@@ -614,6 +614,30 @@ class BacktestResult:
 
 ---
 
+## 用户交互模式
+
+**Agent（生产者）+ Web 看板（展示层），职责分离。**
+
+| 交互 | Agent 对话（Claude Code） | Web 看板 |
+|------|------------------------|---------|
+| 创建/修改策略 | **主要方式** — agent 写代码放入 strategies/ | 不支持 |
+| 查看 K 线/图表 | agent 可引导"去看板查看" | **主要方式** — 视觉交互 |
+| 运行回测 | "帮我跑 MA 交叉策略" | 也可在看板上点按钮 |
+| 分析结果 | "过拟合评分怎么样" | **主要方式** — 图表/指标 |
+| 因子评估 | "评估 RSI 因子的 IC" | 也可在看板上操作 |
+| 批量实验 | **唯一方式** — 需要编排逻辑 | 不适合 |
+| 监督 agent 工作 | 不需要 | **唯一方式** — 查看产出 |
+
+**各版本交互演进：**
+
+| 版本 | Agent 方式 | 说明 |
+|------|-----------|------|
+| V1 | Claude Code 直接操作 | 人在环中，手动触发，Web 看板做可视化 |
+| V3 | 自建领域 Agent（Claude API + ez-trading 工具） | 自主 R&D 循环，人通过看板监督 |
+| 永远不 | LangChain / LangGraph | 通用框架增加复杂度，无对应收益 |
+
+---
+
 ## 版本路线图
 
 ### V2 — C++ 计算核心
@@ -643,21 +667,62 @@ class BacktestResult:
 
 > 目标：AI 原生的因子发现和策略生成
 
-**因子挖掘**
-- LLM 驱动因子生成（参考 AlphaAgent / RD-Agent 架构）
-- 遗传编程因子搜索
-- 因子评估框架：IC, IR, 换手率, 衰减分析
+**架构决策：自建领域 Agent，不用 LangChain**
+
+> 第一性原理：LangChain 解决的是通用场景下的 LLM 工具调用和上下文管理。ez-trading 的 agent 需求是领域特定的（量化 R&D 循环），通用框架增加复杂度但无对应收益。参考 Microsoft RD-Agent（NeurIPS 2025）——自建量化专用 agent，未用 LangChain。
+
+**不用 LangChain 的理由：**
+- V1 的 Claude Code 已经是 agent，CLAUDE.md 已经是跨会话记忆 → LangChain 的 Memory/Tool 抽象冗余
+- 量化 R&D 循环是固定的（生成 → 评估 → 迭代），不需要通用 Chain 编排
+- LangChain 的抽象层让 agent 更难理解代码 → 违背 Agent-Native 原则
+- LangChain API 频繁 breaking change → 维护成本高
+- 框架锁定 → 灵活性下降
+
+**自建方案：Claude API + ez-trading 工具 = 领域特定 agent**
+
+```python
+# 几十行 Python，非 LangChain 的数百行样板
+class FactorMiningAgent:
+    """自主发现有效因子的 agent"""
+    def run(self, universe: str, n_iterations: int = 20):
+        for i in range(n_iterations):
+            # 1. 调 Claude API：基于已有因子库和 IC 反馈，提出新因子
+            factor_code = self.llm.generate_factor(context=self.memory)
+            # 2. 写入 .py 文件，contract test 自动验证
+            self.save_and_validate(factor_code)
+            # 3. 调 ez-trading 的 FactorEvaluator
+            analysis = self.evaluator.evaluate(factor, forward_returns)
+            # 4. IC > 阈值？保留 : 反馈 IC 结果给 Claude，重试
+            self.memory.add(factor_code, analysis)
+
+class StrategySearchAgent:
+    """基于高 IC 因子自主构建策略的 agent"""
+    def run(self, top_factors: list[str], n_iterations: int = 10):
+        for i in range(n_iterations):
+            # 1. 调 Claude API：基于 top 因子组合设计策略
+            strategy_code = self.llm.generate_strategy(factors=top_factors)
+            # 2. 写入 .py，contract test 验证
+            self.save_and_validate(strategy_code)
+            # 3. 调 WalkForwardValidator（不是单次回测！）
+            wf_result = self.validator.validate(data, strategy)
+            # 4. 过拟合评分 < 阈值？保留 : 反馈，重试
+            self.memory.add(strategy_code, wf_result)
+```
+
+**V3 Agent 清单：**
+
+| Agent | 职责 | 输入 | 输出 |
+|-------|------|------|------|
+| FactorMiningAgent | 自主发现高 IC 因子 | 数据集 + 已有因子 IC | 新因子 .py 文件 |
+| StrategySearchAgent | 基于高 IC 因子构建策略 | top 因子列表 | 新策略 .py + WF 验证结果 |
+| SentimentAgent | 新闻/财报 → 情绪因子 | 新闻文本 | 情绪得分时间序列 |
+| ModelTrainingAgent | 训练/评估 ML 模型 | 因子矩阵 + 标签 | 训练好的模型 + WF 验证 |
 
 **ML 模型框架**
 - 模型基类：train, predict, evaluate
 - 内置模型：LightGBM, XGBoost, LSTM, Transformer
 - Feature Store：因子版本管理、训练/推理一致性
 - Walk-Forward 训练：滚动窗口避免过拟合
-
-**LLM 集成**
-- 新闻/财报情绪分析 -> 情绪因子
-- 自然语言策略描述 -> 策略代码生成
-- Agent 辅助回测分析和报告生成
 
 **MLOps**
 - 实验追踪（模型版本、回测结果绑定）
