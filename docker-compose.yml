@@ -1,0 +1,11 @@
+services:
+  ez-trading:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data          # persist database
+      - ./strategies:/app/strategies  # user strategies
+    env_file:
+      - .env                      # TUSHARE_TOKEN, FMP_API_KEY
+    restart: unless-stopped
