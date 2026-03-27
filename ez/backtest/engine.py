@@ -1,0 +1,177 @@
+"""Vectorized backtest engine. [CORE] -- engine loop steps frozen."""
+from __future__ import annotations
+
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+
+from ez.backtest.metrics import MetricsCalculator
+from ez.backtest.significance import compute_significance
+from ez.strategy.base import Strategy
+from ez.types import BacktestResult, TradeRecord
+
+
+class VectorizedBacktestEngine:
+    """Run a vectorized backtest: factor compute -> signal generation -> simulation."""
+
+    def __init__(
+        self,
+        commission_rate: float = 0.0003,
+        min_commission: float = 5.0,
+        risk_free_rate: float = 0.03,
+    ):
+        self._commission_rate = commission_rate
+        self._min_commission = min_commission
+        self._metrics = MetricsCalculator(risk_free_rate=risk_free_rate)
+
+    def run(
+        self,
+        data: pd.DataFrame,
+        strategy: Strategy,
+        initial_capital: float = 100000.0,
+    ) -> BacktestResult:
+        df = data.copy()
+
+        # 1. Compute factors
+        warmup = 0
+        for factor in strategy.required_factors():
+            df = factor.compute(df)
+            warmup = max(warmup, factor.warmup_period)
+
+        # 2. Generate signals and shift to avoid look-ahead bias
+        raw_signals = strategy.generate_signals(df)
+        signals = raw_signals.shift(1).fillna(0.0)
+
+        # 3. Trim warmup
+        df = df.iloc[warmup:]
+        signals = signals.iloc[warmup:]
+
+        # Guard: if no data left after warmup, return a minimal result
+        if len(df) == 0:
+            empty_equity = pd.Series([initial_capital], dtype=float)
+            empty_returns = pd.Series([0.0], dtype=float)
+            empty_sig = compute_significance(empty_returns, risk_free_rate=self._metrics._rf)
+            return BacktestResult(
+                equity_curve=empty_equity,
+                benchmark_curve=empty_equity.copy(),
+                trades=[],
+                metrics={"sharpe_ratio": 0.0, "total_return": 0.0, "max_drawdown": 0.0,
+                         "win_rate": 0.0, "trade_count": 0, "profit_factor": 0.0},
+                signals=pd.Series(dtype=float),
+                daily_returns=empty_returns,
+                significance=empty_sig,
+            )
+
+        # 4. Simulate
+        equity, trades, daily_returns = self._simulate(df, signals, initial_capital)
+
+        # 5. Benchmark (buy & hold)
+        bench_returns = df["adj_close"].pct_change().fillna(0.0)
+        benchmark = (1 + bench_returns).cumprod() * initial_capital
+
+        # 6. Metrics
+        metrics = self._metrics.compute(equity, benchmark)
+        if trades:
+            wins = [t for t in trades if t.pnl > 0]
+            metrics["win_rate"] = len(wins) / len(trades) if trades else 0.0
+            metrics["trade_count"] = len(trades)
+            avg_win = np.mean([t.pnl_pct for t in wins]) if wins else 0.0
+            losses = [t for t in trades if t.pnl <= 0]
+            avg_loss = abs(np.mean([t.pnl_pct for t in losses])) if losses else 1.0
+            metrics["profit_factor"] = avg_win / avg_loss if avg_loss > 0 else float("inf")
+        else:
+            metrics["win_rate"] = 0.0
+            metrics["trade_count"] = 0
+            metrics["profit_factor"] = 0.0
+
+        # 7. Significance
+        significance = compute_significance(
+            daily_returns, risk_free_rate=self._metrics._rf,
+        )
+
+        return BacktestResult(
+            equity_curve=equity,
+            benchmark_curve=benchmark,
+            trades=trades,
+            metrics=metrics,
+            signals=signals,
+            daily_returns=daily_returns,
+            significance=significance,
+        )
+
+    def _simulate(
+        self,
+        df: pd.DataFrame,
+        signals: pd.Series,
+        capital: float,
+    ) -> tuple[pd.Series, list[TradeRecord], pd.Series]:
+        prices = df["adj_close"].values
+        open_prices = df["open"].values if "open" in df.columns else prices
+        weights = signals.values
+        n = len(prices)
+
+        if n == 0:
+            return (
+                pd.Series([capital], dtype=float),
+                [],
+                pd.Series([0.0], dtype=float),
+            )
+
+        equity_arr = np.zeros(n)
+        equity_arr[0] = capital
+        cash = capital
+        shares = 0.0
+        prev_weight = 0.0
+        trades: list[TradeRecord] = []
+        entry_time: datetime | None = None
+        entry_price: float = 0.0
+        daily_ret = np.zeros(n)
+
+        times = df.index if hasattr(df.index, "__iter__") else range(n)
+        time_list = list(times)
+
+        for i in range(1, n):
+            target_weight = weights[i] if i < len(weights) else 0.0
+            exec_price = open_prices[i]
+
+            if abs(target_weight - prev_weight) > 1e-6:
+                # Close existing position (or reduce)
+                if shares > 0 and target_weight < prev_weight:
+                    sell_value = shares * exec_price
+                    comm = max(sell_value * self._commission_rate, self._min_commission)
+                    cash += sell_value - comm
+                    if entry_time is not None:
+                        pnl = (exec_price - entry_price) * shares - comm
+                        trades.append(TradeRecord(
+                            entry_time=entry_time,
+                            exit_time=time_list[i],
+                            entry_price=entry_price,
+                            exit_price=exec_price,
+                            weight=prev_weight,
+                            pnl=pnl,
+                            pnl_pct=pnl / (entry_price * shares) if entry_price * shares > 0 else 0,
+                            commission=comm,
+                        ))
+                    shares = 0.0
+
+                # Open new position (or increase)
+                if target_weight > 0 and target_weight > prev_weight:
+                    invest = capital * target_weight
+                    invest = min(invest, cash)
+                    comm = max(invest * self._commission_rate, self._min_commission)
+                    shares = (invest - comm) / exec_price if exec_price > 0 else 0
+                    cash -= invest
+                    entry_time = time_list[i]
+                    entry_price = exec_price
+
+                prev_weight = target_weight
+
+            position_value = shares * prices[i]
+            equity_arr[i] = cash + position_value
+            if equity_arr[i - 1] > 0:
+                daily_ret[i] = (equity_arr[i] / equity_arr[i - 1]) - 1
+
+        equity = pd.Series(equity_arr, index=df.index)
+        daily_returns = pd.Series(daily_ret, index=df.index)
+        return equity, trades, daily_returns
