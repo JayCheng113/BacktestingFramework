@@ -126,19 +126,25 @@ ez-trading/
 │   ├── data/                      # 数据层
 │   │   ├── CLAUDE.md              # 模块文档（接口、依赖、状态）
 │   │   ├── types.py               # Bar, TradeRecord 数据模型
-│   │   ├── provider.py            # DataProvider 抽象基类
-│   │   ├── fmp_provider.py        # FMP API 实现
+│   │   ├── provider.py            # DataProvider ABC + DataProviderChain（故障转移）
+│   │   ├── tushare_provider.py    # Tushare Pro 实现（A 股主源）
+│   │   ├── tencent_provider.py    # 腾讯财经 API 实现（备用源）
+│   │   ├── fmp_provider.py        # FMP 实现（美股主源）
+│   │   ├── validator.py           # 数据验证规则（OHLC 一致性、异常检测）
 │   │   └── store.py               # DuckDB 存储引擎
 │   │
 │   ├── factor/                    # 因子层
 │   │   ├── CLAUDE.md              # 模块文档
 │   │   ├── base.py                # Factor 抽象基类
-│   │   └── technical.py           # 技术指标：MA, EMA, RSI, MACD, BOLL
+│   │   ├── technical.py           # 技术指标：MA, EMA, RSI, MACD, BOLL
+│   │   └── evaluator.py           # 因子评估：IC, ICIR, 分组收益, 衰减分析
 │   │
 │   ├── strategy/                  # 策略层
 │   │   ├── CLAUDE.md              # 模块文档
-│   │   ├── base.py                # Strategy 抽象基类
-│   │   └── ma_cross.py            # 示例：均线交叉策略
+│   │   ├── base.py                # Strategy ABC（__init_subclass__ 自动注册）
+│   │   ├── loader.py              # 策略目录扫描与加载
+│   │   └── builtin/               # 内置策略
+│   │       └── ma_cross.py        # 均线交叉策略
 │   │
 │   ├── backtest/                  # 回测层
 │   │   ├── CLAUDE.md              # 模块文档
@@ -167,11 +173,15 @@ ez-trading/
 │       │   ├── SearchBar.tsx
 │       │   ├── StockTabs.tsx
 │       │   ├── KlineChart.tsx     # K 线 + 成交量 + 指标叠加
-│       │   └── BacktestPanel.tsx  # 回测参数 + 结果展示
+│       │   ├── BacktestPanel.tsx  # 回测参数 + 结果展示
+│       │   └── FactorPanel.tsx   # 因子分析面板（IC/分组收益图表）
 │       ├── pages/
 │       │   └── Dashboard.tsx      # 主看板页面
 │       └── styles/
 │           └── global.css         # 深色主题基础样式
+│
+├── strategies/                    # 用户自定义策略目录（agent 放入 .py 即自动注册）
+│   └── .gitkeep
 │
 ├── configs/
 │   └── default.yaml               # 默认配置
@@ -195,21 +205,57 @@ ez-trading/
 
 ### 1. 数据层
 
-**数据获取**
-- FMP (Financial Modeling Prep) K 线数据（美股日 K/周 K/月 K）
-- DataProvider 抽象基类，后续可接入 Tiingo, Polygon, Binance 等
-- 查库优先：本地有数据直接返回，无则调 API -> 存库 -> 返回
+**数据源架构（多源 + 故障转移）**
+
+| 市场 | 主数据源 | 备用数据源 | 兜底数据源 |
+|------|----------|------------|------------|
+| A 股 | Tushare Pro（需注册 token，免费 120 积分层可用日 K） | 腾讯财经 API（无需注册，非官方） | AKShare（开源聚合库） |
+| 美股 | FMP（免费 250 次/天） | 腾讯财经 API（`usAAPL` 格式） | — |
+| 港股 | Tushare Pro（`hk_daily`） | 腾讯财经 API（`hk00700` 格式） | — |
+
+**故障转移链（DataProviderChain）：**
+```
+1. 查询本地 DuckDB 缓存 → 有数据则直接返回
+2. 调用主数据源 → 成功则存入 DuckDB 并返回
+3. 主数据源失败（超时/限流/HTTP 错误）→ 调用备用数据源
+4. 备用数据源失败 → 调用兜底数据源
+5. 全部失败 → 返回缓存中的陈旧数据（如有）+ 警告，或报错
+```
+- 每个 Provider 独立配置超时时间（默认 10s）
+- 指数退避重试（1s, 2s, 4s），单源最多重试 2 次
+- 日志记录每次源切换，便于排查数据问题
+
+**数据验证规则（每次入库前执行）：**
+- OHLC 一致性：`low <= open <= high` 且 `low <= close <= high`
+- 成交量非负：`volume >= 0`
+- 无重复行：`(symbol, market, time)` 唯一
+- 价格跳空检查：如果 open 相对前一日 close 偏离 > 20% 且非涨跌停，标记为可疑
+- 成交量单位统一：Tushare 返回"手"（100 股），腾讯返回"股"，统一存储为"股"
+
+**Tushare 注意事项：**
+- 免费 120 积分：仅日 K 线（`daily`），50 次/分钟，8000 次/天
+- 周 K/月 K 需 2000+ 积分（付费或社区贡献）
+- 复权价通过 `pro_bar(adj='qfq')` 获取前复权，或 `adj_factor` API 获取复权因子
+- 股票代码格式：`000001.SZ`（深圳），`600000.SH`（上海）
+
+**腾讯 API 注意事项：**
+- 非官方 API，无 SLA，可随时变更
+- 端点：`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get`
+- 响应列序非标准：`[date, open, CLOSE, high, low, volume]`（close 在第 2 位）
+- 前复权参数：`qfqa`，后复权：`qfq`
+- 建议限流 60 次/分钟以防被封
+- 仅作为备用源，不作为主源
 
 **复权策略（关键决策）**
-- v1 采用 FMP 提供的前复权价格（`adjClose`），简单直接
+- v1 采用数据源提供的前复权价格（Tushare `adj='qfq'` / 腾讯 `qfqa`）
 - 存储字段区分 `close`（原始收盘价）和 `adj_close`（前复权收盘价）
 - 回测引擎默认使用 `adj_close` 计算收益，避免拆分/分红导致的虚假波动
 - v2 切换为 LEAN 方案：存储原始价格 + factor 文件，运行时按需复权
 
 **交易日历**
-- 使用 `exchange_calendars` 库处理交易日历对齐
+- 使用 `exchange_calendars` 库处理交易日历对齐（SSE/SZSE/HKEX/NYSE）
 - 仅存储交易日数据行（非交易日无行），日历文件定义有效日期
-- 跨时区统一存为 UTC，显示层转为交易所本地时间
+- A 股时间存为 Asia/Shanghai，美股存为 America/New_York
 
 **数据存储**
 - DuckDB 本地文件数据库（`data/ez_trading.db`）
@@ -222,19 +268,19 @@ ez-trading/
 @dataclass
 class Bar:
     time: datetime
-    symbol: str
-    market: str
+    symbol: str         # 标准化代码：000001.SZ / AAPL
+    market: str         # cn_stock / us_stock / hk_stock
     open: float
     high: float
     low: float
     close: float        # 原始收盘价
     adj_close: float    # 前复权收盘价（v1 回测用此字段）
-    volume: int
+    volume: int         # 统一为"股"，非"手"
 ```
 
 ### 2. 因子层
 
-**技术指标（v1）**
+**技术指标（v1 内置）**
 - MA (Simple Moving Average) — 5, 10, 20, 60 日
 - EMA (Exponential Moving Average)
 - RSI (Relative Strength Index)
@@ -261,12 +307,68 @@ class Factor(ABC):
         ...
 ```
 
+**因子评估框架（IC 分析）**
+
+因子的价值不在于计算出来，而在于能否预测未来收益。v1 提供完整的因子评估工具：
+
+| 指标 | 计算方式 | 含义 |
+|------|----------|------|
+| **IC** (Pearson) | `corr(factor_values, N日forward_returns)` | 因子值与未来收益的线性相关性 |
+| **Rank IC** (Spearman) | `spearmanr(factor_ranks, return_ranks)` | 因子排名与收益排名的单调相关性（首选，对异常值鲁棒） |
+| **ICIR** | `IC_mean / IC_std` | IC 的稳定性，> 0.5 为可投资信号 |
+| **IC 衰减** | 分别计算 1d/5d/10d/20d 的 IC | 因子的信息时效，衰减慢 = 更可持续 |
+| **因子换手率** | 因子排名的自相关系数 | 换手率高 = 交易成本高，侵蚀 alpha |
+| **分组收益** | 按因子值分 5 组（quintile），计算各组平均收益 | 单调递增/递减 = 因子有效 |
+
+**因子评估接口**
+```python
+@dataclass
+class FactorAnalysis:
+    ic_series: pd.Series          # 每日 IC 时间序列
+    rank_ic_series: pd.Series     # 每日 Rank IC 时间序列
+    ic_mean: float                # IC 均值
+    rank_ic_mean: float           # Rank IC 均值
+    icir: float                   # ICIR
+    rank_icir: float              # Rank ICIR
+    ic_decay: dict[int, float]    # {1: 0.05, 5: 0.04, 10: 0.03, 20: 0.02}
+    turnover: float               # 因子换手率
+    quintile_returns: pd.DataFrame  # 5 组平均收益
+
+class FactorEvaluator:
+    def evaluate(self, factor_values: pd.Series,
+                 forward_returns: pd.Series,
+                 periods: list[int] = [1, 5, 10, 20]) -> FactorAnalysis:
+        """评估单个因子的预测能力"""
+        ...
+```
+
+**前端因子分析可视化（v1）：**
+- IC 时间序列折线图（含均值线）
+- IC 分布直方图
+- 分组收益柱状图（quintile returns）
+- IC 衰减曲线图
+
 ### 3. 策略层
 
-**策略接口**
+**策略接口（自动注册）**
+
+使用 `__init_subclass__` 自动注册机制：任何继承 `Strategy` 的非抽象类自动被注册，agent 只需创建 .py 文件即可，无需修改核心代码。
+
 ```python
 class Strategy(ABC):
-    name: str
+    """策略基类。所有子类自动注册到 _registry 字典中。"""
+    _registry: dict[str, type] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if not inspect.isabstract(cls):
+            cls._registry[cls.__name__] = cls
+
+    @classmethod
+    def get_parameters_schema(cls) -> dict[str, dict]:
+        """返回策略可配置参数的 schema，供前端渲染参数表单。
+        格式：{"param_name": {"type": "int", "default": 20, "min": 5, "max": 200, "label": "短期均线"}}"""
+        return {}
 
     @abstractmethod
     def required_factors(self) -> list[Factor]:
@@ -281,15 +383,39 @@ class Strategy(ABC):
         ...
 ```
 
+**自定义策略目录**
+- 内置策略：`ez/strategy/builtin/`（ma_cross.py, rsi_reversal.py 等）
+- 用户策略：`strategies/`（项目根目录，agent 直接放入 .py 文件即可）
+- 启动时自动扫描两个目录（`pkgutil.iter_modules`），导入所有模块触发注册
+- API 端点 `GET /api/backtest/strategies` 返回所有已注册策略的名称 + 参数 schema
+
 **执行时序规则（防止前视偏差）**
 - 信号在 bar[i] 收盘价产生 → 在 bar[i+1] 开盘价执行（`signal.shift(1)`）
 - 回测引擎在内部自动做 shift，策略代码无需关心
 - 这是 LEAN 和 Zipline 的标准做法
 
 **示例策略：均线交叉**
-- 短期 MA 上穿长期 MA -> 目标仓位 1.0（满仓）
-- 短期 MA 下穿长期 MA -> 目标仓位 0.0（空仓）
-- 过渡期可输出 0.5（半仓）等中间值
+```python
+class MACrossStrategy(Strategy):
+    def __init__(self, short_period: int = 5, long_period: int = 20):
+        self.short_period = short_period
+        self.long_period = long_period
+
+    @classmethod
+    def get_parameters_schema(cls) -> dict:
+        return {
+            "short_period": {"type": "int", "default": 5, "min": 2, "max": 60, "label": "短期均线"},
+            "long_period": {"type": "int", "default": 20, "min": 5, "max": 250, "label": "长期均线"},
+        }
+
+    def required_factors(self) -> list[Factor]:
+        return [MA(period=self.short_period), MA(period=self.long_period)]
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        short_ma = data[f"ma_{self.short_period}"]
+        long_ma = data[f"ma_{self.long_period}"]
+        return (short_ma > long_ma).astype(float)  # 1.0 满仓 / 0.0 空仓
+```
 
 ### 4. 回测层
 
@@ -351,8 +477,9 @@ class BacktestResult:
 | `/api/market-data/kline` | GET | 获取 K 线数据（symbol, market, period, startDate, endDate） |
 | `/api/market-data/symbols` | GET | 搜索股票代码 |
 | `/api/backtest/run` | POST | 运行回测（body: {symbol, market, period, strategy_name, strategy_params, start_date, end_date, initial_capital, commission_rate}） |
-| `/api/backtest/strategies` | GET | 可用策略列表 |
+| `/api/backtest/strategies` | GET | 可用策略列表（含参数 schema，供前端渲染表单） |
 | `/api/factors` | GET | 可用因子列表 |
+| `/api/factors/evaluate` | POST | 因子评估（body: {symbol, factor_name, factor_params, start_date, end_date, periods}），返回 IC/ICIR/分组收益 |
 
 ### 6. 前端看板
 
@@ -371,12 +498,22 @@ class BacktestResult:
   - tooltip：日期、开/高/低/收、成交量
 
 **回测面板**
-- 策略选择（下拉）+ 参数配置
+- 策略选择（下拉，动态加载已注册策略）+ 参数配置（根据 schema 自动渲染表单）
 - 运行回测按钮
 - 结果展示：
-  - 权益曲线（折线图，叠加基准线）
-  - 绩效指标卡片（Sharpe, 回撤, 胜率等）
+  - 权益曲线（折线图，叠加基准线 Buy & Hold）
+  - 绩效指标卡片（Sharpe, Sortino, 回撤, 胜率等）
   - 交易记录表格
+
+**因子分析面板**
+- 因子选择（下拉）+ 参数配置
+- 分析按钮
+- 结果展示：
+  - IC 时间序列折线图（含均值线、±1 标准差带）
+  - IC 分布直方图
+  - 分组收益柱状图（quintile returns，检验单调性）
+  - IC 衰减曲线图（1d/5d/10d/20d）
+  - ICIR 等核心指标卡片
 
 ---
 
@@ -481,6 +618,9 @@ class BacktestResult:
 | API 框架 | FastAPI | latest |
 | 数据库 | DuckDB | latest |
 | HTTP 客户端 | httpx | latest |
+| A 股数据 | tushare | latest |
+| 数据聚合 | akshare | latest |
+| 交易日历 | exchange_calendars | latest |
 | 数据处理 | pandas + numpy | latest |
 | 前端框架 | React | 19 |
 | 构建工具 | Vite | 7 |
