@@ -1,17 +1,22 @@
 import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listStrategies, runBacktest } from '../api'
-import type { StrategyInfo, BacktestResult } from '../types'
+import { listStrategies, runBacktest, runWalkForward } from '../api'
+import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
 
 interface Props {
   symbol: string; market: string; startDate: string; endDate: string
 }
 
+const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
 export default function BacktestPanel({ symbol, market, startDate, endDate }: Props) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [selected, setSelected] = useState('')
   const [params, setParams] = useState<Record<string, number>>({})
+  const [mode, setMode] = useState<'backtest' | 'walk-forward'>('backtest')
+  const [nSplits, setNSplits] = useState(5)
   const [result, setResult] = useState<BacktestResult | null>(null)
+  const [wfResult, setWfResult] = useState<WalkForwardResult | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -29,13 +34,24 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
   const handleRun = async () => {
     if (!selected || !symbol) return
     setLoading(true)
+    setResult(null)
+    setWfResult(null)
     try {
-      const res = await runBacktest({
-        symbol, market, period: 'daily', strategy_name: selected,
-        strategy_params: params, start_date: startDate, end_date: endDate,
-      })
-      setResult(res.data)
-    } catch (e: any) { alert(e?.response?.data?.detail || 'Backtest failed') }
+      if (mode === 'backtest') {
+        const res = await runBacktest({
+          symbol, market, period: 'daily', strategy_name: selected,
+          strategy_params: params, start_date: startDate, end_date: endDate,
+        })
+        setResult(res.data)
+      } else {
+        const res = await runWalkForward({
+          symbol, market, period: 'daily', strategy_name: selected,
+          strategy_params: params, start_date: startDate, end_date: endDate,
+          n_splits: nSplits,
+        })
+        setWfResult(res.data)
+      }
+    } catch (e: any) { alert(e?.response?.data?.detail || 'Failed') }
     finally { setLoading(false) }
   }
 
@@ -55,7 +71,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
     tooltip: { trigger: 'axis' },
     legend: { data: ['Strategy', 'Benchmark'], textStyle: { color: '#8b949e' }, top: 25 },
     grid: { left: 60, right: 20, top: 60, bottom: 30 },
-    xAxis: { type: 'category', data: result.equity_curve.map((_, i) => i), axisLabel: { color: '#8b949e' } },
+    xAxis: { type: 'category', data: result.equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
     series: [
       { name: 'Strategy', type: 'line', data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
@@ -63,37 +79,77 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
     ],
   } : null
 
+  const wfEquityOption = wfResult ? {
+    backgroundColor: '#0d1117',
+    title: { text: 'OOS Equity Curve', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    tooltip: { trigger: 'axis' },
+    grid: { left: 60, right: 20, top: 40, bottom: 30 },
+    xAxis: { type: 'category', data: wfResult.oos_equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+    series: [{ type: 'line', data: wfResult.oos_equity_curve, lineStyle: { color: '#22c55e' }, showSymbol: false }],
+  } : null
+
+  const metricKeys = ['sharpe_ratio', 'total_return', 'max_drawdown', 'win_rate', 'trade_count', 'avg_holding_days', 'max_drawdown_duration']
+  const formatMetric = (k: string, v: number) => {
+    if (k.includes('return') || k.includes('rate') || k.includes('drawdown') && !k.includes('duration'))
+      return `${(v * 100).toFixed(2)}%`
+    if (k === 'trade_count' || k.includes('duration') || k.includes('days')) return Math.round(v).toString()
+    return v.toFixed(4)
+  }
+
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
       <h3 className="text-sm font-medium mb-3">Backtest</h3>
       <div className="flex flex-wrap gap-3 items-end mb-4">
+        {/* Mode toggle */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Mode</label>
+          <select value={mode} onChange={e => { setMode(e.target.value as any); setResult(null); setWfResult(null) }}
+            className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+            <option value="backtest">Single Backtest</option>
+            <option value="walk-forward">Walk-Forward</option>
+          </select>
+        </div>
+        {/* Strategy */}
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Strategy</label>
           <select value={selected} onChange={e => onStrategyChange(e.target.value)}
-            className="px-3 py-1.5 rounded text-sm" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+            className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             {strategies.map(s => <option key={s.key} value={s.name}>{s.name}</option>)}
           </select>
         </div>
+        {/* Strategy params */}
         {Object.entries(params).map(([k, v]) => (
           <div key={k} className="flex flex-col gap-1">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{k}</label>
             <input type="number" value={v} onChange={e => setParams({ ...params, [k]: Number(e.target.value) })}
-              className="px-3 py-1.5 rounded text-sm w-20" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+              className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
           </div>
         ))}
+        {/* WF splits */}
+        {mode === 'walk-forward' && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Splits</label>
+            <input type="number" value={nSplits} min={2} max={20}
+              onChange={e => setNSplits(Number(e.target.value))}
+              className="px-3 py-1.5 rounded text-sm w-16" style={inputStyle} />
+          </div>
+        )}
         <button onClick={handleRun} disabled={loading}
-          className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
+          className="px-4 py-1.5 rounded text-sm font-medium text-white"
+          style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
           {loading ? 'Running...' : 'Run'}
         </button>
       </div>
 
+      {/* Single backtest results */}
       {result && (
         <div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            {Object.entries(result.metrics).filter(([k]) => ['sharpe_ratio', 'total_return', 'max_drawdown', 'win_rate'].includes(k)).map(([k, v]) => (
+            {Object.entries(result.metrics).filter(([k]) => metricKeys.includes(k)).map(([k, v]) => (
               <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
                 <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{k.replace(/_/g, ' ')}</div>
-                <div className="text-sm font-medium">{typeof v === 'number' ? (k.includes('return') || k.includes('rate') || k.includes('drawdown') ? `${(v * 100).toFixed(2)}%` : v.toFixed(4)) : v}</div>
+                <div className="text-sm font-medium">{formatMetric(k, v)}</div>
               </div>
             ))}
           </div>
@@ -106,6 +162,38 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
             </span>
           </div>
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
+        </div>
+      )}
+
+      {/* Walk-Forward results */}
+      {wfResult && (
+        <div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS Sharpe</div>
+              <div className="text-sm font-medium">{(wfResult.oos_metrics.sharpe_ratio ?? 0).toFixed(4)}</div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Overfitting Score</div>
+              <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.5 ? '#ef4444' : '#22c55e' }}>
+                {wfResult.overfitting_score.toFixed(4)}
+              </div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>IS vs OOS Degradation</div>
+              <div className="text-sm font-medium">{(wfResult.is_vs_oos_degradation * 100).toFixed(1)}%</div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Splits</div>
+              <div className="text-sm font-medium">{wfResult.n_splits}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`text-xs px-2 py-0.5 rounded ${wfResult.overfitting_score <= 0.3 ? 'bg-green-900 text-green-300' : wfResult.overfitting_score <= 0.6 ? 'bg-yellow-900 text-yellow-300' : 'bg-red-900 text-red-300'}`}>
+              {wfResult.overfitting_score <= 0.3 ? 'Robust' : wfResult.overfitting_score <= 0.6 ? 'Moderate Overfit' : 'Overfitting'}
+            </span>
+          </div>
+          {wfEquityOption && <ReactECharts option={wfEquityOption} style={{ height: 300 }} />}
         </div>
       )}
     </div>

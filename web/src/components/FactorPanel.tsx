@@ -8,6 +8,7 @@ interface Props {
 }
 
 const FACTORS = ['ma', 'ema', 'rsi', 'macd', 'boll']
+const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function FactorPanel({ symbol, market, startDate, endDate }: Props) {
   const [factor, setFactor] = useState('ma')
@@ -17,26 +18,59 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   const handleEval = async () => {
     setLoading(true)
     try {
-      const res = await evaluateFactor({
-        symbol, market, factor_name: factor,
-        start_date: startDate, end_date: endDate,
-      })
+      const res = await evaluateFactor({ symbol, market, factor_name: factor, start_date: startDate, end_date: endDate })
       setResult(res.data)
     } catch (e: any) { alert(e?.response?.data?.detail || 'Evaluation failed') }
     finally { setLoading(false) }
   }
 
-  const icOption = result ? {
+  // IC time-series with mean line
+  const icMean = result ? result.ic_series.reduce((a, b) => a + b, 0) / result.ic_series.length : 0
+  const icTimeSeriesOption = result ? {
     backgroundColor: '#0d1117',
-    title: { text: 'IC Series', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: 'IC Time Series', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
-    xAxis: { type: 'category', data: result.ic_series.map((_, i) => i), axisLabel: { color: '#8b949e' } },
+    xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
     series: [
-      { type: 'bar', data: result.ic_series.map(v => ({ value: v, itemStyle: { color: v >= 0 ? '#2563eb80' : '#ef444480' } })) },
+      { type: 'bar', data: result.ic_series.map((v: number) => ({ value: v, itemStyle: { color: v >= 0 ? '#2563eb80' : '#ef444480' } })), barMaxWidth: 4 },
+      { type: 'line', data: result.ic_series.map(() => icMean), lineStyle: { color: '#f59e0b', type: 'dashed', width: 1 }, showSymbol: false, name: 'Mean' },
     ],
   } : null
+
+  // IC Decay curve
+  const icDecayOption = result && result.ic_decay ? {
+    backgroundColor: '#0d1117',
+    title: { text: 'IC Decay', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    tooltip: { trigger: 'axis' },
+    grid: { left: 60, right: 20, top: 40, bottom: 30 },
+    xAxis: { type: 'category', data: Object.keys(result.ic_decay).map(k => `${k}d`), axisLabel: { color: '#8b949e' } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+    series: [
+      { type: 'line', data: Object.values(result.ic_decay), lineStyle: { color: '#2563eb', width: 2 }, symbolSize: 8, itemStyle: { color: '#2563eb' } },
+    ],
+  } : null
+
+  // IC Distribution histogram
+  const icHistOption = result ? (() => {
+    const bins = 20
+    const vals = result.ic_series
+    const min = Math.min(...vals), max = Math.max(...vals)
+    const step = (max - min) / bins || 0.01
+    const counts = Array(bins).fill(0)
+    vals.forEach((v: number) => { const idx = Math.min(Math.floor((v - min) / step), bins - 1); counts[idx]++ })
+    const labels = Array.from({ length: bins }, (_, i) => (min + step * (i + 0.5)).toFixed(3))
+    return {
+      backgroundColor: '#0d1117',
+      title: { text: 'IC Distribution', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+      tooltip: { trigger: 'axis' },
+      grid: { left: 60, right: 20, top: 40, bottom: 30 },
+      xAxis: { type: 'category', data: labels, axisLabel: { color: '#8b949e', rotate: 45, fontSize: 10 } },
+      yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+      series: [{ type: 'bar', data: counts, itemStyle: { color: '#2563eb80' } }],
+    }
+  })() : null
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
@@ -45,7 +79,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Factor</label>
           <select value={factor} onChange={e => setFactor(e.target.value)}
-            className="px-3 py-1.5 rounded text-sm" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+            className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             {FACTORS.map(f => <option key={f} value={f}>{f.toUpperCase()}</option>)}
           </select>
         </div>
@@ -56,25 +90,26 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
       </div>
       {result && (
         <div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>IC Mean</div>
-              <div className="text-sm font-medium">{result.ic_mean.toFixed(4)}</div>
-            </div>
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Rank IC</div>
-              <div className="text-sm font-medium">{result.rank_ic_mean.toFixed(4)}</div>
-            </div>
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>ICIR</div>
-              <div className="text-sm font-medium">{result.icir.toFixed(4)}</div>
-            </div>
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Turnover</div>
-              <div className="text-sm font-medium">{result.turnover.toFixed(4)}</div>
-            </div>
+          {/* Metric cards */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+            {[
+              ['IC Mean', result.ic_mean], ['Rank IC', result.rank_ic_mean],
+              ['ICIR', result.icir], ['Rank ICIR', result.rank_icir], ['Turnover', result.turnover],
+            ].map(([label, val]) => (
+              <div key={label as string} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{label as string}</div>
+                <div className="text-sm font-medium" style={{ color: Math.abs(val as number) > 0.03 ? '#2563eb' : 'var(--text-primary)' }}>
+                  {(val as number).toFixed(4)}
+                </div>
+              </div>
+            ))}
           </div>
-          {icOption && <ReactECharts option={icOption} style={{ height: 200 }} />}
+          {/* Charts: IC series + IC decay + IC distribution */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {icTimeSeriesOption && <ReactECharts option={icTimeSeriesOption} style={{ height: 220 }} />}
+            {icDecayOption && <ReactECharts option={icDecayOption} style={{ height: 220 }} />}
+          </div>
+          {icHistOption && <div className="mt-4"><ReactECharts option={icHistOption} style={{ height: 200 }} /></div>}
         </div>
       )}
     </div>

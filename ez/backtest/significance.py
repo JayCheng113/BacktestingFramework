@@ -1,6 +1,11 @@
 """Statistical significance testing for backtest results.
 
 [CORE] — interface frozen.
+
+Tests whether a strategy's performance is statistically significant by:
+1. Bootstrap CI: resample daily returns to estimate Sharpe confidence interval
+2. Monte Carlo permutation: shuffle SIGNALS (not returns) to test if timing adds value
+   - If randomly-timed signals produce similar Sharpe → strategy has no edge
 """
 from __future__ import annotations
 
@@ -16,11 +21,22 @@ def compute_significance(
     n_bootstrap: int = 1000,
     n_permutations: int = 1000,
     seed: int | None = None,
+    signals: pd.Series | None = None,
+    asset_returns: pd.Series | None = None,
 ) -> SignificanceTest:
-    """Bootstrap CI for Sharpe + Monte Carlo permutation test.
+    """Bootstrap CI for Sharpe + Monte Carlo signal permutation test.
 
     Args:
+        daily_returns: Strategy daily returns (for Bootstrap CI).
+        signals: Position weight signals (for Monte Carlo permutation).
+        asset_returns: Underlying asset daily returns (for Monte Carlo permutation).
         seed: RNG seed. None for true randomness, int for reproducibility (tests).
+
+    Monte Carlo approach:
+        If signals and asset_returns are provided, shuffle the signal ordering
+        and recompute strategy returns as shuffled_signal * asset_return.
+        This tests whether the strategy's TIMING adds value beyond random entry/exit.
+        If not provided, falls back to permuting returns directly.
     """
     returns = daily_returns.dropna().values
     if len(returns) < 20:
@@ -32,8 +48,9 @@ def compute_significance(
     daily_rf = risk_free_rate / 252
     observed_sharpe = _sharpe(returns, daily_rf)
 
-    # Bootstrap CI
     rng = np.random.default_rng(seed)
+
+    # 1. Bootstrap CI for Sharpe
     boot_sharpes = np.array([
         _sharpe(rng.choice(returns, size=len(returns), replace=True), daily_rf)
         for _ in range(n_bootstrap)
@@ -41,11 +58,25 @@ def compute_significance(
     ci_lower = float(np.percentile(boot_sharpes, 2.5))
     ci_upper = float(np.percentile(boot_sharpes, 97.5))
 
-    # Monte Carlo permutation
-    perm_sharpes = np.array([
-        _sharpe(rng.permutation(returns), daily_rf)
-        for _ in range(n_permutations)
-    ])
+    # 2. Monte Carlo: permute signals (preferred) or returns (fallback)
+    if signals is not None and asset_returns is not None:
+        sig_vals = signals.dropna().values
+        ar_vals = asset_returns.reindex(signals.index).fillna(0.0).values
+        n = min(len(sig_vals), len(ar_vals))
+        sig_vals = sig_vals[:n]
+        ar_vals = ar_vals[:n]
+
+        perm_sharpes = np.array([
+            _sharpe(rng.permutation(sig_vals) * ar_vals, daily_rf)
+            for _ in range(n_permutations)
+        ])
+    else:
+        # Fallback: permute returns (less accurate but backward compatible)
+        perm_sharpes = np.array([
+            _sharpe(rng.permutation(returns), daily_rf)
+            for _ in range(n_permutations)
+        ])
+
     p_value = float(np.mean(perm_sharpes >= observed_sharpe))
 
     return SignificanceTest(

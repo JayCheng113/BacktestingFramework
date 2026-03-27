@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from datetime import date, datetime
 
 import httpx
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 _PERIOD_MAP = {"daily": "day", "weekly": "week", "monthly": "month"}
 
+# Spec: 60 calls/min → 1s interval
+_TENCENT_RATE_LIMIT_DELAY = 1.0
+
 
 class TencentDataProvider(DataProvider):
     """Tencent Finance undocumented API. Free, no auth. Use as backup only."""
@@ -28,6 +32,7 @@ class TencentDataProvider(DataProvider):
 
     def __init__(self, timeout: int = 10):
         self._client = httpx.Client(timeout=timeout)
+        self._last_call_time: float = 0.0
 
     @property
     def name(self) -> str:
@@ -45,7 +50,7 @@ class TencentDataProvider(DataProvider):
         url = self.HK_URL if market == "hk_stock" else self.BASE_URL
 
         try:
-            # Tencent API param format: code,period,start,end,count,qfq
+            self._throttle()
             resp = self._client.get(url, params={
                 "param": f"{code},{tc_period},{start_date},{end_date},800,qfq",
             })
@@ -123,3 +128,10 @@ class TencentDataProvider(DataProvider):
 
         bars.sort(key=lambda b: b.time)
         return bars
+
+    def _throttle(self) -> None:
+        """Enforce ~60 calls/min rate limit."""
+        elapsed = time.monotonic() - self._last_call_time
+        if elapsed < _TENCENT_RATE_LIMIT_DELAY:
+            time.sleep(_TENCENT_RATE_LIMIT_DELAY - elapsed)
+        self._last_call_time = time.monotonic()

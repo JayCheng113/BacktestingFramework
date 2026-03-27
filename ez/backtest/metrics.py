@@ -39,6 +39,15 @@ class MetricsCalculator:
         drawdown = (equity_curve - running_max) / running_max
         max_dd = float(drawdown.min())
 
+        # Max drawdown duration (bars in drawdown before recovery)
+        in_drawdown = drawdown < 0
+        if in_drawdown.any():
+            groups = (~in_drawdown).cumsum()
+            dd_durations = in_drawdown.groupby(groups).sum()
+            max_dd_duration = int(dd_durations.max()) if len(dd_durations) > 0 else 0
+        else:
+            max_dd_duration = 0
+
         bench_total = (benchmark_curve.iloc[-1] / benchmark_curve.iloc[0]) - 1
 
         return {
@@ -48,6 +57,7 @@ class MetricsCalculator:
             "sharpe_ratio": sharpe,
             "sortino_ratio": sortino,
             "max_drawdown": max_dd,
+            "max_drawdown_duration": max_dd_duration,
             "benchmark_return": float(bench_total),
             "trading_days": n_days,
         }

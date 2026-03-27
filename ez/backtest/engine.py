@@ -80,14 +80,25 @@ class VectorizedBacktestEngine:
             losses = [t for t in trades if t.pnl <= 0]
             avg_loss = abs(np.mean([t.pnl_pct for t in losses])) if losses else 1.0
             metrics["profit_factor"] = avg_win / avg_loss if avg_loss > 0 else float("inf")
+            # Average holding period in days
+            holding_days = [(t.exit_time - t.entry_time).days for t in trades
+                           if hasattr(t.exit_time, 'days') or True]
+            try:
+                holding_days = [(t.exit_time - t.entry_time).days for t in trades]
+                metrics["avg_holding_days"] = float(np.mean(holding_days)) if holding_days else 0.0
+            except (TypeError, AttributeError):
+                metrics["avg_holding_days"] = 0.0
         else:
             metrics["win_rate"] = 0.0
             metrics["trade_count"] = 0
             metrics["profit_factor"] = 0.0
+            metrics["avg_holding_days"] = 0.0
 
-        # 7. Significance
+        # 7. Significance — permute signals (not returns) for Monte Carlo
+        asset_returns = df["adj_close"].pct_change().fillna(0.0)
         significance = compute_significance(
             daily_returns, risk_free_rate=self._metrics._rf,
+            signals=signals, asset_returns=asset_returns,
         )
 
         return BacktestResult(
