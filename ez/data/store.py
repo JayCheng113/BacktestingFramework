@@ -29,11 +29,17 @@ class DuckDBStore(DataStore):
     PERIODS = ("daily", "weekly", "monthly")
 
     def __init__(self, db_path: str = "data/ez_trading.db"):
+        import os
         from pathlib import Path as _P
-        p = _P(db_path)
-        if not p.is_absolute():
-            project_root = _P(__file__).resolve().parent.parent.parent
-            p = project_root / p
+        # EZ_DATA_DIR overrides default data location (used in packaged builds)
+        data_dir = os.environ.get("EZ_DATA_DIR")
+        if data_dir:
+            p = _P(data_dir) / "ez_trading.db"
+        else:
+            p = _P(db_path)
+            if not p.is_absolute():
+                project_root = _P(__file__).resolve().parent.parent.parent
+                p = project_root / p
         p.parent.mkdir(parents=True, exist_ok=True)
         self._conn = duckdb.connect(str(p))
         self._init_tables()
