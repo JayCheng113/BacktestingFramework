@@ -12,7 +12,12 @@ from ez.types import BacktestResult, WalkForwardResult
 
 
 class WalkForwardValidator:
-    """Split data into rolling train/test windows and measure OOS degradation."""
+    """Split data into rolling train/test windows and measure OOS degradation.
+
+    Each split prepends extra warmup data so the engine can compute factors
+    before the actual train/test range begins. Without this, splits shorter
+    than the strategy's warmup period produce zero trades.
+    """
 
     def __init__(self, engine: VectorizedBacktestEngine | None = None):
         self._engine = engine or VectorizedBacktestEngine()
@@ -26,11 +31,22 @@ class WalkForwardValidator:
         initial_capital: float = 100000.0,
     ) -> WalkForwardResult:
         n = len(data)
+
+        # Determine warmup needed by strategy's factors
+        warmup = 0
+        for factor in strategy.required_factors():
+            warmup = max(warmup, factor.warmup_period)
+
+        # Each split needs: warmup + enough bars for actual trading
+        min_tradeable = 10  # minimum bars after warmup to produce meaningful results
+        min_window = warmup + min_tradeable
         window_size = n // n_splits
-        if window_size < 20:
+
+        if window_size < min_tradeable:
             raise ValueError(
-                f"Not enough data for {n_splits} splits "
-                f"(need {n_splits * 20} bars, got {n})"
+                f"Not enough data for {n_splits} splits with warmup={warmup}: "
+                f"each window has {window_size} bars, need at least {min_tradeable} tradeable bars. "
+                f"Try fewer splits or more data."
             )
 
         train_size = int(window_size * train_ratio)
@@ -40,15 +56,20 @@ class WalkForwardValidator:
         oos_sharpes: list[float] = []
 
         for i in range(n_splits):
-            start = i * window_size
-            train_end = start + train_size
-            test_end = min(start + window_size, n)
+            window_start = i * window_size
+            train_end = window_start + train_size
+            test_end = min(window_start + window_size, n)
             if test_end > n:
                 break
 
-            train_data = data.iloc[start:train_end]
-            test_data = data.iloc[train_end:test_end]
-            if len(test_data) < 5:
+            # Prepend warmup data from before the window start
+            # This gives the engine enough history to compute factors
+            warmup_start = max(0, window_start - warmup)
+
+            train_data = data.iloc[warmup_start:train_end]
+            test_data = data.iloc[max(0, train_end - warmup):test_end]
+
+            if len(test_data) <= warmup:
                 continue
 
             # In-sample
