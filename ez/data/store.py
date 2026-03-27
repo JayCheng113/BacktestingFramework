@@ -122,8 +122,8 @@ class DuckDBStore(DataStore):
             [s.get("ts_code", ""), s.get("name", ""), s.get("area", ""), s.get("industry", "")]
             for s in symbols if s.get("ts_code")
         ]
-        # DuckDB executemany doesn't support SQL functions in VALUES,
-        # so omit updated_at (uses table default CURRENT_TIMESTAMP)
+        # DuckDB executemany doesn't support SQL functions anywhere in the statement.
+        # Use executemany for bulk upsert, then a single UPDATE for timestamps.
         self._conn.executemany(
             """INSERT INTO symbols (ts_code, name, area, industry)
                VALUES (?, ?, ?, ?)
@@ -132,6 +132,14 @@ class DuckDBStore(DataStore):
                  industry=EXCLUDED.industry""",
             params,
         )
+        # Refresh updated_at for all affected rows
+        codes = [p[0] for p in params]
+        if codes:
+            placeholders = ",".join(["?"] * len(codes))
+            self._conn.execute(
+                f"UPDATE symbols SET updated_at=CURRENT_TIMESTAMP WHERE ts_code IN ({placeholders})",
+                codes,
+            )
         return len(params)
 
     def query_symbols(self, keyword: str = "", limit: int = 50) -> list[dict]:

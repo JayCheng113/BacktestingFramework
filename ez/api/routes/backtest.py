@@ -89,7 +89,7 @@ def run_walk_forward(req: WalkForwardRequest):
     try:
         result = validator.validate(df, strategy, req.n_splits, req.train_ratio, req.initial_capital)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return {
         "oos_metrics": result.oos_metrics,
         "overfitting_score": result.overfitting_score,

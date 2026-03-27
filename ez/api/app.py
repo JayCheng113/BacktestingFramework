@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -22,7 +23,6 @@ async def lifespan(app: FastAPI):
         try:
             tushare._ensure_symbol_cache()
         except Exception as exc:
-            import logging
             logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
     yield
     close_resources()
