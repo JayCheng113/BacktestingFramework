@@ -5,11 +5,12 @@ import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
 
 interface Props {
   symbol: string; market: string; startDate: string; endDate: string
+  onTradesUpdate?: (trades: BacktestResult['trades']) => void
 }
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
-export default function BacktestPanel({ symbol, market, startDate, endDate }: Props) {
+export default function BacktestPanel({ symbol, market, startDate, endDate, onTradesUpdate }: Props) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [selected, setSelected] = useState('')
   const [params, setParams] = useState<Record<string, number>>({})
@@ -43,6 +44,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
           strategy_params: params, start_date: startDate, end_date: endDate,
         })
         setResult(res.data)
+        onTradesUpdate?.(res.data.trades || [])
       } else {
         const res = await runWalkForward({
           symbol, market, period: 'daily', strategy_name: selected,

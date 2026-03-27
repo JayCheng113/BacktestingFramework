@@ -4,7 +4,7 @@ import KlineChart from '../components/KlineChart'
 import BacktestPanel from '../components/BacktestPanel'
 import FactorPanel from '../components/FactorPanel'
 import { fetchKline } from '../api'
-import type { KlineBar } from '../types'
+import type { KlineBar, TradeRecord } from '../types'
 
 export default function Dashboard() {
   const [klineData, setKlineData] = useState<KlineBar[]>([])
@@ -13,6 +13,7 @@ export default function Dashboard() {
   const [startDate, setStartDate] = useState('2024-01-01')
   const [endDate, setEndDate] = useState('2024-12-31')
   const [loading, setLoading] = useState(false)
+  const [trades, setTrades] = useState<TradeRecord[]>([])
 
   const handleSearch = async (symbol: string, market: string, start: string, end: string) => {
     setLoading(true)
@@ -20,6 +21,7 @@ export default function Dashboard() {
     setCurrentMarket(market)
     setStartDate(start)
     setEndDate(end)
+    setTrades([])  // clear old trades on new search
     try {
       const res = await fetchKline({ symbol, market, period: 'daily', start_date: start, end_date: end })
       setKlineData(res.data)
@@ -34,10 +36,14 @@ export default function Dashboard() {
         <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Loading...</div>
       ) : (
         <div className="p-4">
-          <KlineChart data={klineData} symbol={currentSymbol} />
+          <KlineChart data={klineData} symbol={currentSymbol} trades={trades} />
           {currentSymbol && (
             <>
-              <BacktestPanel symbol={currentSymbol} market={currentMarket} startDate={startDate} endDate={endDate} />
+              <BacktestPanel
+                symbol={currentSymbol} market={currentMarket}
+                startDate={startDate} endDate={endDate}
+                onTradesUpdate={setTrades}
+              />
               <FactorPanel symbol={currentSymbol} market={currentMarket} startDate={startDate} endDate={endDate} />
             </>
           )}
