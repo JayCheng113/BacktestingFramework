@@ -7,8 +7,8 @@ database:
 
 data_sources:
   cn_stock:
-    primary: "tencent"
-    backup: ["akshare"]
+    primary: "tushare"
+    backup: ["tencent"]
   us_stock:
     primary: "fmp"
     backup: ["tencent"]
