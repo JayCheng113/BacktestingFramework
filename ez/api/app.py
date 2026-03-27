@@ -21,8 +21,9 @@ async def lifespan(app: FastAPI):
     if tushare:
         try:
             tushare._ensure_symbol_cache()
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
     yield
     close_resources()
 

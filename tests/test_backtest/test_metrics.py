@@ -48,3 +48,21 @@ def test_max_drawdown_duration_no_drawdown(calc):
     equity = pd.Series([100000, 101000, 102000, 103000])
     metrics = calc.compute(equity, pd.Series([100000] * 4))
     assert metrics["max_drawdown_duration"] == 0
+
+
+def test_alpha_beta_identical_curves(calc):
+    """Identical strategy and benchmark → alpha=0, beta=1."""
+    equity = pd.Series([100, 101, 102, 101, 103, 104])
+    metrics = calc.compute(equity, equity.copy())
+    assert abs(metrics["alpha"]) < 0.01
+    assert abs(metrics["beta"] - 1.0) < 0.01
+
+
+def test_alpha_beta_with_benchmark():
+    """Beta should be positive when strategy correlates with benchmark."""
+    calc = MetricsCalculator(risk_free_rate=0.0)
+    bench = pd.Series([100, 100.5, 101, 101.5, 102])
+    strat = pd.Series([100, 101, 102, 103, 104])
+    metrics = calc.compute(strat, bench)
+    assert metrics["beta"] > 0  # positively correlated
+    assert "alpha" in metrics  # alpha computed

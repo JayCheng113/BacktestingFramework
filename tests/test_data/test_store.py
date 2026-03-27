@@ -64,3 +64,32 @@ def test_context_manager(tmp_path):
     db_path = str(tmp_path / "ctx.db")
     with DuckDBStore(db_path) as store:
         assert store.has_data("X", "cn_stock", "daily", date(2024, 1, 1), date(2024, 1, 31)) is False
+
+
+def test_save_and_query_symbols(store):
+    symbols = [
+        {"ts_code": "000001.SZ", "name": "Ping An Bank", "area": "Shenzhen", "industry": "Banking"},
+        {"ts_code": "510300.SH", "name": "CSI 300 ETF", "area": "Huatai", "industry": "ETF"},
+    ]
+    saved = store.save_symbols(symbols)
+    assert saved == 2
+    assert store.symbols_count() == 2
+
+    results = store.query_symbols("000001")
+    assert len(results) == 1
+    assert results[0]["name"] == "Ping An Bank"
+
+    results = store.query_symbols("ETF")
+    assert len(results) == 1
+    assert results[0]["ts_code"] == "510300.SH"
+
+    results = store.query_symbols("")  # all
+    assert len(results) == 2
+
+
+def test_save_symbols_upsert(store):
+    store.save_symbols([{"ts_code": "000001.SZ", "name": "Old Name", "area": "", "industry": ""}])
+    store.save_symbols([{"ts_code": "000001.SZ", "name": "New Name", "area": "SZ", "industry": "Bank"}])
+    assert store.symbols_count() == 1
+    r = store.query_symbols("000001")
+    assert r[0]["name"] == "New Name"
