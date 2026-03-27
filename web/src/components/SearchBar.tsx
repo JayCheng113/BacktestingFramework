@@ -36,19 +36,45 @@ function toStr(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
-// Fallback popular stocks when API search is unavailable
-const POPULAR_STOCKS: SymbolInfo[] = [
-  { symbol: '000001.SZ', name: '平安银行', industry: '银行' },
-  { symbol: '600519.SH', name: '贵州茅台', industry: '白酒' },
-  { symbol: '000858.SZ', name: '五粮液', industry: '白酒' },
-  { symbol: '601318.SH', name: '中国平安', industry: '保险' },
-  { symbol: '000333.SZ', name: '美的集团', industry: '家电' },
-  { symbol: '600036.SH', name: '招商银行', industry: '银行' },
-  { symbol: '300750.SZ', name: '宁德时代', industry: '电池' },
-  { symbol: '601899.SH', name: '紫金矿业', industry: '黄金' },
-  { symbol: '600900.SH', name: '长江电力', industry: '电力' },
-  { symbol: '000002.SZ', name: '万科A', industry: '房地产' },
-]
+// Popular stocks per market — shown as fallback and on market switch
+const POPULAR_BY_MARKET: Record<string, SymbolInfo[]> = {
+  cn_stock: [
+    { symbol: '000001.SZ', name: '平安银行', industry: '银行' },
+    { symbol: '600519.SH', name: '贵州茅台', industry: '白酒' },
+    { symbol: '000858.SZ', name: '五粮液', industry: '白酒' },
+    { symbol: '601318.SH', name: '中国平安', industry: '保险' },
+    { symbol: '000333.SZ', name: '美的集团', industry: '家电' },
+    { symbol: '600036.SH', name: '招商银行', industry: '银行' },
+    { symbol: '300750.SZ', name: '宁德时代', industry: '电池' },
+    { symbol: '601899.SH', name: '紫金矿业', industry: '黄金' },
+    { symbol: '600900.SH', name: '长江电力', industry: '电力' },
+    { symbol: '000002.SZ', name: '万科A', industry: '房地产' },
+  ],
+  us_stock: [
+    { symbol: 'AAPL', name: 'Apple', industry: 'Technology' },
+    { symbol: 'MSFT', name: 'Microsoft', industry: 'Technology' },
+    { symbol: 'GOOGL', name: 'Alphabet', industry: 'Technology' },
+    { symbol: 'AMZN', name: 'Amazon', industry: 'E-Commerce' },
+    { symbol: 'TSLA', name: 'Tesla', industry: 'Auto' },
+    { symbol: 'NVDA', name: 'NVIDIA', industry: 'Semiconductor' },
+    { symbol: 'META', name: 'Meta', industry: 'Social Media' },
+    { symbol: 'JPM', name: 'JPMorgan Chase', industry: 'Banking' },
+  ],
+  hk_stock: [
+    { symbol: '00700.HK', name: '腾讯控股', industry: '互联网' },
+    { symbol: '09988.HK', name: '阿里巴巴', industry: '电商' },
+    { symbol: '03690.HK', name: '美团', industry: '本地生活' },
+    { symbol: '01810.HK', name: '小米集团', industry: '消费电子' },
+    { symbol: '09618.HK', name: '京东集团', industry: '电商' },
+    { symbol: '00005.HK', name: 'HSBC', industry: 'Banking' },
+    { symbol: '02318.HK', name: '中国平安', industry: '保险' },
+    { symbol: '00941.HK', name: '中国移动', industry: '电信' },
+  ],
+}
+
+function getPopular(market: string): SymbolInfo[] {
+  return POPULAR_BY_MARKET[market] || POPULAR_BY_MARKET.cn_stock
+}
 
 const inputStyle = {
   backgroundColor: 'var(--bg-primary)',
@@ -80,17 +106,29 @@ export default function SearchBar({ onSearch }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const showInitialSuggestions = useCallback(() => {
-    setSuggestions(POPULAR_STOCKS)
-    setShowDropdown(true)
+  // When market changes, update default stock to first popular in that market
+  const handleMarketChange = useCallback((newMarket: string) => {
+    setMarket(newMarket)
+    const popular = getPopular(newMarket)
+    if (popular.length > 0) {
+      setSelectedSymbol(popular[0].symbol)
+      setSelectedName(popular[0].name)
+    }
+    setShowDropdown(false)
   }, [])
+
+  const showInitialSuggestions = useCallback(() => {
+    setSuggestions(getPopular(market))
+    setShowDropdown(true)
+  }, [market])
 
   // Debounced search
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    const popular = getPopular(market)
     if (value.trim().length < 1) {
-      setSuggestions(POPULAR_STOCKS)
+      setSuggestions(popular)
       return
     }
     debounceRef.current = setTimeout(async () => {
@@ -102,17 +140,17 @@ export default function SearchBar({ onSearch }: Props) {
           setSuggestions(results)
           setShowDropdown(true)
         } else {
-          const filtered = POPULAR_STOCKS.filter(s =>
+          const filtered = popular.filter(s =>
             s.symbol.includes(value.toUpperCase()) || s.name.includes(value)
           )
-          setSuggestions(filtered.length > 0 ? filtered : POPULAR_STOCKS.slice(0, 5))
+          setSuggestions(filtered.length > 0 ? filtered : popular.slice(0, 5))
           setShowDropdown(true)
         }
       } catch {
-        const filtered = POPULAR_STOCKS.filter(s =>
+        const filtered = popular.filter(s =>
           s.symbol.includes(value.toUpperCase()) || s.name.includes(value)
         )
-        setSuggestions(filtered.length > 0 ? filtered : POPULAR_STOCKS.slice(0, 5))
+        setSuggestions(filtered.length > 0 ? filtered : popular.slice(0, 5))
         setShowDropdown(true)
       } finally {
         setLoading(false)
@@ -189,7 +227,7 @@ export default function SearchBar({ onSearch }: Props) {
       {/* Market selector */}
       <div className="flex flex-col gap-1">
         <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Market</label>
-        <select value={market} onChange={e => setMarket(e.target.value)}
+        <select value={market} onChange={e => handleMarketChange(e.target.value)}
           className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
           <option value="cn_stock">A-Shares</option>
           <option value="us_stock">US Stock</option>
