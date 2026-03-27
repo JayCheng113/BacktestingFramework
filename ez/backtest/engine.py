@@ -136,13 +136,26 @@ class VectorizedBacktestEngine:
             exec_price = open_prices[i]
 
             if abs(target_weight - prev_weight) > 1e-6:
-                # Close existing position (or reduce)
-                if shares > 0 and target_weight < prev_weight:
-                    sell_value = shares * exec_price
+                current_equity = cash + shares * exec_price
+                target_value = current_equity * target_weight
+                current_value = shares * exec_price
+
+                if target_value < current_value and shares > 0:
+                    # Reduce or close position
+                    if target_weight == 0:
+                        sell_shares = shares
+                    else:
+                        sell_shares = (current_value - target_value) / exec_price
+                    sell_value = sell_shares * exec_price
                     comm = max(sell_value * self._commission_rate, self._min_commission)
                     cash += sell_value - comm
-                    if entry_time is not None:
-                        pnl = (exec_price - entry_price) * shares - comm
+                    old_shares = shares
+                    shares -= sell_shares
+                    if shares < 1e-10:
+                        shares = 0.0
+                    # Record trade when fully closing
+                    if old_shares > 0 and shares < 1e-10 and entry_time is not None:
+                        pnl = (exec_price - entry_price) * old_shares - comm
                         trades.append(TradeRecord(
                             entry_time=entry_time,
                             exit_time=time_list[i],
@@ -150,21 +163,26 @@ class VectorizedBacktestEngine:
                             exit_price=exec_price,
                             weight=prev_weight,
                             pnl=pnl,
-                            pnl_pct=pnl / (entry_price * shares) if entry_price * shares > 0 else 0,
+                            pnl_pct=pnl / (entry_price * old_shares) if entry_price * old_shares > 0 else 0,
                             commission=comm,
                         ))
-                    shares = 0.0
+                        entry_time = None
 
-                # Open new position (or increase)
-                if target_weight > 0 and target_weight > prev_weight:
-                    current_equity = cash + shares * prices[i]
-                    invest = current_equity * target_weight
-                    invest = min(invest, cash)
-                    comm = max(invest * self._commission_rate, self._min_commission)
-                    shares = (invest - comm) / exec_price if exec_price > 0 else 0
-                    cash -= invest
-                    entry_time = time_list[i]
-                    entry_price = exec_price
+                elif target_value > current_value:
+                    # Increase or open position
+                    additional = target_value - current_value
+                    additional = min(additional, cash)
+                    if additional > 0:
+                        comm = max(additional * self._commission_rate, self._min_commission)
+                        new_shares = (additional - comm) / exec_price if exec_price > 0 else 0
+                        if shares == 0:
+                            entry_time = time_list[i]
+                            entry_price = exec_price
+                        elif new_shares > 0:
+                            # Weighted average entry price
+                            entry_price = (entry_price * shares + exec_price * new_shares) / (shares + new_shares)
+                        shares += new_shares
+                        cash -= additional
 
                 prev_weight = target_weight
 

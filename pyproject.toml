@@ -13,7 +13,6 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
-    "exchange-calendars>=4.5",
     "scipy>=1.14",
 ]
 

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from ez.api.deps import close_store
 from ez.config import load_config
@@ -29,6 +30,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from ez.errors import BacktestError, EzTradingError, ProviderError, ValidationError  # noqa: E402
+
+
+@app.exception_handler(ValidationError)
+async def validation_error_handler(request: Request, exc: ValidationError):
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+@app.exception_handler(ProviderError)
+async def provider_error_handler(request: Request, exc: ProviderError):
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(BacktestError)
+async def backtest_error_handler(request: Request, exc: BacktestError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(EzTradingError)
+async def ez_error_handler(request: Request, exc: EzTradingError):
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
 
 from ez.api.routes import market_data, backtest, factors  # noqa: E402
 app.include_router(market_data.router, prefix="/api/market-data", tags=["market-data"])

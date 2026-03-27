@@ -70,15 +70,17 @@ class DuckDBStore(DataStore):
             return 0
         table = _safe_table(period)
         count_before = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        for bar in bars:
-            self._conn.execute(
-                f"""INSERT INTO {table}
-                    (time, symbol, market, open, high, low, close, adj_close, volume)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT DO NOTHING""",
-                [bar.time, bar.symbol, bar.market, bar.open, bar.high,
-                 bar.low, bar.close, bar.adj_close, bar.volume],
-            )
+        params = [
+            [b.time, b.symbol, b.market, b.open, b.high, b.low, b.close, b.adj_close, b.volume]
+            for b in bars
+        ]
+        self._conn.executemany(
+            f"""INSERT INTO {table}
+                (time, symbol, market, open, high, low, close, adj_close, volume)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING""",
+            params,
+        )
         count_after = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         return count_after - count_before
 
@@ -96,3 +98,10 @@ class DuckDBStore(DataStore):
 
     def close(self) -> None:
         self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
