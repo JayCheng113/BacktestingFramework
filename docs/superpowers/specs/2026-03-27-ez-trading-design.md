@@ -144,11 +144,11 @@ ez-trading/
 │   ├── __init__.py
 │   ├── config.py                  # 配置加载（YAML + .env）
 │   │
+│   ├── types.py                   # [CORE] 所有数据模型（Bar, TradeRecord, BacktestResult, FactorAnalysis, SignificanceTest, WalkForwardResult）
 │   ├── errors.py                  # [CORE] 统一错误类型
 │   │
 │   ├── data/                      # 数据层
 │   │   ├── CLAUDE.md              # 模块文档（接口、依赖、状态）
-│   │   ├── types.py               # [CORE] Bar, TradeRecord 数据模型
 │   │   ├── provider.py            # [CORE] DataProvider ABC + DataProviderChain
 │   │   ├── validator.py           # [CORE] DataValidator 验证规则
 │   │   ├── store.py               # [CORE] DuckDB 存储引擎
@@ -307,7 +307,7 @@ ez-trading/
 - Parquet 导出能力（为未来 C++ Arrow 集成预留）
 - **DuckDB 已知限制**：单写者并发、无原生时序索引、无复制。v1 单进程架构下可接受，v2+ 视需求评估 ArcticDB
 
-**数据模型**
+**数据模型（定义在 `ez/types.py`，所有模块从此导入）**
 ```python
 @dataclass
 class Bar:
@@ -320,6 +320,67 @@ class Bar:
     close: float        # 原始收盘价
     adj_close: float    # 前复权收盘价（v1 回测用此字段）
     volume: int         # 统一为"股"，非"手"
+```
+
+**DataProvider ABC（Core 接口，签名冻结）**
+```python
+class DataProvider(ABC):
+    """数据源抽象基类。所有数据源（Tushare、腾讯、FMP）必须实现此接口。"""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """数据源名称，用于日志和错误信息"""
+        ...
+
+    @abstractmethod
+    def get_kline(self, symbol: str, market: str, period: str,
+                  start_date: date, end_date: date) -> list[Bar]:
+        """获取 K 线数据。
+        - period: "daily" | "weekly" | "monthly"
+        - 返回按时间升序排列的 Bar 列表
+        - 无数据返回空列表，不抛异常
+        - 网络/认证错误抛 ProviderError
+        """
+        ...
+
+    @abstractmethod
+    def search_symbols(self, keyword: str, market: str = "") -> list[dict]:
+        """搜索股票代码。返回 [{"symbol": "000001.SZ", "name": "平安银行"}, ...]"""
+        ...
+```
+
+**DataProviderChain（故障转移链）**
+```python
+class DataProviderChain:
+    """按优先级尝试多个数据源，失败自动切换下一个。"""
+    def __init__(self, providers: list[DataProvider], store: DataStore): ...
+    def get_kline(self, symbol, market, period, start_date, end_date) -> list[Bar]:
+        # 1. 查 store 缓存 → 2. 逐个尝试 provider → 3. 验证 → 4. 存入 store → 5. 返回
+        ...
+```
+
+**DataStore ABC（Core 接口，签名冻结）**
+```python
+class DataStore(ABC):
+    """数据存储抽象基类。V1 实现为 DuckDB，V2 可切换为 ArcticDB。"""
+
+    @abstractmethod
+    def query_kline(self, symbol: str, market: str, period: str,
+                    start_date: date, end_date: date) -> list[Bar]:
+        """查询本地缓存。无数据返回空列表。"""
+        ...
+
+    @abstractmethod
+    def save_kline(self, bars: list[Bar], period: str) -> int:
+        """批量存储 K 线数据。ON CONFLICT 忽略重复。返回新增行数。"""
+        ...
+
+    @abstractmethod
+    def has_data(self, symbol: str, market: str, period: str,
+                 start_date: date, end_date: date) -> bool:
+        """检查指定范围是否有完整数据（用于决定是否调用外部 API）。"""
+        ...
 ```
 
 ### 2. 因子层
@@ -386,11 +447,18 @@ class FactorEvaluator:
         ...
 ```
 
+**V1 局限性说明：时间序列 IC（非截面 IC）**
+- V1 为单标的系统，IC 计算为时间序列相关性（因子值 vs 同一股票 N 日后收益）
+- 这与专业的截面 IC（同一时点跨多只股票的相关性）有本质区别
+- 时间序列 IC 可衡量因子对单只股票的预测力，但统计意义弱于截面 IC
+- 分组收益（quintile）在单标的下退化为按因子值分时间段统计，参考性有限
+- **V2 升级**：多标的支持后切换为截面 IC，quintile 分组跨股票池计算
+
 **前端因子分析可视化（v1）：**
-- IC 时间序列折线图（含均值线）
+- IC 时间序列折线图（含均值线、±1 标准差带）
 - IC 分布直方图
-- 分组收益柱状图（quintile returns）
-- IC 衰减曲线图
+- IC 衰减曲线图（1d/5d/10d/20d）
+- 因子值 vs 收益散点图（替代 quintile，更适合单标的场景）
 
 ### 3. 策略层
 
@@ -406,7 +474,10 @@ class Strategy(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if not inspect.isabstract(cls):
-            cls._registry[cls.__name__] = cls
+            key = f"{cls.__module__}.{cls.__name__}"
+            if key in cls._registry:
+                raise ValueError(f"Strategy '{key}' already registered by {cls._registry[key]}")
+            cls._registry[key] = cls
 
     @classmethod
     def get_parameters_schema(cls) -> dict[str, dict]:
@@ -428,9 +499,10 @@ class Strategy(ABC):
 ```
 
 **自定义策略目录**
-- 内置策略：`ez/strategy/builtin/`（ma_cross.py, rsi_reversal.py 等）
+- 内置策略：`ez/strategy/builtin/`
 - 用户策略：`strategies/`（项目根目录，agent 直接放入 .py 文件即可）
-- 启动时自动扫描两个目录（`pkgutil.iter_modules`），导入所有模块触发注册
+- 扫描路径通过 `configs/default.yaml` 的 `strategy.scan_dirs` 配置（可扩展，不改 Core）
+- 启动时自动扫描配置的目录（`pkgutil.iter_modules`），导入所有模块触发注册
 - API 端点 `GET /api/backtest/strategies` 返回所有已注册策略的名称 + 参数 schema
 
 **执行时序规则（防止前视偏差）**
@@ -493,25 +565,32 @@ class MACrossStrategy(Strategy):
 
 **Walk-Forward 验证（核心差异化功能 #1）**
 
-> 行业第二大痛点：过拟合太容易。没有任何开源平台内置强制 walk-forward 验证。ez-trading 将此作为 v1 核心功能。
+> 行业第二大痛点：过拟合太容易。没有任何开源平台内置 walk-forward 验证。
 
 ```
-数据: |----训练----|--验证--|--测试--|
-                 |----训练----|--验证--|--测试--|
-                              |----训练----|--验证--|--测试--|
+数据: |----训练----|--测试--|
+                 |----训练----|--测试--|
+                              |----训练----|--测试--|
       ←────────── 滚动窗口 ──────────→
 ```
 
+**V1 范围：固定参数鲁棒性验证（时间序列交叉验证）**
 - 将历史数据切分为多个滚动窗口（训练 + 样本外测试）
-- 每个窗口：在训练期拟合策略参数 → 在测试期验证
-- 汇总所有样本外测试期的绩效 = 真实的策略表现
-- 参数：`train_ratio`（默认 0.7）、`n_splits`（默认 5）、`min_train_size`
+- 每个窗口：在训练期运行策略 → 在测试期验证同一策略的样本外表现
+- 汇总所有样本外测试期的绩效 = 策略在不同市场环境下的鲁棒性
+- 如果样本外绩效大幅低于样本内 → 策略可能过拟合
+- **V1 不含参数优化**：策略参数固定，仅检验鲁棒性
+
+**V2 升级：完整 Walk-Forward 优化**
+- Strategy 增加 `parameter_space()` 方法定义参数搜索范围
+- 每个训练窗口内做参数网格搜索，选最优参数在测试窗口验证
+- 这是真正的 Walk-Forward Optimization（WFO）
 
 ```python
 class WalkForwardValidator:
     def validate(self, data: pd.DataFrame, strategy: Strategy,
                  n_splits: int = 5, train_ratio: float = 0.7) -> WalkForwardResult:
-        """滚动窗口验证，返回每个窗口的回测结果 + 汇总指标"""
+        """滚动窗口鲁棒性验证（V1: 固定参数）"""
         ...
 
 @dataclass
@@ -568,6 +647,7 @@ class BacktestResult:
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
+| `/api/health` | GET | 健康检查（返回版本号、已注册策略数、数据库状态） |
 | `/api/market-data/kline` | GET | 获取 K 线数据（symbol, market, period, startDate, endDate） |
 | `/api/market-data/symbols` | GET | 搜索股票代码 |
 | `/api/backtest/run` | POST | 单次回测（body: {symbol, market, period, strategy_name, strategy_params, start_date, end_date, initial_capital, commission_rate}），返回含统计显著性 |
@@ -841,7 +921,8 @@ class StrategySearchAgent:
 
 | 文件 | 职责 | 修改条件 |
 |------|------|----------|
-| `ez/data/types.py` | Bar, TradeRecord, BacktestResult, FactorAnalysis 数据模型 | 仅允许追加字段（带默认值），不允许删除或改名 |
+| `ez/types.py` | 所有数据模型（Bar, TradeRecord, BacktestResult, FactorAnalysis, SignificanceTest, WalkForwardResult）。唯一定义处，所有模块从此导入。不导入任何 ez 子模块，无循环依赖。 | 仅允许追加字段（带默认值）和新 dataclass，不允许删除或改名 |
+| `ez/errors.py` | 统一错误类型层级（EzTradingError → DataError, FactorError, BacktestError 等） | 仅允许追加新异常类，不改变继承层级 |
 | `ez/data/provider.py` | DataProvider ABC + DataProviderChain | 接口签名冻结 |
 | `ez/data/validator.py` | DataValidator 验证规则引擎 | 仅允许追加规则 |
 | `ez/data/store.py` | DataStore ABC | 接口签名冻结 |
