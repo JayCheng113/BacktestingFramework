@@ -2,17 +2,38 @@
 
 ## 项目愿景
 
-构建一个现代化量化回测交易系统，核心差异化：C++ 计算引擎 + AI 大规模接入。最终形态覆盖数据、因子、策略、模型、回测、交易全链路。全程 vibe coding 开发，代码结构优先服务 AI agent 的理解和操作能力。
+**ez-trading 是世界上第一个 Agent-Native 量化平台。**
+
+不是"一个有 AI 功能的回测框架"，而是"一个从底层为 AI agent 自主开发、评估、部署策略而设计的量化系统"。
+
+**核心差异化（vs 竞品）：**
+
+| 竞品 | 它做得好的 | 它做不到的 | ez-trading 的定位 |
+|------|-----------|-----------|------------------|
+| Qlib | AI/ML 研究最强（40+ 模型） | 不能交易，无看板，A 股数据差 | AI 能力 + 可交易 + 看板 |
+| NautilusTrader | Rust 高性能，回测=实盘 | 学习曲线陡峭，无 AI，无看板 | C++ 性能 + 低门槛 + 看板 |
+| FreqTrade | UX 最佳（Web+Telegram），FreqAI | 仅加密货币 | 多市场 + 更强 AI |
+| VNPy | A 股/期货生态最强 | 代码质量差，测试弱，AI 初期 | 专业工程 + 强 AI |
+| QuantConnect | 多资产，400TB 数据 | 依赖云平台，AI 弱 | 本地化 + AI 原生 |
+| 所有平台 | 各自领域 | **无人为 agent 设计架构** | **Agent-Native** |
+
+**Agent-Native 的含义：**
+- Agent 创建策略文件 → contract test 自动验证 → 无需人类审核代码
+- 因子 IC 评估告诉 agent 哪些因子值得用（数据驱动，非直觉）
+- Walk-Forward 验证防止 agent 过拟合（行业第二大痛点，无竞品解决）
+- 统计显著性检验告诉 agent 回测结果是否可信
+- 人类通过 Web 看板监督 agent 的全部操作
+- Core/Extension 架构保证 agent 不会意外破坏系统
 
 ## 核心原则
 
 | 原则 | 含义 | 设计约束 |
 |------|------|----------|
+| **Agent-Native** | 系统为 AI agent 自主操作而设计 | 自动注册、contract test、因子评估闭环 |
 | **高效** | 计算高效 + 开发高效 | C++ 热路径，Python 编排；无冗余抽象 |
 | **精简** | 最少代码量达成目标 | 单进程架构，拒绝微服务；无 XML/样板代码 |
-| **专业** | 金融级严谨性 | 正确的回测指标，无前视偏差，专业级 K 线图 |
+| **专业** | 金融级严谨性 | Walk-Forward 验证，统计显著性检验，防过拟合 |
 | **现代化** | 技术栈领先 | C++20/23, Python 3.12+, React 19, DuckDB |
-| **Agent 友好** | AI agent 可高效导航和修改 | 扁平结构，小文件，显式 > 隐式，CLAUDE.md 导航 |
 
 ## 第一性原理分析
 
@@ -154,7 +175,9 @@ ez-trading/
 │   │   ├── CLAUDE.md              # 模块文档
 │   │   ├── engine.py              # [CORE] BacktestEngine ABC + 向量化实现
 │   │   ├── portfolio.py           # [CORE] 组合状态跟踪
-│   │   └── metrics.py             # [CORE] 绩效指标计算
+│   │   ├── metrics.py             # [CORE] 绩效指标计算
+│   │   ├── walk_forward.py        # [CORE] Walk-Forward 滚动验证
+│   │   └── significance.py        # [CORE] 统计显著性检验（Bootstrap + Monte Carlo）
 │   │
 │   └── api/                       # API 层
 │       ├── CLAUDE.md              # 模块文档
@@ -468,6 +491,55 @@ class MACrossStrategy(Strategy):
 - 基准对比（Buy & Hold 同期收益）
 - 年化波动率
 
+**Walk-Forward 验证（核心差异化功能 #1）**
+
+> 行业第二大痛点：过拟合太容易。没有任何开源平台内置强制 walk-forward 验证。ez-trading 将此作为 v1 核心功能。
+
+```
+数据: |----训练----|--验证--|--测试--|
+                 |----训练----|--验证--|--测试--|
+                              |----训练----|--验证--|--测试--|
+      ←────────── 滚动窗口 ──────────→
+```
+
+- 将历史数据切分为多个滚动窗口（训练 + 样本外测试）
+- 每个窗口：在训练期拟合策略参数 → 在测试期验证
+- 汇总所有样本外测试期的绩效 = 真实的策略表现
+- 参数：`train_ratio`（默认 0.7）、`n_splits`（默认 5）、`min_train_size`
+
+```python
+class WalkForwardValidator:
+    def validate(self, data: pd.DataFrame, strategy: Strategy,
+                 n_splits: int = 5, train_ratio: float = 0.7) -> WalkForwardResult:
+        """滚动窗口验证，返回每个窗口的回测结果 + 汇总指标"""
+        ...
+
+@dataclass
+class WalkForwardResult:
+    splits: list[BacktestResult]       # 每个窗口的回测结果
+    oos_equity_curve: pd.Series        # 拼接所有样本外权益曲线
+    oos_metrics: dict[str, float]      # 样本外汇总指标
+    is_vs_oos_degradation: float       # 样本内 vs 样本外 Sharpe 衰减比
+    overfitting_score: float           # 过拟合评分（衰减比越高越过拟合）
+```
+
+**统计显著性检验（核心差异化功能 #2）**
+
+> 回测 Sharpe > 0 不代表策略有效。可能只是随机波动。ez-trading 用统计检验告诉 agent（和人类）结果是否可信。
+
+- **Bootstrap 置信区间**：对日收益率重采样 1000 次，计算 Sharpe 的 95% 置信区间
+- **Monte Carlo 排列检验**：随机打乱信号 1000 次，统计有多少次 Sharpe > 真实值 → p-value
+- 如果 p-value > 0.05，回测结果标记为"统计不显著"，前端显示警告
+
+```python
+@dataclass
+class SignificanceTest:
+    sharpe_ci_lower: float       # Sharpe 95% 置信区间下界
+    sharpe_ci_upper: float       # Sharpe 95% 置信区间上界
+    monte_carlo_p_value: float   # Monte Carlo 排列检验 p-value
+    is_significant: bool         # p_value < 0.05
+```
+
 **回测结果数据**
 ```python
 @dataclass
@@ -483,12 +555,13 @@ class TradeRecord:
 
 @dataclass
 class BacktestResult:
-    equity_curve: pd.Series       # 权益曲线（含基准线）
+    equity_curve: pd.Series       # 权益曲线
     benchmark_curve: pd.Series    # 基准权益曲线（Buy & Hold）
     trades: list[TradeRecord]     # 交易记录
     metrics: dict[str, float]     # 绩效指标
     signals: pd.Series            # 目标仓位权重序列
     daily_returns: pd.Series      # 日收益率序列
+    significance: SignificanceTest # 统计显著性检验结果
 ```
 
 ### 5. API 层
@@ -497,7 +570,8 @@ class BacktestResult:
 |------|------|------|
 | `/api/market-data/kline` | GET | 获取 K 线数据（symbol, market, period, startDate, endDate） |
 | `/api/market-data/symbols` | GET | 搜索股票代码 |
-| `/api/backtest/run` | POST | 运行回测（body: {symbol, market, period, strategy_name, strategy_params, start_date, end_date, initial_capital, commission_rate}） |
+| `/api/backtest/run` | POST | 单次回测（body: {symbol, market, period, strategy_name, strategy_params, start_date, end_date, initial_capital, commission_rate}），返回含统计显著性 |
+| `/api/backtest/walk-forward` | POST | Walk-Forward 验证（额外参数: n_splits, train_ratio），返回各窗口结果 + 过拟合评分 |
 | `/api/backtest/strategies` | GET | 可用策略列表（含参数 schema，供前端渲染表单） |
 | `/api/factors` | GET | 可用因子列表 |
 | `/api/factors/evaluate` | POST | 因子评估（body: {symbol, factor_name, factor_params, start_date, end_date, periods}），返回 IC/ICIR/分组收益 |
@@ -520,10 +594,12 @@ class BacktestResult:
 
 **回测面板**
 - 策略选择（下拉，动态加载已注册策略）+ 参数配置（根据 schema 自动渲染表单）
-- 运行回测按钮
+- 运行模式切换：单次回测 / Walk-Forward 验证
 - 结果展示：
   - 权益曲线（折线图，叠加基准线 Buy & Hold）
   - 绩效指标卡片（Sharpe, Sortino, 回撤, 胜率等）
+  - **统计显著性徽章**：显著（绿）/ 不显著（红）+ p-value + 95% 置信区间
+  - **Walk-Forward 结果**：样本内 vs 样本外 Sharpe 对比、过拟合评分、各窗口权益曲线
   - 交易记录表格
 
 **因子分析面板**
@@ -709,6 +785,8 @@ class BacktestResult:
 | `ez/strategy/base.py` | Strategy ABC + 自动注册 + 参数 schema | 接口签名冻结 |
 | `ez/backtest/engine.py` | BacktestEngine ABC + 引擎核心循环 | 循环步骤不变，仅允许追加 hook 点 |
 | `ez/backtest/metrics.py` | MetricsCalculator | 仅允许追加指标 |
+| `ez/backtest/walk_forward.py` | WalkForwardValidator + WalkForwardResult | 接口签名冻结 |
+| `ez/backtest/significance.py` | SignificanceTest + Bootstrap/Monte Carlo | 接口签名冻结 |
 | `ez/config.py` | 配置加载和验证 | 仅允许追加配置项 |
 
 **Extension 文件（自由增删）：**
