@@ -33,6 +33,9 @@ class TencentDataProvider(DataProvider):
     def name(self) -> str:
         return "tencent"
 
+    def close(self) -> None:
+        self._client.close()
+
     def get_kline(
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,

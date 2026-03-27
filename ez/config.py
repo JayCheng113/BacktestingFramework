@@ -26,7 +26,7 @@ class DataSourceEntry(BaseModel):
 
 
 class DataSourcesConfig(BaseModel):
-    cn_stock: DataSourceEntry = DataSourceEntry(primary="tencent", backup=["akshare"])
+    cn_stock: DataSourceEntry = DataSourceEntry(primary="tushare", backup=["tencent"])
     us_stock: DataSourceEntry = DataSourceEntry(primary="fmp", backup=["tencent"])
     hk_stock: DataSourceEntry = DataSourceEntry(primary="tencent", backup=[])
     timeout_seconds: int = 10

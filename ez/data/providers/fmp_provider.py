@@ -30,6 +30,9 @@ class FMPDataProvider(DataProvider):
     def name(self) -> str:
         return "fmp"
 
+    def close(self) -> None:
+        self._client.close()
+
     def get_kline(
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
