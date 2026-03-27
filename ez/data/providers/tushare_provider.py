@@ -59,12 +59,13 @@ class TushareDataProvider(DataProvider):
 
     API_URL = "https://api.tushare.pro"
 
-    def __init__(self, token: str | None = None, timeout: int = 10):
+    def __init__(self, token: str | None = None, timeout: int = 10, store=None):
         self._token = token or os.environ.get("TUSHARE_TOKEN", "")
         self._client = httpx.Client(timeout=timeout)
         self._last_call_time: float = 0.0
         self._trade_cal_cache: dict[str, set[str]] = {}  # exchange -> set of YYYYMMDD
-        self._stock_basic_cache: list[dict] | None = None  # cached stock list
+        self._symbol_cache: list[dict] | None = None  # cached stock + ETF list
+        self._store = store  # optional DuckDBStore for persistent symbol cache
 
     @property
     def name(self) -> str:
@@ -118,24 +119,15 @@ class TushareDataProvider(DataProvider):
         if market and market not in _SUPPORTED_MARKETS:
             return []
 
-        # Use cached stock list (fetched once, ~5000 rows)
-        if self._stock_basic_cache is None:
-            data = self._call_api(
-                api_name="stock_basic",
-                params={"list_status": "L"},
-                fields="ts_code,symbol,name,area,industry,market,list_date",
-            )
-            if not data:
-                return []
-            fields = data["fields"]
-            self._stock_basic_cache = [dict(zip(fields, row)) for row in data["items"]]
+        self._ensure_symbol_cache()
 
         keyword_upper = keyword.upper()
+        keyword_lower = keyword.lower()
         results = []
-        for record in self._stock_basic_cache:
+        for record in self._symbol_cache or []:
             ts_code = record.get("ts_code", "")
             name = record.get("name", "")
-            if keyword_upper in ts_code.upper() or keyword.lower() in name.lower():
+            if keyword_upper in ts_code.upper() or keyword_lower in name.lower():
                 results.append({
                     "symbol": ts_code,
                     "name": name,
@@ -143,6 +135,63 @@ class TushareDataProvider(DataProvider):
                     "industry": record.get("industry", ""),
                 })
         return results[:50]
+
+    def _ensure_symbol_cache(self) -> None:
+        """Load stock + ETF lists. Priority: memory → DuckDB → Tushare API."""
+        if self._symbol_cache is not None:
+            return
+
+        # Try DuckDB cache first
+        if self._store and hasattr(self._store, "symbols_count") and self._store.symbols_count() > 0:
+            self._symbol_cache = self._store.query_symbols("", limit=99999)
+            logger.info("Symbol cache loaded from DB: %d symbols", len(self._symbol_cache))
+            return
+
+        # Fetch from API
+        all_symbols: list[dict] = []
+
+        # 1. Stocks
+        stock_data = self._call_api(
+            api_name="stock_basic",
+            params={"list_status": "L"},
+            fields="ts_code,symbol,name,area,industry,market,list_date",
+        )
+        if stock_data:
+            for row in stock_data["items"]:
+                record = dict(zip(stock_data["fields"], row))
+                all_symbols.append({
+                    "ts_code": record.get("ts_code", ""),
+                    "name": record.get("name", ""),
+                    "area": record.get("area", ""),
+                    "industry": record.get("industry", ""),
+                })
+
+        # 2. ETFs
+        etf_data = self._call_api(
+            api_name="fund_basic",
+            params={"market": "E", "status": "L"},
+            fields="ts_code,name,management,type,fund_type,market",
+        )
+        if etf_data:
+            for row in etf_data["items"]:
+                record = dict(zip(etf_data["fields"], row))
+                all_symbols.append({
+                    "ts_code": record.get("ts_code", ""),
+                    "name": record.get("name", ""),
+                    "area": record.get("management", ""),
+                    "industry": "ETF",
+                })
+
+        logger.info("Symbol cache from API: %d stocks + %d ETFs",
+                     len(stock_data["items"]) if stock_data else 0,
+                     len(etf_data["items"]) if etf_data else 0)
+
+        # Persist to DuckDB for next startup
+        if self._store and hasattr(self._store, "save_symbols") and all_symbols:
+            saved = self._store.save_symbols(all_symbols)
+            logger.info("Saved %d symbols to DB", saved)
+
+        self._symbol_cache = all_symbols
 
     # ── Extended APIs (not part of DataProvider ABC) ──────────────────
 

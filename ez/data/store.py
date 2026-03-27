@@ -48,6 +48,16 @@ class DuckDBStore(DataStore):
                     PRIMARY KEY (symbol, market, time)
                 )
             """)
+        # Symbol directory table (stocks + ETFs)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS symbols (
+                ts_code VARCHAR PRIMARY KEY,
+                name VARCHAR,
+                area VARCHAR,
+                industry VARCHAR,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
     def query_kline(
         self, symbol: str, market: str, period: str,
@@ -95,6 +105,43 @@ class DuckDBStore(DataStore):
              datetime.combine(end_date, datetime.max.time())],
         ).fetchone()[0]
         return count > 0
+
+    # ── Symbol directory ────────────────────────────────────────────
+
+    def save_symbols(self, symbols: list[dict]) -> int:
+        """Upsert symbol directory (stocks + ETFs). Returns count saved."""
+        if not symbols:
+            return 0
+        params = [
+            [s.get("ts_code", ""), s.get("name", ""), s.get("area", ""), s.get("industry", "")]
+            for s in symbols if s.get("ts_code")
+        ]
+        self._conn.executemany(
+            """INSERT INTO symbols (ts_code, name, area, industry, updated_at)
+               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT (ts_code) DO UPDATE SET
+                 name=EXCLUDED.name, area=EXCLUDED.area,
+                 industry=EXCLUDED.industry, updated_at=CURRENT_TIMESTAMP""",
+            params,
+        )
+        return len(params)
+
+    def query_symbols(self, keyword: str = "", limit: int = 50) -> list[dict]:
+        """Search symbols by code or name. Empty keyword returns all."""
+        if keyword:
+            rows = self._conn.execute(
+                "SELECT ts_code, name, area, industry FROM symbols "
+                "WHERE ts_code ILIKE ? OR name ILIKE ? LIMIT ?",
+                [f"%{keyword}%", f"%{keyword}%", limit],
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT ts_code, name, area, industry FROM symbols LIMIT ?", [limit],
+            ).fetchall()
+        return [{"ts_code": r[0], "name": r[1], "area": r[2], "industry": r[3]} for r in rows]
+
+    def symbols_count(self) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
 
     def close(self) -> None:
         self._conn.close()

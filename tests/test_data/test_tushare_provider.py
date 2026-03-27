@@ -329,15 +329,20 @@ class TestCallApi:
 
 
 class TestSearchSymbols:
+    def _stock_and_etf_side_effect(self, stocks, etfs=None):
+        """Return side_effect for _call_api: first call=stock_basic, second=fund_basic."""
+        return [stocks, etfs]
+
     @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
     def test_search_by_code(self, mock_call):
-        mock_call.return_value = {
+        stock_data = {
             "fields": ["ts_code", "symbol", "name", "area", "industry", "market", "list_date"],
             "items": [
                 ["000001.SZ", "000001", "Ping An Bank", "Shenzhen", "Banking", "Main", "19910403"],
                 ["000002.SZ", "000002", "Vanke A", "Shenzhen", "Real Estate", "Main", "19910129"],
             ],
         }
+        mock_call.side_effect = [stock_data, None]  # stocks, no ETFs
 
         p = TushareDataProvider(token="test")
         results = p.search_symbols("000001")
@@ -348,18 +353,40 @@ class TestSearchSymbols:
 
     @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
     def test_search_by_name(self, mock_call):
-        mock_call.return_value = {
+        stock_data = {
             "fields": ["ts_code", "symbol", "name", "area", "industry", "market", "list_date"],
             "items": [
                 ["000001.SZ", "000001", "Ping An Bank", "Shenzhen", "Banking", "Main", "19910403"],
                 ["601318.SH", "601318", "Ping An Insurance", "Shenzhen", "Insurance", "Main", "20070301"],
             ],
         }
+        mock_call.side_effect = [stock_data, None]
 
         p = TushareDataProvider(token="test")
         results = p.search_symbols("Ping An")
 
         assert len(results) == 2
+
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
+    def test_search_includes_etfs(self, mock_call):
+        stock_data = {
+            "fields": ["ts_code", "symbol", "name", "area", "industry", "market", "list_date"],
+            "items": [["000001.SZ", "000001", "Ping An Bank", "Shenzhen", "Banking", "Main", "19910403"]],
+        }
+        etf_data = {
+            "fields": ["ts_code", "name", "management", "type", "fund_type", "market"],
+            "items": [
+                ["510300.SH", "沪深300ETF", "华泰柏瑞", "契约型", "股票型", "E"],
+                ["510050.SH", "上证50ETF", "华夏基金", "契约型", "股票型", "E"],
+            ],
+        }
+        mock_call.side_effect = [stock_data, etf_data]
+
+        p = TushareDataProvider(token="test")
+        results = p.search_symbols("ETF")
+
+        assert len(results) == 2
+        assert all(r["industry"] == "ETF" for r in results)
 
     def test_search_no_token(self):
         p = TushareDataProvider(token="")
@@ -373,7 +400,7 @@ class TestSearchSymbols:
 
     @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
     def test_search_empty_response(self, mock_call):
-        mock_call.return_value = None
+        mock_call.side_effect = [None, None]  # both stock_basic and fund_basic empty
 
         p = TushareDataProvider(token="test")
         results = p.search_symbols("nonexistent")

@@ -33,7 +33,7 @@ def get_tushare_provider():
     if not os.environ.get("TUSHARE_TOKEN"):
         return None
     from ez.data.providers.tushare_provider import TushareDataProvider
-    _tushare_provider = TushareDataProvider()
+    _tushare_provider = TushareDataProvider(store=get_store())
     logger.info("TushareDataProvider singleton created (TUSHARE_TOKEN found)")
     return _tushare_provider
 
