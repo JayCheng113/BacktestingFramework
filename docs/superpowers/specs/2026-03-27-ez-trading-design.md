@@ -191,13 +191,25 @@ ez-trading/
 
 **数据获取**
 - FMP (Financial Modeling Prep) K 线数据（美股日 K/周 K/月 K）
-- DataProvider 抽象基类，后续可接入 Yahoo Finance, Binance 等
+- DataProvider 抽象基类，后续可接入 Tiingo, Polygon, Binance 等
 - 查库优先：本地有数据直接返回，无则调 API -> 存库 -> 返回
+
+**复权策略（关键决策）**
+- v1 采用 FMP 提供的前复权价格（`adjClose`），简单直接
+- 存储字段区分 `close`（原始收盘价）和 `adj_close`（前复权收盘价）
+- 回测引擎默认使用 `adj_close` 计算收益，避免拆分/分红导致的虚假波动
+- v2 切换为 LEAN 方案：存储原始价格 + factor 文件，运行时按需复权
+
+**交易日历**
+- 使用 `exchange_calendars` 库处理交易日历对齐
+- 仅存储交易日数据行（非交易日无行），日历文件定义有效日期
+- 跨时区统一存为 UTC，显示层转为交易所本地时间
 
 **数据存储**
 - DuckDB 本地文件数据库（`data/ez_trading.db`）
-- 表结构：`kline_{period}(time, symbol, market, open, high, low, close, volume)`
+- 表结构：`kline_{period}(time, symbol, market, open, high, low, close, adj_close, volume)`
 - Parquet 导出能力（为未来 C++ Arrow 集成预留）
+- **DuckDB 已知限制**：单写者并发、无原生时序索引、无复制。v1 单进程架构下可接受，v2+ 视需求评估 ArcticDB
 
 **数据模型**
 ```python
@@ -209,7 +221,8 @@ class Bar:
     open: float
     high: float
     low: float
-    close: float
+    close: float        # 原始收盘价
+    adj_close: float    # 前复权收盘价（v1 回测用此字段）
     volume: int
 ```
 
@@ -228,9 +241,17 @@ class Factor(ABC):
     name: str
     params: dict
 
+    @property
+    @abstractmethod
+    def warmup_period(self) -> int:
+        """因子需要的最小历史数据条数（如 60 日 MA 返回 60）。
+        回测引擎用此值决定向前加载多少额外数据做预热。"""
+        ...
+
     @abstractmethod
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
-        """输入 OHLCV DataFrame，返回附加因子列的 DataFrame"""
+        """输入 OHLCV DataFrame，返回附加因子列的 DataFrame。
+        前 warmup_period 行的因子值可能为 NaN，引擎会自动裁剪。"""
         ...
 ```
 
@@ -242,39 +263,79 @@ class Strategy(ABC):
     name: str
 
     @abstractmethod
+    def required_factors(self) -> list[Factor]:
+        """声明策略依赖的因子列表，引擎自动计算并注入 data 中"""
+        ...
+
+    @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        """输入含因子列的 DataFrame，返回信号序列：1=买入, -1=卖出, 0=持有"""
+        """输入含因子列的 DataFrame，返回目标仓位权重序列。
+        值域：0.0 = 空仓, 1.0 = 满仓, 0.5 = 半仓。
+        信号基于当前 bar 收盘价计算，引擎在下一根 bar 开盘价执行。"""
         ...
 ```
 
+**执行时序规则（防止前视偏差）**
+- 信号在 bar[i] 收盘价产生 → 在 bar[i+1] 开盘价执行（`signal.shift(1)`）
+- 回测引擎在内部自动做 shift，策略代码无需关心
+- 这是 LEAN 和 Zipline 的标准做法
+
 **示例策略：均线交叉**
-- 短期 MA 上穿长期 MA -> 买入信号
-- 短期 MA 下穿长期 MA -> 卖出信号
+- 短期 MA 上穿长期 MA -> 目标仓位 1.0（满仓）
+- 短期 MA 下穿长期 MA -> 目标仓位 0.0（空仓）
+- 过渡期可输出 0.5（半仓）等中间值
 
 ### 4. 回测层
 
 **向量化回测引擎**
-- 输入：历史数据 + 策略 + 初始资金
-- 流程：加载数据 -> 计算因子 -> 生成信号 -> 模拟交易 -> 计算绩效
-- 单标的，全仓买卖（v1 简化）
-- 手续费率可配置（默认万三）
+- 输入：历史数据 + 策略 + 初始资金 + 手续费率
+- 流程：
+  1. 根据策略声明的因子计算所需预热期（取所有因子 `warmup_period` 最大值）
+  2. 加载数据（含预热期额外数据）
+  3. 计算因子 → 生成信号（目标仓位权重）
+  4. 将信号 shift(1)：bar[i] 信号在 bar[i+1] 执行（防止前视偏差）
+  5. 裁剪预热期数据行
+  6. 按权重变化模拟交易（仅在权重变化时产生交易）
+  7. 计算绩效指标 + 基准对比
+- 使用 `adj_close` 计算收益，`open` 作为执行价格
+- 手续费率可配置（默认万三），支持最低手续费
+- 单标的，支持灵活仓位（0.0-1.0 权重）
+
+**前视偏差防护（架构级）**
+- 信号 shift(1) 由引擎强制执行，策略无法绕过
+- 因子预热期自动裁剪，预热期内不产生交易
+- 数据层仅返回交易日数据（通过 exchange_calendars 过滤）
 
 **绩效指标**
 - 总收益率 / 年化收益率
-- Sharpe Ratio（无风险利率可配）
+- Sharpe Ratio / Sortino Ratio（无风险利率可配）
 - 最大回撤 / 最大回撤持续期
-- 胜率 / 盈亏比
-- 交易次数
-- 基准对比（Buy & Hold）
+- 胜率 / 盈亏比 / 利润因子
+- 交易次数 / 平均持仓天数
+- 基准对比（Buy & Hold 同期收益）
+- 年化波动率
 
 **回测结果数据**
 ```python
 @dataclass
+class TradeRecord:
+    entry_time: datetime
+    exit_time: datetime
+    entry_price: float
+    exit_price: float
+    weight: float             # 仓位权重
+    pnl: float                # 盈亏金额
+    pnl_pct: float            # 盈亏百分比
+    commission: float         # 手续费
+
+@dataclass
 class BacktestResult:
-    equity_curve: pd.Series       # 权益曲线
+    equity_curve: pd.Series       # 权益曲线（含基准线）
+    benchmark_curve: pd.Series    # 基准权益曲线（Buy & Hold）
     trades: list[TradeRecord]     # 交易记录
     metrics: dict[str, float]     # 绩效指标
-    signals: pd.Series            # 信号序列
+    signals: pd.Series            # 目标仓位权重序列
+    daily_returns: pd.Series      # 日收益率序列
 ```
 
 ### 5. API 层
@@ -325,11 +386,17 @@ class BacktestResult:
 - 事件驱动回测引擎：tick 级仿真，部分成交、滑点模拟
 - 订单撮合模拟器：限价单、市价单、止损单
 
+**数据层升级**
+- 原始价格 + factor 文件方案（参考 LEAN）：存储未复权价格，运行时按需复权
+- 支持多种复权模式：前复权、后复权、不复权
+- 企业行为处理：拆分、分红、退市、更名
+- 数据质量检查：缺失值、异常值、跳空检测
+- 评估 ArcticDB 替代 DuckDB（版本化、增量更新）
+
 **增强功能**
-- 多标的回测
+- 多标的回测 + 截面策略支持
 - 多策略并行回测
-- 更多数据源：Yahoo Finance, Alpha Vantage, Binance
-- 数据质量检查：缺失值、异常值、复权处理
+- 更多数据源：Tiingo, Polygon, Binance
 - 性能对比面板：C++ vs Python 引擎切换
 
 ### V3 — AI 引擎
@@ -429,6 +496,19 @@ class BacktestResult:
 - Docker / K8s 部署（本地运行）
 - Paper Trading（v3）
 - 组合优化（v4）
+- 原始价格 + factor 文件复权（v2，v1 使用数据源提供的前复权价格）
+- 做空交易（v1 仅支持 0.0-1.0 多头仓位）
+- 分笔/Tick 级别数据（v1 仅日 K/周 K/月 K）
+
+## V1 已知限制
+
+| 限制 | 原因 | 解决版本 |
+|------|------|----------|
+| 使用数据源前复权价格，非自主计算 | v1 精简原则，FMP 提供 adj_close | V2（raw + factor 文件） |
+| DuckDB 单写者并发 | 单进程架构下无影响 | V2（评估 ArcticDB） |
+| 无拆分/分红事件通知 | 依赖前复权价格已隐含处理 | V2（企业行为事件系统） |
+| 无存活偏差修正 | FMP 免费版不含退市股票 | V2（专业数据源） |
+| 仅支持多头仓位 | 简化 v1 回测逻辑 | V2（支持做空） |
 
 ---
 
