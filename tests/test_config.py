@@ -12,8 +12,8 @@ def test_load_default_config():
 
 def test_config_data_sources():
     config = load_config()
-    assert config.data_sources.cn_stock.primary == "tencent"
-    assert "akshare" in config.data_sources.cn_stock.backup
+    assert config.data_sources.cn_stock.primary == "tushare"
+    assert "tencent" in config.data_sources.cn_stock.backup
 
 
 def test_config_strategy_scan_dirs():
