@@ -1,6 +1,7 @@
 """Strategy auto-discovery from configured directories.
 
 [CORE] — scans paths from config, does not hardcode directories.
+Resolves relative paths against the project root (where pyproject.toml lives).
 """
 from __future__ import annotations
 
@@ -13,14 +14,23 @@ from ez.config import load_config
 
 logger = logging.getLogger(__name__)
 
+# Project root = parent of ez/ package
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 def load_all_strategies() -> None:
     """Import all strategy modules from configured scan directories."""
     config = load_config()
     for scan_dir in config.strategy.scan_dirs:
+        # Resolve relative paths against project root, not CWD
         path = Path(scan_dir)
+        if not path.is_absolute():
+            path = _PROJECT_ROOT / path
+
         if not path.exists():
+            logger.debug("Strategy scan dir does not exist: %s", path)
             continue
+
         module_base = scan_dir.replace("/", ".").replace("\\", ".")
         try:
             pkg = importlib.import_module(module_base)
@@ -32,6 +42,7 @@ def load_all_strategies() -> None:
                 except Exception as e:
                     logger.warning("Failed to load strategy module %s: %s", full_name, e)
         except ModuleNotFoundError:
+            # Fallback: load .py files directly (for user strategies dir)
             for py_file in path.glob("*.py"):
                 if py_file.name.startswith("_"):
                     continue

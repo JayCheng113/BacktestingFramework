@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from ez.api.deps import close_resources
+from ez.api.deps import close_resources, get_tushare_provider
 from ez.config import load_config
 from ez.strategy.loader import load_all_strategies
 
@@ -16,6 +16,13 @@ from ez.strategy.loader import load_all_strategies
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     load_all_strategies()
+    # Pre-warm symbol cache so first search is fast
+    tushare = get_tushare_provider()
+    if tushare:
+        try:
+            tushare._ensure_symbol_cache()
+        except Exception:
+            pass
     yield
     close_resources()
 

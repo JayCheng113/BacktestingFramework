@@ -29,7 +29,13 @@ class DuckDBStore(DataStore):
     PERIODS = ("daily", "weekly", "monthly")
 
     def __init__(self, db_path: str = "data/ez_trading.db"):
-        self._conn = duckdb.connect(db_path)
+        from pathlib import Path as _P
+        p = _P(db_path)
+        if not p.is_absolute():
+            project_root = _P(__file__).resolve().parent.parent.parent
+            p = project_root / p
+        p.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = duckdb.connect(str(p))
         self._init_tables()
 
     def _init_tables(self) -> None:
@@ -116,12 +122,14 @@ class DuckDBStore(DataStore):
             [s.get("ts_code", ""), s.get("name", ""), s.get("area", ""), s.get("industry", "")]
             for s in symbols if s.get("ts_code")
         ]
+        # DuckDB executemany doesn't support SQL functions in VALUES,
+        # so omit updated_at (uses table default CURRENT_TIMESTAMP)
         self._conn.executemany(
-            """INSERT INTO symbols (ts_code, name, area, industry, updated_at)
-               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """INSERT INTO symbols (ts_code, name, area, industry)
+               VALUES (?, ?, ?, ?)
                ON CONFLICT (ts_code) DO UPDATE SET
                  name=EXCLUDED.name, area=EXCLUDED.area,
-                 industry=EXCLUDED.industry, updated_at=CURRENT_TIMESTAMP""",
+                 industry=EXCLUDED.industry""",
             params,
         )
         return len(params)

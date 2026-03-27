@@ -77,15 +77,20 @@ def _load_dotenv(env_path: str = ".env") -> None:
             os.environ[key] = value
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 def load_config(config_path: str = "configs/default.yaml") -> EzConfig:
     """Load .env into environment, then YAML config with Pydantic defaults."""
     global _config
     if _config is not None:
         return _config
 
-    _load_dotenv()
+    _load_dotenv(str(_PROJECT_ROOT / ".env"))
 
     path = Path(config_path)
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
     if path.exists():
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
