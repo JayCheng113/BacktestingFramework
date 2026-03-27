@@ -1,29 +1,13 @@
 """Market data endpoints."""
 from __future__ import annotations
 
-import os
 from datetime import date
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from ez.api.deps import get_chain
+from ez.api.deps import get_chain, get_tushare_provider
 
 router = APIRouter()
-
-# Lazy singleton for Tushare extended APIs
-_tushare_provider = None
-
-
-def _get_tushare():
-    """Return TushareDataProvider singleton if token is configured, else None."""
-    global _tushare_provider
-    if _tushare_provider is not None:
-        return _tushare_provider
-    if not os.environ.get("TUSHARE_TOKEN"):
-        return None
-    from ez.data.providers.tushare_provider import TushareDataProvider
-    _tushare_provider = TushareDataProvider()
-    return _tushare_provider
 
 
 @router.get("/kline")
@@ -52,6 +36,14 @@ def search_symbols(keyword: str = Query(...), market: str = Query("")):
     return chain.search_symbols(keyword, market)
 
 
+def _require_tushare():
+    """Return shared TushareDataProvider or raise 503."""
+    provider = get_tushare_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="Tushare not configured (set TUSHARE_TOKEN)")
+    return provider
+
+
 @router.get("/daily-basic")
 def get_daily_basic(
     symbol: str = Query(..., description="Stock symbol, e.g. 000001.SZ"),
@@ -59,9 +51,7 @@ def get_daily_basic(
     end_date: date = Query(...),
 ):
     """Daily fundamental indicators: PE, PB, turnover rate, market cap, etc."""
-    provider = _get_tushare()
-    if not provider:
-        return {"error": "Tushare not configured (set TUSHARE_TOKEN)"}
+    provider = _require_tushare()
     data = provider.get_daily_basic(symbol, start_date, end_date)
     for row in data:
         if "trade_date" in row and hasattr(row["trade_date"], "isoformat"):
@@ -76,9 +66,7 @@ def get_index_kline(
     end_date: date = Query(...),
 ):
     """Index daily K-line for benchmark. 000001.SH=Shanghai, 000300.SH=CSI300, 399006.SZ=ChiNext."""
-    provider = _get_tushare()
-    if not provider:
-        return {"error": "Tushare not configured (set TUSHARE_TOKEN)"}
+    provider = _require_tushare()
     bars = provider.get_index_kline(index_code, start_date, end_date)
     return [
         {
@@ -97,8 +85,6 @@ def get_trade_cal(
     exchange: str = Query("SSE"),
 ):
     """Return trading days in the date range."""
-    provider = _get_tushare()
-    if not provider:
-        return {"error": "Tushare not configured (set TUSHARE_TOKEN)"}
+    provider = _require_tushare()
     days = provider.get_trade_cal(exchange, start_date, end_date)
     return [d.isoformat() for d in days]

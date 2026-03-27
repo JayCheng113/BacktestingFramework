@@ -57,17 +57,22 @@ class TushareDataProvider(DataProvider):
     for trading calendar, fundamental data, and index benchmarks.
     """
 
-    API_URL = "http://api.tushare.pro"
+    API_URL = "https://api.tushare.pro"
 
     def __init__(self, token: str | None = None, timeout: int = 10):
         self._token = token or os.environ.get("TUSHARE_TOKEN", "")
         self._client = httpx.Client(timeout=timeout)
         self._last_call_time: float = 0.0
         self._trade_cal_cache: dict[str, set[str]] = {}  # exchange -> set of YYYYMMDD
+        self._stock_basic_cache: list[dict] | None = None  # cached stock list
 
     @property
     def name(self) -> str:
         return "tushare"
+
+    def close(self) -> None:
+        """Close the HTTP client connection pool."""
+        self._client.close()
 
     # ── DataProvider ABC implementation ───────────────────────────────
 
@@ -113,19 +118,21 @@ class TushareDataProvider(DataProvider):
         if market and market not in _SUPPORTED_MARKETS:
             return []
 
-        data = self._call_api(
-            api_name="stock_basic",
-            params={"list_status": "L"},
-            fields="ts_code,symbol,name,area,industry,market,list_date",
-        )
-        if not data:
-            return []
+        # Use cached stock list (fetched once, ~5000 rows)
+        if self._stock_basic_cache is None:
+            data = self._call_api(
+                api_name="stock_basic",
+                params={"list_status": "L"},
+                fields="ts_code,symbol,name,area,industry,market,list_date",
+            )
+            if not data:
+                return []
+            fields = data["fields"]
+            self._stock_basic_cache = [dict(zip(fields, row)) for row in data["items"]]
 
-        fields = data["fields"]
         keyword_upper = keyword.upper()
         results = []
-        for row in data["items"]:
-            record = dict(zip(fields, row))
+        for record in self._stock_basic_cache:
             ts_code = record.get("ts_code", "")
             name = record.get("name", "")
             if keyword_upper in ts_code.upper() or keyword.lower() in name.lower():

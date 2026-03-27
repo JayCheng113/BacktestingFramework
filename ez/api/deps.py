@@ -1,4 +1,4 @@
-"""Shared API dependencies — singleton store and provider chain."""
+"""Shared API dependencies — singleton store, provider chain, Tushare provider."""
 from __future__ import annotations
 
 import logging
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _store: DuckDBStore | None = None
 _chain: DataProviderChain | None = None
+_tushare_provider = None  # TushareDataProvider singleton (shared by chain + routes)
 
 
 def get_store() -> DuckDBStore:
@@ -24,6 +25,19 @@ def get_store() -> DuckDBStore:
     return _store
 
 
+def get_tushare_provider():
+    """Return singleton TushareDataProvider if token is configured, else None."""
+    global _tushare_provider
+    if _tushare_provider is not None:
+        return _tushare_provider
+    if not os.environ.get("TUSHARE_TOKEN"):
+        return None
+    from ez.data.providers.tushare_provider import TushareDataProvider
+    _tushare_provider = TushareDataProvider()
+    logger.info("TushareDataProvider singleton created (TUSHARE_TOKEN found)")
+    return _tushare_provider
+
+
 def get_chain() -> DataProviderChain:
     """Return singleton DataProviderChain (reuses store and providers)."""
     global _chain
@@ -31,23 +45,22 @@ def get_chain() -> DataProviderChain:
         store = get_store()
         providers: list[DataProvider] = []
 
-        # Add Tushare as primary for cn_stock if token is configured
-        if os.environ.get("TUSHARE_TOKEN"):
-            from ez.data.providers.tushare_provider import TushareDataProvider
-            providers.append(TushareDataProvider())
-            logger.info("TushareDataProvider added to chain (TUSHARE_TOKEN found)")
+        tushare = get_tushare_provider()
+        if tushare:
+            providers.append(tushare)
 
-        # Tencent as backup (no auth needed)
         providers.append(TencentDataProvider())
-
         _chain = DataProviderChain(providers=providers, store=store)
     return _chain
 
 
-def close_store() -> None:
-    """Close the singleton store (called at app shutdown)."""
-    global _store, _chain
+def close_resources() -> None:
+    """Close all singleton resources (called at app shutdown)."""
+    global _store, _chain, _tushare_provider
     _chain = None
+    if _tushare_provider is not None:
+        _tushare_provider.close()
+        _tushare_provider = None
     if _store is not None:
         _store.close()
         _store = None

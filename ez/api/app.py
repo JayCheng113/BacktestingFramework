@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from ez.api.deps import close_store
+from ez.api.deps import close_resources
 from ez.config import load_config
 from ez.strategy.loader import load_all_strategies
 
@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     load_all_strategies()
     yield
-    close_store()
+    close_resources()
 
 
 app = FastAPI(title="ez-trading", version="0.1.0", lifespan=lifespan)
