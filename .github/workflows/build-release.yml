@@ -12,8 +12,6 @@ jobs:
         include:
           - os: macos-latest
             artifact: ez-trading-mac-arm64
-          - os: macos-13
-            artifact: ez-trading-mac-x64
           - os: windows-latest
             artifact: ez-trading-windows
           - os: ubuntu-latest
@@ -41,11 +39,10 @@ jobs:
           npm run build
 
       - name: Install Python dependencies
+        shell: bash
         run: |
           pip install pyinstaller
-          pip install "fastapi>=0.115" "uvicorn[standard]>=0.30" "duckdb>=1.0" \
-            "pandas>=2.2" "numpy>=2.0" "httpx>=0.27" "pyyaml>=6.0" \
-            "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14"
+          pip install "fastapi>=0.115" "uvicorn[standard]>=0.30" "duckdb>=1.0" "pandas>=2.2" "numpy>=2.0" "httpx>=0.27" "pyyaml>=6.0" "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14"
 
       - name: Build with PyInstaller
         run: |
@@ -120,7 +117,6 @@ jobs:
 
             Download the package for your platform:
             - **Mac (Apple Silicon)**: `ez-trading-mac-arm64.zip`
-            - **Mac (Intel)**: `ez-trading-mac-x64.zip`
             - **Windows**: `ez-trading-windows.zip`
             - **Linux**: `ez-trading-linux.zip`
 
