@@ -72,11 +72,19 @@ class DataProviderChain:
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
     ) -> list[Bar]:
-        # 1. Check cache
+        # 1. Check cache — only use if it covers the requested range
         cached = self._store.query_kline(symbol, market, period, start_date, end_date)
         if cached:
-            logger.info("Cache hit for %s/%s/%s", symbol, market, period)
-            return cached
+            cached_start = cached[0].time.date()
+            cached_end = cached[-1].time.date()
+            # Allow 3-day tolerance for weekends/holidays at range boundaries
+            start_covered = (cached_start - start_date).days <= 3
+            end_covered = (end_date - cached_end).days <= 3
+            if start_covered and end_covered:
+                logger.info("Cache hit for %s/%s/%s", symbol, market, period)
+                return cached
+            logger.info("Cache partial for %s (have %s~%s, need %s~%s), fetching fresh",
+                        symbol, cached_start, cached_end, start_date, end_date)
 
         # 2. Try providers in order
         last_error: Exception | None = None

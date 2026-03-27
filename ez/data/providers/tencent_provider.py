@@ -42,8 +42,9 @@ class TencentDataProvider(DataProvider):
         url = self.HK_URL if market == "hk_stock" else self.BASE_URL
 
         try:
+            # Tencent API param format: code,period,start,end,count,qfq
             resp = self._client.get(url, params={
-                "param": f"{code},{tc_period},{start_date},{end_date},9999,qfqa",
+                "param": f"{code},{tc_period},{start_date},{end_date},800,qfq",
             })
             resp.raise_for_status()
         except httpx.HTTPError as e:
@@ -82,6 +83,10 @@ class TencentDataProvider(DataProvider):
             return []
 
         inner = data.get("data", {})
+        # Guard: API may return empty list instead of dict on error
+        if not isinstance(inner, dict):
+            return []
+
         stock_data = None
         for v in inner.values():
             if isinstance(v, dict):
@@ -90,6 +95,7 @@ class TencentDataProvider(DataProvider):
         if not stock_data:
             return []
 
+        # Tencent uses "qfqday", "qfqweek", etc. for adjusted data
         kline_key = f"qfq{tc_period}"
         rows = stock_data.get(kline_key) or stock_data.get(tc_period, [])
 
@@ -99,6 +105,7 @@ class TencentDataProvider(DataProvider):
                 continue
             try:
                 dt = datetime.strptime(str(row[0]), "%Y-%m-%d")
+                # Tencent format: [date, open, close, high, low, volume]
                 o, c, h, l = float(row[1]), float(row[2]), float(row[3]), float(row[4])
                 vol = int(float(row[5]))
                 if not (start_date <= dt.date() <= end_date):
