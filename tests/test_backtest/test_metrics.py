@@ -34,3 +34,17 @@ def test_win_rate(calc):
     equity = pd.Series([100, 101, 100.5, 102, 101.5, 103])
     metrics = calc.compute(equity, equity * 0 + 100)
     assert "annualized_return" in metrics
+
+
+def test_max_drawdown_duration(calc):
+    """Drawdown duration = bars spent below previous peak."""
+    # Peak at bar 1 (110k), drawdown bars 2,3 (below peak), recovery at bar 4
+    equity = pd.Series([100000, 110000, 90000, 95000, 112000])
+    metrics = calc.compute(equity, pd.Series([100000] * 5))
+    assert metrics["max_drawdown_duration"] == 2  # bars 2 and 3
+
+
+def test_max_drawdown_duration_no_drawdown(calc):
+    equity = pd.Series([100000, 101000, 102000, 103000])
+    metrics = calc.compute(equity, pd.Series([100000] * 4))
+    assert metrics["max_drawdown_duration"] == 0

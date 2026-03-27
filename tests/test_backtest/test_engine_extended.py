@@ -125,5 +125,5 @@ def test_significance_returned(engine, simple_df):
 
 def test_metrics_keys_complete(engine, simple_df):
     result = engine.run(simple_df, AlwaysInStrategy(), initial_capital=100000)
-    required_keys = {"sharpe_ratio", "total_return", "max_drawdown", "win_rate", "trade_count", "profit_factor"}
+    required_keys = {"sharpe_ratio", "total_return", "max_drawdown", "max_drawdown_duration", "win_rate", "trade_count", "profit_factor", "avg_holding_days"}
     assert required_keys.issubset(set(result.metrics.keys()))

@@ -91,7 +91,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
 
   const metricKeys = ['sharpe_ratio', 'total_return', 'max_drawdown', 'win_rate', 'trade_count', 'avg_holding_days', 'max_drawdown_duration']
   const formatMetric = (k: string, v: number) => {
-    if (k.includes('return') || k.includes('rate') || k.includes('drawdown') && !k.includes('duration'))
+    if ((k.includes('return') || k.includes('rate') || k.includes('drawdown')) && !k.includes('duration'))
       return `${(v * 100).toFixed(2)}%`
     if (k === 'trade_count' || k.includes('duration') || k.includes('days')) return Math.round(v).toString()
     return v.toFixed(4)

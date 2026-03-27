@@ -24,8 +24,10 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     finally { setLoading(false) }
   }
 
-  // IC time-series with mean line
-  const icMean = result ? result.ic_series.reduce((a, b) => a + b, 0) / result.ic_series.length : 0
+  // IC time-series with mean line + ±1 std dev bands
+  const icN = result ? result.ic_series.length : 0
+  const icMean = result && icN > 0 ? result.ic_series.reduce((a: number, b: number) => a + b, 0) / icN : 0
+  const icStd = result && icN > 1 ? Math.sqrt(result.ic_series.reduce((s: number, v: number) => s + (v - icMean) ** 2, 0) / (icN - 1)) : 0
   const icTimeSeriesOption = result ? {
     backgroundColor: '#0d1117',
     title: { text: 'IC Time Series', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
@@ -36,6 +38,8 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     series: [
       { type: 'bar', data: result.ic_series.map((v: number) => ({ value: v, itemStyle: { color: v >= 0 ? '#2563eb80' : '#ef444480' } })), barMaxWidth: 4 },
       { type: 'line', data: result.ic_series.map(() => icMean), lineStyle: { color: '#f59e0b', type: 'dashed', width: 1 }, showSymbol: false, name: 'Mean' },
+      { type: 'line', data: result.ic_series.map(() => icMean + icStd), lineStyle: { color: '#f59e0b40', type: 'dotted', width: 1 }, showSymbol: false, name: '+1σ' },
+      { type: 'line', data: result.ic_series.map(() => icMean - icStd), lineStyle: { color: '#f59e0b40', type: 'dotted', width: 1 }, showSymbol: false, name: '-1σ' },
     ],
   } : null
 
