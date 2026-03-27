@@ -1,0 +1,113 @@
+请帮我创建量化交易项目的基础骨架。
+
+【项目结构】
+jzhu-trading/
+├── .env
+├── pom.xml                       # 父 POM
+├── db/
+│   └── init/
+│       └── 01_init_kline.sql     # K线表初始化脚本
+├── trading-common/               # 共享 DTO 库 (纯 JAR，非 Spring Boot 应用)
+├── strategy-core/                # (本期先创建空模块占位)
+├── web-service/                  # (下一个 Prompt 创建)
+├── market-data-service/          # (下一个 Prompt 创建)
+└── web-app/                      # (React，不在 Maven 管理中)
+
+【.env 文件】
+FMP_API_KEY=
+SPRING_PROFILES_ACTIVE=dev
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=trading_platform
+DB_USER=trading
+DB_PASSWORD=trading123
+
+【TimescaleDB Docker 启动】
+请提供 Docker 启动命令：
+docker run -d \
+  --name trading-timescaledb \
+  -p 5432:5432 \
+  -e POSTGRES_DB=trading_platform \
+  -e POSTGRES_USER=trading \
+  -e POSTGRES_PASSWORD=trading123 \
+  -v trading-pgdata:/var/lib/postgresql/data \
+  timescale/timescaledb:latest-pg16
+
+【数据库初始化脚本 db/init/01_init_kline.sql】
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+SET timezone = 'America/New_York';
+
+CREATE TABLE IF NOT EXISTS kline_daily (
+    time TIMESTAMPTZ NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    market VARCHAR(10) NOT NULL,
+    open DOUBLE PRECISION,
+    high DOUBLE PRECISION,
+    low DOUBLE PRECISION,
+    close DOUBLE PRECISION,
+    volume BIGINT
+);
+
+SELECT create_hypertable('kline_daily', 'time', if_not_exists => TRUE);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kline_daily_symbol_time
+    ON kline_daily (symbol, market, time DESC);
+
+-- 可选: 周K、月K 表结构相同
+CREATE TABLE IF NOT EXISTS kline_weekly (LIKE kline_daily INCLUDING ALL);
+SELECT create_hypertable('kline_weekly', 'time', if_not_exists => TRUE);
+
+CREATE TABLE IF NOT EXISTS kline_monthly (LIKE kline_daily INCLUDING ALL);
+SELECT create_hypertable('kline_monthly', 'time', if_not_exists => TRUE);
+
+初始化执行命令:
+docker exec -i trading-timescaledb psql -U trading -d trading_platform < db/init/01_init_kline.sql
+
+【父 POM 要求】
+- groupId: ai.jzhu.trading, artifactId: jzhu-trading, version: 1.0.0-SNAPSHOT
+- Java 21, Spring Boot 4.0.3 (spring-boot-starter-parent)
+- 当前子模块: trading-common, strategy-core, web-service, market-data-service
+  (后续会加 indicator-service, backtest-service, strategy-service, api-gateway)
+- dependencyManagement 统一管理:
+  - spring-boot-starter-web
+  - spring-boot-starter-webflux
+  - spring-boot-starter-data-jdbc
+  - lombok
+  - jackson-databind
+  - me.paulschwarz:spring-dotenv:4.0.0
+  - org.postgresql:postgresql
+- 所有子模块默认引入: spring-dotenv, lombok, spring-boot-starter-test
+
+【trading-common 模块】
+
+这是一个纯 Java JAR 库（不是 Spring Boot 应用），被所有微服务依赖。
+packaging: jar，不需要 spring-boot-maven-plugin。
+
+包路径: ai.jzhu.trading.common
+
+当前阶段只需要定义以下内容（后续期数会逐步添加更多 DTO）：
+
+1. dto/KlineResponse.java (record):
+   - String date
+   - double open, high, low, close
+   - long volume
+
+2. dto/ErrorResponse.java (record):
+   - int status
+   - String message
+   - String timestamp
+
+推荐方案: trading-common 只放 DTO 和工具类，不放 Spring 注解的类。
+GlobalExceptionHandler 在每个服务中各自定义。
+所以 trading-common 的依赖很轻量：只需要 lombok 和 jackson-annotations。
+
+【strategy-core 占位模块】
+当前只创建空的 pom.xml 和包目录，内容在第3期填充。
+包路径: ai.jzhu.strategy
+
+请生成以下文件：
+1. jzhu-trading/pom.xml (父 POM)
+2. jzhu-trading/.env
+3. db/init/01_init_kline.sql
+4. trading-common/pom.xml
+5. trading-common 的所有 Java 类
+6. strategy-core/pom.xml (空模块占位)

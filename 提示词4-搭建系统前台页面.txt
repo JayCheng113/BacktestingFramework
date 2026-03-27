@@ -1,0 +1,112 @@
+请创建 React 前端项目 web-app。这是第1期，只实现搜索股票和展示K线图。
+
+【技术栈】
+- React 19 + TypeScript 5.9
+- Vite 7 构建工具 (端口 3000)
+- Bootstrap 5 (响应式布局)
+- ECharts 5 (K线图)
+- Axios (HTTP 请求)
+
+【项目结构】
+web-app/
+├── package.json
+├── vite.config.ts (端口 3000)
+├── tsconfig.json
+├── index.html
+└── src/
+    ├── main.tsx
+    ├── App.tsx
+    ├── api/
+    │   └── index.ts              # Axios 实例，baseURL: http://localhost:8181/api/web
+    ├── components/
+    │   ├── Navbar.tsx             # 顶部导航栏
+    │   ├── SearchBar.tsx          # 搜索栏
+    │   ├── StockTabs.tsx          # 股票标签
+    │   └── KlineChart.tsx         # K线图
+    ├── types/
+    │   └── index.ts
+    ├── pages/
+    │   └── KlinePage.tsx          # K线主页面
+    └── styles/
+        └── global.css             # 深色主题
+
+【深色主题配色】
+- 页面背景: #0d1117
+- 卡片/面板背景: #161b22
+- 边框: #30363d
+- 主文字: #e6edf3
+- 次文字: #8b949e
+- 涨/阳线: 红色 #ef4444 (K线用红涨绿跌的中国习惯)
+- 跌/阴线: 绿色 #22c55e
+- 按钮蓝: #2563eb
+- 按钮橙: #f97316
+
+【Navbar 组件】
+- 左侧: "JZhu Trading" 白色粗体文字
+- 导航菜单项: K线回测
+- 当前只有 "K线回测" 可点击，其余灰显
+- 深色背景风格
+
+【SearchBar 组件】
+一行排列:
+- 股票代码: 输入框 (placeholder: "输入代码")
+- 市场: 下拉选择 (美股)
+- 周期: 下拉选择 (日K, 周K, 月K)
+- 开始日期: 日期选择器
+- 结束日期: 日期选择器
+- 查询按钮 (蓝色) - 点击触发 API 调用
+
+日期默认值: 开始日期 = 5年前今天，结束日期 = 今天
+
+【StockTabs 组件】
+- 查询过的股票显示为标签，如 "TSLA 美股 ×"
+- 可以查询多只股票，标签横排排列
+- 点击标签切换显示对应股票数据
+- × 按钮删除标签
+- 当前选中的标签高亮
+
+【KlineChart 组件 - 使用 ECharts】
+这是本期的核心视觉效果。
+
+图表配置:
+- 背景透明 (继承页面深色背景)
+- 标题显示股票代码 (如 "TSLA")
+- 使用 ECharts 的 candlestick 系列绘制K线
+  - K线颜色: 阳线(收>开)红色填充 #ef4444，阴线(收<开)绿色填充 #22c55e
+  - 阳线边框红色，阴线边框绿色
+- X轴: 日期
+- Y轴: 价格
+- 支持 dataZoom (底部滑动条 + 鼠标滚轮缩放)
+- tooltip 显示: 日期、开盘、收盘、最高、最低、成交量
+- 副图: 成交量柱状图 (阳线日红色，阴线日绿色)
+- 主图和副图使用 grid + xAxis 联动
+- 图例: "K线" (当前只有一项，后续会加 MA、BOLL 等)
+
+ECharts 布局:
+- 主图 (K线): 占 70% 高度
+- 副图 (成交量): 占 20% 高度
+- dataZoom: 占 10% 高度
+- 两个图的 X 轴联动
+
+【KlinePage 组件 - 页面整合】
+- 顶部: SearchBar
+- 搜索栏下方: StockTabs 股票标签栏
+- 标签栏下方: 显示 "共 {n} 条数据"
+- 主体: KlineChart
+- 状态管理: 使用 React useState 管理 klines 数据、当前选中股票、loading 状态
+- 查询流程: 用户填写参数 → 点击查询 → 调用 GET /api/web/kline → 更新图表
+- 加载中显示 loading 动画
+- 错误时显示错误提示
+
+【API 调用】
+GET http://localhost:8181/api/web/kline?symbol=TSLA&market=us&period=daily&startDate=2021-03-18&endDate=2026-03-18
+
+返回: [{ date, open, high, low, close, volume }, ...]
+
+【注意事项】
+- 第1期不需要回测面板、指标叠加、策略选择等功能
+- 保持页面简洁，只展示搜索 + K线图 + 成交量
+- 确保手机端也能正常显示 (Bootstrap 响应式)
+- ECharts 实例在窗口 resize 时自动 resize
+
+请生成 web-app 第1期的完整代码。
