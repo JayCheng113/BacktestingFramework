@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 import { searchSymbols } from '../api'
 import type { SymbolInfo } from '../types'
 
@@ -6,8 +8,12 @@ interface Props {
   onSearch: (symbol: string, market: string, startDate: string, endDate: string) => void
 }
 
-const today = new Date().toISOString().slice(0, 10)
-const oneYearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
+const todayDate = new Date()
+const oneYearAgoDate = new Date(Date.now() - 365 * 86400000)
+
+function toStr(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
 
 // Fallback popular stocks when API search is unavailable
 const POPULAR_STOCKS: SymbolInfo[] = [
@@ -32,10 +38,10 @@ const inputStyle = {
 export default function SearchBar({ onSearch }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSymbol, setSelectedSymbol] = useState('000001.SZ')
-  const [selectedName, setSelectedName] = useState('Ping An Bank')
+  const [selectedName, setSelectedName] = useState('平安银行')
   const [market, setMarket] = useState('cn_stock')
-  const [startDate, setStartDate] = useState(oneYearAgo)
-  const [endDate, setEndDate] = useState(today)
+  const [startDate, setStartDate] = useState<Date>(oneYearAgoDate)
+  const [endDate, setEndDate] = useState<Date>(todayDate)
   const [suggestions, setSuggestions] = useState<SymbolInfo[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -53,7 +59,6 @@ export default function SearchBar({ onSearch }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Show popular stocks when clicking with empty query
   const showInitialSuggestions = useCallback(() => {
     setSuggestions(POPULAR_STOCKS)
     setShowDropdown(true)
@@ -64,8 +69,7 @@ export default function SearchBar({ onSearch }: Props) {
     setQuery(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (value.trim().length < 1) {
-      setSuggestions([])
-      setShowDropdown(false)
+      setSuggestions(POPULAR_STOCKS)
       return
     }
     debounceRef.current = setTimeout(async () => {
@@ -77,7 +81,6 @@ export default function SearchBar({ onSearch }: Props) {
           setSuggestions(results)
           setShowDropdown(true)
         } else {
-          // Fallback to local popular stocks
           const filtered = POPULAR_STOCKS.filter(s =>
             s.symbol.includes(value.toUpperCase()) || s.name.includes(value)
           )
@@ -85,7 +88,6 @@ export default function SearchBar({ onSearch }: Props) {
           setShowDropdown(true)
         }
       } catch {
-        // API unavailable — use local fallback
         const filtered = POPULAR_STOCKS.filter(s =>
           s.symbol.includes(value.toUpperCase()) || s.name.includes(value)
         )
@@ -104,20 +106,8 @@ export default function SearchBar({ onSearch }: Props) {
     setShowDropdown(false)
   }
 
-  const handleStartChange = (val: string) => {
-    setStartDate(val)
-    // If start > end, push end to match start
-    if (val > endDate) setEndDate(val)
-  }
-
-  const handleEndChange = (val: string) => {
-    setEndDate(val)
-    // If end < start, pull start to match end
-    if (val < startDate) setStartDate(val)
-  }
-
   const handleSearch = () => {
-    if (selectedSymbol) onSearch(selectedSymbol, market, startDate, endDate)
+    if (selectedSymbol) onSearch(selectedSymbol, market, toStr(startDate), toStr(endDate))
   }
 
   return (
@@ -141,7 +131,7 @@ export default function SearchBar({ onSearch }: Props) {
               autoFocus
               value={query}
               onChange={e => handleQueryChange(e.target.value)}
-              placeholder="Search code or name..."
+              placeholder="输入代码或名称搜索..."
               className="w-full px-3 py-2 text-sm outline-none"
               style={{ ...inputStyle, borderBottom: '1px solid var(--border)', borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}
               onKeyDown={e => {
@@ -149,14 +139,14 @@ export default function SearchBar({ onSearch }: Props) {
                 if (e.key === 'Enter' && suggestions.length > 0) handleSelect(suggestions[0])
               }}
             />
-            {loading && <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>Searching...</div>}
+            {loading && <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>搜索中...</div>}
             {!loading && suggestions.length === 0 && query.length > 0 && (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>No results</div>
+              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>无结果</div>
             )}
             {suggestions.map(item => (
               <div
                 key={item.symbol}
-                className="px-3 py-2 text-sm cursor-pointer hover:opacity-80 flex justify-between items-center"
+                className="px-3 py-2 text-sm cursor-pointer flex justify-between items-center"
                 style={{ borderBottom: '1px solid var(--border)' }}
                 onClick={() => handleSelect(item)}
                 onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--bg-secondary)')}
@@ -186,21 +176,49 @@ export default function SearchBar({ onSearch }: Props) {
         </select>
       </div>
 
-      {/* Date range with constraints */}
+      {/* Date range — calendar dropdown pickers */}
       <div className="flex flex-col gap-1">
         <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start</label>
-        <input type="date" value={startDate}
-          max={endDate}
-          onChange={e => handleStartChange(e.target.value)}
-          className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
+        <DatePicker
+          selected={startDate}
+          onChange={(d: Date | null) => {
+            if (!d) return
+            setStartDate(d)
+            if (d > endDate) setEndDate(d)
+          }}
+          selectsStart
+          startDate={startDate}
+          endDate={endDate}
+          maxDate={endDate}
+          dateFormat="yyyy-MM-dd"
+          className="px-3 py-1.5 rounded text-sm w-[130px]"
+          calendarClassName="ez-calendar"
+          showMonthDropdown
+          showYearDropdown
+          dropdownMode="select"
+        />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End</label>
-        <input type="date" value={endDate}
-          min={startDate}
-          max={today}
-          onChange={e => handleEndChange(e.target.value)}
-          className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
+        <DatePicker
+          selected={endDate}
+          onChange={(d: Date | null) => {
+            if (!d) return
+            setEndDate(d)
+            if (d < startDate) setStartDate(d)
+          }}
+          selectsEnd
+          startDate={startDate}
+          endDate={endDate}
+          minDate={startDate}
+          maxDate={todayDate}
+          dateFormat="yyyy-MM-dd"
+          className="px-3 py-1.5 rounded text-sm w-[130px]"
+          calendarClassName="ez-calendar"
+          showMonthDropdown
+          showYearDropdown
+          dropdownMode="select"
+        />
       </div>
 
       <button onClick={handleSearch}
