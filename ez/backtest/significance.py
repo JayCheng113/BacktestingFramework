@@ -15,8 +15,13 @@ def compute_significance(
     risk_free_rate: float = 0.03,
     n_bootstrap: int = 1000,
     n_permutations: int = 1000,
+    seed: int | None = None,
 ) -> SignificanceTest:
-    """Bootstrap CI for Sharpe + Monte Carlo permutation test."""
+    """Bootstrap CI for Sharpe + Monte Carlo permutation test.
+
+    Args:
+        seed: RNG seed. None for true randomness, int for reproducibility (tests).
+    """
     returns = daily_returns.dropna().values
     if len(returns) < 20:
         return SignificanceTest(
@@ -28,7 +33,7 @@ def compute_significance(
     observed_sharpe = _sharpe(returns, daily_rf)
 
     # Bootstrap CI
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed)
     boot_sharpes = np.array([
         _sharpe(rng.choice(returns, size=len(returns), replace=True), daily_rf)
         for _ in range(n_bootstrap)

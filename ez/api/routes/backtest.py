@@ -7,12 +7,9 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
 from ez.backtest.walk_forward import WalkForwardValidator
-from ez.config import load_config
-from ez.data.provider import DataProviderChain
-from ez.data.providers.tencent_provider import TencentDataProvider
-from ez.data.store import DuckDBStore
 from ez.strategy.base import Strategy
 
 router = APIRouter()
@@ -46,9 +43,7 @@ def _get_strategy(name: str, params: dict) -> Strategy:
 
 
 def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
-    config = load_config()
-    store = DuckDBStore(config.database.path)
-    chain = DataProviderChain([TencentDataProvider()], store)
+    chain = get_chain()
     bars = chain.get_kline(req.symbol, req.market, req.period, req.start_date, req.end_date)
     if not bars:
         raise HTTPException(status_code=404, detail=f"No data for {req.symbol}")

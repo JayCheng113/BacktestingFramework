@@ -16,7 +16,8 @@ REST API exposing market data, backtesting, and factor evaluation via FastAPI.
 ## Files
 | File | Role |
 |------|------|
-| app.py | FastAPI app entry, CORS, router registration |
+| app.py | FastAPI app entry, CORS, lifespan, router registration |
+| deps.py | Singleton DuckDBStore + DataProviderChain (shared across routes) |
 | routes/market_data.py | Market data endpoints |
 | routes/backtest.py | Backtest + walk-forward endpoints |
 | routes/factors.py | Factor listing + evaluation endpoints |

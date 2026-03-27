@@ -157,7 +157,8 @@ class VectorizedBacktestEngine:
 
                 # Open new position (or increase)
                 if target_weight > 0 and target_weight > prev_weight:
-                    invest = capital * target_weight
+                    current_equity = cash + shares * prices[i]
+                    invest = current_equity * target_weight
                     invest = min(invest, cash)
                     comm = max(invest * self._commission_rate, self._min_commission)
                     shares = (invest - comm) / exec_price if exec_price > 0 else 0

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -59,11 +60,30 @@ class EzConfig(BaseModel):
 _config: EzConfig | None = None
 
 
+def _load_dotenv(env_path: str = ".env") -> None:
+    """Load .env file into os.environ if it exists (no external dependency)."""
+    path = Path(env_path)
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if value and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def load_config(config_path: str = "configs/default.yaml") -> EzConfig:
-    """Load config from YAML file, falling back to defaults if file missing."""
+    """Load .env into environment, then YAML config with Pydantic defaults."""
     global _config
     if _config is not None:
         return _config
+
+    _load_dotenv()
 
     path = Path(config_path)
     if path.exists():

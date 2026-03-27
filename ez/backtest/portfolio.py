@@ -1,6 +1,7 @@
 """Portfolio state tracking during backtest.
 
 [CORE] — tracks cash, position, equity over time.
+NOTE: V1 engine uses numpy arrays directly. PortfolioState reserved for V2 event-driven engine.
 """
 from __future__ import annotations
 

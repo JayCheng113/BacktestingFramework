@@ -8,10 +8,22 @@ from datetime import date, datetime
 
 import duckdb
 
+from ez.data.provider import DataStore
+from ez.errors import ValidationError
 from ez.types import Bar
 
+# Whitelist of valid period values — used to prevent SQL injection
+_VALID_PERIODS = frozenset(("daily", "weekly", "monthly"))
 
-class DuckDBStore:
+
+def _safe_table(period: str) -> str:
+    """Return sanitized table name or raise on invalid period."""
+    if period not in _VALID_PERIODS:
+        raise ValidationError(f"Invalid period '{period}'. Must be one of: {', '.join(sorted(_VALID_PERIODS))}")
+    return f"kline_{period}"
+
+
+class DuckDBStore(DataStore):
     """DuckDB-backed data store."""
 
     PERIODS = ("daily", "weekly", "monthly")
@@ -41,7 +53,7 @@ class DuckDBStore:
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
     ) -> list[Bar]:
-        table = f"kline_{period}"
+        table = _safe_table(period)
         rows = self._conn.execute(
             f"SELECT * FROM {table} WHERE symbol=? AND market=? AND time>=? AND time<=? ORDER BY time",
             [symbol, market, datetime.combine(start_date, datetime.min.time()),
@@ -56,7 +68,7 @@ class DuckDBStore:
     def save_kline(self, bars: list[Bar], period: str) -> int:
         if not bars:
             return 0
-        table = f"kline_{period}"
+        table = _safe_table(period)
         count_before = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         for bar in bars:
             self._conn.execute(
@@ -74,7 +86,7 @@ class DuckDBStore:
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
     ) -> bool:
-        table = f"kline_{period}"
+        table = _safe_table(period)
         count = self._conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE symbol=? AND market=? AND time>=? AND time<=?",
             [symbol, market, datetime.combine(start_date, datetime.min.time()),

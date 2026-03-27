@@ -13,7 +13,7 @@ Run vectorized backtests, compute metrics, validate via Walk-Forward, test stati
 | File | Role | Core/Extension |
 |------|------|---------------|
 | engine.py | VectorizedBacktestEngine | CORE |
-| portfolio.py | PortfolioState | CORE |
+| portfolio.py | PortfolioState (V2, reserved) | CORE |
 | metrics.py | MetricsCalculator | CORE |
 | walk_forward.py | WalkForwardValidator | CORE |
 | significance.py | Statistical significance | CORE |

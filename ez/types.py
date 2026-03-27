@@ -5,7 +5,7 @@ This file MUST NOT import from any ez submodule to avoid circular dependencies.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 import pandas as pd

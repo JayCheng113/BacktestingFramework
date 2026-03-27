@@ -1,13 +1,25 @@
 """FastAPI application entry point."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from ez.api.deps import close_store
 from ez.config import load_config
 from ez.strategy.loader import load_all_strategies
 
-app = FastAPI(title="ez-trading", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup / shutdown lifecycle."""
+    load_all_strategies()
+    yield
+    close_store()
+
+
+app = FastAPI(title="ez-trading", version="0.1.0", lifespan=lifespan)
 
 config = load_config()
 app.add_middleware(
@@ -18,9 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-load_all_strategies()
-
-from ez.api.routes import market_data, backtest, factors
+from ez.api.routes import market_data, backtest, factors  # noqa: E402
 app.include_router(market_data.router, prefix="/api/market-data", tags=["market-data"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
 app.include_router(factors.router, prefix="/api/factors", tags=["factors"])

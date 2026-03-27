@@ -13,6 +13,17 @@ from ez.types import Bar
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid circular dependency (validator imports Bar from types)
+_DataValidator = None
+
+
+def _get_validator():
+    global _DataValidator
+    if _DataValidator is None:
+        from ez.data.validator import DataValidator
+        _DataValidator = DataValidator
+    return _DataValidator
+
 
 class DataProvider(ABC):
     """Abstract data source. All providers (Tushare, Tencent, FMP) implement this."""
@@ -74,8 +85,14 @@ class DataProviderChain:
                 logger.info("Fetching %s from %s", symbol, provider.name)
                 bars = provider.get_kline(symbol, market, period, start_date, end_date)
                 if bars:
-                    self._store.save_kline(bars, period)
-                    return bars
+                    validator = _get_validator()
+                    result = validator.validate_bars(bars)
+                    if result.invalid_count > 0:
+                        logger.warning("%d invalid bars filtered for %s: %s",
+                                       result.invalid_count, symbol, result.errors[:3])
+                    if result.valid_bars:
+                        self._store.save_kline(result.valid_bars, period)
+                    return result.valid_bars
             except Exception as e:
                 logger.warning("Provider %s failed for %s: %s", provider.name, symbol, e)
                 last_error = e

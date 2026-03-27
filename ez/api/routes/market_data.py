@@ -5,19 +5,9 @@ from datetime import date
 
 from fastapi import APIRouter, Query
 
-from ez.config import load_config
-from ez.data.providers.tencent_provider import TencentDataProvider
-from ez.data.provider import DataProviderChain
-from ez.data.store import DuckDBStore
+from ez.api.deps import get_chain
 
 router = APIRouter()
-
-
-def _get_chain() -> DataProviderChain:
-    config = load_config()
-    store = DuckDBStore(config.database.path)
-    providers = [TencentDataProvider()]
-    return DataProviderChain(providers=providers, store=store)
 
 
 @router.get("/kline")
@@ -28,7 +18,7 @@ def get_kline(
     start_date: date = Query(...),
     end_date: date = Query(...),
 ):
-    chain = _get_chain()
+    chain = get_chain()
     bars = chain.get_kline(symbol, market, period, start_date, end_date)
     return [
         {
@@ -42,5 +32,5 @@ def get_kline(
 
 @router.get("/symbols")
 def search_symbols(keyword: str = Query(...), market: str = Query("")):
-    chain = _get_chain()
+    chain = get_chain()
     return chain.search_symbols(keyword, market)
