@@ -11,6 +11,7 @@ from ez.data.providers.tushare_provider import (
     TushareDataProvider,
     _date_to_tushare,
     _tushare_to_datetime,
+    _tushare_to_date,
 )
 from ez.errors import ProviderError
 from ez.types import Bar
@@ -283,8 +284,9 @@ class TestCallApi:
             p._call_api("daily", {}, "")
 
     @patch("ez.data.providers.tushare_provider.TushareDataProvider._throttle")
-    def test_auth_error_raises(self, mock_throttle):
-        """Auth error (code=2002) should raise ProviderError with auth message."""
+    @patch("ez.data.providers.tushare_provider.time.sleep")
+    def test_auth_error_raises_after_retries(self, mock_sleep, mock_throttle):
+        """Auth error (code=2002) retries then raises ProviderError."""
         response_body = _make_error_response(code=2002, msg="Invalid token")
         mock_resp = MagicMock()
         mock_resp.json.return_value = response_body
@@ -294,7 +296,7 @@ class TestCallApi:
         p._client = MagicMock()
         p._client.post.return_value = mock_resp
 
-        with pytest.raises(ProviderError, match="auth error"):
+        with pytest.raises(ProviderError, match="auth/rate-limit"):
             p._call_api("daily", {}, "")
 
     @patch("ez.data.providers.tushare_provider.TushareDataProvider._throttle")
@@ -397,3 +399,150 @@ class TestBuildAdjMap:
     def test_build_adj_map_none(self):
         result = TushareDataProvider._build_adj_map(None)
         assert result == {}
+
+
+# ── Retry / backoff tests ─────────────────────────────────────────
+
+
+class TestRetryLogic:
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._throttle")
+    @patch("ez.data.providers.tushare_provider.time.sleep")
+    def test_retry_on_rate_limit(self, mock_sleep, mock_throttle):
+        """2002 error should trigger retry with backoff, then succeed."""
+        rate_limit_resp = MagicMock()
+        rate_limit_resp.json.return_value = _make_error_response(code=2002, msg="rate limit")
+        rate_limit_resp.raise_for_status = MagicMock()
+
+        success_resp = MagicMock()
+        success_resp.json.return_value = _make_kline_response()
+        success_resp.raise_for_status = MagicMock()
+
+        p = TushareDataProvider(token="test")
+        p._client = MagicMock()
+        p._client.post.side_effect = [rate_limit_resp, success_resp]
+
+        result = p._call_api("daily", {}, "")
+        assert result is not None
+        assert p._client.post.call_count == 2
+        mock_sleep.assert_called_once_with(1.0)  # first backoff = 1s
+
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._throttle")
+    @patch("ez.data.providers.tushare_provider.time.sleep")
+    def test_retry_exhausted_raises(self, mock_sleep, mock_throttle):
+        """3 consecutive 2002 errors should raise after all retries."""
+        rate_limit_resp = MagicMock()
+        rate_limit_resp.json.return_value = _make_error_response(code=2002, msg="rate limit")
+        rate_limit_resp.raise_for_status = MagicMock()
+
+        p = TushareDataProvider(token="test")
+        p._client = MagicMock()
+        p._client.post.return_value = rate_limit_resp
+
+        with pytest.raises(ProviderError, match="auth/rate-limit"):
+            p._call_api("daily", {}, "")
+
+        assert p._client.post.call_count == 3
+
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._throttle")
+    def test_non_retryable_error_raises_immediately(self, mock_throttle):
+        """Non-2002 errors should raise immediately, no retry."""
+        error_resp = MagicMock()
+        error_resp.json.return_value = _make_error_response(code=-1, msg="bad request")
+        error_resp.raise_for_status = MagicMock()
+
+        p = TushareDataProvider(token="test")
+        p._client = MagicMock()
+        p._client.post.return_value = error_resp
+
+        with pytest.raises(ProviderError, match="Tushare API error"):
+            p._call_api("daily", {}, "")
+
+        assert p._client.post.call_count == 1
+
+
+# ── Extended API tests ────────────────────────────────────────────
+
+
+class TestTradeCal:
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
+    def test_get_trade_cal(self, mock_call):
+        mock_call.return_value = {
+            "fields": ["cal_date"],
+            "items": [["20240102"], ["20240103"], ["20240104"], ["20240105"]],
+        }
+        p = TushareDataProvider(token="test")
+        days = p.get_trade_cal("SSE", date(2024, 1, 2), date(2024, 1, 4))
+
+        assert len(days) == 3
+        assert days[0] == date(2024, 1, 2)
+        assert days[2] == date(2024, 1, 4)
+
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
+    def test_trade_cal_cached(self, mock_call):
+        """Second call should use cache, not hit API again."""
+        mock_call.return_value = {
+            "fields": ["cal_date"],
+            "items": [["20240102"], ["20240103"]],
+        }
+        p = TushareDataProvider(token="test")
+        p.get_trade_cal("SSE")
+        p.get_trade_cal("SSE")
+        assert mock_call.call_count == 1  # cached
+
+    def test_trade_cal_no_token(self):
+        with patch.dict("os.environ", {}, clear=True):
+            p = TushareDataProvider(token="")
+            with pytest.raises(ProviderError, match="TUSHARE_TOKEN"):
+                p.get_trade_cal()
+
+
+class TestDailyBasic:
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
+    def test_get_daily_basic(self, mock_call):
+        mock_call.return_value = {
+            "fields": ["ts_code", "trade_date", "close", "pe", "pb", "turnover_rate", "total_mv", "circ_mv",
+                        "turnover_rate_f", "volume_ratio", "pe_ttm", "ps", "ps_ttm", "total_share", "float_share"],
+            "items": [
+                ["000001.SZ", "20240102", 10.5, 8.2, 0.9, 1.5, 2000000, 1500000,
+                 1.3, 0.8, 7.5, 1.2, 1.1, 19000, 17000],
+            ],
+        }
+        p = TushareDataProvider(token="test")
+        data = p.get_daily_basic("000001.SZ", date(2024, 1, 2), date(2024, 1, 2))
+
+        assert len(data) == 1
+        assert data[0]["pe"] == 8.2
+        assert data[0]["pb"] == 0.9
+        assert data[0]["trade_date"] == date(2024, 1, 2)
+
+    def test_daily_basic_no_token(self):
+        with patch.dict("os.environ", {}, clear=True):
+            p = TushareDataProvider(token="")
+            with pytest.raises(ProviderError, match="TUSHARE_TOKEN"):
+                p.get_daily_basic("000001.SZ", date(2024, 1, 1), date(2024, 1, 31))
+
+
+class TestIndexKline:
+    @patch("ez.data.providers.tushare_provider.TushareDataProvider._call_api")
+    def test_get_index_kline(self, mock_call):
+        mock_call.return_value = {
+            "fields": ["ts_code", "trade_date", "open", "high", "low", "close", "vol"],
+            "items": [
+                ["000300.SH", "20240102", 3500.0, 3550.0, 3480.0, 3520.0, 150000.0],
+                ["000300.SH", "20240103", 3520.0, 3560.0, 3510.0, 3540.0, 160000.0],
+            ],
+        }
+        p = TushareDataProvider(token="test")
+        bars = p.get_index_kline("000300.SH", date(2024, 1, 2), date(2024, 1, 3))
+
+        assert len(bars) == 2
+        assert bars[0].symbol == "000300.SH"
+        assert bars[0].market == "cn_index"
+        assert bars[0].close == 3520.0
+        assert bars[0].adj_close == 3520.0  # index: adj=close
+
+    def test_index_kline_no_token(self):
+        with patch.dict("os.environ", {}, clear=True):
+            p = TushareDataProvider(token="")
+            with pytest.raises(ProviderError, match="TUSHARE_TOKEN"):
+                p.get_index_kline("000300.SH", date(2024, 1, 1), date(2024, 1, 31))
