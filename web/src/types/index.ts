@@ -33,6 +33,13 @@ export interface WalkForwardResult {
   oos_equity_curve: number[];
 }
 
+export interface SymbolInfo {
+  symbol: string
+  name: string
+  area?: string
+  industry?: string
+}
+
 export interface FactorResult {
   ic_mean: number; rank_ic_mean: number; icir: number;
   rank_icir: number; ic_decay: Record<string, number>;
