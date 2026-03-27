@@ -1,0 +1,131 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.1.0
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: ez-trading-mac-arm64
+          - os: macos-13
+            artifact: ez-trading-mac-x64
+          - os: windows-latest
+            artifact: ez-trading-windows
+          - os: ubuntu-latest
+            artifact: ez-trading-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Python dependencies
+        run: |
+          pip install pyinstaller
+          pip install "fastapi>=0.115" "uvicorn[standard]>=0.30" "duckdb>=1.0" \
+            "pandas>=2.2" "numpy>=2.0" "httpx>=0.27" "pyyaml>=6.0" \
+            "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14"
+
+      - name: Build with PyInstaller
+        run: |
+          SEP=":"
+          if [ "$RUNNER_OS" = "Windows" ]; then SEP=";"; fi
+          pyinstaller \
+            --name "ez-trading" \
+            --onedir \
+            --noconfirm \
+            --clean \
+            --add-data "web/dist${SEP}web/dist" \
+            --add-data "configs${SEP}configs" \
+            --add-data "strategies${SEP}strategies" \
+            --hidden-import "ez.api.app" \
+            --hidden-import "ez.api.routes.market_data" \
+            --hidden-import "ez.api.routes.backtest" \
+            --hidden-import "ez.api.routes.factors" \
+            --hidden-import "ez.api.deps" \
+            --hidden-import "ez.strategy.builtin.ma_cross" \
+            --hidden-import "ez.factor.builtin.technical" \
+            --hidden-import "ez.data.providers.tushare_provider" \
+            --hidden-import "ez.data.providers.tencent_provider" \
+            --hidden-import "ez.data.providers.fmp_provider" \
+            --hidden-import "uvicorn.logging" \
+            --hidden-import "uvicorn.loops.auto" \
+            --hidden-import "uvicorn.protocols.http.auto" \
+            --hidden-import "uvicorn.protocols.websockets.auto" \
+            --hidden-import "uvicorn.lifespan.on" \
+            --collect-submodules "uvicorn" \
+            --collect-submodules "duckdb" \
+            launcher.py
+        shell: bash
+
+      - name: Add README and env example
+        run: |
+          cp .env.example dist/ez-trading/.env.example
+        shell: bash
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: cd dist && zip -r ../${{ matrix.artifact }}.zip ez-trading/
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/ez-trading -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+          body: |
+            ## ez-trading ${{ github.ref_name }}
+
+            Download the package for your platform:
+            - **Mac (Apple Silicon)**: `ez-trading-mac-arm64.zip`
+            - **Mac (Intel)**: `ez-trading-mac-x64.zip`
+            - **Windows**: `ez-trading-windows.zip`
+            - **Linux**: `ez-trading-linux.zip`
+
+            ### Quick Start
+            1. Download and unzip
+            2. (Optional) Create `.env` file with `TUSHARE_TOKEN=your_token`
+            3. Double-click `ez-trading` (Mac/Linux) or `ez-trading.exe` (Windows)
+            4. Browser opens automatically at http://localhost:8000
