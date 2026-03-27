@@ -115,7 +115,7 @@ v1 先用纯 Python 实现全链路逻辑，接口设计预留 C++ 替换点。
 
 ```
 ez-trading/
-├── CLAUDE.md                      # Agent 导航文档
+├── CLAUDE.md                      # Agent 强制入口（每次会话必读）
 ├── pyproject.toml                 # 统一 Python 配置（uv/pip）
 ├── .env.example                   # 环境变量模板
 │
@@ -124,30 +124,36 @@ ez-trading/
 │   ├── config.py                  # 配置加载（YAML + .env）
 │   │
 │   ├── data/                      # 数据层
+│   │   ├── CLAUDE.md              # 模块文档（接口、依赖、状态）
 │   │   ├── types.py               # Bar, TradeRecord 数据模型
 │   │   ├── provider.py            # DataProvider 抽象基类
 │   │   ├── fmp_provider.py        # FMP API 实现
 │   │   └── store.py               # DuckDB 存储引擎
 │   │
 │   ├── factor/                    # 因子层
+│   │   ├── CLAUDE.md              # 模块文档
 │   │   ├── base.py                # Factor 抽象基类
 │   │   └── technical.py           # 技术指标：MA, EMA, RSI, MACD, BOLL
 │   │
 │   ├── strategy/                  # 策略层
+│   │   ├── CLAUDE.md              # 模块文档
 │   │   ├── base.py                # Strategy 抽象基类
 │   │   └── ma_cross.py            # 示例：均线交叉策略
 │   │
 │   ├── backtest/                  # 回测层
+│   │   ├── CLAUDE.md              # 模块文档
 │   │   ├── engine.py              # 向量化回测引擎
 │   │   ├── portfolio.py           # 组合状态跟踪
 │   │   └── metrics.py             # 绩效指标计算
 │   │
 │   └── api/                       # API 层
+│       ├── CLAUDE.md              # 模块文档
 │       ├── app.py                 # FastAPI 应用入口
 │       ├── market_data.py         # /api/market-data 路由
 │       └── backtest_routes.py     # /api/backtest 路由
 │
 ├── web/                           # 前端
+│   ├── CLAUDE.md                  # 模块文档
 │   ├── package.json
 │   ├── vite.config.ts
 │   ├── index.html
@@ -512,13 +518,139 @@ class BacktestResult:
 
 ---
 
-## Agent 友好设计规范
+## 文档驱动开发（最高优先级）
 
-1. **CLAUDE.md**：项目根目录必须有，描述模块职责、关键文件、运行方式
-2. **文件大小**：单文件不超过 300 行，超过即拆分
-3. **命名规范**：Python PEP8, TypeScript camelCase，文件名 snake_case
-4. **显式 > 隐式**：不用 Spring 式注解魔法，所有依赖显式传入
-5. **扁平结构**：最多 3 层目录嵌套
-6. **类型标注**：Python 全量使用 type hints，TypeScript strict mode
-7. **无全局状态**：依赖注入，可测试
-8. **配置集中**：YAML + .env，不散落在代码中
+> **核心原则：每次新开发可能都是新对话窗口。文档是跨会话连续性的唯一保障。代码变更但文档未更新 = 不完整的提交。**
+
+### CLAUDE.md 体系
+
+项目使用分层 CLAUDE.md 体系，Claude Code 在每次会话启动时自动读取根目录 CLAUDE.md，根文件引导 agent 读取各模块文档。
+
+**根目录 `CLAUDE.md`（agent 强制入口）**
+
+必须包含：
+1. **项目一句话描述**：ez-trading 是什么
+2. **技术栈速览**：Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts
+3. **目录结构总览**：每个顶层目录的职责（一行一个）
+4. **模块依赖图**：哪个模块依赖哪个模块（文本 ASCII）
+5. **快速启动命令**：`scripts/start.sh` 和 `scripts/stop.sh`
+6. **开发规范速览**：指向本 spec 的核心规则
+7. **当前开发状态**：哪些模块已完成、进行中、未开始
+8. **各模块文档入口**：列出所有模块的 `CLAUDE.md` 路径
+
+示例结构：
+```markdown
+# ez-trading
+
+现代化量化回测系统。Python + FastAPI + DuckDB + React 19。
+
+## 模块地图
+- `ez/data/` — 数据获取与存储 [详情](ez/data/CLAUDE.md)
+- `ez/factor/` — 因子计算框架 [详情](ez/factor/CLAUDE.md)
+- `ez/strategy/` — 策略定义框架 [详情](ez/strategy/CLAUDE.md)
+- `ez/backtest/` — 向量化回测引擎 [详情](ez/backtest/CLAUDE.md)
+- `ez/api/` — FastAPI 接口层 [详情](ez/api/CLAUDE.md)
+- `web/` — React 前端 [详情](web/CLAUDE.md)
+
+## 依赖关系
+data → factor → strategy → backtest → api → web
+
+## 快速启动
+./scripts/start.sh    # 启动后端(8000) + 前端(3000)
+./scripts/stop.sh     # 停止所有服务
+
+## 开发状态
+| 模块 | 状态 | 最后更新 |
+|------|------|----------|
+| ez/data | 已完成 | 2026-03-27 |
+| ez/factor | 已完成 | 2026-03-27 |
+| ... | ... | ... |
+
+## 开发规范
+- 每次代码变更必须同步更新相关 CLAUDE.md
+- 单文件不超过 300 行
+- Python 全量 type hints
+- 详细规范见 docs/superpowers/specs/2026-03-27-ez-trading-design.md
+```
+
+**模块级 `CLAUDE.md`（每个模块目录必须有）**
+
+每个模块的 CLAUDE.md 必须包含：
+```markdown
+# 模块名
+
+## 职责
+一段话描述这个模块做什么、不做什么。
+
+## 公开接口
+列出所有对外暴露的类/函数，含签名和一句话说明。
+不需要写实现细节，只写"怎么用"。
+
+## 依赖
+- 上游：本模块依赖哪些模块
+- 下游：哪些模块依赖本模块
+
+## 文件清单
+| 文件 | 职责 | 行数 |
+|------|------|------|
+| types.py | 数据模型定义 | ~50 |
+| provider.py | DataProvider ABC | ~40 |
+| ... | ... | ... |
+
+## 关键设计决策
+列出非显而易见的设计选择及理由（如为什么用 DuckDB 而不是 SQLite）。
+
+## 当前状态
+- 已实现：哪些功能
+- 未实现：哪些接口已定义但未实现（占位）
+- 已知问题：当前存在的 bug 或限制
+```
+
+### 文档更新强制规则
+
+**开发工作流（每次变更必须遵循）：**
+
+1. **开始前**：读取根 CLAUDE.md → 读取目标模块 CLAUDE.md → 理解当前状态
+2. **开发中**：正常编写代码
+3. **完成后**：
+   - 更新目标模块的 CLAUDE.md（接口变更、文件变更、状态变更）
+   - 如果新增/删除模块，更新根 CLAUDE.md 的模块地图和依赖关系
+   - 更新根 CLAUDE.md 的"开发状态"表格
+4. **提交时**：代码文件和文档文件在同一个 commit 中
+
+**文档更新检查清单：**
+- [ ] 新增了文件？→ 更新模块 CLAUDE.md 的文件清单
+- [ ] 修改了公开接口？→ 更新模块 CLAUDE.md 的公开接口
+- [ ] 修改了依赖关系？→ 更新模块 CLAUDE.md 的依赖 + 根 CLAUDE.md 的依赖图
+- [ ] 新增了模块？→ 创建模块 CLAUDE.md + 更新根 CLAUDE.md
+- [ ] 删除了模块？→ 删除模块 CLAUDE.md + 更新根 CLAUDE.md
+- [ ] 修改了运行方式？→ 更新根 CLAUDE.md 的快速启动命令
+
+### 文档文件列表（V1 需要创建）
+
+```
+ez-trading/
+├── CLAUDE.md                      # 根入口（必读）
+├── ez/
+│   ├── data/CLAUDE.md             # 数据层文档
+│   ├── factor/CLAUDE.md           # 因子层文档
+│   ├── strategy/CLAUDE.md         # 策略层文档
+│   ├── backtest/CLAUDE.md         # 回测层文档
+│   └── api/CLAUDE.md              # API 层文档
+└── web/CLAUDE.md                  # 前端文档
+```
+
+总计 7 个 CLAUDE.md 文件，每个 30-80 行，全部在 V1 实现阶段创建。
+
+---
+
+## Agent 友好代码规范
+
+1. **文件大小**：单文件不超过 300 行，超过即拆分
+2. **命名规范**：Python PEP8, TypeScript camelCase，文件名 snake_case
+3. **显式 > 隐式**：不用注解魔法，所有依赖显式传入
+4. **扁平结构**：最多 3 层目录嵌套
+5. **类型标注**：Python 全量使用 type hints，TypeScript strict mode
+6. **无全局状态**：依赖注入，可测试
+7. **配置集中**：YAML + .env，不散落在代码中
+8. **文档同步**：代码变更必须同步更新 CLAUDE.md（同一 commit）
