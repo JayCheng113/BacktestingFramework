@@ -123,40 +123,46 @@ ez-trading/
 │   ├── __init__.py
 │   ├── config.py                  # 配置加载（YAML + .env）
 │   │
+│   ├── errors.py                  # [CORE] 统一错误类型
+│   │
 │   ├── data/                      # 数据层
 │   │   ├── CLAUDE.md              # 模块文档（接口、依赖、状态）
-│   │   ├── types.py               # Bar, TradeRecord 数据模型
-│   │   ├── provider.py            # DataProvider ABC + DataProviderChain（故障转移）
-│   │   ├── tushare_provider.py    # Tushare Pro 实现（A 股主源）
-│   │   ├── tencent_provider.py    # 腾讯财经 API 实现（备用源）
-│   │   ├── fmp_provider.py        # FMP 实现（美股主源）
-│   │   ├── validator.py           # 数据验证规则（OHLC 一致性、异常检测）
-│   │   └── store.py               # DuckDB 存储引擎
+│   │   ├── types.py               # [CORE] Bar, TradeRecord 数据模型
+│   │   ├── provider.py            # [CORE] DataProvider ABC + DataProviderChain
+│   │   ├── validator.py           # [CORE] DataValidator 验证规则
+│   │   ├── store.py               # [CORE] DuckDB 存储引擎
+│   │   └── providers/             # [EXTENSION] 数据源实现
+│   │       ├── tushare_provider.py    # Tushare Pro（A 股主源）
+│   │       ├── tencent_provider.py    # 腾讯财经 API（备用源）
+│   │       └── fmp_provider.py        # FMP（美股主源）
 │   │
 │   ├── factor/                    # 因子层
 │   │   ├── CLAUDE.md              # 模块文档
-│   │   ├── base.py                # Factor 抽象基类
-│   │   ├── technical.py           # 技术指标：MA, EMA, RSI, MACD, BOLL
-│   │   └── evaluator.py           # 因子评估：IC, ICIR, 分组收益, 衰减分析
+│   │   ├── base.py                # [CORE] Factor ABC（含 warmup_period）
+│   │   ├── evaluator.py           # [CORE] FactorEvaluator + FactorAnalysis
+│   │   └── builtin/               # [EXTENSION] 内置因子
+│   │       └── technical.py       # MA, EMA, RSI, MACD, BOLL
 │   │
 │   ├── strategy/                  # 策略层
 │   │   ├── CLAUDE.md              # 模块文档
-│   │   ├── base.py                # Strategy ABC（__init_subclass__ 自动注册）
-│   │   ├── loader.py              # 策略目录扫描与加载
-│   │   └── builtin/               # 内置策略
+│   │   ├── base.py                # [CORE] Strategy ABC（自动注册）
+│   │   ├── loader.py              # [CORE] 策略目录扫描与加载
+│   │   └── builtin/               # [EXTENSION] 内置策略
 │   │       └── ma_cross.py        # 均线交叉策略
 │   │
 │   ├── backtest/                  # 回测层
 │   │   ├── CLAUDE.md              # 模块文档
-│   │   ├── engine.py              # 向量化回测引擎
-│   │   ├── portfolio.py           # 组合状态跟踪
-│   │   └── metrics.py             # 绩效指标计算
+│   │   ├── engine.py              # [CORE] BacktestEngine ABC + 向量化实现
+│   │   ├── portfolio.py           # [CORE] 组合状态跟踪
+│   │   └── metrics.py             # [CORE] 绩效指标计算
 │   │
 │   └── api/                       # API 层
 │       ├── CLAUDE.md              # 模块文档
 │       ├── app.py                 # FastAPI 应用入口
-│       ├── market_data.py         # /api/market-data 路由
-│       └── backtest_routes.py     # /api/backtest 路由
+│       └── routes/                # [EXTENSION] API 路由
+│           ├── market_data.py     # /api/market-data
+│           ├── backtest.py        # /api/backtest
+│           └── factors.py         # /api/factors
 │
 ├── web/                           # 前端
 │   ├── CLAUDE.md                  # 模块文档
@@ -191,10 +197,25 @@ ez-trading/
 │   └── stop.sh                    # 一键停止
 │
 └── tests/
-    ├── conftest.py
+    ├── conftest.py                # 共享 fixtures: sample_data, mock_provider
+    ├── fixtures/
+    │   └── sample_kline.parquet   # 固定测试数据（确定性，零网络依赖）
+    ├── mocks/
+    │   └── mock_provider.py       # MockDataProvider（读本地 parquet）
+    ├── test_smoke.py              # 冒烟测试（每次修改后必跑）
+    ├── test_architecture.py       # 架构适应度测试（Core/Extension 边界）
     ├── test_data/
+    │   └── test_provider_contract.py  # DataProvider 契约测试
     ├── test_factor/
-    └── test_backtest/
+    │   ├── test_factor_contract.py    # Factor 契约测试
+    │   └── test_technical.py          # 技术指标计算正确性
+    ├── test_strategy/
+    │   └── test_strategy_contract.py  # Strategy 契约测试
+    ├── test_backtest/
+    │   ├── test_engine.py             # 引擎核心逻辑
+    │   └── test_metrics.py            # 指标计算正确性
+    └── test_integration/
+        └── test_pipeline.py           # 全流程集成测试
 ```
 
 ---
@@ -658,139 +679,347 @@ class BacktestResult:
 
 ---
 
-## 文档驱动开发（最高优先级）
+## 架构治理（V1 最关键的交付物）
 
-> **核心原则：每次新开发可能都是新对话窗口。文档是跨会话连续性的唯一保障。代码变更但文档未更新 = 不完整的提交。**
-
-### CLAUDE.md 体系
-
-项目使用分层 CLAUDE.md 体系，Claude Code 在每次会话启动时自动读取根目录 CLAUDE.md，根文件引导 agent 读取各模块文档。
-
-**根目录 `CLAUDE.md`（agent 强制入口）**
-
-必须包含：
-1. **项目一句话描述**：ez-trading 是什么
-2. **技术栈速览**：Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts
-3. **目录结构总览**：每个顶层目录的职责（一行一个）
-4. **模块依赖图**：哪个模块依赖哪个模块（文本 ASCII）
-5. **快速启动命令**：`scripts/start.sh` 和 `scripts/stop.sh`
-6. **开发规范速览**：指向本 spec 的核心规则
-7. **当前开发状态**：哪些模块已完成、进行中、未开始
-8. **各模块文档入口**：列出所有模块的 `CLAUDE.md` 路径
-
-示例结构：
-```markdown
-# ez-trading
-
-现代化量化回测系统。Python + FastAPI + DuckDB + React 19。
-
-## 模块地图
-- `ez/data/` — 数据获取与存储 [详情](ez/data/CLAUDE.md)
-- `ez/factor/` — 因子计算框架 [详情](ez/factor/CLAUDE.md)
-- `ez/strategy/` — 策略定义框架 [详情](ez/strategy/CLAUDE.md)
-- `ez/backtest/` — 向量化回测引擎 [详情](ez/backtest/CLAUDE.md)
-- `ez/api/` — FastAPI 接口层 [详情](ez/api/CLAUDE.md)
-- `web/` — React 前端 [详情](web/CLAUDE.md)
-
-## 依赖关系
-data → factor → strategy → backtest → api → web
-
-## 快速启动
-./scripts/start.sh    # 启动后端(8000) + 前端(3000)
-./scripts/stop.sh     # 停止所有服务
-
-## 开发状态
-| 模块 | 状态 | 最后更新 |
-|------|------|----------|
-| ez/data | 已完成 | 2026-03-27 |
-| ez/factor | 已完成 | 2026-03-27 |
-| ... | ... | ... |
-
-## 开发规范
-- 每次代码变更必须同步更新相关 CLAUDE.md
-- 单文件不超过 300 行
-- Python 全量 type hints
-- 详细规范见 docs/superpowers/specs/2026-03-27-ez-trading-design.md
-```
-
-**模块级 `CLAUDE.md`（每个模块目录必须有）**
-
-每个模块的 CLAUDE.md 必须包含：
-```markdown
-# 模块名
-
-## 职责
-一段话描述这个模块做什么、不做什么。
-
-## 公开接口
-列出所有对外暴露的类/函数，含签名和一句话说明。
-不需要写实现细节，只写"怎么用"。
-
-## 依赖
-- 上游：本模块依赖哪些模块
-- 下游：哪些模块依赖本模块
-
-## 文件清单
-| 文件 | 职责 | 行数 |
-|------|------|------|
-| types.py | 数据模型定义 | ~50 |
-| provider.py | DataProvider ABC | ~40 |
-| ... | ... | ... |
-
-## 关键设计决策
-列出非显而易见的设计选择及理由（如为什么用 DuckDB 而不是 SQLite）。
-
-## 当前状态
-- 已实现：哪些功能
-- 未实现：哪些接口已定义但未实现（占位）
-- 已知问题：当前存在的 bug 或限制
-```
-
-### 文档更新强制规则
-
-**开发工作流（每次变更必须遵循）：**
-
-1. **开始前**：读取根 CLAUDE.md → 读取目标模块 CLAUDE.md → 理解当前状态
-2. **开发中**：正常编写代码
-3. **完成后**：
-   - 更新目标模块的 CLAUDE.md（接口变更、文件变更、状态变更）
-   - 如果新增/删除模块，更新根 CLAUDE.md 的模块地图和依赖关系
-   - 更新根 CLAUDE.md 的"开发状态"表格
-4. **提交时**：代码文件和文档文件在同一个 commit 中
-
-**文档更新检查清单：**
-- [ ] 新增了文件？→ 更新模块 CLAUDE.md 的文件清单
-- [ ] 修改了公开接口？→ 更新模块 CLAUDE.md 的公开接口
-- [ ] 修改了依赖关系？→ 更新模块 CLAUDE.md 的依赖 + 根 CLAUDE.md 的依赖图
-- [ ] 新增了模块？→ 创建模块 CLAUDE.md + 更新根 CLAUDE.md
-- [ ] 删除了模块？→ 删除模块 CLAUDE.md + 更新根 CLAUDE.md
-- [ ] 修改了运行方式？→ 更新根 CLAUDE.md 的快速启动命令
-
-### 文档文件列表（V1 需要创建）
-
-```
-ez-trading/
-├── CLAUDE.md                      # 根入口（必读）
-├── ez/
-│   ├── data/CLAUDE.md             # 数据层文档
-│   ├── factor/CLAUDE.md           # 因子层文档
-│   ├── strategy/CLAUDE.md         # 策略层文档
-│   ├── backtest/CLAUDE.md         # 回测层文档
-│   └── api/CLAUDE.md              # API 层文档
-└── web/CLAUDE.md                  # 前端文档
-```
-
-总计 7 个 CLAUDE.md 文件，每个 30-80 行，全部在 V1 实现阶段创建。
+> **V1 的核心产出不是功能，而是架构。功能可以迭代，架构定型后改动成本指数级增长。**
 
 ---
 
-## Agent 友好代码规范
+### 一、核心不可变架构
 
-1. **文件大小**：单文件不超过 300 行，超过即拆分
-2. **命名规范**：Python PEP8, TypeScript camelCase，文件名 snake_case
-3. **显式 > 隐式**：不用注解魔法，所有依赖显式传入
-4. **扁平结构**：最多 3 层目录嵌套
-5. **类型标注**：Python 全量使用 type hints，TypeScript strict mode
-6. **无全局状态**：依赖注入，可测试
+将代码严格划分为 **Core（核心）** 和 **Extension（扩展）** 两类。Core 在 v1 定型后**未经充分论证不得修改**，所有功能迭代通过 Extension 实现。
+
+**Core = 接口定义 + 数据模型 + 引擎骨架。Extension = 具体实现。**
+
+```
+依赖方向：Extension → Core（单向，不可反转）
+核心承诺：Core 文件的公开接口不变，Extension 可自由增删
+```
+
+**Core 文件清单（不可变）：**
+
+| 文件 | 职责 | 修改条件 |
+|------|------|----------|
+| `ez/data/types.py` | Bar, TradeRecord, BacktestResult, FactorAnalysis 数据模型 | 仅允许追加字段（带默认值），不允许删除或改名 |
+| `ez/data/provider.py` | DataProvider ABC + DataProviderChain | 接口签名冻结 |
+| `ez/data/validator.py` | DataValidator 验证规则引擎 | 仅允许追加规则 |
+| `ez/data/store.py` | DataStore ABC | 接口签名冻结 |
+| `ez/factor/base.py` | Factor ABC（含 warmup_period） | 接口签名冻结 |
+| `ez/factor/evaluator.py` | FactorEvaluator + FactorAnalysis | 仅允许追加指标 |
+| `ez/strategy/base.py` | Strategy ABC + 自动注册 + 参数 schema | 接口签名冻结 |
+| `ez/backtest/engine.py` | BacktestEngine ABC + 引擎核心循环 | 循环步骤不变，仅允许追加 hook 点 |
+| `ez/backtest/metrics.py` | MetricsCalculator | 仅允许追加指标 |
+| `ez/config.py` | 配置加载和验证 | 仅允许追加配置项 |
+
+**Extension 文件（自由增删）：**
+
+| 类型 | 目录 | 添加方式 |
+|------|------|----------|
+| 数据源 | `ez/data/providers/` | 新建 `xxx_provider.py`，继承 DataProvider |
+| 因子 | `ez/factor/builtin/` | 新建 `xxx.py`，继承 Factor |
+| 策略（内置） | `ez/strategy/builtin/` | 新建 `xxx.py`，继承 Strategy |
+| 策略（用户） | `strategies/` | 新建 `xxx.py`，继承 Strategy |
+| API 路由 | `ez/api/routes/` | 新建 `xxx.py`，注册到 FastAPI router |
+| 前端组件 | `web/src/components/` | 新建 `Xxx.tsx` |
+| 前端页面 | `web/src/pages/` | 新建 `XxxPage.tsx` |
+
+**Core 修改审批流程：**
+1. 在 `docs/core-changes/` 创建变更提案文档：为什么要改、影响范围、向后兼容方案
+2. 评估是否可以通过追加（而非修改）解决
+3. 如果必须修改：同步更新所有依赖的 Extension + 更新所有 CLAUDE.md + 更新所有 contract tests
+
+**依赖边界强制（架构适应度测试）：**
+```python
+# tests/test_architecture.py — 每次 CI 运行
+def test_extension_does_not_import_extension():
+    """Extension 之间不允许互相导入，只能导入 Core"""
+    ...
+
+def test_core_does_not_import_extension():
+    """Core 不允许导入任何 Extension"""
+    ...
+```
+
+---
+
+### 二、Agent 开发工作流
+
+本系统为 agent 写代码而设计。agent 添加功能的标准流程：
+
+**场景：agent 被要求"添加一个 RSI 反转策略"**
+
+```
+1. 读取 CLAUDE.md → 了解项目结构
+2. 读取 ez/strategy/CLAUDE.md → 了解 Strategy ABC 和注册机制
+3. 读取 ez/strategy/builtin/ma_cross.py → 作为参考模板
+4. 创建 strategies/rsi_reversal.py → 继承 Strategy，实现接口
+5. 运行 pytest tests/test_strategy/ → contract tests 自动验证新策略
+6. 更新 strategies/ 目录的文档（如有 CLAUDE.md）
+7. 提交
+```
+
+**关键设计：agent 全程不接触任何 Core 文件。**
+
+**每种 Extension 类型的标准三件套：**
+1. **ABC 接口**（Core）— 定义契约
+2. **参考实现**（Extension）— agent 的模板
+3. **Contract Test**（Tests）— 自动验证任何新实现是否符合契约
+
+| Extension 类型 | ABC | 参考实现 | Contract Test |
+|----------------|-----|----------|---------------|
+| 数据源 | `DataProvider` | `tushare_provider.py` | `tests/test_data/test_provider_contract.py` |
+| 因子 | `Factor` | `technical.py` (MA) | `tests/test_factor/test_factor_contract.py` |
+| 策略 | `Strategy` | `builtin/ma_cross.py` | `tests/test_strategy/test_strategy_contract.py` |
+
+---
+
+### 三、测试体系
+
+> **测试是 agent 的安全网。没有测试，agent 每次修改都是盲飞。**
+
+**测试金字塔：**
+
+```
+                  ┌─────────┐
+                  │  Smoke  │  ← 每次修改后运行（< 5s）
+                 ┌┴─────────┴┐
+                 │ Contract  │  ← 每次新增 Extension 时运行（< 10s）
+                ┌┴───────────┴┐
+                │ Integration │  ← 每个模块完成后运行（< 30s）
+               ┌┴─────────────┴┐
+               │     Unit      │  ← 每个函数完成后运行（< 1s each）
+               └───────────────┘
+```
+
+**1. Smoke Tests（冒烟测试）— 全局健康检查**
+
+```python
+# tests/test_smoke.py — 任何修改后必须全部通过
+def test_all_imports():
+    """所有模块可正常导入，无语法错误"""
+    import ez.data, ez.factor, ez.strategy, ez.backtest, ez.api
+
+def test_all_strategies_registered():
+    """所有策略正确注册"""
+    assert len(Strategy._registry) > 0
+
+def test_all_factors_registered():
+    """所有因子可实例化"""
+    assert MA(period=5).warmup_period == 5
+
+def test_api_starts():
+    """API 可正常启动"""
+    from ez.api.app import app
+    client = TestClient(app)
+    assert client.get("/api/health").status_code == 200
+
+def test_simple_backtest_completes():
+    """一个简单回测可以跑完，不崩溃"""
+    result = run_backtest(MockData, MACrossStrategy(), initial_capital=100000)
+    assert result.equity_curve is not None
+    assert len(result.trades) >= 0
+```
+
+**2. Contract Tests（契约测试）— 自动验证所有 Extension**
+
+```python
+# tests/test_strategy/test_strategy_contract.py
+import pytest
+from ez.strategy.base import Strategy
+
+def discover_strategies():
+    """自动发现所有已注册的 Strategy 子类"""
+    # 触发 auto-discovery
+    import ez.strategy.loader
+    return list(Strategy._registry.values())
+
+@pytest.fixture(params=discover_strategies(), ids=lambda s: s.__name__)
+def strategy_cls(request):
+    return request.param
+
+class TestStrategyContract:
+    def test_has_required_factors(self, strategy_cls):
+        """必须声明依赖因子"""
+        instance = strategy_cls(**self._default_params(strategy_cls))
+        factors = instance.required_factors()
+        assert isinstance(factors, list)
+
+    def test_generate_signals_returns_series(self, strategy_cls, sample_data):
+        """generate_signals 必须返回 pd.Series"""
+        instance = strategy_cls(**self._default_params(strategy_cls))
+        signals = instance.generate_signals(sample_data)
+        assert isinstance(signals, pd.Series)
+        assert len(signals) == len(sample_data)
+
+    def test_signals_in_valid_range(self, strategy_cls, sample_data):
+        """信号值必须在 [0.0, 1.0] 范围内"""
+        instance = strategy_cls(**self._default_params(strategy_cls))
+        signals = instance.generate_signals(sample_data)
+        assert signals.between(0.0, 1.0).all()
+
+    def test_parameters_schema_valid(self, strategy_cls):
+        """参数 schema 格式正确"""
+        schema = strategy_cls.get_parameters_schema()
+        for name, spec in schema.items():
+            assert "type" in spec
+            assert "default" in spec
+
+    def _default_params(self, cls):
+        return {k: v["default"] for k, v in cls.get_parameters_schema().items()}
+```
+
+同理为 DataProvider 和 Factor 编写 contract tests。**新增 Extension 无需编写新测试——contract tests 自动覆盖。**
+
+**3. Integration Tests（集成测试）— 数据流贯通**
+
+```python
+# tests/test_integration/test_pipeline.py
+def test_full_pipeline_with_mock_data():
+    """数据 → 因子 → 策略 → 回测 → 指标 全流程"""
+    data = MockDataProvider().get_kline("TEST", "cn_stock", "daily", start, end)
+    assert len(data) > 0
+
+    strategy = MACrossStrategy(short_period=5, long_period=20)
+    result = BacktestEngine().run(data, strategy, initial_capital=100000)
+
+    assert result.metrics["sharpe_ratio"] is not None
+    assert result.metrics["max_drawdown"] <= 0  # 回撤为负数
+    assert len(result.equity_curve) == len(data)
+    assert result.equity_curve.iloc[-1] > 0     # 权益不为负
+```
+
+**4. Unit Tests（单元测试）— 核心计算正确性**
+
+```python
+# tests/test_backtest/test_metrics.py
+def test_sharpe_ratio_known_values():
+    """Sharpe ratio 对已知数据的计算结果正确"""
+    returns = pd.Series([0.01, 0.02, -0.01, 0.03, -0.005])
+    sharpe = calculate_sharpe(returns, risk_free_rate=0.0)
+    assert abs(sharpe - expected_value) < 1e-6
+
+# tests/test_factor/test_technical.py
+def test_ma_computation():
+    """MA(5) 对 [1,2,3,4,5,6,7] 的计算结果正确"""
+    data = pd.DataFrame({"adj_close": [1,2,3,4,5,6,7]})
+    result = MA(period=5).compute(data)
+    assert result["ma_5"].iloc[4] == 3.0  # (1+2+3+4+5)/5
+    assert pd.isna(result["ma_5"].iloc[3])  # 预热期为 NaN
+```
+
+**5. 架构适应度测试 — 守护核心边界**
+
+```python
+# tests/test_architecture.py
+import ast, pathlib
+
+CORE_FILES = { ... }  # 核心文件路径集合
+EXTENSION_DIRS = { ... }  # 扩展目录集合
+
+def test_core_does_not_import_extension():
+    """Core 文件不得导入 Extension 模块"""
+    for core_file in CORE_FILES:
+        tree = ast.parse(core_file.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                module = node.module or node.names[0].name
+                assert not any(ext in module for ext in EXTENSION_DIRS)
+
+def test_no_circular_dependencies():
+    """模块间无循环依赖"""
+    ...
+```
+
+**测试基础设施：**
+
+| 文件 | 职责 |
+|------|------|
+| `tests/conftest.py` | 共享 fixtures：sample_data, mock_provider |
+| `tests/fixtures/sample_kline.parquet` | 固定测试数据集（确定性，不依赖外部 API） |
+| `tests/mocks/mock_provider.py` | MockDataProvider（读取本地 parquet，零网络调用） |
+
+**测试运行命令（写入 CLAUDE.md）：**
+```bash
+pytest tests/test_smoke.py          # 冒烟测试（每次修改后）
+pytest tests/test_strategy/         # 策略契约测试
+pytest tests/test_factor/           # 因子契约测试
+pytest tests/                       # 全量测试
+```
+
+---
+
+### 四、文档驱动开发
+
+> **每次新对话可能是新 agent。文档 = 跨会话记忆。代码变更但文档未更新 = 不完整提交。**
+
+**CLAUDE.md 分层体系（根文件 ≤ 150 行，模块文件 ≤ 80 行）：**
+
+```
+ez-trading/
+├── CLAUDE.md                      # 根入口（每次会话自动加载）
+├── ez/
+│   ├── data/CLAUDE.md             # 数据层
+│   ├── factor/CLAUDE.md           # 因子层
+│   ├── strategy/CLAUDE.md         # 策略层
+│   ├── backtest/CLAUDE.md         # 回测层
+│   └── api/CLAUDE.md              # API 层
+└── web/CLAUDE.md                  # 前端
+```
+
+**根 CLAUDE.md 必须包含（≤ 150 行）：**
+1. 项目一句话描述 + 技术栈
+2. 模块地图（每个模块一行 + CLAUDE.md 路径）
+3. 依赖关系图（`data → factor → strategy → backtest → api → web`）
+4. Core 文件清单（标注**不可修改**）
+5. Extension 添加指南（每种类型：放哪个目录、继承什么基类、运行什么测试）
+6. 快速命令（启动、停止、测试）
+7. 开发状态表格（模块 × 状态 × 最后更新）
+
+**模块 CLAUDE.md 必须包含（≤ 80 行）：**
+1. 职责（做什么、不做什么）
+2. 公开接口（类名 + 方法签名，无实现细节）
+3. 文件清单（文件名 + 职责 + Core/Extension 标记）
+4. 上游/下游依赖
+5. 添加新 Extension 的步骤（3-5 步）
+6. 当前状态（已实现/未实现/已知问题）
+
+**开发工作流（每次变更强制执行）：**
+```
+开始 → 读 CLAUDE.md → 读目标模块 CLAUDE.md → 编码 → 运行测试 → 更新 CLAUDE.md → 同一 commit 提交
+```
+
+---
+
+### 五、错误处理策略
+
+**统一错误类型（Core 定义）：**
+
+```python
+# ez/errors.py (Core)
+class EzTradingError(Exception): ...
+class DataError(EzTradingError): ...         # 数据获取/验证失败
+class ProviderError(DataError): ...          # 数据源连接/限流
+class ValidationError(DataError): ...        # 数据验证不通过
+class FactorError(EzTradingError): ...       # 因子计算失败
+class BacktestError(EzTradingError): ...     # 回测引擎错误
+class ConfigError(EzTradingError): ...       # 配置错误
+```
+
+- API 层捕获所有 `EzTradingError` 并转换为 HTTP 响应
+- 错误消息必须包含上下文（哪个数据源、哪个股票、什么时间段）
+- agent 读到错误消息应能判断问题原因和修复方向
+
+---
+
+### 六、代码规范
+
+1. **Core 不可变**：Core 文件的公开接口冻结，功能通过 Extension 扩展
+2. **Add, Never Modify**：新功能 = 新文件，不改已有文件（Core 尤其如此）
+3. **文件 ≤ 300 行**：超过即拆分
+4. **类型标注**：Python 全量 type hints，TypeScript strict mode
+5. **显式 > 隐式**：无全局状态，依赖注入，所有 import 显式
+6. **扁平 ≤ 3 层**：最多 3 层目录嵌套
 7. **配置集中**：YAML + .env，不散落在代码中
-8. **文档同步**：代码变更必须同步更新 CLAUDE.md（同一 commit）
+8. **文档同步**：代码和文档在同一 commit
+9. **测试覆盖**：新 Extension 必须通过 contract test，Core 修改必须通过全量测试
+10. **命名规范**：Python PEP8，TypeScript camelCase，文件 snake_case
