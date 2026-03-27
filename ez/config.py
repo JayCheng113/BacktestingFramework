@@ -1,0 +1,81 @@
+"""Configuration loading from YAML + .env.
+
+[CORE] — append-only. New config keys must have defaults.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel
+
+
+class ServerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+
+class DatabaseConfig(BaseModel):
+    path: str = "data/ez_trading.db"
+
+
+class DataSourceEntry(BaseModel):
+    primary: str = "tencent"
+    backup: list[str] = []
+
+
+class DataSourcesConfig(BaseModel):
+    cn_stock: DataSourceEntry = DataSourceEntry(primary="tencent", backup=["akshare"])
+    us_stock: DataSourceEntry = DataSourceEntry(primary="fmp", backup=["tencent"])
+    hk_stock: DataSourceEntry = DataSourceEntry(primary="tencent", backup=[])
+    timeout_seconds: int = 10
+    max_retries: int = 2
+
+
+class BacktestConfig(BaseModel):
+    default_initial_capital: float = 100000.0
+    default_commission_rate: float = 0.0003
+    default_min_commission: float = 5.0
+    risk_free_rate: float = 0.03
+
+
+class StrategyConfig(BaseModel):
+    scan_dirs: list[str] = ["ez/strategy/builtin", "strategies"]
+
+
+class CorsConfig(BaseModel):
+    origins: list[str] = ["http://localhost:3000"]
+
+
+class EzConfig(BaseModel):
+    server: ServerConfig = ServerConfig()
+    database: DatabaseConfig = DatabaseConfig()
+    data_sources: DataSourcesConfig = DataSourcesConfig()
+    backtest: BacktestConfig = BacktestConfig()
+    strategy: StrategyConfig = StrategyConfig()
+    cors: CorsConfig = CorsConfig()
+
+
+_config: EzConfig | None = None
+
+
+def load_config(config_path: str = "configs/default.yaml") -> EzConfig:
+    """Load config from YAML file, falling back to defaults if file missing."""
+    global _config
+    if _config is not None:
+        return _config
+
+    path = Path(config_path)
+    if path.exists():
+        with open(path) as f:
+            raw = yaml.safe_load(f) or {}
+        _config = EzConfig(**raw)
+    else:
+        _config = EzConfig()
+    return _config
+
+
+def reset_config() -> None:
+    """Reset cached config (for testing)."""
+    global _config
+    _config = None
