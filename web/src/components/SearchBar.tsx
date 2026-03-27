@@ -1,8 +1,29 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, forwardRef } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { searchSymbols } from '../api'
 import type { SymbolInfo } from '../types'
+
+/* Custom date trigger — looks like a button with calendar icon, not an editable input */
+const DateButton = forwardRef<HTMLButtonElement, { value?: string; onClick?: () => void; label: string }>(
+  ({ value, onClick, label }, ref) => (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 px-3 py-1.5 rounded text-sm cursor-pointer min-w-[150px]"
+      style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      <span>{value || label}</span>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-secondary)', marginLeft: 'auto' }}>
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+  )
+)
 
 interface Props {
   onSearch: (symbol: string, market: string, startDate: string, endDate: string) => void
@@ -176,9 +197,9 @@ export default function SearchBar({ onSearch }: Props) {
         </select>
       </div>
 
-      {/* Date range — calendar dropdown pickers */}
+      {/* Date range — calendar dropdown, click-only (no manual input) */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start Date</label>
         <DatePicker
           selected={startDate}
           onChange={(d: Date | null) => {
@@ -191,15 +212,14 @@ export default function SearchBar({ onSearch }: Props) {
           endDate={endDate}
           maxDate={endDate}
           dateFormat="yyyy-MM-dd"
-          className="px-3 py-1.5 rounded text-sm w-[130px]"
-          calendarClassName="ez-calendar"
           showMonthDropdown
           showYearDropdown
           dropdownMode="select"
+          customInput={<DateButton label="Select start" />}
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End Date</label>
         <DatePicker
           selected={endDate}
           onChange={(d: Date | null) => {
@@ -213,11 +233,10 @@ export default function SearchBar({ onSearch }: Props) {
           minDate={startDate}
           maxDate={todayDate}
           dateFormat="yyyy-MM-dd"
-          className="px-3 py-1.5 rounded text-sm w-[130px]"
-          calendarClassName="ez-calendar"
           showMonthDropdown
           showYearDropdown
           dropdownMode="select"
+          customInput={<DateButton label="Select end" />}
         />
       </div>
 
