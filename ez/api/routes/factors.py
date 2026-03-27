@@ -61,6 +61,9 @@ def evaluate_factor(req: FactorEvalRequest):
     factor_values = computed[factor_col[0]].dropna()
     forward_returns = df["adj_close"].pct_change().shift(-1).dropna()
 
+    if len(factor_values) < 10:
+        raise HTTPException(status_code=400, detail=f"Not enough data for evaluation (need 10+ bars after warmup, got {len(factor_values)})")
+
     evaluator = FactorEvaluator()
     analysis = evaluator.evaluate(factor_values, forward_returns, req.periods)
 

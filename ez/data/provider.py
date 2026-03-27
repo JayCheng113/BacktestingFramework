@@ -8,6 +8,8 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import date
 
+from datetime import datetime as _dt
+
 from ez.errors import ProviderError
 from ez.types import Bar
 
@@ -93,6 +95,12 @@ class DataProviderChain:
                 logger.info("Fetching %s from %s", symbol, provider.name)
                 bars = provider.get_kline(symbol, market, period, start_date, end_date)
                 if bars:
+                    # Filter out future dates (some APIs return fake future data)
+                    today = _dt.now().date()
+                    bars = [b for b in bars if b.time.date() <= today]
+                    if not bars:
+                        continue
+
                     validator = _get_validator()
                     result = validator.validate_bars(bars)
                     if result.invalid_count > 0:

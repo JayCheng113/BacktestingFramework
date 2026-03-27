@@ -86,7 +86,10 @@ def run_walk_forward(req: WalkForwardRequest):
     validator = WalkForwardValidator(
         VectorizedBacktestEngine(commission_rate=req.commission_rate)
     )
-    result = validator.validate(df, strategy, req.n_splits, req.train_ratio, req.initial_capital)
+    try:
+        result = validator.validate(df, strategy, req.n_splits, req.train_ratio, req.initial_capital)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {
         "oos_metrics": result.oos_metrics,
         "overfitting_score": result.overfitting_score,
