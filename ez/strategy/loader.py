@@ -20,6 +20,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 def load_all_strategies() -> None:
     """Import all strategy modules from configured scan directories."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # PyInstaller frozen mode: hidden-imports are already bundled, just import them
+        try:
+            import ez.strategy.builtin.ma_cross  # noqa: F401
+            logger.debug("Loaded frozen strategy: ma_cross")
+        except ImportError as e:
+            logger.warning("Failed to load frozen strategy: %s", e)
+        return
+
     config = load_config()
     for scan_dir in config.strategy.scan_dirs:
         # Resolve relative paths against project root, not CWD

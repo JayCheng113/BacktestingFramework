@@ -6,17 +6,16 @@ import threading
 import webbrowser
 import socket
 
+# IMPORTANT: Compute exe_dir BEFORE chdir
+exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+
 # Set project root for path resolution
 if getattr(sys, 'frozen', False):
-    # Running as PyInstaller bundle
     os.environ['EZ_ROOT'] = sys._MEIPASS
     os.chdir(sys._MEIPASS)
 else:
     os.environ['EZ_ROOT'] = os.path.dirname(os.path.abspath(__file__))
     os.chdir(os.environ['EZ_ROOT'])
-
-# Load .env from user's working directory (next to the exe)
-exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 env_file = os.path.join(exe_dir, '.env')
 if os.path.exists(env_file):
     for line in open(env_file):

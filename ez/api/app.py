@@ -20,13 +20,16 @@ from ez.strategy.loader import load_all_strategies
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     load_all_strategies()
-    # Pre-warm symbol cache so first search is fast
+    # Pre-warm symbol cache in background (don't block startup)
     tushare = get_tushare_provider()
     if tushare:
-        try:
-            tushare._ensure_symbol_cache()
-        except Exception as exc:
-            logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
+        import threading
+        def _warm():
+            try:
+                tushare._ensure_symbol_cache()
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
+        threading.Thread(target=_warm, daemon=True).start()
     yield
     close_resources()
 
@@ -82,7 +85,11 @@ def health():
 
 
 # Serve frontend static files (built React app)
-_FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+import sys as _sys
+if getattr(_sys, 'frozen', False):
+    _FRONTEND_DIR = Path(_sys._MEIPASS) / "web" / "dist"
+else:
+    _FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 if _FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIR / "assets")), name="assets")
 
