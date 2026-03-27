@@ -69,13 +69,13 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
     backgroundColor: '#0d1117',
     title: { text: 'Equity Curve', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
-    legend: { data: ['Strategy', 'Benchmark'], textStyle: { color: '#8b949e' }, top: 25 },
+    legend: { data: ['Strategy', `Benchmark (Buy & Hold)`], textStyle: { color: '#8b949e' }, top: 25 },
     grid: { left: 60, right: 20, top: 60, bottom: 30 },
     xAxis: { type: 'category', data: result.equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
     series: [
       { name: 'Strategy', type: 'line', data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
-      { name: 'Benchmark', type: 'line', data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' }, showSymbol: false },
+      { name: 'Benchmark (Buy & Hold)', type: 'line', data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' }, showSymbol: false },
     ],
   } : null
 
@@ -89,7 +89,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate }: Pr
     series: [{ type: 'line', data: wfResult.oos_equity_curve, lineStyle: { color: '#22c55e' }, showSymbol: false }],
   } : null
 
-  const metricKeys = ['sharpe_ratio', 'total_return', 'max_drawdown', 'win_rate', 'trade_count', 'avg_holding_days', 'max_drawdown_duration']
+  const metricKeys = ['sharpe_ratio', 'total_return', 'max_drawdown', 'alpha', 'beta', 'win_rate', 'trade_count', 'avg_holding_days', 'max_drawdown_duration']
   const formatMetric = (k: string, v: number) => {
     if ((k.includes('return') || k.includes('rate') || k.includes('drawdown')) && !k.includes('duration'))
       return `${(v * 100).toFixed(2)}%`

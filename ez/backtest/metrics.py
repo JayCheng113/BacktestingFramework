@@ -50,12 +50,25 @@ class MetricsCalculator:
 
         bench_total = (benchmark_curve.iloc[-1] / benchmark_curve.iloc[0]) - 1
 
+        # Alpha & Beta (CAPM regression: R_strategy - Rf = alpha + beta * (R_bench - Rf))
+        common = pd.concat([daily_returns, bench_returns], axis=1, keys=["s", "b"]).dropna()
+        if len(common) > 1 and common["b"].std() > 1e-10:
+            excess_s = common["s"] - daily_rf
+            excess_b = common["b"] - daily_rf
+            beta = float(excess_s.cov(excess_b) / excess_b.var())
+            # Annualized alpha
+            alpha = float((excess_s.mean() - beta * excess_b.mean()) * self._td)
+        else:
+            alpha, beta = 0.0, 0.0
+
         return {
             "total_return": float(total_return),
             "annualized_return": float(ann_return),
             "annualized_volatility": ann_vol,
             "sharpe_ratio": sharpe,
             "sortino_ratio": sortino,
+            "alpha": alpha,
+            "beta": beta,
             "max_drawdown": max_dd,
             "max_drawdown_duration": max_dd_duration,
             "benchmark_return": float(bench_total),

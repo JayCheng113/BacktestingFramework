@@ -61,6 +61,7 @@ def run_backtest(req: BacktestRequest):
     result = engine.run(df, strategy, req.initial_capital)
     return {
         "metrics": result.metrics,
+        "benchmark_info": f"Buy & Hold {req.symbol}",
         "equity_curve": result.equity_curve.tolist(),
         "benchmark_curve": result.benchmark_curve.tolist(),
         "trades": [
