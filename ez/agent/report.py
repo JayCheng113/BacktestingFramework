@@ -71,7 +71,8 @@ class ExperimentReport:
             m = result.backtest.metrics
             report.sharpe_ratio = m.get("sharpe_ratio")
             report.total_return = m.get("total_return")
-            report.max_drawdown = m.get("max_drawdown")
+            raw_dd = m.get("max_drawdown")
+            report.max_drawdown = abs(raw_dd) if raw_dd is not None else None
             report.trade_count = int(m.get("trade_count", 0))
             report.win_rate = m.get("win_rate")
             report.profit_factor = m.get("profit_factor")

@@ -174,3 +174,7 @@ class ExperimentStore:
             [spec_id],
         ).fetchone()
         return result[0] if result else 0
+
+    def close(self) -> None:
+        """Close the DuckDB connection."""
+        self._conn.close()

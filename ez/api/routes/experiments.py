@@ -53,6 +53,15 @@ class ExperimentRequest(BaseModel):
 
 _exp_store: ExperimentStore | None = None
 
+
+def close_experiment_store() -> None:
+    """Shut down the experiment store connection. Called by deps.close_resources()."""
+    global _exp_store
+    if _exp_store is not None:
+        _exp_store.close()
+        _exp_store = None
+
+
 def _get_experiment_store() -> ExperimentStore:
     """Get or create ExperimentStore with its own DuckDB connection.
 
