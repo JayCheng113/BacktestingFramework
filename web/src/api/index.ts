@@ -20,4 +20,12 @@ export const listFactors = () => api.get('/factors')
 
 export const evaluateFactor = (data: any) => api.post('/factors/evaluate', data)
 
+// Experiments
+export const submitExperiment = (data: any) => api.post('/experiments', data)
+
+export const listExperiments = (limit = 50, offset = 0) =>
+  api.get('/experiments', { params: { limit, offset } })
+
+export const getExperiment = (runId: string) => api.get(`/experiments/${runId}`)
+
 export default api

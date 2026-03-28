@@ -53,6 +53,7 @@ LAYER_MAP = {
     "ez.factor": 3,
     "ez.strategy": 4,
     "ez.backtest": 5,
+    "ez.agent": 5,   # same level as backtest — consumes core+backtest, consumed by api
     "ez.api": 6,
 }
 
@@ -131,8 +132,8 @@ class TestLayerDependencies:
         )
 
     def test_future_modules_not_imported_by_core(self):
-        """Core/data/factor/strategy/backtest must not import ez.agent/live/ops."""
-        forbidden = ("ez.agent", "ez.live", "ez.ops")
+        """Core/data/factor/strategy/backtest must not import ez.live/ops (unimplemented)."""
+        forbidden = ("ez.live", "ez.ops")
         violations = []
         for py_file in EZ_ROOT.rglob("*.py"):
             if "__pycache__" in str(py_file):
@@ -162,6 +163,8 @@ EZ_MODULES = [
     "ez.strategy", "ez.strategy.base", "ez.strategy.loader",
     "ez.backtest", "ez.backtest.engine", "ez.backtest.metrics",
     "ez.backtest.walk_forward", "ez.backtest.significance",
+    "ez.agent", "ez.agent.run_spec", "ez.agent.runner",
+    "ez.agent.gates", "ez.agent.report", "ez.agent.experiment_store",
     "ez.api",
 ]
 

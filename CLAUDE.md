@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.3 | Tests: 669 | C++ acceleration: up to 7.9x
+Version: 0.2.4 | Tests: 707 | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -20,7 +20,7 @@ Version: 0.2.3 | Tests: 669 | C++ acceleration: up to 7.9x
 - `ez/backtest/` — Backtest engine, Walk-Forward, significance [CLAUDE.md](ez/backtest/CLAUDE.md)
 - `ez/api/` — FastAPI REST endpoints [CLAUDE.md](ez/api/CLAUDE.md)
 - `web/` — React frontend dashboard [CLAUDE.md](web/CLAUDE.md)
-- `ez/agent/` — Agent loop: RunSpec, Runner, Gates (V2.4, planned)
+- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore [CLAUDE.md](ez/agent/CLAUDE.md)
 - `ez/live/` — Deploy Gate, OMS, Broker (V2.6+, planned)
 - `ez/ops/` — Scheduling, monitoring, audit (V3.2+, planned)
 
@@ -52,7 +52,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (680 collected, 669 pass, 10 skip, 1 DuckDB lock env issue)
+pytest tests/                # Full test suite (718 collected, 707 pass, 10 skip, 1 DuckDB lock env issue)
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -67,4 +67,5 @@ No version tag without review pass. No push without critical issues resolved.
 - V2.1: C++ nanobind acceleration (up to 7.9x)
 - V2.2: SlippageMatcher + user-configurable trading costs
 - **V2.3**: Correctness hardening — accounting invariants (173 tests), C++/Python dual-path parity (109 tests), rolling_std Welford O(n) (5.2x vs Python), architecture gate tests (47 tests), ewm_mean span=1 NaN fix
-- **Next: V2.4** — Agent Loop (RunSpec, Runner, Gates, Report)
+- **V2.4**: Agent Loop — RunSpec, Runner, ResearchGate, Report, ExperimentStore, /experiments API, Experiments UI
+- **Next: V2.4.1** — Stability (bug fixes, edge tests, docs sync)

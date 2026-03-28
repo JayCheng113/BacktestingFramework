@@ -45,3 +45,37 @@ export interface FactorResult {
   rank_icir: number; ic_decay: Record<string, number>;
   turnover: number; ic_series: number[]; rank_ic_series: number[];
 }
+
+export interface ExperimentRun {
+  run_id: string
+  spec_id: string
+  status: string
+  created_at: string
+  duration_ms: number
+  code_commit: string
+  strategy_name: string
+  symbol: string
+  market: string
+  sharpe_ratio: number | null
+  total_return: number | null
+  max_drawdown: number | null
+  trade_count: number
+  win_rate: number | null
+  profit_factor: number | null
+  p_value: number | null
+  is_significant: boolean
+  oos_sharpe: number | null
+  overfitting_score: number | null
+  gate_passed: boolean
+  gate_summary: string
+  gate_reasons: string | GateReason[]
+  error: string | null
+}
+
+export interface GateReason {
+  rule: string
+  passed: boolean
+  value: number
+  threshold: number
+  message: string
+}

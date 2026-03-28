@@ -1,0 +1,114 @@
+"""Tests for ExperimentStore — B5."""
+from datetime import date, datetime
+
+import duckdb
+import pytest
+
+from ez.agent.experiment_store import ExperimentStore
+from ez.agent.gates import ResearchGate
+from ez.agent.report import ExperimentReport
+from ez.agent.run_spec import RunSpec
+from ez.agent.runner import Runner
+
+import ez.strategy.builtin.ma_cross  # noqa: F401
+import numpy as np
+import pandas as pd
+
+
+@pytest.fixture
+def conn():
+    """In-memory DuckDB for testing."""
+    c = duckdb.connect(":memory:")
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def store(conn):
+    return ExperimentStore(conn)
+
+
+@pytest.fixture
+def spec():
+    return RunSpec(
+        strategy_name="MACrossStrategy",
+        strategy_params={"short_period": 5, "long_period": 20},
+        symbol="000001.SZ", market="cn_stock",
+        start_date=date(2022, 1, 1), end_date=date(2023, 12, 31),
+        wfo_n_splits=3,
+    )
+
+
+@pytest.fixture
+def sample_data():
+    rng = np.random.default_rng(42)
+    n = 500
+    prices = 10 * np.cumprod(1 + rng.normal(0.001, 0.015, n))
+    dates = pd.date_range("2022-01-03", periods=n, freq="B")
+    return pd.DataFrame({
+        "open": prices * (1 + rng.normal(0, 0.002, n)),
+        "high": prices * (1 + abs(rng.normal(0, 0.005, n))),
+        "low": prices * (1 - abs(rng.normal(0, 0.005, n))),
+        "close": prices, "adj_close": prices,
+        "volume": rng.integers(100_000, 5_000_000, n),
+    }, index=dates)
+
+
+def _run_and_report(spec, data):
+    result = Runner().run(spec, data)
+    verdict = ResearchGate().evaluate(result)
+    return ExperimentReport.from_result(result, verdict)
+
+
+class TestExperimentStore:
+    def test_save_and_retrieve_spec(self, store, spec):
+        store.save_spec(spec.to_dict())
+        # No error on duplicate (upsert)
+        store.save_spec(spec.to_dict())
+
+    def test_save_and_list_runs(self, store, spec, sample_data):
+        report = _run_and_report(spec, sample_data)
+        store.save_spec(spec.to_dict())
+        store.save_run(report.to_dict())
+
+        runs = store.list_runs()
+        assert len(runs) == 1
+        assert runs[0]["run_id"] == report.run_id
+
+    def test_get_run_by_id(self, store, spec, sample_data):
+        report = _run_and_report(spec, sample_data)
+        store.save_spec(spec.to_dict())
+        store.save_run(report.to_dict())
+
+        run = store.get_run(report.run_id)
+        assert run is not None
+        assert run["spec_id"] == spec.spec_id
+
+    def test_get_nonexistent_run(self, store):
+        assert store.get_run("nonexistent") is None
+
+    def test_find_by_spec_id(self, store, spec, sample_data):
+        store.save_spec(spec.to_dict())
+        for _ in range(3):
+            report = _run_and_report(spec, sample_data)
+            store.save_run(report.to_dict())
+
+        runs = store.find_by_spec_id(spec.spec_id)
+        assert len(runs) == 3
+
+    def test_count_by_spec_id(self, store, spec, sample_data):
+        store.save_spec(spec.to_dict())
+        assert store.count_by_spec_id(spec.spec_id) == 0
+
+        report = _run_and_report(spec, sample_data)
+        store.save_run(report.to_dict())
+        assert store.count_by_spec_id(spec.spec_id) == 1
+
+    def test_idempotency_check(self, store, spec, sample_data):
+        """Same spec_id should be detectable for idempotency."""
+        store.save_spec(spec.to_dict())
+        report = _run_and_report(spec, sample_data)
+        store.save_run(report.to_dict())
+
+        # Caller can check count before submitting duplicate
+        assert store.count_by_spec_id(spec.spec_id) >= 1
