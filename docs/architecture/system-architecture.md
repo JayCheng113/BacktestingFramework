@@ -49,38 +49,120 @@ ez-trading 是 **Agent-Native 量化交易系统**。
 
 ---
 
-## 统一策略生命周期状态机
+## 策略生命周期：双状态机
 
-**唯一真相源**。策略在任何模块、任何时刻只有一个状态。
+策略有两个维度的状态，解耦研究和部署：
+
+### StrategyVersionState（研究侧，按策略版本）
+
+一个策略版本从诞生到验证通过的生命周期。与账户无关。
 
 ```
-CANDIDATE → BACKTESTED → RESEARCH_PASSED → DEPLOYABLE → PAPER_LIVE → LIMITED → ACTIVE
-     ↓           ↓              ↓              ↓            ↓          ↓         ↓
-  REJECTED   REJECTED      NOT_DEPLOYABLE   SUSPENDED    SUSPENDED  SUSPENDED  RETIRED
+CANDIDATE → BACKTESTED → RESEARCH_PASSED
+     ↓           ↓
+  REJECTED   REJECTED
 ```
 
-| 状态 | 含义 | 谁触发转移 | 在哪个面 |
-|------|------|-----------|---------|
-| CANDIDATE | 候选池，等待回测 | Agent 提交 / 参数搜索生成 | Research |
-| BACKTESTED | 回测完成，等待 Research Gate | Runner 自动 | Research |
-| RESEARCH_PASSED | 通过 Research Gate 全部检验 | Gate 自动判定 | Research |
-| NOT_DEPLOYABLE | 研究通过但不适合当前账户 | Deploy Gate 自动 | Research |
-| DEPLOYABLE | 通过 Deploy Gate，**需人工审批** | 人类在 Web 确认 | 跨面 |
-| PAPER_LIVE | 仿真实盘运行中 | 人工启动 | Live |
-| LIMITED | 小规模真实资金 | 人工审批 + 系统检查 | Live |
-| ACTIVE | 全量运行 | 人工审批 | Live |
-| SUSPENDED | 暂停（风控触发 / 人工干预） | 自动或手动 | Live |
-| RETIRED | 永久下线 | 人工决定 | 任意 |
-| REJECTED | 未通过验证 | Gate 自动 | Research |
+| 状态 | 含义 | 谁触发 |
+|------|------|--------|
+| CANDIDATE | 候选池，等待回测 | Agent / 参数搜索 |
+| BACKTESTED | 回测完成，等待 Gate | Runner |
+| RESEARCH_PASSED | 通过全部研究检验 | Gate 自动 |
+| REJECTED | 未通过 | Gate 自动 |
 
-**禁止转移**：
-- CANDIDATE 不可直接到 DEPLOYABLE（必须经过 Research Gate）
-- RESEARCH_PASSED 不可直接到 ACTIVE（必须经过 Deploy Gate + 人工审批）
-- SUSPENDED 可回到 PAPER_LIVE/LIMITED/ACTIVE（人工审批），但不可跳级
+### DeploymentState（部署侧，按 account × market 实例化）
 
-**回滚动作**：
-- 任何 ACTIVE/LIMITED 策略触发风控 → 自动 SUSPENDED + 通知
-- SUSPENDED 恢复需人工审批 + 重新通过 Runtime Gate
+一个 RESEARCH_PASSED 的策略版本可以在多个账户/市场独立部署，各自有自己的状态。
+
+```
+PENDING_DEPLOY → PAPER_LIVE → LIMITED → ACTIVE
+      ↓              ↓           ↓         ↓
+  NOT_DEPLOYABLE  SUSPENDED  SUSPENDED  RETIRED
+```
+
+| 状态 | 含义 | 谁触发 | 需人工 |
+|------|------|--------|--------|
+| PENDING_DEPLOY | 等待 Deploy Gate | 研究通过后自动 | — |
+| NOT_DEPLOYABLE | 不适合此账户 | Deploy Gate | — |
+| PAPER_LIVE | 仿真运行 | 人工审批 | **是** |
+| LIMITED | 小规模资金 | 人工审批 | **是** |
+| ACTIVE | 全量运行 | 人工审批 | **是** |
+| SUSPENDED | 风控暂停 | 自动或手动 | 恢复需审批 |
+| RETIRED | 永久下线 | 人工 | **是** |
+
+**多账户示例**：策略 MACross-v3 通过 Research → 在 Account-A(A股) 部署为 PAPER_LIVE，在 Account-B(美股) 仍为 NOT_DEPLOYABLE（碎股不支持）。
+
+### 禁止转移
+
+- CANDIDATE 不可直接到 PENDING_DEPLOY（必须经 Research Gate）
+- PENDING_DEPLOY 不可直接到 ACTIVE（必须经 Deploy Gate + 人工审批）
+- Agent **没有** Deploy/Live 操作权限（见下方权限模型）
+
+### 回滚
+
+- ACTIVE/LIMITED 触发风控 → 自动 SUSPENDED + 通知
+- SUSPENDED 恢复需人工审批 + 重新 Runtime Gate
+
+---
+
+## 不可变发布工件 (Release Artifact)
+
+**策略从 Research 到 Live 的唯一通道是发布工件，Live 面不执行工作区代码。**
+
+```
+Research 通过 → 打包发布工件 → Deploy Gate 验证工件 → Live 执行工件
+```
+
+发布工件包含（全部不可变，append-only）：
+
+| 字段 | 说明 |
+|------|------|
+| artifact_id | 唯一标识 (UUID) |
+| strategy_version | 策略版本号 |
+| code_commit | git SHA（代码精确版本） |
+| dependency_lock | requirements.txt / pyproject.toml 的 hash |
+| config_hash | 策略参数 + 交易成本配置的 hash |
+| data_snapshot_id | 训练数据的 hash（可回放） |
+| gate_results | Research Gate 每层检验结果 |
+| created_at | 打包时间 |
+
+**数据快照物理落地**：
+- 近期（90天）：Parquet 文件保留完整数据
+- 远期：只保留 hash + 元数据；需要重放时从数据源重新拉取并验证 hash 一致
+
+---
+
+## 权限模型 (RBAC)
+
+Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
+
+| 角色 | Research 面 | Deploy/Live 面 | 审批 |
+|------|------------|---------------|------|
+| **Agent** | 提交策略、运行回测、查询实验 | **只读**（查看状态） | 无 |
+| **研究员** | 同 Agent + 手动回测 | 只读 | 无 |
+| **PM** | 只读 | 查看 + 审批部署 + 调整仓位 | **有** |
+| **风控** | 只读 | 查看 + kill-switch + 强制平仓 | **有** |
+| **管理员** | 全部 | 全部 | **有** |
+
+**审计**：所有 Deploy/Live 操作记录操作人(或 Agent ID)、时间、审批链。
+
+---
+
+## 交易制度约束 (MarketRules)
+
+**Backtest / Runtime / Execution 共用同一套 MarketRules，保证回测和实盘行为一致。**
+
+| 规则 | A 股 (cn_stock) | 美股 (us_stock) | 说明 |
+|------|----------------|----------------|------|
+| T+N | T+1 | T+0 | A 股今日买入不可今日卖出 |
+| 涨跌停 | ±10%（ST ±5%，科创/创业 ±20%） | 无 | 涨停价不可买入，跌停价不可卖出 |
+| 最小交易单位 | 100 股（1 手） | 1 股（支持碎股看券商） | 下单必须是整手 |
+| 停牌 | 有 | 有 | 停牌期间不可交易 |
+| 集合竞价 | 9:15-9:25 | — | 日线回测用开盘价已隐含 |
+| 印花税 | 卖出 0.05% | — | A 股特有卖出税 |
+| 交易时间 | 9:30-11:30, 13:00-15:00 | 9:30-16:00 ET | — |
+
+**当前实现**：❌ 未实现。引擎假设可随时买卖任意数量。V2.5+ 实现 MarketRules 模块。
 
 ---
 
@@ -223,8 +305,13 @@ CANDIDATE → BACKTESTED → RESEARCH_PASSED → DEPLOYABLE → PAPER_LIVE → L
 │                                                      │
 │  OMS (订单管理)                                       │
 │  ├── 状态机: NEW→SUBMITTED→PARTIAL→FILLED/CANCELED    │
-│  ├── 持久化（重启恢复）                               │
-│  └── 超时撤单                                         │
+│  ├── 事件日志: append-only（不可删改）                │
+│  ├── 幂等键: client_order_id（防重复下单）            │
+│  ├── 重启恢复: 重放事件日志重建状态                   │
+│  │   - NEW/SUBMITTED → 查询券商确认状态               │
+│  │   - PARTIAL → 查询已成交量，继续等待或撤单         │
+│  │   - FILLED/CANCELED → 已终态，无需操作             │
+│  └── 超时撤单（可配置超时阈值）                       │
 │                                                      │
 │  最小事件总线（非高频事件引擎）                       │
 │  ├── bar_received → 策略计算                          │
@@ -254,16 +341,21 @@ CANDIDATE → BACKTESTED → RESEARCH_PASSED → DEPLOYABLE → PAPER_LIVE → L
 │  └── monthly: 自动研究循环 → 新候选                   │
 │                                                      │
 │  监控 (4级降级)                                       │
-│  ┌──────────────────────────────────────────┐         │
-│  │ L1 正常:  全功能运行                      │         │
-│  │ L2 警告:  数据延迟>30min / 失败率>5%      │         │
-│  │          → 通知, 不影响交易                │         │
-│  │ L3 降级:  数据缺失>1日 / 失败率>20%       │         │
-│  │          → 自动降杠杆, 暂停新开仓         │         │
-│  │ L4 紧急:  风控触发 / 系统异常              │         │
-│  │          → kill-switch 停单, 仅允许平仓    │         │
-│  │          → 立即通知人类                    │         │
-│  └──────────────────────────────────────────┘         │
+│  ┌────────────────────────────────────────────────┐   │
+│  │ 级别 │ 触发条件               │ 自动动作       │   │
+│  │──────│────────────────────────│────────────────│   │
+│  │ L1   │ 全部正常               │ 无             │   │
+│  │ L2   │ 数据延迟>30min(5min窗) │ 通知           │   │
+│  │      │ 或 订单失败率>5%(20单) │ 不影响交易     │   │
+│  │ L3   │ 数据缺失>1交易日       │ 暂停新开仓     │   │
+│  │      │ 或 订单失败率>20%(20单)│ 降杠杆50%      │   │
+│  │ L4   │ 风控触发 / 系统崩溃    │ kill-switch    │   │
+│  │      │ 或 持仓对账drift>5%   │ 仅允许平仓     │   │
+│  │──────│────────────────────────│────────────────│   │
+│  │ 恢复 │ L4→L3: 人工确认+对账通过                │   │
+│  │      │ L3→L2: 数据恢复+失败率下降              │   │
+│  │      │ L2→L1: 自动（指标回正常）               │   │
+│  └────────────────────────────────────────────────┘   │
 │                                                      │
 │  通知: 微信/钉钉/Discord（中国团队优先微信）          │
 │  审计: 每笔决策日志, 每次 run 可复现                  │
@@ -467,17 +559,17 @@ Live 面:     ░░░░░░░░░░  0%  (无 OMS/Broker/风控)
 2. V2.4: Agent 闭环（RunSpec + Runner + Gate + Report + 实验持久化）
 
 ### 中期: 候选生成 + Deploy Gate（V2.5-V2.6）
-3. V2.5: 参数搜索 + 批量预筛 + 更多因子
-4. V2.6: Deploy Gate + 策略审批 Web 页面
+3. V2.5: 参数搜索 + 批量预筛 + 更多因子 + 多重检验控制(FDR) + MarketRules
+4. V2.6: Deploy Gate + 不可变发布工件 + 策略审批页面
 
 ### 远期: Live 面（V3+）
-5. V3.0: PaperBroker + 基础 OMS + 最小事件总线
+5. V3.0: PaperBroker + OMS(事件日志+幂等键+恢复) + 日线级事件总线
 6. V3.1: PreTradeRiskEngine + Runtime Gate
-7. V3.2: 调度层 + 监控 + 生命周期状态机
+7. V3.2: 调度层 + 监控(SLO/SLA) + 双状态机实现
 8. V3.3: 中国券商 API 适配（通达信/恒生/CTP）
 
-### 不做
+### 优先级较低（不是不做，时机未到）
+- 高频事件引擎（当前无 tick 数据，日线级事件总线优先，高频后续可扩展）
 - 黎曼流形几何特征 (SPD)
-- 高频事件引擎 (无 tick 数据)
 - CRTP/Eigen/SIMD 显式优化
 - Kyle λ / Glosten-Milgrom 微观结构
