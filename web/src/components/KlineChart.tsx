@@ -10,7 +10,7 @@ interface Props {
 function computeMA(data: KlineBar[], period: number): (number | null)[] {
   return data.map((_, i) => {
     if (i < period - 1) return null
-    const sum = data.slice(i - period + 1, i + 1).reduce((s, d) => s + d.adj_close, 0)
+    const sum = data.slice(i - period + 1, i + 1).reduce((s, d) => s + d.close, 0)
     return +(sum / period).toFixed(2)
   })
 }

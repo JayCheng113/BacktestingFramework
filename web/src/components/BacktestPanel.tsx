@@ -202,10 +202,10 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
                         <td className="px-3 py-1.5">{t.exit_time.slice(0, 10)}</td>
                         <td className="px-3 py-1.5">{t.entry_price.toFixed(2)}</td>
                         <td className="px-3 py-1.5">{t.exit_price.toFixed(2)}</td>
-                        <td className="px-3 py-1.5" style={{ color: t.pnl >= 0 ? 'var(--color-down)' : 'var(--color-up)' }}>
+                        <td className="px-3 py-1.5" style={{ color: t.pnl >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
                           {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                         </td>
-                        <td className="px-3 py-1.5" style={{ color: t.pnl_pct >= 0 ? 'var(--color-down)' : 'var(--color-up)' }}>
+                        <td className="px-3 py-1.5" style={{ color: t.pnl_pct >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
                           {(t.pnl_pct * 100).toFixed(2)}%
                         </td>
                         <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{t.commission.toFixed(2)}</td>
