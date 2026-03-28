@@ -174,15 +174,18 @@ class ExperimentStore:
             return True
 
         # Step 1: Claim the spec_id lock via PK constraint.
-        # Catch duckdb.Error (covers ConstraintException + TransactionException
-        # which can occur under concurrent multi-connection writes).
+        # Only treat unique-key violations as "duplicate" (return False).
+        # Other DuckDB errors (connection issues, etc.) must propagate.
         try:
             self._conn.execute(
                 "INSERT INTO completed_specs (spec_id, run_id, completed_at) VALUES (?, ?, ?)",
                 [spec_id, report_dict["run_id"], report_dict["created_at"]],
             )
-        except duckdb.Error:
-            return False
+        except duckdb.Error as e:
+            msg = str(e).lower()
+            if "duplicate" in msg or "unique" in msg or "constraint" in msg or "primary key" in msg:
+                return False
+            raise
 
         # Step 2: Write the actual run. If this fails, roll back the lock
         # to avoid a "dirty" completed_specs entry with no matching run.

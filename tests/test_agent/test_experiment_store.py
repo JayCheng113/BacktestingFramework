@@ -112,3 +112,74 @@ class TestExperimentStore:
 
         # Caller can check count before submitting duplicate
         assert store.count_by_spec_id(spec.spec_id) >= 1
+
+    def test_save_completed_run_blocks_duplicate(self, store, spec, sample_data):
+        """Second completed run for same spec_id must return False."""
+        store.save_spec(spec.to_dict())
+        r1 = _run_and_report(spec, sample_data)
+        assert store.save_completed_run(r1.to_dict()) is True
+
+        r2 = _run_and_report(spec, sample_data)
+        assert store.save_completed_run(r2.to_dict()) is False
+        # Only 1 run in DB
+        assert store.count_by_spec_id(spec.spec_id) == 1
+
+    def test_concurrent_duplicate_two_connections(self, spec, sample_data):
+        """Two independent connections: only one completed run survives."""
+        import tempfile, os
+        db_path = tempfile.mktemp(suffix=".db")
+        try:
+            c1 = duckdb.connect(db_path)
+            c2 = duckdb.connect(db_path)
+            s1 = ExperimentStore(c1)
+            s2 = ExperimentStore(c2)
+
+            s1.save_spec(spec.to_dict())
+            r1 = _run_and_report(spec, sample_data)
+            r2 = _run_and_report(spec, sample_data)
+
+            result1 = s1.save_completed_run(r1.to_dict())
+            result2 = s2.save_completed_run(r2.to_dict())
+
+            assert (result1, result2).count(True) == 1, (
+                f"Exactly one should succeed: {result1}, {result2}"
+            )
+            c1.close()
+            c2.close()
+        finally:
+            os.unlink(db_path)
+
+    def test_dirty_lock_rollback_on_save_run_failure(self, store, spec, sample_data):
+        """If save_run fails after completed_specs INSERT, lock must be rolled back."""
+        store.save_spec(spec.to_dict())
+        report = _run_and_report(spec, sample_data)
+        d = report.to_dict()
+
+        # First: insert the run normally so run_id exists
+        store.save_run(d)
+        # Now try save_completed_run with SAME run_id — save_run will fail (PK dup)
+        # but completed_specs should NOT retain the lock
+        try:
+            store.save_completed_run(d)
+        except Exception:
+            pass
+
+        # Lock should be clean — no entry in completed_specs
+        assert store.get_completed_run_id(spec.spec_id) is None
+
+    def test_backfill_on_upgrade(self, spec, sample_data):
+        """Pre-existing completed run is backfilled into completed_specs on init."""
+        conn = duckdb.connect(":memory:")
+        store = ExperimentStore(conn)
+        store.save_spec(spec.to_dict())
+        report = _run_and_report(spec, sample_data)
+        store.save_run(report.to_dict())
+
+        # Simulate pre-upgrade state: no completed_specs entry
+        conn.execute("DELETE FROM completed_specs")
+        assert store.get_completed_run_id(spec.spec_id) is None
+
+        # Re-init (simulates upgrade) should backfill
+        store2 = ExperimentStore(conn)
+        assert store2.get_completed_run_id(spec.spec_id) is not None
+        conn.close()
