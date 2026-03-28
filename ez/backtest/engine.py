@@ -8,6 +8,7 @@ import pandas as pd
 
 from ez.backtest.metrics import MetricsCalculator
 from ez.backtest.significance import compute_significance
+from ez.core.matcher import Matcher, SimpleMatcher
 from ez.strategy.base import Strategy
 from ez.types import BacktestResult, TradeRecord
 
@@ -20,9 +21,9 @@ class VectorizedBacktestEngine:
         commission_rate: float = 0.0003,
         min_commission: float = 5.0,
         risk_free_rate: float = 0.03,
+        matcher: Matcher | None = None,
     ):
-        self._commission_rate = commission_rate
-        self._min_commission = min_commission
+        self._matcher = matcher or SimpleMatcher(commission_rate, min_commission)
         self._metrics = MetricsCalculator(risk_free_rate=risk_free_rate)
 
     def run(
@@ -140,6 +141,7 @@ class VectorizedBacktestEngine:
 
         times = df.index if hasattr(df.index, "__iter__") else range(n)
         time_list = list(times)
+        matcher = self._matcher
 
         for i in range(1, n):
             target_weight = weights[i] if i < len(weights) else 0.0
@@ -156,18 +158,16 @@ class VectorizedBacktestEngine:
                         sell_shares = shares
                     else:
                         sell_shares = (current_value - target_value) / exec_price
-                    sell_value = sell_shares * exec_price
-                    comm = max(sell_value * self._commission_rate, self._min_commission)
-                    if comm > sell_value:
-                        comm = sell_value  # Cap commission at sell value to prevent negative cash
-                    cash += sell_value - comm
+
+                    fill = matcher.fill_sell(exec_price, sell_shares)
+                    cash += fill.net_amount
                     old_shares = shares
-                    shares -= sell_shares
+                    shares -= fill.shares
                     if shares < 1e-10:
                         shares = 0.0
                     # Record trade when fully closing
                     if old_shares > 0 and shares < 1e-10 and entry_time is not None:
-                        pnl = (exec_price - entry_price) * old_shares - comm - entry_comm
+                        pnl = (exec_price - entry_price) * old_shares - fill.commission - entry_comm
                         trades.append(TradeRecord(
                             entry_time=entry_time,
                             exit_time=time_list[i],
@@ -176,31 +176,29 @@ class VectorizedBacktestEngine:
                             weight=prev_weight,
                             pnl=pnl,
                             pnl_pct=pnl / (entry_price * old_shares) if entry_price * old_shares > 0 else 0,
-                            commission=comm + entry_comm,
+                            commission=fill.commission + entry_comm,
                         ))
                         entry_time = None
                         entry_comm = 0.0
 
                 elif target_value > current_value:
                     # Increase or open position
-                    additional = target_value - current_value
-                    additional = min(additional, cash)
+                    additional = min(target_value - current_value, cash)
                     if additional > 0:
-                        comm = max(additional * self._commission_rate, self._min_commission)
-                        if comm >= additional:
-                            # Commission would exceed trade value — skip this trade
+                        fill = matcher.fill_buy(exec_price, additional)
+                        if fill.shares == 0:
+                            # Commission would exceed trade value — skip
                             continue
-                        new_shares = (additional - comm) / exec_price if exec_price > 0 else 0
                         if shares == 0:
                             entry_time = time_list[i]
                             entry_price = exec_price
-                            entry_comm = comm
-                        elif new_shares > 0:
-                            entry_comm += comm  # Accumulate commission across multiple buys
+                            entry_comm = fill.commission
+                        elif fill.shares > 0:
+                            entry_comm += fill.commission
                             # Weighted average entry price
-                            entry_price = (entry_price * shares + exec_price * new_shares) / (shares + new_shares)
-                        shares += new_shares
-                        cash -= additional
+                            entry_price = (entry_price * shares + exec_price * fill.shares) / (shares + fill.shares)
+                        shares += fill.shares
+                        cash += fill.net_amount  # net_amount is negative for buys
 
                 prev_weight = target_weight
 

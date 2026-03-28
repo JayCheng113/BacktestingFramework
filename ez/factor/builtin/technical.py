@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from ez.core import ts_ops
 from ez.factor.base import Factor
 
 
@@ -25,7 +26,7 @@ class MA(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        data[self.name] = data["adj_close"].rolling(window=self._period, min_periods=self._period).mean()
+        data[self.name] = ts_ops.rolling_mean(data["adj_close"], self._period)
         return data
 
 
@@ -45,7 +46,7 @@ class EMA(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        data[self.name] = data["adj_close"].ewm(span=self._period, min_periods=self._period).mean()
+        data[self.name] = ts_ops.ewm_mean(data["adj_close"], self._period)
         return data
 
 
@@ -65,9 +66,9 @@ class RSI(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        delta = data["adj_close"].diff()
-        gain = delta.clip(lower=0).rolling(window=self._period, min_periods=self._period).mean()
-        loss = (-delta.clip(upper=0)).rolling(window=self._period, min_periods=self._period).mean()
+        delta = ts_ops.diff(data["adj_close"])
+        gain = ts_ops.rolling_mean(delta.clip(lower=0), self._period)
+        loss = ts_ops.rolling_mean((-delta.clip(upper=0)), self._period)
         rs = gain / loss.replace(0, float("nan"))
         data[self.name] = 100 - (100 / (1 + rs))
         return data
@@ -91,10 +92,10 @@ class MACD(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        ema_fast = data["adj_close"].ewm(span=self._fast, min_periods=self._fast).mean()
-        ema_slow = data["adj_close"].ewm(span=self._slow, min_periods=self._slow).mean()
+        ema_fast = ts_ops.ewm_mean(data["adj_close"], self._fast)
+        ema_slow = ts_ops.ewm_mean(data["adj_close"], self._slow)
         data["macd_line"] = ema_fast - ema_slow
-        data["macd_signal"] = data["macd_line"].ewm(span=self._signal, min_periods=self._signal).mean()
+        data["macd_signal"] = ts_ops.ewm_mean(data["macd_line"], self._signal)
         data["macd_hist"] = data["macd_line"] - data["macd_signal"]
         return data
 
@@ -116,8 +117,8 @@ class BOLL(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        mid = data["adj_close"].rolling(window=self._period, min_periods=self._period).mean()
-        std = data["adj_close"].rolling(window=self._period, min_periods=self._period).std()
+        mid = ts_ops.rolling_mean(data["adj_close"], self._period)
+        std = ts_ops.rolling_std(data["adj_close"], self._period)
         data[f"boll_mid_{self._period}"] = mid
         data[f"boll_upper_{self._period}"] = mid + self._std_dev * std
         data[f"boll_lower_{self._period}"] = mid - self._std_dev * std
@@ -140,5 +141,5 @@ class Momentum(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        data[self.name] = data["adj_close"].pct_change(periods=self._period)
+        data[self.name] = ts_ops.pct_change(data["adj_close"], self._period)
         return data

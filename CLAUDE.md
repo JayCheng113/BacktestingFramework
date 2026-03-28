@@ -3,6 +3,7 @@
 Agent-Native quantitative trading platform. Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts.
 
 ## Module Map
+- `ez/core/` — Computational primitives: matcher, ts_ops (C++ replaceable) [CLAUDE.md](ez/core/CLAUDE.md)
 - `ez/data/` — Data ingestion, validation, caching [CLAUDE.md](ez/data/CLAUDE.md)
 - `ez/factor/` — Factor computation + IC evaluation [CLAUDE.md](ez/factor/CLAUDE.md)
 - `ez/strategy/` — Strategy framework, auto-registration [CLAUDE.md](ez/strategy/CLAUDE.md)
@@ -13,13 +14,16 @@ Agent-Native quantitative trading platform. Python 3.12+ / FastAPI / DuckDB / Re
 ## Dependency Flow
 ```
 ez/types.py -> ez/data/ -> ez/factor/ -> ez/strategy/ -> ez/backtest/ -> ez/api/ -> web/
+                            ↑ ts_ops                      ↑ matcher
+                            └────────── ez/core/ ─────────┘  (leaf, no deps)
 ```
 
 ## Core Files (DO NOT MODIFY without proposal in docs/core-changes/)
-ez/types.py, ez/errors.py, ez/config.py, ez/data/provider.py, ez/data/validator.py,
-ez/data/store.py, ez/factor/base.py, ez/factor/evaluator.py, ez/strategy/base.py,
-ez/strategy/loader.py, ez/backtest/engine.py, ez/backtest/portfolio.py,
-ez/backtest/metrics.py, ez/backtest/walk_forward.py, ez/backtest/significance.py
+ez/types.py, ez/errors.py, ez/config.py, ez/core/matcher.py, ez/core/ts_ops.py,
+ez/data/provider.py, ez/data/validator.py, ez/data/store.py, ez/factor/base.py,
+ez/factor/evaluator.py, ez/strategy/base.py, ez/strategy/loader.py,
+ez/backtest/engine.py, ez/backtest/portfolio.py, ez/backtest/metrics.py,
+ez/backtest/walk_forward.py, ez/backtest/significance.py
 
 ## Adding Extensions (no Core changes needed)
 | Type | Directory | Base Class | Test |
