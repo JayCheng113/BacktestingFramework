@@ -162,7 +162,9 @@ Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
 | 印花税 | 卖出 0.05% | — | A 股特有卖出税 |
 | 交易时间 | 9:30-11:30, 13:00-15:00 | 9:30-16:00 ET | — |
 
-**当前实现**：❌ 未实现。引擎假设可随时买卖任意数量。V2.5+ 实现 MarketRules 模块。
+**当前实现**：❌ 未实现。引擎假设可随时买卖任意数量。V2.5 实现 MarketRules 模块。
+
+**依赖关系**：OMS (V3.0) 消费 MarketRules (V2.5) 做订单校验。MarketRules 必须在 OMS 之前完成。
 
 ---
 
@@ -244,6 +246,12 @@ Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
 │                                                      │
 │  当前实现: 前3层引擎已有, Gate 框架未实现 (V2.4)     │
 └─────────────────────────────────────────────────────┘
+
+**实验流程（V2.4，连接 Layer 2 和 Layer 3）**：
+Agent/研究员提交 RunSpec → Runner 调用 Layer 2 候选生成 + Layer 3 各层检验 →
+结果持久化到实验台账 (DuckDB runs 表) → Gate 自动判定 PASS/FAIL →
+人类在 Web "实验管理"页面查看/比较/审批。
+API: `POST /experiments/submit`, `GET /experiments/{id}`, `GET /experiments`。
 ```
 
 ### Layer 4: Deploy Gate
@@ -623,6 +631,9 @@ class OrderEvent:
     status: Literal["NEW", "SUBMITTED", "PARTIAL", "FILLED", "CANCELED", "REJECTED"]
     timestamp: datetime
 
+# 注意：FillEvent (Live 面) 与 FillResult (回测面, ez/core/matcher.py) 是
+# 不同抽象层级的类型。FillResult 用于回测撮合模拟（无 order_id/timestamp），
+# FillEvent 用于实盘订单回报。两者不需要合并。
 @dataclass
 class FillEvent:
     client_order_id: str
