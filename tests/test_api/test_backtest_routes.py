@@ -34,7 +34,7 @@ def test_run_backtest_success(mock_chain):
     resp = client.post("/api/backtest/run", json={
         "symbol": "TEST.SZ", "market": "cn_stock", "period": "daily",
         "strategy_name": "MACrossStrategy",
-        "strategy_params": {"short_period": 5, "long_period": 10},
+        "strategy_params": {"short_period": 3, "long_period": 5},
         "start_date": "2024-06-01", "end_date": "2024-08-31",
     })
     assert resp.status_code == 200
@@ -71,9 +71,9 @@ def test_walk_forward_success(mock_chain):
     resp = client.post("/api/backtest/walk-forward", json={
         "symbol": "TEST.SZ", "market": "cn_stock", "period": "daily",
         "strategy_name": "MACrossStrategy",
-        "strategy_params": {"short_period": 5, "long_period": 10},
+        "strategy_params": {"short_period": 3, "long_period": 5},
         "start_date": "2024-06-01", "end_date": "2024-08-31",
-        "n_splits": 3,
+        "n_splits": 2,
     })
     assert resp.status_code == 200
     data = resp.json()

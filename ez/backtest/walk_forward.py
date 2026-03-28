@@ -48,11 +48,13 @@ class WalkForwardValidator:
             warmup = max(warmup, factor.warmup_period)
 
         min_tradeable = 10
-        if window_size < warmup + min_tradeable:
+        test_size = window_size - int(window_size * train_ratio)
+        if test_size < warmup + min_tradeable:
+            max_splits = n // (int((warmup + min_tradeable) / (1 - train_ratio)) + 1)
             raise ValueError(
-                f"Not enough data for {n_splits} splits with warmup={warmup}: "
-                f"each window has {window_size} bars, need at least {warmup + min_tradeable}. "
-                f"Try fewer splits or more data."
+                f"OOS window too short for {n_splits} splits: each test has {test_size} bars "
+                f"but strategy needs {warmup} warmup + {min_tradeable} tradeable = {warmup + min_tradeable}. "
+                f"Try n_splits<={max(1, max_splits)} or use a shorter-warmup strategy."
             )
 
         train_size = int(window_size * train_ratio)

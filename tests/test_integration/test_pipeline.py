@@ -26,7 +26,7 @@ def test_full_pipeline_with_mock(tmp_path):
         for b in bars
     ]).set_index("time")
 
-    strategy = MACrossStrategy(short_period=5, long_period=10)
+    strategy = MACrossStrategy(short_period=3, long_period=5)
     engine = VectorizedBacktestEngine(commission_rate=0.0003)
     result = engine.run(df, strategy, initial_capital=100000)
 
@@ -41,9 +41,9 @@ def test_full_pipeline_with_mock(tmp_path):
 
 
 def test_walk_forward_pipeline(sample_df):
-    strategy = MACrossStrategy(short_period=5, long_period=10)
+    strategy = MACrossStrategy(short_period=3, long_period=5)
     validator = WalkForwardValidator()
-    wf = validator.validate(sample_df, strategy, n_splits=3)
+    wf = validator.validate(sample_df, strategy, n_splits=2)
     assert len(wf.splits) > 0
     assert wf.overfitting_score >= 0
     assert "sharpe_ratio" in wf.oos_metrics
