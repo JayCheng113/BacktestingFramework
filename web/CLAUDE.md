@@ -1,7 +1,7 @@
 # web/ — Frontend Dashboard
 
 ## Tech Stack
-React 19 + TypeScript + Vite 7 + TailwindCSS 4 + ECharts 5
+React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5
 
 ## Components
 | Component | Role |
