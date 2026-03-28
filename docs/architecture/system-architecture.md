@@ -568,8 +568,101 @@ Live 面:     ░░░░░░░░░░  0%  (无 OMS/Broker/风控)
 7. V3.2: 调度层 + 监控(SLO/SLA) + 双状态机实现
 8. V3.3: 中国券商 API 适配（通达信/恒生/CTP）
 
+---
+
+## 语言分工与演进策略
+
+### 当前分工
+
+| 层 | 语言 | 理由 |
+|----|------|------|
+| Research / Gate / API / 编排 | Python | Agent 友好，开发效率高 |
+| 数值热路径 (ts_ops) | C++ (nanobind) | 已证实 4-8x 加速 |
+| Live 核心 (OMS/风控/执行) | **Python（V3.0 起步）** | 先跑通逻辑，验证正确性 |
+
+### Rust 引入触发条件（硬门槛，未达到前不引入）
+
+**只有同时满足以下条件时才考虑将 Live 组件迁移到 Rust：**
+
+| 维度 | 触发阈值 | 测量方式 |
+|------|---------|---------|
+| 性能 | 某模块长期占总 CPU > 30%，Python 优化后仍不达标 | profiling |
+| 稳定性 | Python Paper OMS 出现无法通过代码修复的崩溃/并发问题 | 事故日志 |
+| 延迟 | p99 延迟超过交易时间窗口要求（日线: 数秒；分钟线: 数百毫秒） | 监控 |
+| 恢复 | 重启恢复一致性无法在 Python 中保证 | 回放测试 |
+
+**当前判断：日线级别交易，Python OMS 完全足够。触发条件预计在引入分钟线/高频时才会达到。**
+
+### 如果引入 Rust 的路径
+
+```
+V3.0: Python Paper OMS 跑通 → 验证逻辑正确性
+V3.x: 评估是否触发门槛
+  - 未触发 → 继续 Python，优化热点
+  - 触发 → Rust 重写 OMS + Risk + Gateway
+         → 进程隔离（gRPC/HTTP），不是 FFI
+         → Python 回测 vs Rust 实盘回放一致性测试
+```
+
+---
+
+## 跨语言契约（不论未来用什么语言都需要）
+
+### 统一事件模型
+
+```python
+# 所有模块共用这些事件定义（Python dataclass / Rust struct / C++ struct）
+@dataclass
+class OrderEvent:
+    client_order_id: str    # 幂等键
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    quantity: float
+    order_type: Literal["MARKET", "LIMIT"]
+    limit_price: float | None
+    status: Literal["NEW", "SUBMITTED", "PARTIAL", "FILLED", "CANCELED", "REJECTED"]
+    timestamp: datetime
+
+@dataclass
+class FillEvent:
+    client_order_id: str
+    fill_price: float
+    fill_quantity: float
+    commission: float
+    timestamp: datetime
+
+@dataclass
+class RiskDecision:
+    order: OrderEvent
+    approved: bool
+    reject_reason: str | None    # NOTIONAL_LIMIT, POSITION_LIMIT, LEVERAGE, KILL_SWITCH
+```
+
+### 错误码（固定，跨语言通用）
+
+| 码 | 含义 | 重试 |
+|----|------|------|
+| OK | 成功 | — |
+| REJECTED_RISK | 风控拒绝 | 否 |
+| REJECTED_CAPACITY | 资金/仓位不足 | 否 |
+| BROKER_TIMEOUT | 券商超时 | 是（指数退避） |
+| BROKER_ERROR | 券商报错 | 视错误码 |
+| DUPLICATE_ORDER | 重复下单（幂等拦截） | 否 |
+
+### 工程化成本预估
+
+| 项目 | Python-only | + Rust (未来) |
+|------|------------|--------------|
+| CI/CD | 单语言构建，简单 | 多语言构建 + 交叉测试 |
+| 发布 | pip install | pip + cargo/binary |
+| 监控 | Python metrics | 统一 metrics 格式 |
+| Oncall | Python 调试 | 需要 Rust 调试能力 |
+
+---
+
 ### 优先级较低（不是不做，时机未到）
 - 高频事件引擎（当前无 tick 数据，日线级事件总线优先，高频后续可扩展）
+- Rust Live 核心（Python Paper OMS 先跑通，有瓶颈再迁移）
 - 黎曼流形几何特征 (SPD)
 - CRTP/Eigen/SIMD 显式优化
 - Kyle λ / Glosten-Milgrom 微观结构
