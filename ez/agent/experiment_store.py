@@ -182,11 +182,17 @@ class ExperimentStore:
 
     @staticmethod
     def _clean_rows(records: list[dict]) -> list[dict]:
-        """Convert NaN/inf to None for JSON compliance."""
+        """Clean DuckDB output for JSON compliance: NaN→None, JSON strings→objects."""
+        json_fields = ("gate_reasons", "strategy_params", "tags")
         for row in records:
             for k, v in row.items():
                 if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
                     row[k] = None
+                elif k in json_fields and isinstance(v, str):
+                    try:
+                        row[k] = json.loads(v)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
         return records
 
     def find_by_spec_id(self, spec_id: str) -> list[dict]:

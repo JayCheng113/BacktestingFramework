@@ -151,6 +151,36 @@ class TestGate:
         verdict = ResearchGate().evaluate(result)
         assert "PASS" in verdict.summary or "FAIL" in verdict.summary
 
+    def test_empty_reasons_does_not_pass(self, sample_data):
+        """Regression: all([]) is True in Python, but gate should FAIL with no rules."""
+        spec = RunSpec(
+            strategy_name="MACrossStrategy",
+            strategy_params={"short_period": 5, "long_period": 20},
+            symbol="T", market="cn_stock",
+            start_date=date(2022, 1, 1), end_date=date(2022, 12, 31),
+            run_backtest=False, wfo_n_splits=3,
+        )
+        result = Runner().run(spec, sample_data)
+        # No backtest → no sharpe/dd/trades/sig rules; require_wfo=False → no WFO rule
+        config = GateConfig(require_wfo=False)
+        verdict = ResearchGate(config).evaluate(result)
+        assert not verdict.passed, "Gate with zero rules must not pass"
+
+    def test_wfo_only_gate(self, sample_data):
+        """Gate evaluates a WFO-only run (no backtest)."""
+        spec = RunSpec(
+            strategy_name="MACrossStrategy",
+            strategy_params={"short_period": 5, "long_period": 20},
+            symbol="T", market="cn_stock",
+            start_date=date(2022, 1, 1), end_date=date(2022, 12, 31),
+            run_backtest=False, wfo_n_splits=3,
+        )
+        result = Runner().run(spec, sample_data)
+        verdict = ResearchGate().evaluate(result)
+        # Should have at least the WFO overfitting rule
+        rules = {r.rule for r in verdict.reasons}
+        assert "max_overfitting" in rules or "wfo_required" in rules
+
     def test_max_drawdown_rejects_large_dd(self, spec, sample_data):
         """Regression: negative max_drawdown (e.g. -0.31) must be caught by gate.
 

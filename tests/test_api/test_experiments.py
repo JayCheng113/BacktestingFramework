@@ -128,6 +128,9 @@ class TestListExperiments:
         runs = resp.json()
         assert len(runs) == 1
         assert runs[0]["strategy_name"] == "MACrossStrategy"
+        # gate_reasons must be a list (not a JSON string)
+        gr = runs[0].get("gate_reasons")
+        assert gr is None or isinstance(gr, list), f"gate_reasons should be list, got {type(gr)}"
 
     def test_list_invalid_params(self):
         resp = client.get("/api/experiments", params={"limit": -1})
@@ -149,7 +152,11 @@ class TestGetExperiment:
         run_id = r1.json()["run_id"]
         resp = client.get(f"/api/experiments/{run_id}")
         assert resp.status_code == 200
-        assert resp.json()["run_id"] == run_id
+        data = resp.json()
+        assert data["run_id"] == run_id
+        # strategy_params must be a dict (not a JSON string)
+        sp = data.get("strategy_params")
+        assert sp is None or isinstance(sp, dict), f"strategy_params should be dict, got {type(sp)}"
 
     def test_get_nonexistent(self):
         resp = client.get("/api/experiments/nonexistent")

@@ -136,5 +136,6 @@ class ResearchGate:
                     message=f"Overfitting {ofs:.2f} {'<=':} {cfg.max_overfitting_score}",
                 ))
 
-        passed = all(r.passed for r in reasons)
+        # Empty reasons = no checks performed = FAIL (not vacuous truth)
+        passed = len(reasons) > 0 and all(r.passed for r in reasons)
         return GateVerdict(passed=passed, reasons=reasons)
