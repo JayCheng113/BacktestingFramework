@@ -6,9 +6,11 @@ Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
 Version: 0.2.2 | Tests: 351 | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
-- [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, 4 gates, dual state machine
+- [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
 - [Engineering Governance](docs/architecture/governance.md) — thin core, lifecycle labels, version discipline
 - [V2.3+ Roadmap](docs/core-changes/v2.3-roadmap.md) — detailed per-version plan with exit gates
+
+**Note**: Gate framework is DESIGNED but not yet implemented. Gates are planned for V2.4+.
 
 ## Module Map
 - `ez/core/` — Computational primitives: matcher, ts_ops (C++ accelerated) [CLAUDE.md](ez/core/CLAUDE.md)
@@ -50,7 +52,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (351 tests)
+pytest tests/                # Full test suite (351 collected, 350 pass, 1 DuckDB lock env issue)
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
