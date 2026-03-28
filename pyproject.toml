@@ -33,9 +33,6 @@ akshare = ["akshare>=1.14"]
 wheel.packages = ["ez"]
 build-dir = "build/{wheel_tag}"
 
-[tool.setuptools.packages.find]
-include = ["ez*"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

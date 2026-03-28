@@ -10,6 +10,12 @@ def prices():
     return pd.Series([10.0, 11.0, 12.0, 11.5, 13.0, 12.5, 14.0, 13.5, 15.0, 14.5])
 
 
+@pytest.fixture
+def prices_with_nan():
+    """Series with NaN to verify C++ handles gaps correctly."""
+    return pd.Series([10.0, np.nan, 12.0, 11.5, 13.0, 12.5, np.nan, 14.0, 13.5, 15.0])
+
+
 class TestRollingMean:
     def test_basic(self, prices):
         result = ts_ops.rolling_mean(prices, window=3)
@@ -32,6 +38,11 @@ class TestRollingMean:
         s = pd.Series([1.0, 2.0])
         result = ts_ops.rolling_mean(s, window=5)
         assert result.isna().all()
+
+    def test_matches_pandas_with_nan(self, prices_with_nan):
+        result = ts_ops.rolling_mean(prices_with_nan, window=3)
+        expected = prices_with_nan.rolling(window=3, min_periods=3).mean()
+        pd.testing.assert_series_equal(result, expected)
 
 
 class TestRollingStd:
@@ -57,6 +68,11 @@ class TestRollingStd:
         result = ts_ops.rolling_std(s, window=3)
         assert result.dropna().eq(0).all()
 
+    def test_matches_pandas_with_nan(self, prices_with_nan):
+        result = ts_ops.rolling_std(prices_with_nan, window=3)
+        expected = prices_with_nan.rolling(window=3, min_periods=3).std(ddof=1)
+        pd.testing.assert_series_equal(result, expected)
+
 
 class TestEwmMean:
     def test_basic(self, prices):
@@ -69,6 +85,11 @@ class TestEwmMean:
     def test_matches_pandas(self, prices):
         result = ts_ops.ewm_mean(prices, span=5)
         expected = prices.ewm(span=5, min_periods=5).mean()
+        pd.testing.assert_series_equal(result, expected)
+
+    def test_matches_pandas_with_nan(self, prices_with_nan):
+        result = ts_ops.ewm_mean(prices_with_nan, span=3)
+        expected = prices_with_nan.ewm(span=3, min_periods=3).mean()
         pd.testing.assert_series_equal(result, expected)
 
 

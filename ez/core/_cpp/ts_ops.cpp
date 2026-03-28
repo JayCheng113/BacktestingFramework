@@ -2,19 +2,18 @@
  * C++ time series operations for ez-trading.
  *
  * Operates on numpy float64 arrays, returns numpy arrays.
- * NaN for positions where window is insufficient (matches pandas).
+ * NaN handling: NaN values are skipped in accumulations, matching pandas behavior.
+ * Output is NaN where valid count < min_periods (= window).
  */
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <cmath>
 #include <algorithm>
-#include <vector>
 
 namespace nb = nanobind;
 
 using InputArray = nb::ndarray<const double, nb::numpy, nb::ndim<1>>;
 
-// Helper: create a numpy float64 array of size n
 static nb::object make_output(size_t n) {
     auto np = nb::module_::import_("numpy");
     return np.attr("empty")(n, nb::arg("dtype") = "float64");
@@ -26,63 +25,73 @@ static double* get_data(nb::object& arr) {
 }
 
 /**
- * Simple moving average: O(n) sliding window.
+ * Simple moving average: O(n*window) — handles NaN by counting valid values.
  */
 static nb::object rolling_mean(InputArray input, int window) {
+    if (window <= 0) throw nb::value_error("window must be positive");
     size_t n = input.shape(0);
     const double* src = input.data();
+    size_t w = static_cast<size_t>(window);
 
     auto out = make_output(n);
     double* dst = get_data(out);
 
-    size_t w = static_cast<size_t>(window);
-    for (size_t i = 0; i < std::min(n, w - 1); i++) {
-        dst[i] = std::nan("");
-    }
-
-    if (n < w) return out;
-
-    double sum = 0.0;
-    for (size_t i = 0; i < w; i++) sum += src[i];
-    dst[w - 1] = sum / window;
-
-    for (size_t i = w; i < n; i++) {
-        sum += src[i] - src[i - w];
-        dst[i] = sum / window;
+    for (size_t i = 0; i < n; i++) {
+        if (i < w - 1) {
+            dst[i] = std::nan("");
+            continue;
+        }
+        double sum = 0.0;
+        int count = 0;
+        for (size_t j = 0; j < w; j++) {
+            double v = src[i - w + 1 + j];
+            if (!std::isnan(v)) {
+                sum += v;
+                count++;
+            }
+        }
+        // min_periods = window: require ALL values to be valid
+        dst[i] = (count == window) ? sum / window : std::nan("");
     }
 
     return out;
 }
 
 /**
- * Rolling standard deviation.
- * Two-pass per window. O(n*window) but window is typically small (5-60).
+ * Rolling standard deviation — NaN-safe, two-pass per window.
  */
 static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
+    if (window <= 0) throw nb::value_error("window must be positive");
     size_t n = input.shape(0);
     const double* src = input.data();
+    size_t w = static_cast<size_t>(window);
 
     auto out = make_output(n);
     double* dst = get_data(out);
 
-    size_t w = static_cast<size_t>(window);
-    for (size_t i = 0; i < std::min(n, w - 1); i++) {
-        dst[i] = std::nan("");
-    }
-
-    if (n < w) return out;
-
-    for (size_t i = w - 1; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
+        if (i < w - 1) {
+            dst[i] = std::nan("");
+            continue;
+        }
         double mean = 0.0;
-        for (size_t j = 0; j < w; j++) mean += src[i - w + 1 + j];
-        mean /= window;
+        int count = 0;
+        for (size_t j = 0; j < w; j++) {
+            double v = src[i - w + 1 + j];
+            if (!std::isnan(v)) { mean += v; count++; }
+        }
+        if (count < window) { dst[i] = std::nan(""); continue; }
+        mean /= count;
 
         double var = 0.0;
         for (size_t j = 0; j < w; j++) {
-            double d = src[i - w + 1 + j] - mean;
-            var += d * d;
+            double v = src[i - w + 1 + j];
+            if (!std::isnan(v)) {
+                double d = v - mean;
+                var += d * d;
+            }
         }
-        int denom = window - ddof;
+        int denom = count - ddof;
         dst[i] = (denom > 0) ? std::sqrt(var / denom) : std::nan("");
     }
 
@@ -91,11 +100,10 @@ static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
 
 /**
  * Exponential weighted moving average with adjust=True (pandas default).
- *
- * Incremental formula: num = alpha*x + (1-alpha)*num, den = 1 + (1-alpha)*den
- * Result = num / den
+ * NaN-safe: skip NaN values, maintain weights as if they weren't there.
  */
 static nb::object ewm_mean(InputArray input, int span) {
+    if (span <= 0) throw nb::value_error("span must be positive");
     size_t n = input.shape(0);
     const double* src = input.data();
     double alpha = 2.0 / (span + 1.0);
@@ -105,18 +113,24 @@ static nb::object ewm_mean(InputArray input, int span) {
     double* dst = get_data(out);
 
     size_t min_p = static_cast<size_t>(span);
-    for (size_t i = 0; i < std::min(n, min_p - 1); i++) {
-        dst[i] = std::nan("");
-    }
-
-    if (n < min_p) return out;
-
     double num = 0.0, den = 0.0;
+    int valid_count = 0;
+
     for (size_t i = 0; i < n; i++) {
-        num = src[i] + decay * num;    // NO alpha multiply — pandas adjust=True
-        den = 1.0 + decay * den;
-        if (i >= min_p - 1) {
+        if (!std::isnan(src[i])) {
+            num = src[i] + decay * num;
+            den = 1.0 + decay * den;
+            valid_count++;
+        } else {
+            // Decay existing weights but don't add new observation
+            num = decay * num;
+            den = decay * den;
+        }
+
+        if (valid_count >= (int)min_p && den > 0) {
             dst[i] = num / den;
+        } else {
+            dst[i] = std::nan("");
         }
     }
 
@@ -127,13 +141,14 @@ static nb::object ewm_mean(InputArray input, int span) {
  * First difference: out[i] = x[i] - x[i-periods].
  */
 static nb::object diff(InputArray input, int periods = 1) {
+    if (periods <= 0) throw nb::value_error("periods must be positive");
     size_t n = input.shape(0);
     const double* src = input.data();
+    size_t p = static_cast<size_t>(periods);
 
     auto out = make_output(n);
     double* dst = get_data(out);
 
-    size_t p = static_cast<size_t>(periods);
     for (size_t i = 0; i < std::min(n, p); i++) dst[i] = std::nan("");
     for (size_t i = p; i < n; i++) dst[i] = src[i] - src[i - p];
 
@@ -144,17 +159,20 @@ static nb::object diff(InputArray input, int periods = 1) {
  * Percentage change: out[i] = (x[i] - x[i-periods]) / x[i-periods].
  */
 static nb::object pct_change(InputArray input, int periods = 1) {
+    if (periods <= 0) throw nb::value_error("periods must be positive");
     size_t n = input.shape(0);
     const double* src = input.data();
+    size_t p = static_cast<size_t>(periods);
 
     auto out = make_output(n);
     double* dst = get_data(out);
 
-    size_t p = static_cast<size_t>(periods);
     for (size_t i = 0; i < std::min(n, p); i++) dst[i] = std::nan("");
     for (size_t i = p; i < n; i++) {
         double prev = src[i - p];
-        dst[i] = (prev != 0.0) ? (src[i] - prev) / prev : std::nan("");
+        dst[i] = (prev != 0.0 && !std::isnan(prev) && !std::isnan(src[i]))
+                 ? (src[i] - prev) / prev
+                 : std::nan("");
     }
 
     return out;
