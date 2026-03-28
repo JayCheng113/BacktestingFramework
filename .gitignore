@@ -6,3 +6,6 @@ web/node_modules/
 web/dist/
 *.egg-info/
 ez_trading.egg-info/
+*.zip
+dist/
+build/
