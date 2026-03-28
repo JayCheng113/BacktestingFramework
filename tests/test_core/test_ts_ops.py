@@ -19,6 +19,11 @@ class TestRollingMean:
         assert result.iloc[2] == pytest.approx(11.0)  # (10+11+12)/3
         assert result.iloc[3] == pytest.approx(11.5)  # (11+12+11.5)/3
 
+    def test_matches_pandas(self, prices):
+        result = ts_ops.rolling_mean(prices, window=5)
+        expected = prices.rolling(window=5, min_periods=5).mean()
+        pd.testing.assert_series_equal(result, expected)
+
     def test_window_1(self, prices):
         result = ts_ops.rolling_mean(prices, window=1)
         pd.testing.assert_series_equal(result, prices)
@@ -34,6 +39,11 @@ class TestRollingStd:
         result = ts_ops.rolling_std(prices, window=3)
         assert pd.isna(result.iloc[1])
         assert result.iloc[2] > 0  # non-zero std
+
+    def test_matches_pandas(self, prices):
+        result = ts_ops.rolling_std(prices, window=5)
+        expected = prices.rolling(window=5, min_periods=5).std(ddof=1)
+        pd.testing.assert_series_equal(result, expected)
 
     def test_ddof_0(self, prices):
         r1 = ts_ops.rolling_std(prices, window=3, ddof=1)
@@ -68,6 +78,11 @@ class TestDiff:
         assert pd.isna(result.iloc[0])
         assert result.iloc[1] == pytest.approx(1.0)  # 11 - 10
 
+    def test_matches_pandas(self, prices):
+        result = ts_ops.diff(prices, periods=3)
+        expected = prices.diff(periods=3)
+        pd.testing.assert_series_equal(result, expected)
+
     def test_periods_2(self, prices):
         result = ts_ops.diff(prices, periods=2)
         assert pd.isna(result.iloc[0])
@@ -80,6 +95,11 @@ class TestPctChange:
         result = ts_ops.pct_change(prices)
         assert pd.isna(result.iloc[0])
         assert result.iloc[1] == pytest.approx(0.1)  # (11-10)/10
+
+    def test_matches_pandas(self, prices):
+        result = ts_ops.pct_change(prices, periods=3)
+        expected = prices.pct_change(periods=3)
+        pd.testing.assert_series_equal(result, expected)
 
     def test_periods(self, prices):
         result = ts_ops.pct_change(prices, periods=2)

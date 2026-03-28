@@ -18,6 +18,16 @@ Provide the low-level building blocks (matching, time-series ops) that both fact
 - Upstream: none (leaf package)
 - Downstream: `ez/factor/`, `ez/backtest/`
 
+## ts_ops Scope
+ts_ops covers **rolling/windowed time-series operations on market data** — the hot path
+in factor computation. The following are explicitly OUT OF SCOPE (not hot path, not
+worth C++ overhead):
+- `equity_curve.pct_change()` in metrics.py — aggregate return calculation
+- `df["adj_close"].pct_change()` in engine.py — benchmark/significance returns
+- `.std()`, `.corr()`, `.cov()`, `.cummax()` in metrics.py/evaluator.py — aggregate stats
+
+These remain direct pandas calls. Only factor-layer time-series math routes through ts_ops.
+
 ## V2.1 C++ Replacement Plan
 1. Each ts_ops function gets a C++ implementation via nanobind
 2. SimpleMatcher gets a C++ counterpart (SlippageMatcher)
