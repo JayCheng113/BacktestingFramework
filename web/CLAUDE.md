@@ -9,7 +9,7 @@ React 19 + TypeScript + Vite 7 + TailwindCSS 4 + ECharts 5
 | Navbar | Top navigation |
 | SearchBar | Symbol + market + date range |
 | KlineChart | ECharts candlestick + volume |
-| BacktestPanel | Strategy selection + backtest results |
+| BacktestPanel | Strategy selection + trading cost controls (commission/min_commission/slippage) + results + trade table + CSV export |
 | FactorPanel | Factor IC evaluation |
 | Dashboard | Main page |
 

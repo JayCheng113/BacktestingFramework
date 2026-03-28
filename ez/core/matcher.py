@@ -61,6 +61,8 @@ class SimpleMatcher(Matcher):
     def __init__(
         self, commission_rate: float = 0.0003, min_commission: float = 5.0
     ) -> None:
+        if commission_rate < 0 or min_commission < 0:
+            raise ValueError("commission_rate and min_commission must be >= 0")
         self._rate = commission_rate
         self._min_comm = min_commission
 

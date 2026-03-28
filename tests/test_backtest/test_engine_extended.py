@@ -155,6 +155,24 @@ def test_cumulative_entry_commission(simple_df):
         assert t.pnl < (t.exit_price - t.entry_price) * 10000  # pnl < raw gain (commission reduces it)
 
 
+def test_buy_fail_does_not_zero_equity(simple_df):
+    """When min_commission makes buy impossible, equity must not drop to zero."""
+    engine = VectorizedBacktestEngine(commission_rate=0.001, min_commission=200000.0)
+    result = engine.run(simple_df, AlwaysInStrategy(), initial_capital=100000)
+    # Every bar should have equity == initial capital (no trades possible)
+    assert (result.equity_curve == 100000).all()
+    assert result.metrics["trade_count"] == 0
+
+
+def test_partial_sell_pnl_accounting(simple_df):
+    """Scale-out PnL must match equity change."""
+    engine = VectorizedBacktestEngine(commission_rate=0.001, min_commission=0.0)
+    result = engine.run(simple_df, ScaleInStrategy(), initial_capital=100000)
+    total_trade_pnl = sum(t.pnl for t in result.trades)
+    equity_change = result.equity_curve.iloc[-1] - 100000
+    assert abs(total_trade_pnl - equity_change) < 1.0  # within $1 rounding
+
+
 def test_metrics_keys_complete(engine, simple_df):
     result = engine.run(simple_df, AlwaysInStrategy(), initial_capital=100000)
     required_keys = {"sharpe_ratio", "total_return", "max_drawdown", "max_drawdown_duration", "win_rate", "trade_count", "profit_factor", "avg_holding_days"}

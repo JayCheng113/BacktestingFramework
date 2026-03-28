@@ -199,22 +199,21 @@ class VectorizedBacktestEngine:
                     additional = min(target_value - current_value, cash)
                     if additional > 0:
                         fill = matcher.fill_buy(exec_price, additional)
-                        if fill.shares == 0:
-                            # Commission would exceed trade value — skip
-                            continue
-                        if shares == 0:
-                            entry_time = time_list[i]
-                            entry_price = fill.fill_price
-                            entry_comm = fill.commission
-                            partial_pnl = 0.0
-                            partial_comm = 0.0
-                        elif fill.shares > 0:
-                            entry_comm += fill.commission
-                            # Weighted average entry price
-                            entry_price = (entry_price * shares + fill.fill_price * fill.shares) / (shares + fill.shares)
-                        shares += fill.shares
-                        peak_shares = max(peak_shares, shares)
-                        cash += fill.net_amount  # net_amount is negative for buys
+                        if fill.shares > 0:
+                            if shares == 0:
+                                entry_time = time_list[i]
+                                entry_price = fill.fill_price
+                                entry_comm = fill.commission
+                                partial_pnl = 0.0
+                                partial_comm = 0.0
+                            else:
+                                entry_comm += fill.commission
+                                entry_price = (entry_price * shares + fill.fill_price * fill.shares) / (shares + fill.shares)
+                            shares += fill.shares
+                            peak_shares = max(peak_shares, shares)
+                            cash += fill.net_amount
+                        # If fill.shares == 0: commission exceeded amount, skip trade
+                        # but fall through to update prev_weight and record equity
 
                 prev_weight = target_weight
 
