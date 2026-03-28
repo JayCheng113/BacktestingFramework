@@ -196,6 +196,7 @@ class VectorizedBacktestEngine:
                             entry_price = exec_price
                             entry_comm = comm
                         elif new_shares > 0:
+                            entry_comm += comm  # Accumulate commission across multiple buys
                             # Weighted average entry price
                             entry_price = (entry_price * shares + exec_price * new_shares) / (shares + new_shares)
                         shares += new_shares

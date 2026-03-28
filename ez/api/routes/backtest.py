@@ -89,8 +89,13 @@ def run_backtest(req: BacktestRequest):
 def run_walk_forward(req: WalkForwardRequest):
     strategy = _get_strategy(req.strategy_name, req.strategy_params)
     df = _fetch_data(req)
+    config = load_config()
     validator = WalkForwardValidator(
-        VectorizedBacktestEngine(commission_rate=req.commission_rate)
+        VectorizedBacktestEngine(
+            commission_rate=req.commission_rate,
+            min_commission=config.backtest.default_min_commission,
+            risk_free_rate=config.backtest.risk_free_rate,
+        )
     )
     try:
         result = validator.validate(df, strategy, req.n_splits, req.train_ratio, req.initial_capital)

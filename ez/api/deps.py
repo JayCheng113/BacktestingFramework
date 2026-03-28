@@ -6,18 +6,16 @@ import os
 
 from ez.config import load_config
 from ez.data.provider import DataProvider, DataProviderChain
-from ez.data.providers.tencent_provider import TencentDataProvider
 from ez.data.store import DuckDBStore
 
 logger = logging.getLogger(__name__)
 
 _store: DuckDBStore | None = None
 _chain: DataProviderChain | None = None
-_tushare_provider = None  # TushareDataProvider singleton (shared by chain + routes)
+_tushare_provider = None
 
 
 def get_store() -> DuckDBStore:
-    """Return module-level singleton DuckDBStore."""
     global _store
     if _store is None:
         config = load_config()
@@ -26,7 +24,6 @@ def get_store() -> DuckDBStore:
 
 
 def get_tushare_provider():
-    """Return singleton TushareDataProvider if token is configured, else None."""
     global _tushare_provider
     if _tushare_provider is not None:
         return _tushare_provider
@@ -34,37 +31,62 @@ def get_tushare_provider():
         return None
     from ez.data.providers.tushare_provider import TushareDataProvider
     _tushare_provider = TushareDataProvider(store=get_store())
-    logger.info("TushareDataProvider singleton created (TUSHARE_TOKEN found)")
+    logger.info("TushareDataProvider singleton created")
     return _tushare_provider
 
 
+# Provider registry keyed by config name
+def _build_provider(name: str) -> DataProvider | None:
+    """Instantiate a provider by its config name. Returns None if unavailable."""
+    if name == "tushare":
+        return get_tushare_provider()
+    if name == "fmp":
+        if os.environ.get("FMP_API_KEY"):
+            from ez.data.providers.fmp_provider import FMPDataProvider
+            return FMPDataProvider()
+        return None
+    if name == "tencent":
+        from ez.data.providers.tencent_provider import TencentDataProvider
+        return TencentDataProvider()
+    logger.warning("Unknown provider name in config: %s", name)
+    return None
+
+
 def get_chain() -> DataProviderChain:
-    """Return singleton DataProviderChain (reuses store and providers)."""
+    """Build provider chain from config data_sources (primary + backups per market).
+
+    All unique providers across all markets are added in priority order.
+    This ensures a single chain handles any market, with config-driven failover.
+    """
     global _chain
     if _chain is None:
         store = get_store()
         config = load_config()
+
+        # Collect providers in config priority order, deduplicate
+        seen: set[str] = set()
         providers: list[DataProvider] = []
 
-        # Add Tushare for cn_stock if token available
-        tushare = get_tushare_provider()
-        if tushare:
-            providers.append(tushare)
+        for market_cfg in [config.data_sources.cn_stock, config.data_sources.us_stock,
+                           config.data_sources.hk_stock]:
+            for name in [market_cfg.primary] + market_cfg.backup:
+                if name and name not in seen:
+                    p = _build_provider(name)
+                    if p:
+                        providers.append(p)
+                        seen.add(name)
 
-        # Add FMP for us_stock if key available
-        if os.environ.get("FMP_API_KEY"):
-            from ez.data.providers.fmp_provider import FMPDataProvider
-            providers.append(FMPDataProvider())
+        # Fallback: ensure at least Tencent is present
+        if "tencent" not in seen:
+            from ez.data.providers.tencent_provider import TencentDataProvider
+            providers.append(TencentDataProvider())
 
-        # Tencent as universal backup (no auth needed)
-        providers.append(TencentDataProvider())
-
+        logger.info("DataProviderChain built: %s", [p.name for p in providers])
         _chain = DataProviderChain(providers=providers, store=store)
     return _chain
 
 
 def close_resources() -> None:
-    """Close all singleton resources (called at app shutdown)."""
     global _store, _chain, _tushare_provider
     _chain = None
     if _tushare_provider is not None:
