@@ -28,7 +28,7 @@ function computeBOLL(data: KlineBar[], period: number = 20, mult: number = 2): {
     if (i < period - 1) { mid.push(null); upper.push(null); lower.push(null); continue }
     const slice = data.slice(i - period + 1, i + 1).map(d => d.close)
     const avg = slice.reduce((a, b) => a + b, 0) / period
-    const std = Math.sqrt(slice.reduce((s, v) => s + (v - avg) ** 2, 0) / period)
+    const std = Math.sqrt(slice.reduce((s, v) => s + (v - avg) ** 2, 0) / (period - 1))  // ddof=1, match backend pandas .std()
     mid.push(+avg.toFixed(2))
     upper.push(+(avg + mult * std).toFixed(2))
     lower.push(+(avg - mult * std).toFixed(2))

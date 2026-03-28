@@ -9,3 +9,4 @@ ez_trading.egg-info/
 *.zip
 dist/
 build/
+ez-trading.spec
