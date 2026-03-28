@@ -104,6 +104,11 @@ class TestDiff:
         expected = prices.diff(periods=3)
         pd.testing.assert_series_equal(result, expected)
 
+    def test_matches_pandas_with_nan(self, prices_with_nan):
+        result = ts_ops.diff(prices_with_nan, periods=2)
+        expected = prices_with_nan.diff(periods=2)
+        pd.testing.assert_series_equal(result, expected)
+
     def test_periods_2(self, prices):
         result = ts_ops.diff(prices, periods=2)
         assert pd.isna(result.iloc[0])
@@ -120,6 +125,11 @@ class TestPctChange:
     def test_matches_pandas(self, prices):
         result = ts_ops.pct_change(prices, periods=3)
         expected = prices.pct_change(periods=3)
+        pd.testing.assert_series_equal(result, expected)
+
+    def test_matches_pandas_with_nan(self, prices_with_nan):
+        result = ts_ops.pct_change(prices_with_nan, periods=2)
+        expected = prices_with_nan.pct_change(periods=2, fill_method=None)
         pd.testing.assert_series_equal(result, expected)
 
     def test_div_by_zero_returns_inf(self):

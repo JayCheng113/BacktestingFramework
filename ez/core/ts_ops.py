@@ -63,4 +63,4 @@ def pct_change(s: pd.Series, periods: int = 1) -> pd.Series:
     if _USE_CPP:
         result = _cpp_pct_change(s.values, periods)
         return pd.Series(result, index=s.index)
-    return s.pct_change(periods=periods)
+    return s.pct_change(periods=periods, fill_method=None)
