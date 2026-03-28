@@ -81,15 +81,17 @@ class ExperimentStore:
                 completed_at TIMESTAMPTZ NOT NULL
             )
         """)
-        # Backfill: if upgrading from pre-completed_specs schema, populate
-        # from existing completed runs so idempotency holds for old data.
-        self._conn.execute("""
-            INSERT INTO completed_specs (spec_id, run_id, completed_at)
-            SELECT spec_id, run_id, created_at
-            FROM experiment_runs
-            WHERE status = 'completed'
-            ON CONFLICT (spec_id) DO NOTHING
-        """)
+        # Backfill: only on first init (completed_specs empty) to avoid
+        # unnecessary full-table scan on every startup.
+        count = self._conn.execute("SELECT COUNT(*) FROM completed_specs").fetchone()[0]
+        if count == 0:
+            self._conn.execute("""
+                INSERT INTO completed_specs (spec_id, run_id, completed_at)
+                SELECT spec_id, run_id, created_at
+                FROM experiment_runs
+                WHERE status = 'completed'
+                ON CONFLICT (spec_id) DO NOTHING
+            """)
 
     def save_spec(self, spec_dict: dict) -> None:
         """Insert spec if not exists. Immutable — never overwrites existing specs."""
@@ -187,9 +189,12 @@ class ExperimentStore:
         try:
             self.save_run(report_dict)
         except Exception:
-            self._conn.execute(
-                "DELETE FROM completed_specs WHERE spec_id = ?", [spec_id],
-            )
+            try:
+                self._conn.execute(
+                    "DELETE FROM completed_specs WHERE spec_id = ?", [spec_id],
+                )
+            except Exception:
+                pass  # rollback failed — original error is more important
             raise
 
         return True
@@ -225,7 +230,7 @@ class ExperimentStore:
 
     def list_runs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT r.*, s.strategy_name, s.symbol, s.market "
+            "SELECT r.*, s.strategy_name, s.symbol, s.market, s.strategy_params "
             "FROM experiment_runs r "
             "JOIN experiment_specs s ON r.spec_id = s.spec_id "
             "ORDER BY r.created_at DESC LIMIT ? OFFSET ?",
