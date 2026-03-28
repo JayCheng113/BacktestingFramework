@@ -16,7 +16,7 @@ from ez.agent.gates import GateConfig, ResearchGate
 from ez.agent.report import ExperimentReport
 from ez.agent.run_spec import RunSpec
 from ez.agent.runner import Runner
-from ez.api.deps import get_chain, get_store
+from ez.api.deps import get_chain
 
 router = APIRouter()
 
@@ -51,9 +51,27 @@ class ExperimentRequest(BaseModel):
 
 # ---- Helpers ----
 
+_exp_store: ExperimentStore | None = None
+
 def _get_experiment_store() -> ExperimentStore:
-    store = get_store()
-    return ExperimentStore(store._conn)
+    """Get or create ExperimentStore with its own DuckDB connection.
+
+    Uses the same db file as the core store but opens an independent
+    connection — avoids accessing DuckDBStore._conn (private).
+    """
+    global _exp_store
+    if _exp_store is None:
+        import duckdb
+        from ez.config import load_config
+        from pathlib import Path
+        config = load_config()
+        db_path = Path(config.database.path)
+        if not db_path.is_absolute():
+            db_path = Path(__file__).resolve().parent.parent.parent.parent / db_path
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = duckdb.connect(str(db_path))
+        _exp_store = ExperimentStore(conn)
+    return _exp_store
 
 
 def _fetch_data(symbol: str, market: str, period: str, start: date, end: date):

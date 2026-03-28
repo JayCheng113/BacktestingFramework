@@ -10,7 +10,7 @@ import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -32,7 +32,7 @@ class RunResult:
     status: str  # "completed" | "failed"
     backtest: BacktestResult | None = None
     walk_forward: WalkForwardResult | None = None
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: float = 0.0
     code_commit: str = ""
     error: str | None = None
