@@ -25,7 +25,9 @@ def load_all_strategies() -> None:
         # PyInstaller frozen mode: hidden-imports are already bundled, just import them
         try:
             import ez.strategy.builtin.ma_cross  # noqa: F401
-            logger.debug("Loaded frozen strategy: ma_cross")
+            import ez.strategy.builtin.momentum  # noqa: F401
+            import ez.strategy.builtin.boll_reversion  # noqa: F401
+            logger.debug("Loaded frozen strategies: ma_cross, momentum, boll_reversion")
         except ImportError as e:
             logger.warning("Failed to load frozen strategy: %s", e)
         return

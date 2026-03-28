@@ -8,13 +8,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ez.api.deps import get_chain
-from ez.factor.builtin.technical import MA, EMA, RSI, MACD, BOLL
+from ez.factor.builtin.technical import MA, EMA, RSI, MACD, BOLL, Momentum
 from ez.factor.evaluator import FactorEvaluator
 
 router = APIRouter()
 
 _FACTOR_MAP = {
-    "ma": MA, "ema": EMA, "rsi": RSI, "macd": MACD, "boll": BOLL,
+    "ma": MA, "ema": EMA, "rsi": RSI, "macd": MACD, "boll": BOLL, "momentum": Momentum,
 }
 
 

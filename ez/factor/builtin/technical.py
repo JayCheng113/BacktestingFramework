@@ -122,3 +122,23 @@ class BOLL(Factor):
         data[f"boll_upper_{self._period}"] = mid + self._std_dev * std
         data[f"boll_lower_{self._period}"] = mid - self._std_dev * std
         return data
+
+
+class Momentum(Factor):
+    """N-day return as momentum factor."""
+
+    def __init__(self, period: int = 20):
+        self._period = period
+
+    @property
+    def name(self) -> str:
+        return f"momentum_{self._period}"
+
+    @property
+    def warmup_period(self) -> int:
+        return self._period
+
+    def compute(self, data: pd.DataFrame) -> pd.DataFrame:
+        data = data.copy()
+        data[self.name] = data["adj_close"].pct_change(periods=self._period)
+        return data
