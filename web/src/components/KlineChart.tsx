@@ -47,6 +47,9 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   // Build buy/sell markers from trades
   const buyMarkers: any[] = []
   const sellMarkers: any[] = []
+  // Store trade reference with each marker for correct tooltip mapping
+  const buyTrades: TradeRecord[] = []
+  const sellTrades: TradeRecord[] = []
   if (trades.length > 0) {
     const dateSet = new Set(dates)
     for (const t of trades) {
@@ -55,16 +58,16 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       if (dateSet.has(entryDate)) {
         buyMarkers.push({
           coord: [entryDate, t.entry_price],
-          value: `Buy\n${t.entry_price.toFixed(2)}`,
           itemStyle: { color: '#ef4444' },
         })
+        buyTrades.push(t)
       }
       if (dateSet.has(exitDate)) {
         sellMarkers.push({
           coord: [exitDate, t.exit_price],
-          value: `Sell\n${t.exit_price.toFixed(2)}\nPnL: ${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(0)}`,
-          itemStyle: { color: t.pnl >= 0 ? '#22c55e' : '#ef4444' },
+          itemStyle: { color: t.pnl >= 0 ? '#ef4444' : '#22c55e' },  // Chinese: red=profit, green=loss
         })
+        sellTrades.push(t)
       }
     }
   }
@@ -123,8 +126,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       })),
       tooltip: {
         formatter: (p: any) => {
-          const idx = p.dataIndex
-          const t = trades.filter(t => dates.includes(t.entry_time.slice(0, 10)))[idx]
+          const t = buyTrades[p.dataIndex]
           return t ? `<b>Buy</b><br/>Price: ${t.entry_price.toFixed(2)}` : ''
         }
       },
@@ -142,8 +144,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       })),
       tooltip: {
         formatter: (p: any) => {
-          const idx = p.dataIndex
-          const t = trades.filter(t => dates.includes(t.exit_time.slice(0, 10)))[idx]
+          const t = sellTrades[p.dataIndex]
           return t ? `<b>Sell</b><br/>Price: ${t.exit_price.toFixed(2)}<br/>PnL: ${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}` : ''
         }
       },

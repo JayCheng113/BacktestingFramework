@@ -10,8 +10,8 @@ export default function Dashboard() {
   const [klineData, setKlineData] = useState<KlineBar[]>([])
   const [currentSymbol, setCurrentSymbol] = useState('')
   const [currentMarket, setCurrentMarket] = useState('cn_stock')
-  const [startDate, setStartDate] = useState('2024-01-01')
-  const [endDate, setEndDate] = useState('2024-12-31')
+  const [startDate, setStartDate] = useState(() => new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10))
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [loading, setLoading] = useState(false)
   const [trades, setTrades] = useState<TradeRecord[]>([])
 

@@ -64,10 +64,12 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   } : null
 
   // IC Distribution histogram
-  const icHistOption = result ? (() => {
+  const icHistOption = result && result.ic_series.length > 0 ? (() => {
     const bins = 20
     const vals = result.ic_series
-    const min = Math.min(...vals), max = Math.max(...vals)
+    if (vals.length === 0) return null
+    let min = vals[0], max = vals[0]
+    for (const v of vals) { if (v < min) min = v; if (v > max) max = v }
     const step = (max - min) / bins || 0.01
     const counts = Array(bins).fill(0)
     vals.forEach((v: number) => { const idx = Math.min(Math.floor((v - min) / step), bins - 1); counts[idx]++ })

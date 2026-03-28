@@ -25,7 +25,13 @@ class MetricsCalculator:
         n_days = len(daily_returns)
         years = n_days / self._td if n_days > 0 else 1
 
-        ann_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0.0
+        # Guard: total_return < -1.0 would produce NaN with fractional exponent
+        if total_return <= -1.0:
+            ann_return = -1.0
+        elif years > 0:
+            ann_return = (1 + total_return) ** (1 / years) - 1
+        else:
+            ann_return = 0.0
         ann_vol = float(daily_returns.std() * np.sqrt(self._td))
 
         daily_rf = self._rf / self._td

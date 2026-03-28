@@ -1,6 +1,10 @@
 """Walk-Forward robustness validation.
 
 [CORE] -- V1: fixed-parameter validation. V2 adds parameter optimization.
+
+IMPORTANT: Each split's data is strictly non-overlapping to prevent data leakage.
+The engine handles warmup internally — if a split is too short after warmup,
+the engine returns a minimal empty result (this is correct behavior).
 """
 from __future__ import annotations
 
@@ -14,9 +18,14 @@ from ez.types import BacktestResult, WalkForwardResult
 class WalkForwardValidator:
     """Split data into rolling train/test windows and measure OOS degradation.
 
-    Each split prepends extra warmup data so the engine can compute factors
-    before the actual train/test range begins. Without this, splits shorter
-    than the strategy's warmup period produce zero trades.
+    Data layout for n_splits=3, train_ratio=0.7:
+    |---train70%---|--test30%--|---train70%---|--test30%--|---train70%---|--test30%--|
+    ^              ^           ^              ^           ^              ^
+    Split 0                   Split 1                   Split 2
+
+    NO data overlap between IS and OOS, or between adjacent splits.
+    Each split is passed to the engine as-is. The engine computes factor warmup
+    internally and trims it. If a split is too short, it returns 0 trades.
     """
 
     def __init__(self, engine: VectorizedBacktestEngine | None = None):
@@ -31,21 +40,18 @@ class WalkForwardValidator:
         initial_capital: float = 100000.0,
     ) -> WalkForwardResult:
         n = len(data)
+        window_size = n // n_splits
 
-        # Determine warmup needed by strategy's factors
+        # Each split needs enough bars for the engine to produce meaningful results
         warmup = 0
         for factor in strategy.required_factors():
             warmup = max(warmup, factor.warmup_period)
 
-        # Each split needs: warmup + enough bars for actual trading
-        min_tradeable = 10  # minimum bars after warmup to produce meaningful results
-        min_window = warmup + min_tradeable
-        window_size = n // n_splits
-
-        if window_size < min_tradeable:
+        min_tradeable = 10
+        if window_size < warmup + min_tradeable:
             raise ValueError(
                 f"Not enough data for {n_splits} splits with warmup={warmup}: "
-                f"each window has {window_size} bars, need at least {min_tradeable} tradeable bars. "
+                f"each window has {window_size} bars, need at least {warmup + min_tradeable}. "
                 f"Try fewer splits or more data."
             )
 
@@ -59,24 +65,18 @@ class WalkForwardValidator:
             window_start = i * window_size
             train_end = window_start + train_size
             test_end = min(window_start + window_size, n)
-            if test_end > n:
-                break
 
-            # Prepend warmup data from before the window start
-            # This gives the engine enough history to compute factors
-            warmup_start = max(0, window_start - warmup)
+            # Strictly non-overlapping: IS = [window_start, train_end), OOS = [train_end, test_end)
+            train_data = data.iloc[window_start:train_end]
+            test_data = data.iloc[train_end:test_end]
 
-            train_data = data.iloc[warmup_start:train_end]
-            test_data = data.iloc[max(0, train_end - warmup):test_end]
-
-            if len(test_data) <= warmup:
+            if len(test_data) < min_tradeable:
                 continue
 
-            # In-sample
+            # Engine handles warmup internally — short data → empty result (no trades)
             is_result = self._engine.run(train_data, strategy, initial_capital)
             is_sharpes.append(is_result.metrics.get("sharpe_ratio", 0.0))
 
-            # Out-of-sample
             oos_result = self._engine.run(test_data, strategy, initial_capital)
             oos_sharpes.append(oos_result.metrics.get("sharpe_ratio", 0.0))
 
