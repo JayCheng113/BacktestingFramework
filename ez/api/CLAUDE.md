@@ -1,7 +1,7 @@
 # ez/api — API Layer
 
 ## Responsibility
-REST API exposing market data, backtesting, and factor evaluation via FastAPI.
+REST API exposing market data, backtesting, factor evaluation, and experiments via FastAPI.
 
 ## Public Interfaces
 - `GET /api/health` — Health check
@@ -15,18 +15,22 @@ REST API exposing market data, backtesting, and factor evaluation via FastAPI.
 - `GET /api/backtest/strategies` — List registered strategies
 - `GET /api/factors` — List available factors
 - `POST /api/factors/evaluate` — Evaluate factor IC
+- `POST /api/experiments` — Submit and run experiment (V2.4)
+- `GET /api/experiments` — List recent experiments (V2.4)
+- `GET /api/experiments/{run_id}` — Get experiment detail (V2.4)
 
 ## Files
 | File | Role |
 |------|------|
 | app.py | FastAPI app entry, CORS, lifespan, router registration |
-| deps.py | Singleton DuckDBStore + DataProviderChain (shared across routes) |
+| deps.py | Singleton DuckDBStore + DataProviderChain + cleanup lifecycle |
 | routes/market_data.py | Market data endpoints |
 | routes/backtest.py | Backtest + walk-forward endpoints |
 | routes/factors.py | Factor listing + evaluation endpoints |
+| routes/experiments.py | Experiment submit/list/get endpoints (V2.4) |
 
 ## Dependencies
-- Upstream: All ez modules
+- Upstream: All ez modules (including ez/agent/ for experiments)
 - Downstream: web/ (frontend)
 
 ## Running
@@ -35,5 +39,6 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 ## Status
-- Implemented: All V1 endpoints
-- V2.2: BacktestRequest accepts `commission_rate`, `min_commission`, `slippage_rate` (all >= 0, validated server-side). SlippageMatcher used when slippage_rate > 0.
+- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments
+- V2.2: BacktestRequest accepts `commission_rate`, `min_commission`, `slippage_rate`
+- V2.4: ExperimentRequest with RunSpec validation (422 on invalid), idempotency (duplicate detection), query parameter bounds
