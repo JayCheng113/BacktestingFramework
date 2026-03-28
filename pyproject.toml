@@ -1,6 +1,10 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
 [project]
 name = "ez-trading"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent-Native quantitative trading platform"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,6 +28,10 @@ dev = [
 ]
 tushare = ["tushare>=1.4"]
 akshare = ["akshare>=1.14"]
+
+[tool.scikit-build]
+wheel.packages = ["ez"]
+build-dir = "build/{wheel_tag}"
 
 [tool.setuptools.packages.find]
 include = ["ez*"]
