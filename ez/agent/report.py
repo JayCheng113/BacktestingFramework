@@ -62,8 +62,10 @@ class ExperimentReport:
             gate_passed=verdict.passed,
             gate_summary=verdict.summary,
             gate_reasons=[
-                {"rule": r.rule, "passed": r.passed, "value": r.value,
-                 "threshold": r.threshold, "message": r.message}
+                {"rule": r.rule, "passed": r.passed,
+                 "value": cls._clean(r.value),
+                 "threshold": cls._clean(r.threshold),
+                 "message": r.message}
                 for r in verdict.reasons
             ],
         )

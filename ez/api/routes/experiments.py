@@ -62,23 +62,30 @@ def close_experiment_store() -> None:
         _exp_store = None
 
 
-def _get_experiment_store() -> ExperimentStore:
-    """Get or create ExperimentStore with its own DuckDB connection.
+def _resolve_db_path() -> str:
+    """Resolve DB path using same logic as core DuckDBStore (respects EZ_DATA_DIR)."""
+    import os
+    from pathlib import Path
+    from ez.config import load_config
+    data_dir = os.environ.get("EZ_DATA_DIR")
+    if data_dir:
+        p = Path(data_dir) / "ez_trading.db"
+    else:
+        config = load_config()
+        p = Path(config.database.path)
+        if not p.is_absolute():
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            p = project_root / p
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return str(p)
 
-    Uses the same db file as the core store but opens an independent
-    connection — avoids accessing DuckDBStore._conn (private).
-    """
+
+def _get_experiment_store() -> ExperimentStore:
+    """Get or create ExperimentStore with its own DuckDB connection."""
     global _exp_store
     if _exp_store is None:
         import duckdb
-        from ez.config import load_config
-        from pathlib import Path
-        config = load_config()
-        db_path = Path(config.database.path)
-        if not db_path.is_absolute():
-            db_path = Path(__file__).resolve().parent.parent.parent.parent / db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = duckdb.connect(str(db_path))
+        conn = duckdb.connect(_resolve_db_path())
         _exp_store = ExperimentStore(conn)
     return _exp_store
 
@@ -125,21 +132,16 @@ def submit_experiment(req: ExperimentRequest):
 
     exp_store = _get_experiment_store()
 
-    # Idempotency: check if same spec already has a completed run
-    existing = exp_store.find_by_spec_id(spec.spec_id)
-    completed = [r for r in existing if r.get("status") == "completed"]
-    if completed:
+    # Pre-check: fast duplicate detection (avoids expensive computation)
+    if exp_store.has_completed_run(spec.spec_id):
         return {
             "status": "duplicate",
-            "message": f"Spec already has {len(completed)} completed run(s)",
-            "existing_run_id": completed[0]["run_id"],
+            "message": "Spec already has a completed run",
             "spec_id": spec.spec_id,
         }
 
-    # Fetch data
+    # Fetch data and run (expensive — only after pre-check passes)
     data = _fetch_data(req.symbol, req.market, req.period, req.start_date, req.end_date)
-
-    # Run
     result = Runner().run(spec, data)
 
     # Gate
@@ -152,13 +154,13 @@ def submit_experiment(req: ExperimentRequest):
     verdict = ResearchGate(gate_config).evaluate(result)
     report = ExperimentReport.from_result(result, verdict)
 
-    # Persist (atomic: transaction prevents concurrent duplicate completed runs)
+    # Persist (PK constraint on completed_specs is the atomic lock)
     exp_store.save_spec(spec.to_dict())
-    inserted = exp_store.save_run_if_new(spec.spec_id, report.to_dict())
+    inserted = exp_store.save_completed_run(report.to_dict())
     if not inserted:
         return {
             "status": "duplicate",
-            "message": "Concurrent run completed while this one was executing",
+            "message": "Another run completed while this one was executing",
             "spec_id": spec.spec_id,
         }
 

@@ -1,17 +1,18 @@
 """B5: ExperimentStore — DuckDB persistence for experiment data.
 
-Manages its own tables (runs, gate_verdicts) in the same DuckDB file
-as market data, but does NOT modify the core DataStore schema.
+Manages its own tables in the same DuckDB file as market data,
+but does NOT modify the core DataStore schema.
 
 Tables:
-  - experiment_runs: one row per run (spec + metrics + gate result)
-  - experiment_specs: one row per unique spec_id (dedup key)
+  - experiment_specs: immutable spec records (INSERT ON CONFLICT DO NOTHING)
+  - experiment_runs: one row per run attempt
+  - completed_specs: PRIMARY KEY constraint enforces at most one completed
+    run per spec_id (atomic idempotency without explicit transactions)
 """
 from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
 
 import duckdb
 
@@ -28,7 +29,7 @@ class ExperimentStore:
             CREATE TABLE IF NOT EXISTS experiment_specs (
                 spec_id VARCHAR PRIMARY KEY,
                 strategy_name VARCHAR NOT NULL,
-                strategy_params VARCHAR,  -- JSON
+                strategy_params VARCHAR,
                 symbol VARCHAR NOT NULL,
                 market VARCHAR NOT NULL,
                 period VARCHAR DEFAULT 'daily',
@@ -42,7 +43,7 @@ class ExperimentStore:
                 run_wfo BOOLEAN DEFAULT TRUE,
                 wfo_n_splits INTEGER DEFAULT 5,
                 wfo_train_ratio DOUBLE DEFAULT 0.7,
-                tags VARCHAR DEFAULT '[]',  -- JSON array
+                tags VARCHAR DEFAULT '[]',
                 description VARCHAR DEFAULT '',
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
@@ -67,21 +68,31 @@ class ExperimentStore:
                 overfitting_score DOUBLE,
                 gate_passed BOOLEAN DEFAULT FALSE,
                 gate_summary VARCHAR,
-                gate_reasons VARCHAR,  -- JSON
+                gate_reasons VARCHAR,
                 error VARCHAR
+            )
+        """)
+        # Atomic idempotency: PK constraint ensures at most one completed
+        # run per spec_id. No explicit transactions needed.
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS completed_specs (
+                spec_id VARCHAR PRIMARY KEY,
+                run_id VARCHAR NOT NULL,
+                completed_at TIMESTAMPTZ NOT NULL
             )
         """)
 
     def save_spec(self, spec_dict: dict) -> None:
-        """Upsert a RunSpec (idempotent on spec_id)."""
+        """Insert spec if not exists. Immutable — never overwrites existing specs."""
         self._conn.execute("""
-            INSERT OR REPLACE INTO experiment_specs (
+            INSERT INTO experiment_specs (
                 spec_id, strategy_name, strategy_params, symbol, market,
                 period, start_date, end_date, initial_capital,
                 commission_rate, min_commission, slippage_rate,
                 run_backtest, run_wfo, wfo_n_splits, wfo_train_ratio,
                 tags, description
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (spec_id) DO NOTHING
         """, [
             spec_dict["spec_id"],
             spec_dict["strategy_name"],
@@ -105,13 +116,6 @@ class ExperimentStore:
 
     def save_run(self, report_dict: dict) -> None:
         """Insert a run result. Raises on duplicate run_id or missing spec."""
-        # Defensive check: spec must exist (FK enforces this too, but gives clearer error)
-        spec_exists = self._conn.execute(
-            "SELECT 1 FROM experiment_specs WHERE spec_id = ?",
-            [report_dict["spec_id"]],
-        ).fetchone()
-        if not spec_exists:
-            raise ValueError(f"spec_id '{report_dict['spec_id']}' not found — call save_spec() first")
         self._conn.execute("""
             INSERT INTO experiment_runs (
                 run_id, spec_id, status, created_at, duration_ms, code_commit,
@@ -143,9 +147,42 @@ class ExperimentStore:
             report_dict["error"],
         ])
 
+    def save_completed_run(self, report_dict: dict) -> bool:
+        """Save a completed run with atomic idempotency.
+
+        Uses completed_specs PK constraint: if a completed run already
+        exists for this spec_id, the INSERT fails and we return False.
+        No explicit transactions — the constraint is the lock.
+
+        Non-completed runs (failed) are always saved without restriction.
+        """
+        spec_id = report_dict["spec_id"]
+
+        if report_dict["status"] != "completed":
+            self.save_run(report_dict)
+            return True
+
+        try:
+            self._conn.execute(
+                "INSERT INTO completed_specs (spec_id, run_id, completed_at) VALUES (?, ?, ?)",
+                [spec_id, report_dict["run_id"], report_dict["created_at"]],
+            )
+        except duckdb.ConstraintException:
+            return False
+
+        self.save_run(report_dict)
+        return True
+
+    def has_completed_run(self, spec_id: str) -> bool:
+        """Check if a completed run exists for this spec_id (fast, no scan)."""
+        result = self._conn.execute(
+            "SELECT 1 FROM completed_specs WHERE spec_id = ?", [spec_id],
+        ).fetchone()
+        return result is not None
+
     @staticmethod
     def _clean_rows(records: list[dict]) -> list[dict]:
-        """Convert NaN/inf to None for JSON compliance (DuckDB NULL → pandas NaN)."""
+        """Convert NaN/inf to None for JSON compliance."""
         for row in records:
             for k, v in row.items():
                 if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
@@ -153,7 +190,6 @@ class ExperimentStore:
         return records
 
     def find_by_spec_id(self, spec_id: str) -> list[dict]:
-        """Find all runs for a given spec_id."""
         rows = self._conn.execute(
             "SELECT * FROM experiment_runs WHERE spec_id = ? ORDER BY created_at DESC",
             [spec_id],
@@ -161,7 +197,6 @@ class ExperimentStore:
         return self._clean_rows(rows.to_dict("records")) if len(rows) > 0 else []
 
     def list_runs(self, limit: int = 50, offset: int = 0) -> list[dict]:
-        """List recent runs."""
         rows = self._conn.execute(
             "SELECT r.*, s.strategy_name, s.symbol, s.market "
             "FROM experiment_runs r "
@@ -172,7 +207,6 @@ class ExperimentStore:
         return self._clean_rows(rows.to_dict("records")) if len(rows) > 0 else []
 
     def get_run(self, run_id: str) -> dict | None:
-        """Get a single run by run_id."""
         rows = self._conn.execute(
             "SELECT r.*, s.strategy_name, s.symbol, s.market, s.strategy_params "
             "FROM experiment_runs r "
@@ -185,35 +219,11 @@ class ExperimentStore:
         return self._clean_rows(rows.to_dict("records"))[0]
 
     def count_by_spec_id(self, spec_id: str) -> int:
-        """Count runs for a spec (for idempotency check)."""
         result = self._conn.execute(
             "SELECT COUNT(*) FROM experiment_runs WHERE spec_id = ?",
             [spec_id],
         ).fetchone()
         return result[0] if result else 0
 
-    def save_run_if_new(self, spec_id: str, report_dict: dict) -> bool:
-        """Atomically check for existing completed run and insert if none.
-
-        Returns True if inserted, False if a completed run already exists.
-        Uses a transaction to prevent concurrent duplicate writes.
-        """
-        self._conn.execute("BEGIN TRANSACTION")
-        try:
-            count = self._conn.execute(
-                "SELECT COUNT(*) FROM experiment_runs WHERE spec_id = ? AND status = 'completed'",
-                [spec_id],
-            ).fetchone()[0]
-            if count > 0:
-                self._conn.execute("ROLLBACK")
-                return False
-            self.save_run(report_dict)
-            self._conn.execute("COMMIT")
-            return True
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
-
     def close(self) -> None:
-        """Close the DuckDB connection."""
         self._conn.close()
