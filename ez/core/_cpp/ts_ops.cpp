@@ -58,7 +58,11 @@ static nb::object rolling_mean(InputArray input, int window) {
 }
 
 /**
- * Rolling standard deviation — NaN-safe, two-pass per window.
+ * Rolling standard deviation — Welford online O(n) algorithm.
+ *
+ * Uses sliding-window Welford update: when both entering and leaving values
+ * are non-NaN, update mean/M2 in O(1). Falls back to O(w) recomputation
+ * only at NaN boundaries (min_periods = window).
  */
 static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
     if (window <= 0) throw nb::value_error("window must be positive");
@@ -69,30 +73,76 @@ static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
     auto out = make_output(n);
     double* dst = get_data(out);
 
-    for (size_t i = 0; i < n; i++) {
-        if (i < w - 1) {
+    // Leading NaN
+    for (size_t i = 0; i + 1 < w && i < n; i++) {
+        dst[i] = std::nan("");
+    }
+    if (w > n) return out;
+
+    // Count NaN values in initial window
+    int nan_count = 0;
+    for (size_t j = 0; j < w; j++) {
+        if (std::isnan(src[j])) nan_count++;
+    }
+
+    double mean = 0.0, M2 = 0.0;
+    bool welford_valid = false;
+
+    // Recompute Welford state from scratch for window starting at `start`
+    auto recompute = [&](size_t start) {
+        mean = 0.0;
+        M2 = 0.0;
+        for (size_t j = 0; j < w; j++) {
+            double v = src[start + j];
+            double k = static_cast<double>(j + 1);
+            double delta = v - mean;
+            mean += delta / k;
+            M2 += delta * (v - mean);
+        }
+        welford_valid = true;
+    };
+
+    // First complete window
+    if (nan_count == 0) {
+        recompute(0);
+        int denom = static_cast<int>(w) - ddof;
+        dst[w - 1] = (denom > 0) ? std::sqrt(std::max(M2 / denom, 0.0)) : std::nan("");
+    } else {
+        dst[w - 1] = std::nan("");
+    }
+
+    // Slide window: O(1) per step when no NaN at boundaries
+    for (size_t i = w; i < n; i++) {
+        double new_val = src[i];
+        double old_val = src[i - w];
+        bool old_nan = std::isnan(old_val);
+        bool new_nan = std::isnan(new_val);
+
+        if (old_nan) nan_count--;
+        if (new_nan) nan_count++;
+
+        if (nan_count > 0) {
             dst[i] = std::nan("");
+            welford_valid = false;
             continue;
         }
-        double mean = 0.0;
-        int count = 0;
-        for (size_t j = 0; j < w; j++) {
-            double v = src[i - w + 1 + j];
-            if (!std::isnan(v)) { mean += v; count++; }
-        }
-        if (count < window) { dst[i] = std::nan(""); continue; }
-        mean /= count;
 
-        double var = 0.0;
-        for (size_t j = 0; j < w; j++) {
-            double v = src[i - w + 1 + j];
-            if (!std::isnan(v)) {
-                double d = v - mean;
-                var += d * d;
-            }
+        // All values in window are valid
+        if (!welford_valid || old_nan) {
+            // Transitioning from NaN region — recompute
+            recompute(i - w + 1);
+        } else {
+            // O(1) sliding Welford update:
+            // new_mean = old_mean + (new_val - old_val) / w
+            // new_M2 = old_M2 + (new_val - old_val) * (new_val + old_val - old_mean - new_mean)
+            double old_mean = mean;
+            mean = old_mean + (new_val - old_val) / static_cast<double>(w);
+            M2 += (new_val - old_val) * (new_val + old_val - old_mean - mean);
+            if (M2 < 0.0) M2 = 0.0;  // clamp floating-point noise
         }
-        int denom = count - ddof;
-        dst[i] = (denom > 0) ? std::sqrt(var / denom) : std::nan("");
+
+        int denom = static_cast<int>(w) - ddof;
+        dst[i] = (denom > 0) ? std::sqrt(std::max(M2 / denom, 0.0)) : std::nan("");
     }
 
     return out;

@@ -50,10 +50,10 @@ Failure to match will cause EMA, MACD, and MACD signal values to diverge.
 ## Benchmark
 Run `python scripts/benchmark.py` to measure performance.
 
-V2.1 C++ results (5000 bars, Apple M-series):
+V2.3 C++ results (5000 bars, Apple M-series):
 | Function | Python | C++ | Speedup |
 |----------|--------|-----|---------|
 | rolling_mean | 0.044ms | 0.010ms | 4.4x |
 | ewm_mean | 0.035ms | 0.012ms | 2.9x |
 | pct_change | 0.071ms | 0.009ms | 7.9x |
-| rolling_std | 0.078ms | 0.086ms | ~1x (TODO: Welford online) |
+| rolling_std | 0.078ms | 0.015ms | 5.2x (V2.3 Welford O(n)) |
