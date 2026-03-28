@@ -1,8 +1,7 @@
 """Order matching abstraction.
 
-V1: SimpleMatcher — instant fill at given price, proportional commission.
-V2.1: SlippageMatcher — adds market impact model.
-V2.2: EventDrivenMatcher — tick-level with partial fills.
+SimpleMatcher — instant fill, no slippage (V1 default).
+SlippageMatcher — adds configurable market impact (V2.2).
 
 All implementations share the same Matcher ABC so the engine is agnostic.
 """
@@ -88,10 +87,72 @@ class SimpleMatcher(Matcher):
         value = shares * price
         comm = max(value * self._rate, self._min_comm)
         if comm > value:
-            comm = value  # cap commission at sell value
+            comm = value
         return FillResult(
             shares=shares,
             fill_price=price,
+            commission=comm,
+            net_amount=value - comm,
+        )
+
+
+class SlippageMatcher(Matcher):
+    """Fill with configurable slippage + commission.
+
+    Slippage models market impact: buying pushes price up, selling pushes price down.
+      buy fill_price  = price * (1 + slippage_rate)
+      sell fill_price = price * (1 - slippage_rate)
+
+    Commission is applied on the slipped value (realistic: you pay commission on
+    the actual execution price, not the quoted price).
+
+    Args:
+        slippage_rate: fraction of price impact (e.g., 0.001 = 0.1% = 万一).
+        commission_rate: fraction of trade value as commission.
+        min_commission: minimum commission per trade.
+    """
+
+    def __init__(
+        self,
+        slippage_rate: float = 0.001,
+        commission_rate: float = 0.0003,
+        min_commission: float = 5.0,
+    ) -> None:
+        self._slip = slippage_rate
+        self._rate = commission_rate
+        self._min_comm = min_commission
+
+    def fill_buy(self, price: float, amount: float) -> FillResult:
+        if amount <= 0 or price <= 0:
+            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
+
+        fill_price = price * (1 + self._slip)
+        comm = max(amount * self._rate, self._min_comm)
+        if comm >= amount:
+            return FillResult(shares=0, fill_price=fill_price, commission=0, net_amount=0)
+
+        shares = (amount - comm) / fill_price
+        return FillResult(
+            shares=shares,
+            fill_price=fill_price,
+            commission=comm,
+            net_amount=-amount,
+        )
+
+    def fill_sell(self, price: float, shares: float) -> FillResult:
+        if shares <= 0 or price <= 0:
+            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
+
+        fill_price = price * (1 - self._slip)
+        if fill_price <= 0:
+            fill_price = 0.0
+        value = shares * fill_price
+        comm = max(value * self._rate, self._min_comm)
+        if comm > value:
+            comm = value
+        return FillResult(
+            shares=shares,
+            fill_price=fill_price,
             commission=comm,
             net_amount=value - comm,
         )

@@ -1,10 +1,9 @@
 """Contract test for Matcher ABC — any implementation must pass these.
 
-When V2.1 adds a C++ matcher, parametrize `all_matchers()` to include it.
-This guarantees behavioral equivalence across Python and C++ implementations.
+Add new Matcher implementations to `all_matchers()` — contract tests auto-validate.
 """
 import pytest
-from ez.core.matcher import Matcher, SimpleMatcher
+from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
 
 
 def all_matchers() -> list[Matcher]:
@@ -13,10 +12,13 @@ def all_matchers() -> list[Matcher]:
         SimpleMatcher(commission_rate=0.001, min_commission=0.0),
         SimpleMatcher(commission_rate=0.0003, min_commission=5.0),
         SimpleMatcher(commission_rate=0.0, min_commission=0.0),
+        SlippageMatcher(slippage_rate=0.001, commission_rate=0.001, min_commission=0.0),
+        SlippageMatcher(slippage_rate=0.005, commission_rate=0.0003, min_commission=5.0),
+        SlippageMatcher(slippage_rate=0.0, commission_rate=0.0, min_commission=0.0),
     ]
 
 
-@pytest.fixture(params=all_matchers(), ids=lambda m: f"{m.__class__.__name__}(rate={m._rate},min={m._min_comm})")
+@pytest.fixture(params=all_matchers(), ids=lambda m: f"{m.__class__.__name__}(slip={getattr(m,'_slip',0)},rate={m._rate},min={m._min_comm})")
 def matcher(request):
     return request.param
 

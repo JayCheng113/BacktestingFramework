@@ -1,6 +1,6 @@
-"""Tests for ez.core.matcher — SimpleMatcher fill logic."""
+"""Tests for ez.core.matcher — SimpleMatcher + SlippageMatcher fill logic."""
 import pytest
-from ez.core.matcher import FillResult, SimpleMatcher
+from ez.core.matcher import FillResult, SimpleMatcher, SlippageMatcher
 
 
 @pytest.fixture
@@ -68,6 +68,54 @@ class TestFillSell:
     def test_zero_price(self, matcher):
         r = matcher.fill_sell(price=0, shares=100.0)
         assert r.shares == 0
+
+
+class TestSlippageBuy:
+    @pytest.fixture
+    def slip(self):
+        return SlippageMatcher(slippage_rate=0.01, commission_rate=0.001, min_commission=0.0)
+
+    def test_buy_price_is_higher(self, slip):
+        r = slip.fill_buy(price=100.0, amount=10000.0)
+        assert r.fill_price == pytest.approx(101.0)  # 100 * 1.01
+
+    def test_buy_fewer_shares_due_to_slippage(self, slip):
+        no_slip = SimpleMatcher(commission_rate=0.001, min_commission=0.0)
+        r_slip = slip.fill_buy(price=100.0, amount=10000.0)
+        r_no = no_slip.fill_buy(price=100.0, amount=10000.0)
+        assert r_slip.shares < r_no.shares  # slippage = worse fill = fewer shares
+
+    def test_zero_slippage_matches_simple(self):
+        zero = SlippageMatcher(slippage_rate=0.0, commission_rate=0.001, min_commission=0.0)
+        simple = SimpleMatcher(commission_rate=0.001, min_commission=0.0)
+        r1 = zero.fill_buy(price=50.0, amount=5000.0)
+        r2 = simple.fill_buy(price=50.0, amount=5000.0)
+        assert r1.shares == pytest.approx(r2.shares)
+        assert r1.fill_price == pytest.approx(r2.fill_price)
+
+
+class TestSlippageSell:
+    @pytest.fixture
+    def slip(self):
+        return SlippageMatcher(slippage_rate=0.01, commission_rate=0.001, min_commission=0.0)
+
+    def test_sell_price_is_lower(self, slip):
+        r = slip.fill_sell(price=100.0, shares=100.0)
+        assert r.fill_price == pytest.approx(99.0)  # 100 * 0.99
+
+    def test_sell_less_cash_due_to_slippage(self, slip):
+        no_slip = SimpleMatcher(commission_rate=0.001, min_commission=0.0)
+        r_slip = slip.fill_sell(price=100.0, shares=100.0)
+        r_no = no_slip.fill_sell(price=100.0, shares=100.0)
+        assert r_slip.net_amount < r_no.net_amount  # slippage = less cash received
+
+    def test_zero_slippage_matches_simple(self):
+        zero = SlippageMatcher(slippage_rate=0.0, commission_rate=0.001, min_commission=0.0)
+        simple = SimpleMatcher(commission_rate=0.001, min_commission=0.0)
+        r1 = zero.fill_sell(price=50.0, shares=100.0)
+        r2 = simple.fill_sell(price=50.0, shares=100.0)
+        assert r1.net_amount == pytest.approx(r2.net_amount)
+        assert r1.fill_price == pytest.approx(r2.fill_price)
 
 
 class TestFillResultImmutable:

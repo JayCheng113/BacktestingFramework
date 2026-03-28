@@ -5,11 +5,12 @@ from datetime import date
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
 from ez.config import load_config
+from ez.core.matcher import SimpleMatcher, SlippageMatcher
 from ez.backtest.walk_forward import WalkForwardValidator
 from ez.strategy.base import Strategy
 
@@ -25,7 +26,9 @@ class BacktestRequest(BaseModel):
     start_date: date
     end_date: date
     initial_capital: float = 100000.0
-    commission_rate: float = 0.0003
+    commission_rate: float = Field(default=0.0003, description="Commission rate (e.g., 0.0003 = 0.03%)")
+    min_commission: float = Field(default=5.0, description="Minimum commission per trade (yuan)")
+    slippage_rate: float = Field(default=0.0, description="Slippage rate (e.g., 0.001 = 0.1%)")
 
 
 class WalkForwardRequest(BacktestRequest):
@@ -54,14 +57,27 @@ def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
     } for b in bars]).set_index("time")
 
 
+def _build_matcher(req: BacktestRequest):
+    """Build matcher from request params. Slippage > 0 uses SlippageMatcher."""
+    if req.slippage_rate > 0:
+        return SlippageMatcher(
+            slippage_rate=req.slippage_rate,
+            commission_rate=req.commission_rate,
+            min_commission=req.min_commission,
+        )
+    return SimpleMatcher(
+        commission_rate=req.commission_rate,
+        min_commission=req.min_commission,
+    )
+
+
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
     strategy = _get_strategy(req.strategy_name, req.strategy_params)
     df = _fetch_data(req)
     config = load_config()
     engine = VectorizedBacktestEngine(
-        commission_rate=req.commission_rate,
-        min_commission=config.backtest.default_min_commission,
+        matcher=_build_matcher(req),
         risk_free_rate=config.backtest.risk_free_rate,
     )
     result = engine.run(df, strategy, req.initial_capital)
@@ -92,8 +108,7 @@ def run_walk_forward(req: WalkForwardRequest):
     config = load_config()
     validator = WalkForwardValidator(
         VectorizedBacktestEngine(
-            commission_rate=req.commission_rate,
-            min_commission=config.backtest.default_min_commission,
+            matcher=_build_matcher(req),
             risk_free_rate=config.backtest.risk_free_rate,
         )
     )

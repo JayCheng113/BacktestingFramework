@@ -24,4 +24,6 @@ Run vectorized backtests, compute metrics, validate via Walk-Forward, test stati
 
 ## Status
 - Implemented: Full backtest engine, Walk-Forward (fixed-param), significance testing
-- V2: Parameter optimization in Walk-Forward (WFO)
+- V2.0: Matcher extraction — engine delegates to Matcher.fill_buy/fill_sell
+- V2.2: SlippageMatcher — user-configurable slippage via API/frontend
+- Engine uses fill.fill_price (not exec_price) for entry/exit/PnL — supports slippage

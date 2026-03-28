@@ -6,6 +6,7 @@ Provide the low-level building blocks (matching, time-series ops) that both fact
 ## Public Interfaces
 - `Matcher(ABC)` — [CORE] order matching interface: `fill_buy()`, `fill_sell()` -> `FillResult`
 - `SimpleMatcher` — [CORE] instant fill with proportional commission (V1 default)
+- `SlippageMatcher` — [CORE] fill with configurable slippage + commission (V2.2)
 - `ts_ops` — [CORE] time series functions: `rolling_mean`, `rolling_std`, `ewm_mean`, `diff`, `pct_change`
 
 ## Files
@@ -28,11 +29,16 @@ worth C++ overhead):
 
 These remain direct pandas calls. Only factor-layer time-series math routes through ts_ops.
 
-## V2.1 C++ Replacement Plan
-1. Each ts_ops function gets a C++ implementation via nanobind
-2. SimpleMatcher gets a C++ counterpart (SlippageMatcher)
-3. Python implementations stay as fallback when C++ extension not compiled
-4. Same interface — callers don't change
+## V2.1 C++ Status
+- All 5 ts_ops functions have C++ implementations via nanobind (up to 7.9x faster)
+- Python fallback active when C++ extension not compiled
+- Same interface — callers don't change
+
+## SlippageMatcher (V2.2)
+- `buy fill_price = price * (1 + slippage_rate)` — buying pushes price up
+- `sell fill_price = price * (1 - slippage_rate)` — selling pushes price down
+- Commission applied on slipped price (realistic)
+- `slippage_rate=0` is equivalent to SimpleMatcher
 
 ## Critical: ewm_mean adjust=True
 pandas `ewm(adjust=True)` (default) uses a divisor-corrected formula, NOT simple
