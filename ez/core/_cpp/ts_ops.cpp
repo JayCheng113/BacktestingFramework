@@ -12,7 +12,7 @@
 
 namespace nb = nanobind;
 
-using InputArray = nb::ndarray<const double, nb::numpy, nb::ndim<1>>;
+using InputArray = nb::ndarray<const double, nb::numpy, nb::ndim<1>, nb::c_contig>;
 
 static nb::object make_output(size_t n) {
     auto np = nb::module_::import_("numpy");

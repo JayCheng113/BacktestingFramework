@@ -137,6 +137,9 @@ class VectorizedBacktestEngine:
         entry_time: datetime | None = None
         entry_price: float = 0.0
         entry_comm: float = 0.0
+        peak_shares: float = 0.0       # total shares at peak (for pnl_pct)
+        partial_pnl: float = 0.0       # accumulated PnL from partial sells
+        partial_comm: float = 0.0      # accumulated commission from partial sells
         daily_ret = np.zeros(n)
 
         times = df.index if hasattr(df.index, "__iter__") else range(n)
@@ -165,21 +168,31 @@ class VectorizedBacktestEngine:
                     shares -= fill.shares
                     if shares < 1e-10:
                         shares = 0.0
-                    # Record trade when fully closing
+                    # Record trade when fully closing; include partial sell PnL
                     if old_shares > 0 and shares < 1e-10 and entry_time is not None:
-                        pnl = (fill.fill_price - entry_price) * old_shares - fill.commission - entry_comm
+                        final_pnl = (fill.fill_price - entry_price) * old_shares - fill.commission
+                        total_pnl = partial_pnl + final_pnl - entry_comm
+                        total_comm = entry_comm + partial_comm + fill.commission
+                        cost_basis = entry_price * peak_shares if peak_shares > 0 else entry_price * old_shares
                         trades.append(TradeRecord(
                             entry_time=entry_time,
                             exit_time=time_list[i],
                             entry_price=entry_price,
                             exit_price=fill.fill_price,
                             weight=prev_weight,
-                            pnl=pnl,
-                            pnl_pct=pnl / (entry_price * old_shares) if entry_price * old_shares > 0 else 0,
-                            commission=fill.commission + entry_comm,
+                            pnl=total_pnl,
+                            pnl_pct=total_pnl / cost_basis if cost_basis > 0 else 0,
+                            commission=total_comm,
                         ))
                         entry_time = None
                         entry_comm = 0.0
+                        partial_pnl = 0.0
+                        partial_comm = 0.0
+                        peak_shares = 0.0
+                    elif fill.shares > 0 and entry_time is not None:
+                        # Partial sell — accumulate realized PnL for later
+                        partial_pnl += (fill.fill_price - entry_price) * fill.shares - fill.commission
+                        partial_comm += fill.commission
 
                 elif target_value > current_value:
                     # Increase or open position
@@ -193,11 +206,14 @@ class VectorizedBacktestEngine:
                             entry_time = time_list[i]
                             entry_price = fill.fill_price
                             entry_comm = fill.commission
+                            partial_pnl = 0.0
+                            partial_comm = 0.0
                         elif fill.shares > 0:
                             entry_comm += fill.commission
                             # Weighted average entry price
                             entry_price = (entry_price * shares + fill.fill_price * fill.shares) / (shares + fill.shares)
                         shares += fill.shares
+                        peak_shares = max(peak_shares, shares)
                         cash += fill.net_amount  # net_amount is negative for buys
 
                 prev_weight = target_weight

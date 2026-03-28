@@ -26,8 +26,8 @@ class BacktestRequest(BaseModel):
     start_date: date
     end_date: date
     initial_capital: float = 100000.0
-    commission_rate: float = Field(default=0.0003, ge=0, description="Commission rate (e.g., 0.0003 = 0.03%)")
-    min_commission: float = Field(default=5.0, ge=0, description="Minimum commission per trade (yuan)")
+    commission_rate: float | None = Field(default=None, ge=0, description="Commission rate; None = use config default")
+    min_commission: float | None = Field(default=None, ge=0, description="Min commission per trade; None = use config default")
     slippage_rate: float = Field(default=0.0, ge=0, le=0.1, description="Slippage rate (e.g., 0.001 = 0.1%)")
 
 
@@ -57,18 +57,18 @@ def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
     } for b in bars]).set_index("time")
 
 
-def _build_matcher(req: BacktestRequest) -> 'Matcher':
-    """Build matcher from request params. Slippage > 0 uses SlippageMatcher."""
+def _build_matcher(req: BacktestRequest) -> Matcher:
+    """Build matcher from request params. Falls back to config defaults for None values."""
+    config = load_config()
+    comm_rate = req.commission_rate if req.commission_rate is not None else config.backtest.default_commission_rate
+    min_comm = req.min_commission if req.min_commission is not None else config.backtest.default_min_commission
     if req.slippage_rate > 0:
         return SlippageMatcher(
             slippage_rate=req.slippage_rate,
-            commission_rate=req.commission_rate,
-            min_commission=req.min_commission,
+            commission_rate=comm_rate,
+            min_commission=min_comm,
         )
-    return SimpleMatcher(
-        commission_rate=req.commission_rate,
-        min_commission=req.min_commission,
-    )
+    return SimpleMatcher(commission_rate=comm_rate, min_commission=min_comm)
 
 
 @router.post("/run")

@@ -199,7 +199,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>滑点率</label>
-          <input type="number" value={slippageRate} step={0.001} min={0}
+          <input type="number" value={slippageRate} step={0.001} min={0} max={0.1}
             onChange={e => setSlippageRate(Number(e.target.value))}
             className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
         </div>
