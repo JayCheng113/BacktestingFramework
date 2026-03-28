@@ -103,8 +103,8 @@ class SlippageMatcher(Matcher):
       buy fill_price  = price * (1 + slippage_rate)
       sell fill_price = price * (1 - slippage_rate)
 
-    Commission is applied on the slipped value (realistic: you pay commission on
-    the actual execution price, not the quoted price).
+    Commission: on buys, applied on input cash amount; on sells, applied on
+    slipped execution value (shares * fill_price).
 
     Args:
         slippage_rate: fraction of price impact (e.g., 0.001 = 0.1% = 万一).
@@ -118,6 +118,8 @@ class SlippageMatcher(Matcher):
         commission_rate: float = 0.0003,
         min_commission: float = 5.0,
     ) -> None:
+        if slippage_rate < 0 or commission_rate < 0 or min_commission < 0:
+            raise ValueError("slippage_rate, commission_rate, min_commission must be >= 0")
         self._slip = slippage_rate
         self._rate = commission_rate
         self._min_comm = min_commission

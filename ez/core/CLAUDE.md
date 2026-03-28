@@ -37,8 +37,9 @@ These remain direct pandas calls. Only factor-layer time-series math routes thro
 ## SlippageMatcher (V2.2)
 - `buy fill_price = price * (1 + slippage_rate)` — buying pushes price up
 - `sell fill_price = price * (1 - slippage_rate)` — selling pushes price down
-- Commission applied on slipped price (realistic)
+- Commission: buys on input amount, sells on slipped execution value
 - `slippage_rate=0` is equivalent to SimpleMatcher
+- Negative parameters rejected (ValueError)
 
 ## Critical: ewm_mean adjust=True
 pandas `ewm(adjust=True)` (default) uses a divisor-corrected formula, NOT simple

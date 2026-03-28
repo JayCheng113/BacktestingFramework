@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
 from ez.config import load_config
-from ez.core.matcher import SimpleMatcher, SlippageMatcher
+from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
 from ez.backtest.walk_forward import WalkForwardValidator
 from ez.strategy.base import Strategy
 
@@ -26,9 +26,9 @@ class BacktestRequest(BaseModel):
     start_date: date
     end_date: date
     initial_capital: float = 100000.0
-    commission_rate: float = Field(default=0.0003, description="Commission rate (e.g., 0.0003 = 0.03%)")
-    min_commission: float = Field(default=5.0, description="Minimum commission per trade (yuan)")
-    slippage_rate: float = Field(default=0.0, description="Slippage rate (e.g., 0.001 = 0.1%)")
+    commission_rate: float = Field(default=0.0003, ge=0, description="Commission rate (e.g., 0.0003 = 0.03%)")
+    min_commission: float = Field(default=5.0, ge=0, description="Minimum commission per trade (yuan)")
+    slippage_rate: float = Field(default=0.0, ge=0, le=0.1, description="Slippage rate (e.g., 0.001 = 0.1%)")
 
 
 class WalkForwardRequest(BacktestRequest):
@@ -57,7 +57,7 @@ def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
     } for b in bars]).set_index("time")
 
 
-def _build_matcher(req: BacktestRequest):
+def _build_matcher(req: BacktestRequest) -> 'Matcher':
     """Build matcher from request params. Slippage > 0 uses SlippageMatcher."""
     if req.slippage_rate > 0:
         return SlippageMatcher(

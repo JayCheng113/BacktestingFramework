@@ -36,3 +36,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 
 ## Status
 - Implemented: All V1 endpoints
+- V2.2: BacktestRequest accepts `commission_rate`, `min_commission`, `slippage_rate` (all >= 0, validated server-side). SlippageMatcher used when slippage_rate > 0.
