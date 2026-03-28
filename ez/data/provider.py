@@ -108,7 +108,11 @@ class DataProviderChain:
                                        result.invalid_count, symbol, result.errors[:3])
                     if result.valid_bars:
                         self._store.save_kline(result.valid_bars, period)
-                    return result.valid_bars
+                        return result.valid_bars
+                    else:
+                        logger.warning("All %d bars invalid from %s for %s, trying next provider",
+                                       result.invalid_count, provider.name, symbol)
+                        continue
             except Exception as e:
                 logger.warning("Provider %s failed for %s: %s", provider.name, symbol, e)
                 last_error = e
@@ -122,7 +126,9 @@ class DataProviderChain:
     def search_symbols(self, keyword: str, market: str = "") -> list[dict]:
         for provider in self._providers:
             try:
-                return provider.search_symbols(keyword, market)
+                results = provider.search_symbols(keyword, market)
+                if results:  # Only return if non-empty
+                    return results
             except Exception:
                 continue
         return []

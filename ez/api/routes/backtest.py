@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
+from ez.config import load_config
 from ez.backtest.walk_forward import WalkForwardValidator
 from ez.strategy.base import Strategy
 
@@ -57,7 +58,12 @@ def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
 def run_backtest(req: BacktestRequest):
     strategy = _get_strategy(req.strategy_name, req.strategy_params)
     df = _fetch_data(req)
-    engine = VectorizedBacktestEngine(commission_rate=req.commission_rate)
+    config = load_config()
+    engine = VectorizedBacktestEngine(
+        commission_rate=req.commission_rate,
+        min_commission=config.backtest.default_min_commission,
+        risk_free_rate=config.backtest.risk_free_rate,
+    )
     result = engine.run(df, strategy, req.initial_capital)
     return {
         "metrics": result.metrics,

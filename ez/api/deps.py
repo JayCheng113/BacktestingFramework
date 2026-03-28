@@ -43,13 +43,22 @@ def get_chain() -> DataProviderChain:
     global _chain
     if _chain is None:
         store = get_store()
+        config = load_config()
         providers: list[DataProvider] = []
 
+        # Add Tushare for cn_stock if token available
         tushare = get_tushare_provider()
         if tushare:
             providers.append(tushare)
 
+        # Add FMP for us_stock if key available
+        if os.environ.get("FMP_API_KEY"):
+            from ez.data.providers.fmp_provider import FMPDataProvider
+            providers.append(FMPDataProvider())
+
+        # Tencent as universal backup (no auth needed)
         providers.append(TencentDataProvider())
+
         _chain = DataProviderChain(providers=providers, store=store)
     return _chain
 

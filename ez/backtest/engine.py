@@ -41,7 +41,7 @@ class VectorizedBacktestEngine:
 
         # 2. Generate signals and shift to avoid look-ahead bias
         raw_signals = strategy.generate_signals(df)
-        signals = raw_signals.shift(1).fillna(0.0)
+        signals = raw_signals.shift(1).fillna(0.0).clip(0.0, 1.0)
 
         # 3. Trim warmup
         df = df.iloc[warmup:]
@@ -135,6 +135,7 @@ class VectorizedBacktestEngine:
         trades: list[TradeRecord] = []
         entry_time: datetime | None = None
         entry_price: float = 0.0
+        entry_comm: float = 0.0
         daily_ret = np.zeros(n)
 
         times = df.index if hasattr(df.index, "__iter__") else range(n)
@@ -157,6 +158,8 @@ class VectorizedBacktestEngine:
                         sell_shares = (current_value - target_value) / exec_price
                     sell_value = sell_shares * exec_price
                     comm = max(sell_value * self._commission_rate, self._min_commission)
+                    if comm > sell_value:
+                        comm = sell_value  # Cap commission at sell value to prevent negative cash
                     cash += sell_value - comm
                     old_shares = shares
                     shares -= sell_shares
@@ -164,7 +167,7 @@ class VectorizedBacktestEngine:
                         shares = 0.0
                     # Record trade when fully closing
                     if old_shares > 0 and shares < 1e-10 and entry_time is not None:
-                        pnl = (exec_price - entry_price) * old_shares - comm
+                        pnl = (exec_price - entry_price) * old_shares - comm - entry_comm
                         trades.append(TradeRecord(
                             entry_time=entry_time,
                             exit_time=time_list[i],
@@ -173,9 +176,10 @@ class VectorizedBacktestEngine:
                             weight=prev_weight,
                             pnl=pnl,
                             pnl_pct=pnl / (entry_price * old_shares) if entry_price * old_shares > 0 else 0,
-                            commission=comm,
+                            commission=comm + entry_comm,
                         ))
                         entry_time = None
+                        entry_comm = 0.0
 
                 elif target_value > current_value:
                     # Increase or open position
@@ -183,10 +187,14 @@ class VectorizedBacktestEngine:
                     additional = min(additional, cash)
                     if additional > 0:
                         comm = max(additional * self._commission_rate, self._min_commission)
+                        if comm >= additional:
+                            # Commission would exceed trade value — skip this trade
+                            continue
                         new_shares = (additional - comm) / exec_price if exec_price > 0 else 0
                         if shares == 0:
                             entry_time = time_list[i]
                             entry_price = exec_price
+                            entry_comm = comm
                         elif new_shares > 0:
                             # Weighted average entry price
                             entry_price = (entry_price * shares + exec_price * new_shares) / (shares + new_shares)

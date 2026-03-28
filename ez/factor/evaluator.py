@@ -33,6 +33,14 @@ class FactorEvaluator:
         fr = forward_returns.loc[common_idx]
 
         window = min(30, len(fv) // 3)
+        if window < 2:
+            # Not enough data for meaningful rolling correlation
+            return FactorAnalysis(
+                ic_series=pd.Series(dtype=float), rank_ic_series=pd.Series(dtype=float),
+                ic_mean=0.0, rank_ic_mean=0.0, icir=0.0, rank_icir=0.0,
+                ic_decay={p: 0.0 for p in periods}, turnover=0.0,
+                quintile_returns=pd.DataFrame(),
+            )
         ic_series = self._rolling_corr(fv, fr, window, method="pearson")
         rank_ic_series = self._rolling_corr(fv, fr, window, method="spearman")
 
