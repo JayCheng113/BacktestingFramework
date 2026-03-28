@@ -7,6 +7,14 @@ interface Props {
   trades?: TradeRecord[]
 }
 
+function computeMA(data: KlineBar[], period: number): (number | null)[] {
+  return data.map((_, i) => {
+    if (i < period - 1) return null
+    const sum = data.slice(i - period + 1, i + 1).reduce((s, d) => s + d.adj_close, 0)
+    return +(sum / period).toFixed(2)
+  })
+}
+
 export default function KlineChart({ data, symbol, trades = [] }: Props) {
   if (!data.length) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Search a symbol to view K-line data</div>
 
@@ -69,6 +77,8 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: colors[i] + '80' } })),
       xAxisIndex: 1, yAxisIndex: 1,
     },
+    { name: 'MA5', type: 'line', data: computeMA(data, 5), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#f59e0b', width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA20', type: 'line', data: computeMA(data, 20), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#a855f7', width: 1 }, showSymbol: false, z: 5 },
   ]
 
   // Add buy/sell scatter for clear visibility + tooltip
@@ -114,6 +124,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   const option = {
     backgroundColor: '#0d1117',
     title: { text: symbol, left: 'center', top: 8, textStyle: { color: '#e6edf3', fontSize: 14 } },
+    legend: { data: ['MA5', 'MA20'], textStyle: { color: '#8b949e' }, top: 8, right: 20 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     grid: [
       { left: 60, right: 20, top: 50, height: '55%' },
