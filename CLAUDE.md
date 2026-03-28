@@ -1,6 +1,8 @@
 # ez-trading
 
-Agent-Native quantitative trading platform. Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts.
+Agent-Native quantitative trading platform. Human researchers and AI agents are both
+first-class citizens — same pipeline, same gates, same audit trail.
+Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
 Version: 0.2.2 | Tests: 351 | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
