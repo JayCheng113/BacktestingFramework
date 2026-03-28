@@ -133,10 +133,12 @@ def submit_experiment(req: ExperimentRequest):
     exp_store = _get_experiment_store()
 
     # Pre-check: fast duplicate detection (avoids expensive computation)
-    if exp_store.has_completed_run(spec.spec_id):
+    existing_run_id = exp_store.get_completed_run_id(spec.spec_id)
+    if existing_run_id:
         return {
             "status": "duplicate",
             "message": "Spec already has a completed run",
+            "existing_run_id": existing_run_id,
             "spec_id": spec.spec_id,
         }
 
@@ -158,9 +160,11 @@ def submit_experiment(req: ExperimentRequest):
     exp_store.save_spec(spec.to_dict())
     inserted = exp_store.save_completed_run(report.to_dict())
     if not inserted:
+        winner = exp_store.get_completed_run_id(spec.spec_id)
         return {
             "status": "duplicate",
             "message": "Another run completed while this one was executing",
+            "existing_run_id": winner,
             "spec_id": spec.spec_id,
         }
 

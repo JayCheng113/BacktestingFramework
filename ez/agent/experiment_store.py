@@ -81,6 +81,15 @@ class ExperimentStore:
                 completed_at TIMESTAMPTZ NOT NULL
             )
         """)
+        # Backfill: if upgrading from pre-completed_specs schema, populate
+        # from existing completed runs so idempotency holds for old data.
+        self._conn.execute("""
+            INSERT INTO completed_specs (spec_id, run_id, completed_at)
+            SELECT spec_id, run_id, created_at
+            FROM experiment_runs
+            WHERE status = 'completed'
+            ON CONFLICT (spec_id) DO NOTHING
+        """)
 
     def save_spec(self, spec_dict: dict) -> None:
         """Insert spec if not exists. Immutable — never overwrites existing specs."""
@@ -162,23 +171,35 @@ class ExperimentStore:
             self.save_run(report_dict)
             return True
 
+        # Step 1: Claim the spec_id lock via PK constraint.
+        # Catch duckdb.Error (covers ConstraintException + TransactionException
+        # which can occur under concurrent multi-connection writes).
         try:
             self._conn.execute(
                 "INSERT INTO completed_specs (spec_id, run_id, completed_at) VALUES (?, ?, ?)",
                 [spec_id, report_dict["run_id"], report_dict["created_at"]],
             )
-        except duckdb.ConstraintException:
+        except duckdb.Error:
             return False
 
-        self.save_run(report_dict)
+        # Step 2: Write the actual run. If this fails, roll back the lock
+        # to avoid a "dirty" completed_specs entry with no matching run.
+        try:
+            self.save_run(report_dict)
+        except Exception:
+            self._conn.execute(
+                "DELETE FROM completed_specs WHERE spec_id = ?", [spec_id],
+            )
+            raise
+
         return True
 
-    def has_completed_run(self, spec_id: str) -> bool:
-        """Check if a completed run exists for this spec_id (fast, no scan)."""
+    def get_completed_run_id(self, spec_id: str) -> str | None:
+        """Return the run_id of the completed run for this spec_id, or None."""
         result = self._conn.execute(
-            "SELECT 1 FROM completed_specs WHERE spec_id = ?", [spec_id],
+            "SELECT run_id FROM completed_specs WHERE spec_id = ?", [spec_id],
         ).fetchone()
-        return result is not None
+        return result[0] if result else None
 
     @staticmethod
     def _clean_rows(records: list[dict]) -> list[dict]:

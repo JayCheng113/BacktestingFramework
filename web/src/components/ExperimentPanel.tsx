@@ -59,7 +59,7 @@ export default function ExperimentPanel() {
         start_date: startDate,
         end_date: endDate,
         run_wfo: runWfo,
-        wfo_n_splits: wfoSplits,
+        ...(runWfo ? { wfo_n_splits: wfoSplits } : {}),
       })
       if (res.data?.status === 'duplicate') {
         alert(`Duplicate: this experiment already has a completed run (${res.data.existing_run_id || res.data.spec_id})`)
