@@ -8,11 +8,32 @@ interface Props {
 }
 
 function computeMA(data: KlineBar[], period: number): (number | null)[] {
-  return data.map((_, i) => {
-    if (i < period - 1) return null
-    const sum = data.slice(i - period + 1, i + 1).reduce((s, d) => s + d.close, 0)
-    return +(sum / period).toFixed(2)
-  })
+  const result: (number | null)[] = []
+  let sum = 0
+  for (let i = 0; i < data.length; i++) {
+    sum += data[i].close
+    if (i >= period) sum -= data[i - period].close
+    result.push(i >= period - 1 ? +(sum / period).toFixed(2) : null)
+  }
+  return result
+}
+
+function computeBOLL(data: KlineBar[], period: number = 20, mult: number = 2): {
+  mid: (number | null)[]; upper: (number | null)[]; lower: (number | null)[]
+} {
+  const mid: (number | null)[] = []
+  const upper: (number | null)[] = []
+  const lower: (number | null)[] = []
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) { mid.push(null); upper.push(null); lower.push(null); continue }
+    const slice = data.slice(i - period + 1, i + 1).map(d => d.close)
+    const avg = slice.reduce((a, b) => a + b, 0) / period
+    const std = Math.sqrt(slice.reduce((s, v) => s + (v - avg) ** 2, 0) / period)
+    mid.push(+avg.toFixed(2))
+    upper.push(+(avg + mult * std).toFixed(2))
+    lower.push(+(avg - mult * std).toFixed(2))
+  }
+  return { mid, upper, lower }
 }
 
 export default function KlineChart({ data, symbol, trades = [] }: Props) {
@@ -48,6 +69,8 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
     }
   }
 
+  const boll = computeBOLL(data)
+
   const series: any[] = [
     {
       type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
@@ -77,8 +100,15 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: colors[i] + '80' } })),
       xAxisIndex: 1, yAxisIndex: 1,
     },
+    // Moving Averages
     { name: 'MA5', type: 'line', data: computeMA(data, 5), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#f59e0b', width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA10', type: 'line', data: computeMA(data, 10), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#3b82f6', width: 1 }, showSymbol: false, z: 5 },
     { name: 'MA20', type: 'line', data: computeMA(data, 20), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#a855f7', width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA60', type: 'line', data: computeMA(data, 60), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#22c55e', width: 1 }, showSymbol: false, z: 5 },
+    // Bollinger Bands
+    { name: 'BOLL Upper', type: 'line', data: boll.upper, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#64748b', width: 1, type: 'dashed' }, showSymbol: false, z: 4 },
+    { name: 'BOLL Mid', type: 'line', data: boll.mid, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#64748b', width: 1 }, showSymbol: false, z: 4 },
+    { name: 'BOLL Lower', type: 'line', data: boll.lower, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#64748b', width: 1, type: 'dashed' }, showSymbol: false, z: 4 },
   ]
 
   // Add buy/sell scatter for clear visibility + tooltip
@@ -124,7 +154,11 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   const option = {
     backgroundColor: '#0d1117',
     title: { text: symbol, left: 'center', top: 8, textStyle: { color: '#e6edf3', fontSize: 14 } },
-    legend: { data: ['MA5', 'MA20'], textStyle: { color: '#8b949e' }, top: 8, right: 20 },
+    legend: {
+      data: ['MA5', 'MA10', 'MA20', 'MA60', 'BOLL Upper', 'BOLL Mid', 'BOLL Lower'],
+      selected: { 'MA5': true, 'MA10': true, 'MA20': true, 'MA60': false, 'BOLL Upper': false, 'BOLL Mid': false, 'BOLL Lower': false },
+      textStyle: { color: '#8b949e', fontSize: 11 }, top: 8, right: 10, itemWidth: 14, itemHeight: 8, itemGap: 8,
+    },
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     grid: [
       { left: 60, right: 20, top: 50, height: '55%' },
