@@ -19,6 +19,10 @@ class MACrossStrategy(Strategy):
         self.long_period = long_period
 
     @classmethod
+    def get_description(cls) -> str:
+        return "均线交叉策略: 短期均线上穿长期均线时买入，下穿时卖出。趋势跟踪型策略。"
+
+    @classmethod
     def get_parameters_schema(cls) -> dict[str, dict]:
         return {
             "short_period": {"type": "int", "default": 5, "min": 2, "max": 60, "label": "Short MA"},

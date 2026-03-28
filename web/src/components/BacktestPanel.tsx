@@ -113,6 +113,33 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
     return v.toFixed(4)
   }
 
+  // Chinese labels + color thresholds for metric cards
+  const metricLabels: Record<string, string> = {
+    sharpe_ratio: '夏普比率',
+    total_return: '总收益率',
+    annualized_return: '年化收益',
+    max_drawdown: '最大回撤',
+    max_drawdown_duration: '回撤持续(天)',
+    alpha: 'Alpha',
+    beta: 'Beta',
+    win_rate: '胜率',
+    trade_count: '交易次数',
+    profit_factor: '盈亏比',
+    avg_holding_days: '平均持仓(天)',
+    annualized_volatility: '年化波动率',
+    benchmark_return: '基准收益',
+    sortino_ratio: 'Sortino',
+  }
+
+  // Color: good=red(up), bad=green(down), neutral=white
+  function metricColor(k: string, v: number): string {
+    if (k === 'sharpe_ratio') return v > 1 ? 'var(--color-up)' : v > 0 ? 'var(--text-primary)' : 'var(--color-down)'
+    if (k === 'total_return' || k === 'annualized_return' || k === 'alpha') return v > 0 ? 'var(--color-up)' : v < 0 ? 'var(--color-down)' : 'var(--text-primary)'
+    if (k === 'max_drawdown') return v > -0.1 ? 'var(--color-up)' : v > -0.2 ? 'var(--text-primary)' : 'var(--color-down)'
+    if (k === 'win_rate') return v > 0.5 ? 'var(--color-up)' : v > 0.3 ? 'var(--text-primary)' : 'var(--color-down)'
+    return 'var(--text-primary)'
+  }
+
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
       <h3 className="text-sm font-medium mb-3">Backtest</h3>
@@ -133,6 +160,11 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             {strategies.map(s => <option key={s.key} value={s.name}>{s.name}</option>)}
           </select>
+          {selected && strategies.find(s => s.name === selected)?.description && (
+            <div className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+              {strategies.find(s => s.name === selected)?.description}
+            </div>
+          )}
         </div>
         {/* Strategy params */}
         {Object.entries(params).map(([k, v]) => (
@@ -164,8 +196,8 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             {Object.entries(result.metrics).filter(([k]) => metricKeys.includes(k)).map(([k, v]) => (
               <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{k.replace(/_/g, ' ')}</div>
-                <div className="text-sm font-medium">{formatMetric(k, v)}</div>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{metricLabels[k] || k.replace(/_/g, ' ')}</div>
+                <div className="text-sm font-medium" style={{ color: metricColor(k, v) }}>{formatMetric(k, v)}</div>
               </div>
             ))}
           </div>
@@ -224,21 +256,21 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
         <div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS Sharpe</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS 夏普比率</div>
               <div className="text-sm font-medium">{(wfResult.oos_metrics.sharpe_ratio ?? 0).toFixed(4)}</div>
             </div>
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Overfitting Score</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>过拟合评分</div>
               <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.5 ? '#ef4444' : '#22c55e' }}>
                 {wfResult.overfitting_score.toFixed(4)}
               </div>
             </div>
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>IS vs OOS Degradation</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>样本内外衰减</div>
               <div className="text-sm font-medium">{(wfResult.is_vs_oos_degradation * 100).toFixed(1)}%</div>
             </div>
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Splits</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>分割数</div>
               <div className="text-sm font-medium">{wfResult.n_splits}</div>
             </div>
           </div>

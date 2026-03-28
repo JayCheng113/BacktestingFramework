@@ -22,6 +22,10 @@ class BollReversionStrategy(Strategy):
         self.std_dev = std_dev
 
     @classmethod
+    def get_description(cls) -> str:
+        return "布林带回归策略: 价格跌破下轨买入(超卖)，涨破上轨卖出(超买)。均值回归型策略。"
+
+    @classmethod
     def get_parameters_schema(cls) -> dict[str, dict]:
         return {
             "period": {"type": "int", "default": 20, "min": 5, "max": 120, "label": "BOLL Period"},

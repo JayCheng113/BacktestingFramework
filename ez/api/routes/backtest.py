@@ -106,6 +106,7 @@ def list_strategies():
             "name": cls.__name__,
             "key": key,
             "parameters": cls.get_parameters_schema(),
+            "description": cls.get_description() if hasattr(cls, 'get_description') else "",
         }
         for key, cls in Strategy._registry.items()
     ]

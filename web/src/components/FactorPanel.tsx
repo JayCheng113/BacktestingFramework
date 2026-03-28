@@ -7,11 +7,18 @@ interface Props {
   symbol: string; market: string; startDate: string; endDate: string
 }
 
-const FACTORS = ['ma', 'ema', 'rsi', 'macd', 'boll']
+const FACTORS = [
+  { value: 'ma', label: '移动平均 (MA)' },
+  { value: 'ema', label: '指数均线 (EMA)' },
+  { value: 'rsi', label: '相对强弱 (RSI)' },
+  { value: 'macd', label: 'MACD' },
+  { value: 'boll', label: '布林带 (BOLL)' },
+  { value: 'momentum', label: '动量 (Momentum)' },
+]
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function FactorPanel({ symbol, market, startDate, endDate }: Props) {
-  const [factor, setFactor] = useState('ma')
+  const [factor, setFactor] = useState(FACTORS[0].value)
   const [result, setResult] = useState<FactorResult | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -84,7 +91,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Factor</label>
           <select value={factor} onChange={e => setFactor(e.target.value)}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            {FACTORS.map(f => <option key={f} value={f}>{f.toUpperCase()}</option>)}
+            {FACTORS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </div>
         <button onClick={handleEval} disabled={loading}

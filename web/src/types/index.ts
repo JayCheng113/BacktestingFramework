@@ -22,7 +22,7 @@ export interface TradeRecord {
 }
 
 export interface StrategyInfo {
-  name: string; key: string; parameters: Record<string, any>;
+  name: string; key: string; parameters: Record<string, any>; description?: string;
 }
 
 export interface WalkForwardResult {

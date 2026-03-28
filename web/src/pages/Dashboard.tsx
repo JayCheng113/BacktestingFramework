@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import SearchBar from '../components/SearchBar'
 import KlineChart from '../components/KlineChart'
 import BacktestPanel from '../components/BacktestPanel'
@@ -14,6 +14,10 @@ export default function Dashboard() {
   const [endDate, setEndDate] = useState('2024-12-31')
   const [loading, setLoading] = useState(false)
   const [trades, setTrades] = useState<TradeRecord[]>([])
+
+  useEffect(() => {
+    handleSearch('000001.SZ', 'cn_stock', startDate, endDate)
+  }, [])  // run once on mount
 
   const handleSearch = async (symbol: string, market: string, start: string, end: string) => {
     setLoading(true)

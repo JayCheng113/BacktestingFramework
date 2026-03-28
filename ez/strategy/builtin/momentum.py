@@ -21,6 +21,10 @@ class MomentumStrategy(Strategy):
         self.lookback = lookback
 
     @classmethod
+    def get_description(cls) -> str:
+        return "动量策略: 过去N天涨则持有，跌则空仓。追涨杀跌，适合趋势行情。"
+
+    @classmethod
     def get_parameters_schema(cls) -> dict[str, dict]:
         return {
             "lookback": {"type": "int", "default": 20, "min": 5, "max": 120, "label": "Lookback Days"},
