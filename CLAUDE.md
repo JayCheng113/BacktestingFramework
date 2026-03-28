@@ -10,7 +10,7 @@ Version: 0.2.4 | Tests: 707 | C++ acceleration: up to 7.9x
 - [Engineering Governance](docs/architecture/governance.md) — thin core, lifecycle labels, version discipline
 - [V2.3+ Roadmap](docs/core-changes/v2.3-roadmap.md) — detailed per-version plan with exit gates
 
-**Note**: Gate framework is DESIGNED but not yet implemented. Gates are planned for V2.4+.
+**Note**: ResearchGate implemented in V2.4 (ez/agent/gates.py). Deploy/Runtime gates planned for V2.6+.
 
 ## Module Map
 - `ez/core/` — Computational primitives: matcher, ts_ops (C++ accelerated) [CLAUDE.md](ez/core/CLAUDE.md)
@@ -30,7 +30,7 @@ ez/types.py -> ez/data/ -> ez/factor/ -> ez/strategy/ -> ez/backtest/ -> ez/api/
                             ↑ ts_ops                      ↑ matcher
                             └────────── ez/core/ ─────────┘  (leaf, no deps)
 
-Future modules (ez/agent, ez/live, ez/ops) consume core interfaces, never modify core.
+ez/agent/ consumes backtest/core interfaces (V2.4). Future: ez/live/, ez/ops/ — never modify core.
 ```
 
 ## Core Files (DO NOT MODIFY without proposal in docs/core-changes/)
