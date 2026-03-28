@@ -191,40 +191,50 @@ class TestParityParameterValidation:
 
     def test_rolling_mean_non_positive_window(self):
         s = pd.Series([1.0, 2.0, 3.0])
-        for use_cpp in [True, False]:
-            ts_ops._USE_CPP = use_cpp
-            with pytest.raises(ValueError, match="positive"):
-                ts_ops.rolling_mean(s, window=0)
-        ts_ops._USE_CPP = cpp_available
+        try:
+            for use_cpp in [True, False]:
+                ts_ops._USE_CPP = use_cpp
+                with pytest.raises(ValueError, match="positive"):
+                    ts_ops.rolling_mean(s, window=0)
+        finally:
+            ts_ops._USE_CPP = cpp_available
 
     def test_rolling_std_non_positive_window(self):
         s = pd.Series([1.0, 2.0, 3.0])
-        for use_cpp in [True, False]:
-            ts_ops._USE_CPP = use_cpp
-            with pytest.raises(ValueError, match="positive"):
-                ts_ops.rolling_std(s, window=-1)
-        ts_ops._USE_CPP = cpp_available
+        try:
+            for use_cpp in [True, False]:
+                ts_ops._USE_CPP = use_cpp
+                with pytest.raises(ValueError, match="positive"):
+                    ts_ops.rolling_std(s, window=-1)
+        finally:
+            ts_ops._USE_CPP = cpp_available
 
     def test_ewm_mean_non_positive_span(self):
         s = pd.Series([1.0, 2.0, 3.0])
-        for use_cpp in [True, False]:
-            ts_ops._USE_CPP = use_cpp
-            with pytest.raises(ValueError, match="positive"):
-                ts_ops.ewm_mean(s, span=0)
-        ts_ops._USE_CPP = cpp_available
+        try:
+            for use_cpp in [True, False]:
+                ts_ops._USE_CPP = use_cpp
+                with pytest.raises(ValueError, match="positive"):
+                    ts_ops.ewm_mean(s, span=0)
+        finally:
+            ts_ops._USE_CPP = cpp_available
 
     def test_diff_non_positive_periods(self):
         s = pd.Series([1.0, 2.0, 3.0])
-        for use_cpp in [True, False]:
-            ts_ops._USE_CPP = use_cpp
-            with pytest.raises(ValueError, match="positive"):
-                ts_ops.diff(s, periods=0)
-        ts_ops._USE_CPP = cpp_available
+        try:
+            for use_cpp in [True, False]:
+                ts_ops._USE_CPP = use_cpp
+                with pytest.raises(ValueError, match="positive"):
+                    ts_ops.diff(s, periods=0)
+        finally:
+            ts_ops._USE_CPP = cpp_available
 
     def test_pct_change_non_positive_periods(self):
         s = pd.Series([1.0, 2.0, 3.0])
-        for use_cpp in [True, False]:
-            ts_ops._USE_CPP = use_cpp
-            with pytest.raises(ValueError, match="positive"):
-                ts_ops.pct_change(s, periods=-1)
-        ts_ops._USE_CPP = cpp_available
+        try:
+            for use_cpp in [True, False]:
+                ts_ops._USE_CPP = use_cpp
+                with pytest.raises(ValueError, match="positive"):
+                    ts_ops.pct_change(s, periods=-1)
+        finally:
+            ts_ops._USE_CPP = cpp_available

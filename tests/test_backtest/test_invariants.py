@@ -248,13 +248,19 @@ class TestAccountingInvariants:
                 )
 
     @pytest.mark.parametrize("matcher", MATCHERS)
-    def test_closed_trades_pnl_equals_equity_change(self, matcher):
+    @pytest.mark.parametrize("raw_signals", [
+        pytest.param([0, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+                      0, 1, 1, 1, 0, 0, 0, 0, 0, 0], id="buy-hold-sell"),
+        pytest.param([0, 0.3, 0.5, 0.8, 1.0, 1.0, 0.5, 0.2, 0, 0,
+                      0, 0, 0.5, 1.0, 1.0, 0.5, 0, 0, 0, 0], id="scale-in-out"),
+        pytest.param([0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
+                      0, 1, 0, 1, 0, 1, 0, 1, 0, 0], id="rapid-switch"),
+    ])
+    def test_closed_trades_pnl_equals_equity_change(self, matcher, raw_signals):
         """When all positions close, sum(trade.pnl) ~ equity[-1] - capital."""
-        signals = [0, 1, 1, 1, 1, 1, 1, 0, 0, 0,
-                   0, 1, 1, 1, 0, 0, 0, 0, 0, 0]
         data = make_data(PRICES, OPENS)
         engine = VectorizedBacktestEngine(matcher=matcher)
-        result = engine.run(data, FixedSignalStrategy(signals), CAPITAL)
+        result = engine.run(data, FixedSignalStrategy(raw_signals), CAPITAL)
         if result.trades:
             total_pnl = sum(t.pnl for t in result.trades)
             equity_change = result.equity_curve.iloc[-1] - CAPITAL
