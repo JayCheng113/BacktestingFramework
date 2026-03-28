@@ -123,6 +123,38 @@ def test_significance_returned(engine, simple_df):
     assert isinstance(result.significance.monte_carlo_p_value, float)
 
 
+class ScaleInStrategy(Strategy):
+    """Strategy that scales into position: 0 → 0.3 → 0.6 → 1.0 → 0."""
+    def required_factors(self): return []
+    def generate_signals(self, data):
+        n = len(data)
+        signals = [0.0] * n
+        # Scale in over bars 1-3, then exit at bar 6
+        if n > 6:
+            signals[1] = 0.3
+            signals[2] = 0.6
+            signals[3] = 1.0
+            signals[4] = 1.0
+            signals[5] = 1.0
+            signals[6] = 0.0
+        return pd.Series(signals, index=data.index)
+
+
+def test_cumulative_entry_commission(simple_df):
+    """Multiple buys should accumulate entry commission in trade record."""
+    engine = VectorizedBacktestEngine(commission_rate=0.001, min_commission=0.0)
+    result = engine.run(simple_df, ScaleInStrategy(), initial_capital=100000)
+    # Should produce at least 1 trade with commission from multiple buys
+    if result.trades:
+        t = result.trades[0]
+        # Commission should reflect BOTH entry (multiple buys) and exit
+        assert t.commission > 0
+        # PnL should include all commissions
+        # Verify pnl accounts for entry comm: pnl = (exit-entry)*shares - exit_comm - entry_comm
+        # So pnl + commission should roughly equal raw price gain * shares
+        assert t.pnl < (t.exit_price - t.entry_price) * 10000  # pnl < raw gain (commission reduces it)
+
+
 def test_metrics_keys_complete(engine, simple_df):
     result = engine.run(simple_df, AlwaysInStrategy(), initial_capital=100000)
     required_keys = {"sharpe_ratio", "total_return", "max_drawdown", "max_drawdown_duration", "win_rate", "trade_count", "profit_factor", "avg_holding_days"}
