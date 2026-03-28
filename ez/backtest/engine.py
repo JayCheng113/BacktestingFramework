@@ -167,12 +167,12 @@ class VectorizedBacktestEngine:
                         shares = 0.0
                     # Record trade when fully closing
                     if old_shares > 0 and shares < 1e-10 and entry_time is not None:
-                        pnl = (exec_price - entry_price) * old_shares - fill.commission - entry_comm
+                        pnl = (fill.fill_price - entry_price) * old_shares - fill.commission - entry_comm
                         trades.append(TradeRecord(
                             entry_time=entry_time,
                             exit_time=time_list[i],
                             entry_price=entry_price,
-                            exit_price=exec_price,
+                            exit_price=fill.fill_price,
                             weight=prev_weight,
                             pnl=pnl,
                             pnl_pct=pnl / (entry_price * old_shares) if entry_price * old_shares > 0 else 0,
@@ -191,12 +191,12 @@ class VectorizedBacktestEngine:
                             continue
                         if shares == 0:
                             entry_time = time_list[i]
-                            entry_price = exec_price
+                            entry_price = fill.fill_price
                             entry_comm = fill.commission
                         elif fill.shares > 0:
                             entry_comm += fill.commission
                             # Weighted average entry price
-                            entry_price = (entry_price * shares + exec_price * fill.shares) / (shares + fill.shares)
+                            entry_price = (entry_price * shares + fill.fill_price * fill.shares) / (shares + fill.shares)
                         shares += fill.shares
                         cash += fill.net_amount  # net_amount is negative for buys
 

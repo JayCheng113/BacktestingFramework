@@ -170,9 +170,12 @@ static nb::object pct_change(InputArray input, int periods = 1) {
     for (size_t i = 0; i < std::min(n, p); i++) dst[i] = std::nan("");
     for (size_t i = p; i < n; i++) {
         double prev = src[i - p];
-        dst[i] = (prev != 0.0 && !std::isnan(prev) && !std::isnan(src[i]))
-                 ? (src[i] - prev) / prev
-                 : std::nan("");
+        if (std::isnan(prev) || std::isnan(src[i])) {
+            dst[i] = std::nan("");
+        } else {
+            // IEEE 754: 1.0/0.0 = inf, -1.0/0.0 = -inf, 0.0/0.0 = NaN — matches pandas
+            dst[i] = (src[i] - prev) / prev;
+        }
     }
 
     return out;

@@ -122,6 +122,14 @@ class TestPctChange:
         expected = prices.pct_change(periods=3)
         pd.testing.assert_series_equal(result, expected)
 
+    def test_div_by_zero_returns_inf(self):
+        """prev==0 should produce inf, matching pandas IEEE 754 behavior."""
+        s = pd.Series([0.0, 1.0, 2.0])
+        result = ts_ops.pct_change(s)
+        expected = s.pct_change()
+        assert np.isinf(result.iloc[1])  # 1/0 = inf
+        assert result.iloc[2] == pytest.approx(1.0)
+
     def test_periods(self, prices):
         result = ts_ops.pct_change(prices, periods=2)
         assert pd.isna(result.iloc[0])
