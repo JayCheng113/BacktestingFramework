@@ -10,6 +10,7 @@ Tables:
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 
 import duckdb
@@ -49,7 +50,7 @@ class ExperimentStore:
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS experiment_runs (
                 run_id VARCHAR PRIMARY KEY,
-                spec_id VARCHAR NOT NULL,
+                spec_id VARCHAR NOT NULL REFERENCES experiment_specs(spec_id),
                 status VARCHAR NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 duration_ms DOUBLE,
@@ -103,7 +104,14 @@ class ExperimentStore:
         ])
 
     def save_run(self, report_dict: dict) -> None:
-        """Insert a run result. Raises on duplicate run_id."""
+        """Insert a run result. Raises on duplicate run_id or missing spec."""
+        # Defensive check: spec must exist (FK enforces this too, but gives clearer error)
+        spec_exists = self._conn.execute(
+            "SELECT 1 FROM experiment_specs WHERE spec_id = ?",
+            [report_dict["spec_id"]],
+        ).fetchone()
+        if not spec_exists:
+            raise ValueError(f"spec_id '{report_dict['spec_id']}' not found — call save_spec() first")
         self._conn.execute("""
             INSERT INTO experiment_runs (
                 run_id, spec_id, status, created_at, duration_ms, code_commit,
@@ -135,13 +143,22 @@ class ExperimentStore:
             report_dict["error"],
         ])
 
+    @staticmethod
+    def _clean_rows(records: list[dict]) -> list[dict]:
+        """Convert NaN/inf to None for JSON compliance (DuckDB NULL → pandas NaN)."""
+        for row in records:
+            for k, v in row.items():
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    row[k] = None
+        return records
+
     def find_by_spec_id(self, spec_id: str) -> list[dict]:
         """Find all runs for a given spec_id."""
         rows = self._conn.execute(
             "SELECT * FROM experiment_runs WHERE spec_id = ? ORDER BY created_at DESC",
             [spec_id],
         ).fetchdf()
-        return rows.to_dict("records") if len(rows) > 0 else []
+        return self._clean_rows(rows.to_dict("records")) if len(rows) > 0 else []
 
     def list_runs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         """List recent runs."""
@@ -152,7 +169,7 @@ class ExperimentStore:
             "ORDER BY r.created_at DESC LIMIT ? OFFSET ?",
             [limit, offset],
         ).fetchdf()
-        return rows.to_dict("records") if len(rows) > 0 else []
+        return self._clean_rows(rows.to_dict("records")) if len(rows) > 0 else []
 
     def get_run(self, run_id: str) -> dict | None:
         """Get a single run by run_id."""
@@ -165,7 +182,7 @@ class ExperimentStore:
         ).fetchdf()
         if len(rows) == 0:
             return None
-        return rows.to_dict("records")[0]
+        return self._clean_rows(rows.to_dict("records"))[0]
 
     def count_by_spec_id(self, spec_id: str) -> int:
         """Count runs for a spec (for idempotency check)."""
@@ -174,6 +191,28 @@ class ExperimentStore:
             [spec_id],
         ).fetchone()
         return result[0] if result else 0
+
+    def save_run_if_new(self, spec_id: str, report_dict: dict) -> bool:
+        """Atomically check for existing completed run and insert if none.
+
+        Returns True if inserted, False if a completed run already exists.
+        Uses a transaction to prevent concurrent duplicate writes.
+        """
+        self._conn.execute("BEGIN TRANSACTION")
+        try:
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM experiment_runs WHERE spec_id = ? AND status = 'completed'",
+                [spec_id],
+            ).fetchone()[0]
+            if count > 0:
+                self._conn.execute("ROLLBACK")
+                return False
+            self.save_run(report_dict)
+            self._conn.execute("COMMIT")
+            return True
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def close(self) -> None:
         """Close the DuckDB connection."""

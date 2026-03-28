@@ -5,6 +5,7 @@ suitable for storage, API response, and human review.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -85,8 +86,16 @@ class ExperimentReport:
 
         return report
 
+    @staticmethod
+    def _clean(v):
+        """Convert NaN/inf to None for JSON compliance."""
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
     def to_dict(self) -> dict:
-        """Serialize for JSON/DuckDB."""
+        """Serialize for JSON/DuckDB. NaN/inf → None."""
+        c = self._clean
         return {
             "run_id": self.run_id,
             "spec_id": self.spec_id,
@@ -94,16 +103,16 @@ class ExperimentReport:
             "created_at": self.created_at.isoformat(),
             "duration_ms": self.duration_ms,
             "code_commit": self.code_commit,
-            "sharpe_ratio": self.sharpe_ratio,
-            "total_return": self.total_return,
-            "max_drawdown": self.max_drawdown,
+            "sharpe_ratio": c(self.sharpe_ratio),
+            "total_return": c(self.total_return),
+            "max_drawdown": c(self.max_drawdown),
             "trade_count": self.trade_count,
-            "win_rate": self.win_rate,
-            "profit_factor": self.profit_factor,
-            "p_value": self.p_value,
+            "win_rate": c(self.win_rate),
+            "profit_factor": c(self.profit_factor),
+            "p_value": c(self.p_value),
             "is_significant": self.is_significant,
-            "oos_sharpe": self.oos_sharpe,
-            "overfitting_score": self.overfitting_score,
+            "oos_sharpe": c(self.oos_sharpe),
+            "overfitting_score": c(self.overfitting_score),
             "gate_passed": self.gate_passed,
             "gate_summary": self.gate_summary,
             "gate_reasons": self.gate_reasons,

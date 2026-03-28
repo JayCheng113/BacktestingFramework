@@ -50,13 +50,16 @@ export default function ExperimentPanel() {
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
-      await submitExperiment({
+      const res = await submitExperiment({
         strategy_name: strategyName,
         strategy_params: params,
         symbol, market,
         start_date: startDate,
         end_date: endDate,
       })
+      if (res.data?.status === 'duplicate') {
+        alert(`Duplicate: this experiment already has a completed run (${res.data.existing_run_id || res.data.spec_id})`)
+      }
       loadRuns()
     } catch (e: any) {
       alert(e?.response?.data?.detail || 'Experiment failed')

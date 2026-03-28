@@ -152,9 +152,15 @@ def submit_experiment(req: ExperimentRequest):
     verdict = ResearchGate(gate_config).evaluate(result)
     report = ExperimentReport.from_result(result, verdict)
 
-    # Persist
+    # Persist (atomic: transaction prevents concurrent duplicate completed runs)
     exp_store.save_spec(spec.to_dict())
-    exp_store.save_run(report.to_dict())
+    inserted = exp_store.save_run_if_new(spec.spec_id, report.to_dict())
+    if not inserted:
+        return {
+            "status": "duplicate",
+            "message": "Concurrent run completed while this one was executing",
+            "spec_id": spec.spec_id,
+        }
 
     return report.to_dict()
 
