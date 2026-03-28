@@ -43,7 +43,7 @@ class ExperimentStore:
                 wfo_train_ratio DOUBLE DEFAULT 0.7,
                 tags VARCHAR DEFAULT '[]',  -- JSON array
                 description VARCHAR DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
         """)
         self._conn.execute("""
@@ -51,7 +51,7 @@ class ExperimentStore:
                 run_id VARCHAR PRIMARY KEY,
                 spec_id VARCHAR NOT NULL,
                 status VARCHAR NOT NULL,
-                created_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
                 duration_ms DOUBLE,
                 code_commit VARCHAR,
                 sharpe_ratio DOUBLE,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ez.agent.experiment_store import ExperimentStore
@@ -91,25 +91,28 @@ def _fetch_data(symbol: str, market: str, period: str, start: date, end: date):
 @router.post("")
 def submit_experiment(req: ExperimentRequest):
     """Submit and execute an experiment, return report."""
-    spec = RunSpec(
-        strategy_name=req.strategy_name,
-        strategy_params=req.strategy_params,
-        symbol=req.symbol,
-        market=req.market,
-        period=req.period,
-        start_date=req.start_date,
-        end_date=req.end_date,
-        initial_capital=req.initial_capital,
-        commission_rate=req.commission_rate,
-        min_commission=req.min_commission,
-        slippage_rate=req.slippage_rate,
-        run_backtest=req.run_backtest,
-        run_wfo=req.run_wfo,
-        wfo_n_splits=req.wfo_n_splits,
-        wfo_train_ratio=req.wfo_train_ratio,
-        tags=req.tags,
-        description=req.description,
-    )
+    try:
+        spec = RunSpec(
+            strategy_name=req.strategy_name,
+            strategy_params=req.strategy_params,
+            symbol=req.symbol,
+            market=req.market,
+            period=req.period,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            initial_capital=req.initial_capital,
+            commission_rate=req.commission_rate,
+            min_commission=req.min_commission,
+            slippage_rate=req.slippage_rate,
+            run_backtest=req.run_backtest,
+            run_wfo=req.run_wfo,
+            wfo_n_splits=req.wfo_n_splits,
+            wfo_train_ratio=req.wfo_train_ratio,
+            tags=req.tags,
+            description=req.description,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     exp_store = _get_experiment_store()
 
@@ -148,7 +151,10 @@ def submit_experiment(req: ExperimentRequest):
 
 
 @router.get("")
-def list_experiments(limit: int = 50, offset: int = 0):
+def list_experiments(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
     """List recent experiment runs."""
     exp_store = _get_experiment_store()
     return exp_store.list_runs(limit=limit, offset=offset)

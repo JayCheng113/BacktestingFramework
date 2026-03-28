@@ -95,3 +95,11 @@ def close_resources() -> None:
     if _store is not None:
         _store.close()
         _store = None
+    # Close experiment store connection (from routes/experiments.py)
+    from ez.api.routes import experiments as _exp_mod
+    if _exp_mod._exp_store is not None:
+        try:
+            _exp_mod._exp_store._conn.close()
+        except Exception:
+            pass
+        _exp_mod._exp_store = None

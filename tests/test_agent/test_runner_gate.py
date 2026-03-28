@@ -151,6 +151,33 @@ class TestGate:
         verdict = ResearchGate().evaluate(result)
         assert "PASS" in verdict.summary or "FAIL" in verdict.summary
 
+    def test_max_drawdown_rejects_large_dd(self, spec, sample_data):
+        """Regression: negative max_drawdown (e.g. -0.31) must be caught by gate.
+
+        Bug: metrics returns negative DD, gate compared dd <= threshold,
+        so -0.31 <= 0.1 passed. Fix: compare abs(dd) <= threshold.
+        """
+        result = self._make_result(spec, sample_data)
+        # Use a very strict DD threshold that should fail
+        strict = GateConfig(
+            min_sharpe=-100, max_drawdown=0.001,  # 0.1% — almost impossible
+            min_trades=0, max_p_value=1.0, max_overfitting_score=10.0,
+            require_wfo=False,
+        )
+        verdict = ResearchGate(strict).evaluate(result)
+        dd_rule = next(r for r in verdict.reasons if r.rule == "max_drawdown")
+        assert not dd_rule.passed, (
+            f"Gate should reject: dd_abs={dd_rule.value:.4f} > threshold=0.001"
+        )
+        assert dd_rule.value > 0, "Gate should report absolute drawdown value"
+
+    def test_max_drawdown_value_is_positive(self, spec, sample_data):
+        """Gate should always report drawdown as a positive number."""
+        result = self._make_result(spec, sample_data)
+        verdict = ResearchGate().evaluate(result)
+        dd_rule = next(r for r in verdict.reasons if r.rule == "max_drawdown")
+        assert dd_rule.value >= 0, f"Drawdown should be positive, got {dd_rule.value}"
+
 
 class TestReport:
     def test_from_result(self, spec, sample_data):

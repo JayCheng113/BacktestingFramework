@@ -85,14 +85,15 @@ class ResearchGate:
                 message=f"Sharpe {sharpe:.2f} {'>=':} {cfg.min_sharpe}",
             ))
 
-            # Rule 2: Max drawdown
-            dd = result.backtest.metrics.get("max_drawdown", 1.0)
+            # Rule 2: Max drawdown (metrics returns negative, e.g. -0.31 for 31% DD)
+            dd = result.backtest.metrics.get("max_drawdown", -1.0)
+            dd_abs = abs(dd)
             reasons.append(GateReason(
                 rule="max_drawdown",
-                passed=dd <= cfg.max_drawdown,
-                value=dd,
+                passed=dd_abs <= cfg.max_drawdown,
+                value=dd_abs,
                 threshold=cfg.max_drawdown,
-                message=f"MaxDD {dd:.1%} {'<=':} {cfg.max_drawdown:.0%}",
+                message=f"MaxDD {dd_abs:.1%} {'<=':} {cfg.max_drawdown:.0%}",
             ))
 
             # Rule 3: Min trades
