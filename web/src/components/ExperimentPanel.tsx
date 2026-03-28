@@ -16,8 +16,10 @@ export default function ExperimentPanel() {
   const [params, setParams] = useState<Record<string, number>>({})
   const [symbol, setSymbol] = useState('000001.SZ')
   const [market] = useState('cn_stock')
-  const [startDate, setStartDate] = useState('2022-01-01')
-  const [endDate, setEndDate] = useState('2023-12-31')
+  const [startDate, setStartDate] = useState('2020-01-01')
+  const [endDate, setEndDate] = useState('2024-12-31')
+  const [runWfo, setRunWfo] = useState(true)
+  const [wfoSplits, setWfoSplits] = useState(3)
 
   useEffect(() => {
     loadRuns()
@@ -56,6 +58,8 @@ export default function ExperimentPanel() {
         symbol, market,
         start_date: startDate,
         end_date: endDate,
+        run_wfo: runWfo,
+        wfo_n_splits: wfoSplits,
       })
       if (res.data?.status === 'duplicate') {
         alert(`Duplicate: this experiment already has a completed run (${res.data.existing_run_id || res.data.spec_id})`)
@@ -104,6 +108,21 @@ export default function ExperimentPanel() {
             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
           </div>
+        </div>
+        {/* WFO Controls */}
+        <div className="flex gap-4 items-center flex-wrap">
+          <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <input type="checkbox" checked={runWfo} onChange={e => setRunWfo(e.target.checked)} />
+            Walk-Forward
+          </label>
+          {runWfo && (
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Splits</label>
+              <input type="number" value={wfoSplits} min={2} max={20}
+                onChange={e => setWfoSplits(Number(e.target.value))}
+                className="w-16 px-2 py-1 rounded text-sm" style={inputStyle} />
+            </div>
+          )}
         </div>
         {/* Strategy Params */}
         {Object.keys(params).length > 0 && (
