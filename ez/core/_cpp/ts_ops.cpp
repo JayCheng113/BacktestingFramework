@@ -111,7 +111,11 @@ static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
         dst[w - 1] = std::nan("");
     }
 
-    // Slide window: O(1) per step when no NaN at boundaries
+    // Slide window: O(1) per step when no NaN at boundaries.
+    // Periodic recompute every `w` steps to bound floating-point drift
+    // on large-magnitude data (e.g., 1e12 + noise).
+    int steps_since_recompute = 0;
+
     for (size_t i = w; i < n; i++) {
         double new_val = src[i];
         double old_val = src[i - w];
@@ -124,13 +128,15 @@ static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
         if (nan_count > 0) {
             dst[i] = std::nan("");
             welford_valid = false;
+            steps_since_recompute = 0;
             continue;
         }
 
         // All values in window are valid
-        if (!welford_valid || old_nan) {
-            // Transitioning from NaN region — recompute
+        if (!welford_valid || old_nan || steps_since_recompute >= (int)w) {
+            // Recompute from scratch: NaN boundary or periodic drift correction
             recompute(i - w + 1);
+            steps_since_recompute = 0;
         } else {
             // O(1) sliding Welford update:
             // new_mean = old_mean + (new_val - old_val) / w
@@ -139,6 +145,7 @@ static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
             mean = old_mean + (new_val - old_val) / static_cast<double>(w);
             M2 += (new_val - old_val) * (new_val + old_val - old_mean - mean);
             if (M2 < 0.0) M2 = 0.0;  // clamp floating-point noise
+            steps_since_recompute++;
         }
 
         int denom = static_cast<int>(w) - ddof;
@@ -151,6 +158,9 @@ static nb::object rolling_std(InputArray input, int window, int ddof = 1) {
 /**
  * Exponential weighted moving average with adjust=True (pandas default).
  * NaN-safe: skip NaN values, maintain weights as if they weren't there.
+ *
+ * When decay==0 (span=1), NaN causes den to reach 0. In that case pandas
+ * keeps the last valid weighted_avg — we match this with last_valid.
  */
 static nb::object ewm_mean(InputArray input, int span) {
     if (span <= 0) throw nb::value_error("span must be positive");
@@ -165,6 +175,7 @@ static nb::object ewm_mean(InputArray input, int span) {
     size_t min_p = static_cast<size_t>(span);
     double num = 0.0, den = 0.0;
     int valid_count = 0;
+    double last_valid = std::nan("");
 
     for (size_t i = 0; i < n; i++) {
         if (!std::isnan(src[i])) {
@@ -178,7 +189,12 @@ static nb::object ewm_mean(InputArray input, int span) {
         }
 
         if (valid_count >= (int)min_p && den > 0) {
-            dst[i] = num / den;
+            last_valid = num / den;
+            dst[i] = last_valid;
+        } else if (valid_count >= (int)min_p && !std::isnan(last_valid)) {
+            // den collapsed to 0 (e.g., span=1 + NaN) but we have a prior
+            // valid EWM — pandas keeps the last weighted_avg in this case
+            dst[i] = last_valid;
         } else {
             dst[i] = std::nan("");
         }

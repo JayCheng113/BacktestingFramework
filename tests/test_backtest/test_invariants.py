@@ -1,7 +1,7 @@
 """A1: Accounting invariant tests -- V2.3 correctness hardening.
 
 Core invariant: at every bar i,
-    abs(cash + shares * close[i] - equity[i]) <= EPS
+    abs(cash + shares * close[i] - equity[i]) <= EPS_FUND
 
 Verification approach: a shadow simulator independently computes per-bar
 (cash, shares, equity), then compared with the engine's equity curve.
@@ -16,7 +16,10 @@ from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
 from ez.factor.base import Factor
 from ez.strategy.base import Strategy
 
-EPS = 0.01  # V2.3 universal tolerance
+# Split tolerances: fund-level vs rate-level
+EPS_FUND = 0.01     # cash/equity comparison (1 cent per $100K)
+EPS_RATE = 1e-10    # daily return comparison (floating-point precision)
+EPS_PNL = 0.01      # trade PnL vs equity change
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +187,7 @@ class TestAccountingInvariants:
         engine_eq = result.equity_curve.values
         assert len(shadow_eq) == len(engine_eq)
         for i in range(len(engine_eq)):
-            assert abs(shadow_eq[i] - engine_eq[i]) <= EPS, (
+            assert abs(shadow_eq[i] - engine_eq[i]) <= EPS_FUND, (
                 f"Bar {i}: shadow={shadow_eq[i]:.4f} engine={engine_eq[i]:.4f} "
                 f"diff={abs(shadow_eq[i] - engine_eq[i]):.6f}"
             )
@@ -201,7 +204,7 @@ class TestAccountingInvariants:
         )
         for i in range(len(eq)):
             expected = cash[i] + shares[i] * PRICES[i]
-            assert abs(expected - eq[i]) <= EPS, (
+            assert abs(expected - eq[i]) <= EPS_FUND, (
                 f"Bar {i}: cash({cash[i]:.2f})+pos({shares[i]:.4f}*{PRICES[i]})="
                 f"{expected:.2f} != equity={eq[i]:.2f}"
             )
@@ -243,8 +246,8 @@ class TestAccountingInvariants:
         for i in range(1, len(eq)):
             if eq[i - 1] > 0:
                 expected = eq[i] / eq[i - 1] - 1
-                assert abs(dr[i] - expected) <= EPS, (
-                    f"Bar {i}: return={dr[i]:.6f} expected={expected:.6f}"
+                assert abs(dr[i] - expected) <= EPS_RATE, (
+                    f"Bar {i}: return={dr[i]:.10f} expected={expected:.10f}"
                 )
 
     @pytest.mark.parametrize("matcher", MATCHERS)
@@ -264,7 +267,7 @@ class TestAccountingInvariants:
         if result.trades:
             total_pnl = sum(t.pnl for t in result.trades)
             equity_change = result.equity_curve.iloc[-1] - CAPITAL
-            assert abs(total_pnl - equity_change) <= 1.0, (
+            assert abs(total_pnl - equity_change) <= EPS_PNL, (
                 f"PnL sum={total_pnl:.4f} != equity change={equity_change:.4f}"
             )
 
@@ -276,6 +279,28 @@ class TestAccountingInvariants:
         result = engine.run(data, FixedSignalStrategy(raw_signals), CAPITAL)
         for t in result.trades:
             assert t.commission >= 0, f"Negative commission: {t}"
+
+    @pytest.mark.parametrize("matcher", MATCHERS)
+    @pytest.mark.parametrize("raw_signals", SIGNAL_SCENARIOS)
+    def test_equity_from_returns_reconstruction(self, matcher, raw_signals):
+        """Equity reconstructed from daily_returns matches reported equity.
+
+        This is an independent oracle that uses only BacktestResult fields
+        (equity_curve, daily_returns) without replicating simulation logic.
+        """
+        data = make_data(PRICES, OPENS)
+        engine = VectorizedBacktestEngine(matcher=matcher)
+        result = engine.run(data, FixedSignalStrategy(raw_signals), CAPITAL)
+        eq = result.equity_curve.values
+        dr = result.daily_returns.values
+        reconstructed = np.zeros(len(eq))
+        reconstructed[0] = eq[0]
+        for i in range(1, len(eq)):
+            reconstructed[i] = reconstructed[i - 1] * (1 + dr[i])
+        for i in range(len(eq)):
+            assert abs(reconstructed[i] - eq[i]) <= EPS_FUND, (
+                f"Bar {i}: reconstructed={reconstructed[i]:.4f} reported={eq[i]:.4f}"
+            )
 
     def test_high_min_commission_prevents_trading(self):
         """min_commission > capital -> no trades, equity stays flat."""

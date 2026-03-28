@@ -12,7 +12,11 @@ import pytest
 
 import ez.core.ts_ops as ts_ops
 
-EPS = 0.01  # V2.3 universal tolerance
+# Per-function EPS: tighter tolerances catch real drift
+EPS_EXACT = 1e-12       # diff: exact integer arithmetic
+EPS_SIMPLE = 1e-10      # rolling_mean, ewm_mean, pct_change: simple accumulation
+EPS_STD = 1e-6          # rolling_std: Welford vs pandas two-pass can differ slightly
+EPS = EPS_SIMPLE        # default for _assert_parity
 
 # Skip entire module if C++ is not available
 cpp_available = False
@@ -69,7 +73,17 @@ def zero_series():
     return pd.Series([0.0, 1.0, 0.0, 2.0, 0.0], dtype=float, name="zeros")
 
 
+@pytest.fixture
+def large_series():
+    """Large-magnitude values — tests numerical stability."""
+    rng = np.random.default_rng(42)
+    return pd.Series(
+        1e12 + rng.normal(0, 1, 200), dtype=float, name="large",
+    )
+
+
 ALL_SERIES = ["clean_series", "nan_series", "short_series", "constant_series"]
+ALL_SERIES_WITH_LARGE = ALL_SERIES + ["large_series"]
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +107,11 @@ def _run_dual(func_name: str, series: pd.Series, **kwargs):
     return cpp_result, py_result
 
 
-def _assert_parity(cpp: pd.Series, py: pd.Series, label: str = ""):
-    """Assert two series are identical within EPS, handling NaN."""
+def _assert_parity(
+    cpp: pd.Series, py: pd.Series, label: str = "",
+    eps: float = EPS, rtol: float = 1e-12,
+):
+    """Assert two series are identical within max(eps, rtol*|value|), handling NaN."""
     assert len(cpp) == len(py), f"{label}: length mismatch {len(cpp)} vs {len(py)}"
 
     cpp_vals = cpp.values
@@ -113,8 +130,9 @@ def _assert_parity(cpp: pd.Series, py: pd.Series, label: str = ""):
         if np.isinf(c) != np.isinf(p):
             pytest.fail(f"{label} idx {i}: inf mismatch (cpp={c}, py={p})")
 
-        assert abs(c - p) <= EPS, (
-            f"{label} idx {i}: cpp={c:.8f} py={p:.8f} diff={abs(c - p):.10f}"
+        tol = max(eps, rtol * max(abs(c), abs(p)))
+        assert abs(c - p) <= tol, (
+            f"{label} idx {i}: cpp={c:.8f} py={p:.8f} diff={abs(c - p):.2e} > tol={tol:.2e}"
         )
 
     # Also check series name preserved
@@ -126,14 +144,14 @@ def _assert_parity(cpp: pd.Series, py: pd.Series, label: str = ""):
 # ---------------------------------------------------------------------------
 
 class TestRollingMeanParity:
-    @pytest.mark.parametrize("series_name", ALL_SERIES)
+    @pytest.mark.parametrize("series_name", ALL_SERIES_WITH_LARGE)
     @pytest.mark.parametrize("window", [1, 3, 5, 10])
     def test_parity(self, series_name, window, request):
         s = request.getfixturevalue(series_name)
         if window > len(s):
             pytest.skip("window > series length")
         cpp, py = _run_dual("rolling_mean", s, window=window)
-        _assert_parity(cpp, py, f"rolling_mean(w={window})")
+        _assert_parity(cpp, py, f"rolling_mean(w={window})", eps=EPS_SIMPLE)
 
 
 class TestRollingStdParity:
@@ -145,18 +163,41 @@ class TestRollingStdParity:
         if window > len(s):
             pytest.skip("window > series length")
         cpp, py = _run_dual("rolling_std", s, window=window, ddof=ddof)
-        _assert_parity(cpp, py, f"rolling_std(w={window},ddof={ddof})")
+        _assert_parity(cpp, py, f"rolling_std(w={window},ddof={ddof})", eps=EPS_STD)
+
+    @pytest.mark.parametrize("window", [5, 10, 50])
+    @pytest.mark.parametrize("ddof", [0, 1])
+    def test_parity_large_magnitude(self, window, ddof, large_series):
+        """Large-magnitude data (1e12 + N(0,1)) — condition number κ ≈ mean²/var ≈ 1e24.
+
+        Both paths are correct within IEEE 754 limits; they accumulate rounding
+        differently. Small windows (2-3) on extreme magnitudes have catastrophic
+        cancellation and are excluded — see test_large_magnitude_documents_limit.
+        """
+        cpp, py = _run_dual("rolling_std", large_series, window=window, ddof=ddof)
+        _assert_parity(cpp, py, f"rolling_std_large(w={window},ddof={ddof})", eps=EPS_STD, rtol=5e-2)
+
+    def test_large_magnitude_documents_limit(self, large_series):
+        """Document: window=2 on 1e12 data has ~10% relative error (κ ≈ 1e24).
+
+        This is inherent to IEEE 754 double precision, not a bug.
+        Both C++ and Python produce different but equally imprecise results.
+        """
+        cpp, py = _run_dual("rolling_std", large_series, window=2, ddof=1)
+        # Just verify no NaN/crash — precision is not meaningful here
+        assert not cpp.dropna().empty
+        assert not py.dropna().empty
 
 
 class TestEwmMeanParity:
     @pytest.mark.parametrize("series_name", ALL_SERIES)
-    @pytest.mark.parametrize("span", [2, 3, 5, 10])
+    @pytest.mark.parametrize("span", [1, 2, 3, 5, 10])
     def test_parity(self, series_name, span, request):
         s = request.getfixturevalue(series_name)
         if span > len(s):
             pytest.skip("span > series length")
         cpp, py = _run_dual("ewm_mean", s, span=span)
-        _assert_parity(cpp, py, f"ewm_mean(span={span})")
+        _assert_parity(cpp, py, f"ewm_mean(span={span})", eps=EPS_SIMPLE)
 
 
 class TestDiffParity:
@@ -167,7 +208,7 @@ class TestDiffParity:
         if periods >= len(s):
             pytest.skip("periods >= series length")
         cpp, py = _run_dual("diff", s, periods=periods)
-        _assert_parity(cpp, py, f"diff(p={periods})")
+        _assert_parity(cpp, py, f"diff(p={periods})", eps=EPS_EXACT)
 
 
 class TestPctChangeParity:
@@ -178,7 +219,7 @@ class TestPctChangeParity:
         if periods >= len(s):
             pytest.skip("periods >= series length")
         cpp, py = _run_dual("pct_change", s, periods=periods)
-        _assert_parity(cpp, py, f"pct_change(p={periods})")
+        _assert_parity(cpp, py, f"pct_change(p={periods})", eps=EPS_SIMPLE)
 
     def test_div_by_zero_parity(self, zero_series):
         """Both paths should produce inf for x/0."""

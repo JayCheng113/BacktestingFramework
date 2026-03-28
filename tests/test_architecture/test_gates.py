@@ -170,11 +170,8 @@ class TestNoCircularImports:
 
     @pytest.mark.parametrize("module", EZ_MODULES)
     def test_import_succeeds(self, module):
-        try:
-            importlib.import_module(module)
-        except ImportError as e:
-            if "circular" in str(e).lower():
-                pytest.fail(f"Circular import in {module}: {e}")
+        """Each module must import cleanly — any ImportError is a failure."""
+        importlib.import_module(module)
 
 
 # ---------------------------------------------------------------------------
