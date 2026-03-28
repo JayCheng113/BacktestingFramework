@@ -21,3 +21,10 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 cd web && npm run dev  # http://localhost:3000
 ```
 API proxied to http://localhost:8000
+
+## Key Files
+| File | Role |
+|------|------|
+| api/index.ts | API client functions |
+| types/index.ts | TypeScript type definitions |
+| styles/global.css | Global styles and Tailwind imports |

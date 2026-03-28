@@ -7,6 +7,9 @@ REST API exposing market data, backtesting, and factor evaluation via FastAPI.
 - `GET /api/health` — Health check
 - `GET /api/market-data/kline` — Fetch K-line data
 - `GET /api/market-data/symbols` — Search symbols
+- `GET /api/market-data/daily-basic` — Fetch daily basic indicators
+- `GET /api/market-data/index-kline` — Fetch index K-line data
+- `GET /api/market-data/trade-cal` — Fetch trade calendar
 - `POST /api/backtest/run` — Run backtest
 - `POST /api/backtest/walk-forward` — Walk-forward validation
 - `GET /api/backtest/strategies` — List registered strategies

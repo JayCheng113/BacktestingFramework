@@ -18,6 +18,10 @@ Run vectorized backtests, compute metrics, validate via Walk-Forward, test stati
 | walk_forward.py | WalkForwardValidator | CORE |
 | significance.py | Statistical significance | CORE |
 
+## Critical Notes
+- The engine shifts signals by 1 bar (T+1 execution) to prevent look-ahead bias
+- Minimum commission: a floor is applied per trade so that very small trades still incur realistic costs
+
 ## Status
 - Implemented: Full backtest engine, Walk-Forward (fixed-param), significance testing
 - V2: Parameter optimization in Walk-Forward (WFO)

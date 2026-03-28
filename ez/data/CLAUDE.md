@@ -8,7 +8,7 @@ Fetch, validate, cache, and serve market data (K-line) from multiple sources wit
 - `DataStore(ABC)` — [CORE] base class for storage. Methods: `query_kline()`, `save_kline()`, `has_data()`
 - `DataProviderChain` — [CORE] failover chain: cache -> primary -> backup -> stale cache
 - `DataValidator` — [CORE] validates bars before storage (OHLC consistency, volume)
-- `DuckDBStore` — [CORE impl] DuckDB implementation of DataStore
+- `DuckDBStore` — [CORE impl] DuckDB implementation of DataStore. Also exposes `save_symbols()`, `query_symbols()`, `symbols_count()`
 
 ## Files
 | File | Role | Core/Extension |
@@ -29,6 +29,7 @@ Fetch, validate, cache, and serve market data (K-line) from multiple sources wit
 2. Inherit from `DataProvider`, implement `name`, `get_kline()`, `search_symbols()`
 3. Run `pytest tests/test_data/test_provider_contract.py` — auto-validates your provider
 4. Register in `configs/default.yaml` under `data_sources`
+5. Edit `ez/api/deps.py` to wire the provider into `get_chain()`
 
 ## Tushare Provider Notes
 - **Auth:** Requires `TUSHARE_TOKEN` env var (or constructor param). Get token at tushare.pro.

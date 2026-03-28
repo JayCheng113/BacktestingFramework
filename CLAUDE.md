@@ -26,7 +26,7 @@ ez/backtest/metrics.py, ez/backtest/walk_forward.py, ez/backtest/significance.py
 |------|-----------|------------|------|
 | Data source | ez/data/providers/ | DataProvider | pytest tests/test_data/test_provider_contract.py |
 | Factor | ez/factor/builtin/ | Factor | pytest tests/test_factor/test_factor_contract.py |
-| Strategy | strategies/ | Strategy | pytest tests/test_strategy/ |
+| Strategy | strategies/ or ez/strategy/builtin/ | Strategy | pytest tests/test_strategy/ |
 
 ## Quick Commands
 ```bash

@@ -15,6 +15,12 @@ Define and auto-register trading strategies. Strategies produce position weight 
 | base.py | Strategy ABC | CORE |
 | loader.py | Directory scanner | CORE |
 | builtin/ma_cross.py | MA crossover reference | EXTENSION |
+| builtin/momentum.py | Momentum strategy | EXTENSION |
+| builtin/boll_reversion.py | Bollinger band reversion strategy | EXTENSION |
+
+## Conventions
+- `get_description()` -- not enforced by ABC but used by the API to display strategy descriptions
+- `strategies/` user dir has no `__init__.py` (standalone imports only)
 
 ## Adding a New Strategy
 1. Create `strategies/your_strategy.py` (or `ez/strategy/builtin/`)
@@ -22,4 +28,4 @@ Define and auto-register trading strategies. Strategies produce position weight 
 3. Run `pytest tests/test_strategy/` -- auto-validates
 
 ## Status
-- Implemented: Strategy ABC, loader, MACrossStrategy
+- Implemented: Strategy ABC, loader, MACrossStrategy, MomentumStrategy, BollReversionStrategy
