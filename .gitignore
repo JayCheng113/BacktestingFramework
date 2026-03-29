@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 data/*.db
+data/*.db.wal
+data/*.db.tmp
 .env
 web/node_modules/
 web/dist/

@@ -36,6 +36,7 @@ export default function SettingsModal({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return
+    setStatus('')
     fetch('/api/settings/llm').then(r => r.json()).then(d => {
       setLlm(d)
       setProvider(d.provider)

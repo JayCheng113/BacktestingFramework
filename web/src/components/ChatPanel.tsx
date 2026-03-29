@@ -30,8 +30,24 @@ function loadConversations(): Conversation[] {
   } catch { return [] }
 }
 
+const MAX_CONVERSATIONS = 50
+
 function saveConversations(convs: Conversation[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(convs))
+  // Trim to max conversations (oldest first)
+  const trimmed = convs.length > MAX_CONVERSATIONS
+    ? convs.slice(0, MAX_CONVERSATIONS)
+    : convs
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
+  } catch {
+    // QuotaExceededError — trim aggressively
+    try {
+      const minimal = trimmed.slice(0, 10).map(c => ({
+        ...c, messages: c.messages.slice(-20)
+      }))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(minimal))
+    } catch { /* give up */ }
+  }
 }
 
 function newId() {
@@ -93,11 +109,13 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
 
   const deleteConversation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    setConversations(prev => prev.filter(c => c.id !== id))
-    if (activeId === id) {
-      const remaining = conversations.filter(c => c.id !== id)
-      setActiveId(remaining.length > 0 ? remaining[0].id : '')
-    }
+    setConversations(prev => {
+      const remaining = prev.filter(c => c.id !== id)
+      if (activeId === id) {
+        setActiveId(remaining.length > 0 ? remaining[0].id : '')
+      }
+      return remaining
+    })
   }
 
   const switchConversation = (id: string) => {

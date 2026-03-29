@@ -38,30 +38,41 @@ def _read_env() -> dict[str, str]:
     return result
 
 
+import threading
+
+_env_lock = threading.Lock()
+
+
 def _write_env(updates: dict[str, str]) -> None:
     """Update .env file — preserves comments and other keys."""
-    lines: list[str] = []
-    if _ENV_FILE.exists():
-        lines = _ENV_FILE.read_text().splitlines()
-
-    updated_keys: set[str] = set()
-    new_lines: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0].strip()
-            if key in updates:
-                new_lines.append(f"{key}={updates[key]}")
-                updated_keys.add(key)
-                continue
-        new_lines.append(line)
-
-    # Append new keys not already in file
+    # Sanitize: reject newlines/CR/null (prevents .env injection)
     for key, value in updates.items():
-        if key not in updated_keys:
-            new_lines.append(f"{key}={value}")
+        if any(c in value for c in ('\n', '\r', '\0')):
+            raise ValueError(f"Invalid characters in value for {key}")
 
-    _ENV_FILE.write_text("\n".join(new_lines) + "\n")
+    with _env_lock:
+        lines: list[str] = []
+        if _ENV_FILE.exists():
+            lines = _ENV_FILE.read_text().splitlines()
+
+        updated_keys: set[str] = set()
+        new_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key = stripped.split("=", 1)[0].strip()
+                if key in updates:
+                    new_lines.append(f"{key}={updates[key]}")
+                    updated_keys.add(key)
+                    continue
+            new_lines.append(line)
+
+        # Append new keys not already in file
+        for key, value in updates.items():
+            if key not in updated_keys:
+                new_lines.append(f"{key}={value}")
+
+        _ENV_FILE.write_text("\n".join(new_lines) + "\n")
 
 
 _KEY_MAP = {
@@ -113,12 +124,9 @@ def update_llm_settings(req: LLMSettings):
     if updates:
         _write_env(updates)
 
-    # Reload config to pick up changes
+    # Reload config to pick up changes (reset forces re-read of .env + yaml)
     from ez.config import reset_config, load_config
     reset_config()
-    # Force dotenv reload
-    from ez.config import _load_dotenv
-    _load_dotenv(str(_ENV_FILE))
     load_config()
 
     return {"status": "ok", "provider": req.provider, "api_key_set": bool(req.api_key)}
@@ -135,10 +143,14 @@ def get_tushare_settings():
     }
 
 
+class TushareSettings(BaseModel):
+    token: str = ""
+
+
 @router.post("/tushare")
-def update_tushare_settings(data: dict):
+def update_tushare_settings(data: TushareSettings):
     """Update Tushare token."""
-    token = data.get("token", "")
+    token = data.token
     if token:
         _write_env({"TUSHARE_TOKEN": token})
         os.environ["TUSHARE_TOKEN"] = token

@@ -29,6 +29,10 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 - `DELETE /api/code/files/{filename}` — Delete a strategy file (V2.7)
 - `POST /api/chat/send` — SSE streaming chat with AI assistant (V2.7)
 - `GET /api/chat/status` — Check LLM provider availability (V2.7)
+- `GET /api/settings/llm` — Get LLM configuration status (V2.7)
+- `POST /api/settings/llm` — Update LLM provider/key/model (V2.7)
+- `GET /api/settings/tushare` — Get Tushare token status (V2.7)
+- `POST /api/settings/tushare` — Update Tushare token (V2.7)
 
 ## Files
 | File | Role |
@@ -42,6 +46,7 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 | routes/candidates.py | Batch parameter search endpoint (V2.5) |
 | routes/code.py | Code editor: template, validate, save, list, read, delete (V2.7) |
 | routes/chat.py | AI chat SSE endpoint + status (V2.7) |
+| routes/settings.py | LLM + Tushare config read/write (V2.7) |
 
 ## Dependencies
 - Upstream: All ez modules (including ez/agent/ for experiments, ez/llm/ for chat)

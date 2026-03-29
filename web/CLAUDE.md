@@ -14,7 +14,9 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | ExperimentPanel | Single Run / Param Search sub-tabs + runs table + gate detail + delete/cleanup (V2.4+V2.5) |
 | CandidateSearch | Parameter grid/random search form + ranked results table (V2.5) |
 | CodeEditor | Monaco Python editor + template generation + syntax validation + save & contract test (V2.7) |
-| ChatPanel | AI assistant sidebar — SSE streaming, tool action display (V2.7) |
+| ChatPanel | AI assistant sidebar — SSE streaming, tool action display, multi-conversation + localStorage (V2.7) |
+| SettingsModal | LLM + Tushare config modal, writes to .env via API (V2.7) |
+| DocsPage | Comprehensive documentation — 11 sections, 1497 lines (V2.7) |
 | Dashboard | Main page, orchestrates chart/backtest/factor components |
 
 ## Theme
@@ -39,3 +41,5 @@ API proxied to http://localhost:8000
 | components/CandidateSearch.tsx | Parameter search UI (V2.5) |
 | components/CodeEditor.tsx | Monaco editor + template + validate/save (V2.7) |
 | components/ChatPanel.tsx | AI assistant chat panel with SSE (V2.7) |
+| components/SettingsModal.tsx | Settings modal for API keys (V2.7) |
+| pages/DocsPage.tsx | Full documentation page (V2.7) |
