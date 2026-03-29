@@ -72,7 +72,7 @@ class MyStrategy(Strategy):
                   ['EMA(period=12)', 'ema_12', '指数移动平均'],
                   ['RSI(period=14)', 'rsi_14', '相对强弱指标'],
                   ['MACD()', 'macd_line / macd_signal / macd_hist', 'MACD 指标'],
-                  ['BOLL(period=20)', 'boll_upper_20 / boll_lower_20', '布林带上下轨'],
+                  ['BOLL(period=20)', 'boll_mid_20 / boll_upper_20 / boll_lower_20', '布林带'],
                   ['Momentum(period=20)', 'momentum_20', 'N日收益率（动量）'],
                   ['VWAP(period=20)', 'vwap_20', '成交量加权均价'],
                   ['OBV()', 'obv', '能量潮（累计量能）'],
@@ -99,7 +99,11 @@ class MyStrategy(Strategy):
 
           <div style={sectionStyle}>
             <div style={h2}>完整示例：RSI 超卖反转</div>
-            <pre style={code}>{`class RSIReversal(Strategy):
+            <pre style={code}>{`import pandas as pd
+from ez.strategy import Strategy
+from ez.factor.builtin.technical import RSI
+
+class RSIReversal(Strategy):
     def __init__(self, period=14, oversold=30, overbought=70):
         self.period = period
         self.oversold = oversold

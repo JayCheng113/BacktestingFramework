@@ -72,11 +72,12 @@ export default function SettingsModal({ open, onClose }: Props) {
   const saveTushare = async () => {
     setSaving(true)
     try {
-      await fetch('/api/settings/tushare', {
+      const res = await fetch('/api/settings/tushare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: tushareToken }),
       })
+      if (!res.ok) { setStatus('Tushare Token 保存失败'); setSaving(false); return }
       setStatus('Tushare Token 已保存')
       setTushareToken('')
       const d = await fetch('/api/settings/tushare').then(r => r.json())

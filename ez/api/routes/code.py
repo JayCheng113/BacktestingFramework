@@ -81,7 +81,7 @@ def read_file(filename: str):
 
 @router.delete("/files/{filename}")
 def delete_file(filename: str):
-    """Delete a user strategy file."""
+    """Delete a user strategy file and unregister from Strategy._registry."""
     safe_name = _safe_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail=f"Invalid filename: {filename}")
@@ -89,4 +89,17 @@ def delete_file(filename: str):
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     target.unlink()
+    # Clean up registry so deleted strategy doesn't appear in lists
+    try:
+        import sys
+        from ez.strategy.base import Strategy
+        stem = safe_name.replace(".py", "")
+        module_name = f"strategies.{stem}"
+        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
+        for k in old_keys:
+            del Strategy._registry[k]
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+    except Exception:
+        pass  # best-effort cleanup
     return {"deleted": safe_name}

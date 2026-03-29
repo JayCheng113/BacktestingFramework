@@ -89,6 +89,9 @@ export interface CandidateResult {
   trade_count: number
   gate_passed: boolean
   run_id: string | null
+  p_value?: number | null
+  fdr_adjusted_p?: number | null
+  fdr_significant?: boolean
 }
 
 export interface SearchResult {

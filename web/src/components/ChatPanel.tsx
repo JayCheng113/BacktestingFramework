@@ -103,13 +103,11 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
 
   const deleteConversation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    setConversations(prev => {
-      const remaining = prev.filter(c => c.id !== id)
-      if (activeId === id) {
-        setActiveId(remaining.length > 0 ? remaining[0].id : '')
-      }
-      return remaining
-    })
+    if (activeId === id) {
+      const remaining = conversations.filter(c => c.id !== id)
+      setActiveId(remaining.length > 0 ? remaining[0].id : '')
+    }
+    setConversations(prev => prev.filter(c => c.id !== id))
   }
 
   const switchConversation = (id: string) => {
@@ -120,40 +118,42 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
   const sendMessage = async () => {
     if (!input.trim() || streaming) return
 
-    // Auto-create conversation if none active
+    const userMsg: ChatMsg = { role: 'user', content: input.trim() }
+
+    // Build API messages BEFORE any state updates (avoid stale closure)
     let currentId = activeId
+    const existingMsgs = currentId
+      ? (conversations.find(c => c.id === currentId)?.messages || [])
+      : []
+    const allMsgs = [...existingMsgs, userMsg]
+    const apiMessages = allMsgs
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: m.content }))
+
+    // Auto-create conversation if none active
     if (!currentId) {
       const conv: Conversation = {
         id: newId(),
         title: titleFromMsg(input.trim()),
-        messages: [],
+        messages: [userMsg],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
       setConversations(prev => [conv, ...prev])
       currentId = conv.id
       setActiveId(conv.id)
+    } else {
+      // Append user message to existing conversation
+      setConversations(prev => prev.map(c => {
+        if (c.id !== currentId) return c
+        const updated = { ...c, messages: [...c.messages, userMsg], updatedAt: Date.now() }
+        if (c.messages.length === 0) updated.title = titleFromMsg(input.trim())
+        return updated
+      }))
     }
-
-    const userMsg: ChatMsg = { role: 'user', content: input.trim() }
-
-    // Update title if first message
-    setConversations(prev => prev.map(c => {
-      if (c.id !== currentId) return c
-      const updated = { ...c, messages: [...c.messages, userMsg], updatedAt: Date.now() }
-      if (c.messages.length === 0) updated.title = titleFromMsg(input.trim())
-      return updated
-    }))
 
     setInput('')
     setStreaming(true)
-
-    // Build API messages from the conversation (after adding user msg)
-    const convNow = conversations.find(c => c.id === currentId)
-    const allMsgs = [...(convNow?.messages || []), userMsg]
-    const apiMessages = allMsgs
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({ role: m.role, content: m.content }))
 
     // We need a local ref to activeId for the streaming callbacks
     const targetId = currentId

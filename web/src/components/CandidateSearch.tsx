@@ -47,6 +47,7 @@ export default function CandidateSearch() {
 
   const [strategyName, setStrategyName] = useState('')
   const [symbol, setSymbol] = useState('000001.SZ')
+  const [market, setMarket] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
   const [startDate, setStartDate] = useState<Date>(new Date(2020, 0, 1))
   const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
@@ -101,6 +102,7 @@ export default function CandidateSearch() {
         strategy_name: strategyName,
         param_ranges: ranges,
         symbol,
+        market,
         period,
         start_date: toStr(startDate),
         end_date: toStr(endDate),
@@ -134,6 +136,15 @@ export default function CandidateSearch() {
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票代码</label>
             <input value={symbol} onChange={e => setSymbol(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
+          </div>
+          <div>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>市场</label>
+            <select value={market} onChange={e => setMarket(e.target.value)}
+              className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
+              <option value="cn_stock">A股</option>
+              <option value="us_stock">美股</option>
+              <option value="hk_stock">港股</option>
+            </select>
           </div>
           <div>
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>周期</label>
@@ -268,6 +279,7 @@ export default function CandidateSearch() {
                     <th className="px-3 py-2 text-right">收益</th>
                     <th className="px-3 py-2 text-right">回撤</th>
                     <th className="px-3 py-2 text-right">交易数</th>
+                    <th className="px-3 py-2 text-right">FDR-p</th>
                     <th className="px-3 py-2 text-center">Gate</th>
                   </tr>
                 </thead>
@@ -287,6 +299,9 @@ export default function CandidateSearch() {
                       </td>
                       <td className="px-3 py-2 text-right">{c.max_drawdown != null ? (c.max_drawdown * 100).toFixed(1) + '%' : '-'}</td>
                       <td className="px-3 py-2 text-right">{c.trade_count}</td>
+                      <td className="px-3 py-2 text-right" style={{ color: c.fdr_significant ? '#22c55e' : 'var(--text-secondary)' }}>
+                        {c.fdr_adjusted_p != null && !isNaN(c.fdr_adjusted_p) ? c.fdr_adjusted_p.toFixed(3) : '-'}
+                      </td>
                       <td className="px-3 py-2 text-center">
                         <span className="px-2 py-0.5 rounded text-xs font-medium"
                           style={{ backgroundColor: c.gate_passed ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',

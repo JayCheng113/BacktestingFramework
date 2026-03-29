@@ -6,7 +6,7 @@ const DateBtn = forwardRef<HTMLButtonElement, { value?: string; onClick?: () => 
   ({ value, onClick }, ref) => (
     <button ref={ref} type="button" onClick={onClick}
       className="w-full px-2 py-1.5 rounded text-sm text-left" style={inputStyle}>
-      {value || 'Select'}
+      {value || '选择日期'}
     </button>
   )
 )

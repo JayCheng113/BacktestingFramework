@@ -304,14 +304,14 @@ export default function ExperimentPanel() {
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-sm">
             {[
               { label: 'Sharpe', value: detail.sharpe_ratio?.toFixed(2) },
-              { label: 'Return', value: detail.total_return != null ? (detail.total_return * 100).toFixed(1) + '%' : '-' },
-              { label: 'MaxDD', value: detail.max_drawdown != null ? (detail.max_drawdown * 100).toFixed(1) + '%' : '-' },
-              { label: 'Trades', value: String(detail.trade_count) },
-              { label: 'Win Rate', value: detail.win_rate != null ? (detail.win_rate * 100).toFixed(0) + '%' : '-' },
+              { label: '收益率', value: detail.total_return != null ? (detail.total_return * 100).toFixed(1) + '%' : '-' },
+              { label: '最大回撤', value: detail.max_drawdown != null ? (detail.max_drawdown * 100).toFixed(1) + '%' : '-' },
+              { label: '交易数', value: String(detail.trade_count) },
+              { label: '胜率', value: detail.win_rate != null ? (detail.win_rate * 100).toFixed(0) + '%' : '-' },
               { label: 'p-value', value: detail.p_value?.toFixed(3) },
               { label: 'OOS Sharpe', value: detail.oos_sharpe?.toFixed(2) ?? '-' },
-              { label: 'Overfitting', value: detail.overfitting_score?.toFixed(2) ?? '-' },
-              { label: 'Significant', value: detail.is_significant ? 'Yes' : 'No' },
+              { label: '过拟合分', value: detail.overfitting_score?.toFixed(2) ?? '-' },
+              { label: '显著性', value: detail.is_significant ? '是' : '否' },
             ].map(m => (
               <div key={m.label} className="rounded p-2" style={{ backgroundColor: 'var(--bg-primary)' }}>
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{m.label}</div>

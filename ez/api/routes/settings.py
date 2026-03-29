@@ -134,7 +134,7 @@ def _update_yaml_llm(provider: str, model: str, base_url: str, temperature: floa
     data["llm"]["temperature"] = temperature
     _YAML_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(_YAML_FILE, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 @router.post("/llm")

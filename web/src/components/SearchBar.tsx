@@ -33,7 +33,7 @@ const todayDate = new Date()
 const oneYearAgoDate = new Date(Date.now() - 365 * 86400000)
 
 function toStr(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 // Popular stocks per market — shown as fallback and on market switch

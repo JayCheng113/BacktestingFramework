@@ -115,10 +115,10 @@ def get_template(kind: str = "strategy", class_name: str = "", description: str 
 
 _FORBIDDEN_BUILTINS = frozenset({
     "__import__", "eval", "exec", "compile", "open",
-    "getattr", "setattr", "delattr", "globals", "locals",
+    "getattr", "setattr", "delattr", "globals", "locals", "vars",
     "breakpoint", "exit", "quit", "help",
 })
-# NOTE: super, type, dir, vars are intentionally NOT blocked:
+# NOTE: super, type, dir are intentionally NOT blocked:
 # - super() is essential for class inheritance
 # - type() is used for type checking
 # - dir()/vars() are read-only introspection, not dangerous

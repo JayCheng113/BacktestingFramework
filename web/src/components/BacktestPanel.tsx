@@ -102,7 +102,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   } : null
 
   const exportCSV = (result: BacktestResult) => {
-    const headers = 'Entry Date,Exit Date,Entry Price,Exit Price,PnL,PnL%,Commission\n'
+    const headers = '买入日期,卖出日期,买入价,卖出价,盈亏,盈亏%,手续费\n'
     const rows = result.trades.map(t =>
       `${t.entry_time.slice(0,10)},${t.exit_time.slice(0,10)},${t.entry_price},${t.exit_price},${t.pnl.toFixed(2)},${(t.pnl_pct*100).toFixed(2)}%,${t.commission.toFixed(2)}`
     ).join('\n')
