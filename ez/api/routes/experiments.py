@@ -189,3 +189,20 @@ def get_experiment(run_id: str):
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     return run
+
+
+@router.delete("/{run_id}")
+def delete_experiment(run_id: str):
+    """Delete a single experiment run."""
+    exp_store = _get_experiment_store()
+    if not exp_store.delete_run(run_id):
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    return {"status": "deleted", "run_id": run_id}
+
+
+@router.post("/cleanup")
+def cleanup_experiments(keep_last: int = Query(default=200, ge=1, le=10000)):
+    """Delete oldest runs beyond keep_last threshold."""
+    exp_store = _get_experiment_store()
+    deleted = exp_store.cleanup_old_runs(keep_last)
+    return {"status": "ok", "deleted": deleted}

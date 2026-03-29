@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
-import { listExperiments, submitExperiment, listStrategies } from '../api'
+import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments } from '../api'
 import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
+import CandidateSearch from './CandidateSearch'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function ExperimentPanel() {
+  const [subTab, setSubTab] = useState<'single' | 'search'>('single')
   const [runs, setRuns] = useState<ExperimentRun[]>([])
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -16,6 +18,7 @@ export default function ExperimentPanel() {
   const [params, setParams] = useState<Record<string, number>>({})
   const [symbol, setSymbol] = useState('000001.SZ')
   const [market] = useState('cn_stock')
+  const [period, setPeriod] = useState('daily')
   const [startDate, setStartDate] = useState('2020-01-01')
   const [endDate, setEndDate] = useState('2024-12-31')
   const [runWfo, setRunWfo] = useState(true)
@@ -55,7 +58,7 @@ export default function ExperimentPanel() {
       const res = await submitExperiment({
         strategy_name: strategyName,
         strategy_params: params,
-        symbol, market,
+        symbol, market, period,
         start_date: startDate,
         end_date: endDate,
         run_wfo: runWfo,
@@ -72,6 +75,28 @@ export default function ExperimentPanel() {
     }
   }
 
+  const handleDelete = async (runId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('Delete this experiment run?')) return
+    try {
+      await deleteExperiment(runId)
+      if (detail?.run_id === runId) setDetail(null)
+      loadRuns()
+    } catch { alert('Delete failed') }
+  }
+
+  const handleCleanup = async () => {
+    const keepStr = prompt('Keep most recent N runs (delete older ones):', '200')
+    if (!keepStr) return
+    const keep = parseInt(keepStr, 10)
+    if (isNaN(keep) || keep < 1) return
+    try {
+      const res = await cleanupExperiments(keep)
+      alert(`Cleaned up ${res.data.deleted} old runs`)
+      loadRuns()
+    } catch { alert('Cleanup failed') }
+  }
+
   const parseGateReasons = (r: ExperimentRun): GateReason[] => {
     if (!r.gate_reasons) return []
     if (typeof r.gate_reasons === 'string') {
@@ -82,10 +107,26 @@ export default function ExperimentPanel() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Sub-tab */}
+      <div className="flex gap-2">
+        {(['single', 'search'] as const).map(t => (
+          <button key={t} onClick={() => setSubTab(t)}
+            className="px-3 py-1.5 rounded text-sm font-medium"
+            style={{
+              backgroundColor: subTab === t ? 'var(--color-accent)' : 'var(--bg-secondary)',
+              color: subTab === t ? '#fff' : 'var(--text-secondary)',
+              border: '1px solid var(--border)',
+            }}>
+            {t === 'single' ? 'Single Run' : 'Param Search'}
+          </button>
+        ))}
+      </div>
+
+      {subTab === 'search' ? <CandidateSearch /> : <>
       {/* Submit Form */}
       <div className="rounded-lg p-4 space-y-3" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
         <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>New Experiment</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div>
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Strategy</label>
             <select value={strategyName} onChange={e => handleStrategyChange(e.target.value)}
@@ -97,6 +138,15 @@ export default function ExperimentPanel() {
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Symbol</label>
             <input value={symbol} onChange={e => setSymbol(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
+          </div>
+          <div>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Period</label>
+            <select value={period} onChange={e => setPeriod(e.target.value)}
+              className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
           </div>
           <div>
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start</label>
@@ -147,9 +197,14 @@ export default function ExperimentPanel() {
       <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
         <div className="px-4 py-3 flex justify-between items-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
           <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Experiment Runs</h3>
-          <button onClick={loadRuns} className="text-xs px-2 py-1 rounded" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-            {loading ? '...' : 'Refresh'}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={handleCleanup} className="text-xs px-2 py-1 rounded" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              Cleanup
+            </button>
+            <button onClick={loadRuns} className="text-xs px-2 py-1 rounded" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              {loading ? '...' : 'Refresh'}
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm" style={{ color: 'var(--text-primary)' }}>
@@ -164,11 +219,12 @@ export default function ExperimentPanel() {
                 <th className="px-3 py-2 text-right">Trades</th>
                 <th className="px-3 py-2 text-center">Gate</th>
                 <th className="px-3 py-2 text-right">Duration</th>
+                <th className="px-3 py-2 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {runs.length === 0 && (
-                <tr><td colSpan={9} className="px-3 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
+                <tr><td colSpan={10} className="px-3 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
                   No experiments yet
                 </td></tr>
               )}
@@ -193,6 +249,13 @@ export default function ExperimentPanel() {
                   </td>
                   <td className="px-3 py-2 text-right text-xs" style={{ color: 'var(--text-secondary)' }}>
                     {r.duration_ms?.toFixed(0)}ms
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <button onClick={e => handleDelete(r.run_id, e)}
+                      className="text-xs px-1.5 py-0.5 rounded hover:opacity-80"
+                      style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+                      x
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -250,6 +313,7 @@ export default function ExperimentPanel() {
           )}
         </div>
       )}
+      </>}
     </div>
   )
 }

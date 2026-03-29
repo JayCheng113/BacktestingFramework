@@ -260,5 +260,39 @@ class ExperimentStore:
         ).fetchone()
         return result[0] if result else 0
 
+    def delete_run(self, run_id: str) -> bool:
+        """Delete a single run by run_id. Also cleans completed_specs if applicable."""
+        row = self._conn.execute(
+            "SELECT spec_id FROM experiment_runs WHERE run_id = ?", [run_id],
+        ).fetchone()
+        if not row:
+            return False
+        spec_id = row[0]
+        self._conn.execute("DELETE FROM completed_specs WHERE run_id = ?", [run_id])
+        self._conn.execute("DELETE FROM experiment_runs WHERE run_id = ?", [run_id])
+        # Clean orphan spec if no runs remain
+        remaining = self._conn.execute(
+            "SELECT COUNT(*) FROM experiment_runs WHERE spec_id = ?", [spec_id],
+        ).fetchone()[0]
+        if remaining == 0:
+            self._conn.execute("DELETE FROM experiment_specs WHERE spec_id = ?", [spec_id])
+        return True
+
+    def cleanup_old_runs(self, keep_last: int = 200) -> int:
+        """Delete oldest runs beyond keep_last. Returns count deleted."""
+        total = self._conn.execute("SELECT COUNT(*) FROM experiment_runs").fetchone()[0]
+        if total <= keep_last:
+            return 0
+        to_delete = total - keep_last
+        run_ids = self._conn.execute(
+            "SELECT run_id FROM experiment_runs ORDER BY created_at ASC LIMIT ?",
+            [to_delete],
+        ).fetchall()
+        deleted = 0
+        for (run_id,) in run_ids:
+            if self.delete_run(run_id):
+                deleted += 1
+        return deleted
+
     def close(self) -> None:
         self._conn.close()

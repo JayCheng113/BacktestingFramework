@@ -167,6 +167,39 @@ class TestExperimentStore:
         # Lock should be clean — no entry in completed_specs
         assert store.get_completed_run_id(spec.spec_id) is None
 
+    def test_delete_run(self, store, spec, sample_data):
+        """Delete a run removes it and cleans up completed_specs."""
+        store.save_spec(spec.to_dict())
+        report = _run_and_report(spec, sample_data)
+        store.save_completed_run(report.to_dict())
+        assert store.count_by_spec_id(spec.spec_id) == 1
+
+        assert store.delete_run(report.run_id) is True
+        assert store.count_by_spec_id(spec.spec_id) == 0
+        assert store.get_completed_run_id(spec.spec_id) is None
+        # Orphan spec also cleaned
+        rows = store._conn.execute(
+            "SELECT COUNT(*) FROM experiment_specs WHERE spec_id = ?", [spec.spec_id],
+        ).fetchone()
+        assert rows[0] == 0
+
+    def test_delete_nonexistent_run(self, store):
+        assert store.delete_run("nonexistent") is False
+
+    def test_cleanup_old_runs(self, store, spec, sample_data):
+        """Cleanup keeps most recent runs."""
+        store.save_spec(spec.to_dict())
+        run_ids = []
+        for _ in range(5):
+            report = _run_and_report(spec, sample_data)
+            store.save_run(report.to_dict())
+            run_ids.append(report.run_id)
+
+        deleted = store.cleanup_old_runs(keep_last=2)
+        assert deleted == 3
+        runs = store.find_by_spec_id(spec.spec_id)
+        assert len(runs) == 2
+
     def test_backfill_on_upgrade(self, spec, sample_data):
         """Pre-existing completed run is backfilled into completed_specs on init."""
         conn = duckdb.connect(":memory:")

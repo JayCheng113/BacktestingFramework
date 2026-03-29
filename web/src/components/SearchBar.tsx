@@ -26,7 +26,7 @@ const DateButton = forwardRef<HTMLButtonElement, { value?: string; onClick?: () 
 )
 
 interface Props {
-  onSearch: (symbol: string, market: string, startDate: string, endDate: string) => void
+  onSearch: (symbol: string, market: string, startDate: string, endDate: string, period: string) => void
 }
 
 const todayDate = new Date()
@@ -89,6 +89,7 @@ export default function SearchBar({ onSearch }: Props) {
   const [selectedSymbol, setSelectedSymbol] = useState('000001.SZ')
   const [selectedName, setSelectedName] = useState('平安银行')
   const [market, setMarket] = useState('cn_stock')
+  const [period, setPeriod] = useState('daily')
   const [startDate, setStartDate] = useState<Date>(oneYearAgoDate)
   const [endDate, setEndDate] = useState<Date>(todayDate)
   const [suggestions, setSuggestions] = useState<SymbolInfo[]>([])
@@ -168,7 +169,7 @@ export default function SearchBar({ onSearch }: Props) {
   }
 
   const handleSearch = () => {
-    if (selectedSymbol) onSearch(selectedSymbol, market, toStr(startDate), toStr(endDate))
+    if (selectedSymbol) onSearch(selectedSymbol, market, toStr(startDate), toStr(endDate), period)
   }
 
   return (
@@ -234,6 +235,17 @@ export default function SearchBar({ onSearch }: Props) {
           <option value="cn_stock">A-Shares</option>
           <option value="us_stock">US Stock</option>
           <option value="hk_stock">HK Stock</option>
+        </select>
+      </div>
+
+      {/* Period selector */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Period</label>
+        <select value={period} onChange={e => setPeriod(e.target.value)}
+          className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
         </select>
       </div>
 

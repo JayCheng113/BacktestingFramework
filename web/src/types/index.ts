@@ -79,3 +79,23 @@ export interface GateReason {
   threshold: number
   message: string
 }
+
+export interface CandidateResult {
+  spec_id: string
+  params: Record<string, number>
+  sharpe: number | null
+  total_return: number | null
+  max_drawdown: number | null
+  trade_count: number
+  gate_passed: boolean
+  run_id: string | null
+}
+
+export interface SearchResult {
+  total_specs: number
+  prefiltered: number
+  executed: number
+  duplicates: number
+  passed_count: number
+  ranked: CandidateResult[]
+}

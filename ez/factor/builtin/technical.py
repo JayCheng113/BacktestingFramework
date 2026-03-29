@@ -143,3 +143,77 @@ class Momentum(Factor):
         data = data.copy()
         data[self.name] = ts_ops.pct_change(data["adj_close"], self._period)
         return data
+
+
+class VWAP(Factor):
+    """Rolling Volume Weighted Average Price."""
+
+    def __init__(self, period: int = 20):
+        self._period = period
+
+    @property
+    def name(self) -> str:
+        return f"vwap_{self._period}"
+
+    @property
+    def warmup_period(self) -> int:
+        return self._period
+
+    def compute(self, data: pd.DataFrame) -> pd.DataFrame:
+        data = data.copy()
+        typical_price = (data["high"] + data["low"] + data["close"]) / 3
+        tp_vol = typical_price * data["volume"]
+        data[self.name] = (
+            tp_vol.rolling(self._period).sum()
+            / data["volume"].rolling(self._period).sum()
+        )
+        return data
+
+
+class OBV(Factor):
+    """On Balance Volume — cumulative volume with direction from price changes."""
+
+    def __init__(self):
+        pass
+
+    @property
+    def name(self) -> str:
+        return "obv"
+
+    @property
+    def warmup_period(self) -> int:
+        return 1
+
+    def compute(self, data: pd.DataFrame) -> pd.DataFrame:
+        import numpy as np
+
+        data = data.copy()
+        sign = np.sign(ts_ops.diff(data["close"]))
+        data[self.name] = (data["volume"] * sign).cumsum()
+        return data
+
+
+class ATR(Factor):
+    """Average True Range — rolling mean of True Range (volatility measure)."""
+
+    def __init__(self, period: int = 14):
+        self._period = period
+
+    @property
+    def name(self) -> str:
+        return f"atr_{self._period}"
+
+    @property
+    def warmup_period(self) -> int:
+        return self._period + 1
+
+    def compute(self, data: pd.DataFrame) -> pd.DataFrame:
+        data = data.copy()
+        prev_close = data["close"].shift(1)
+        tr = pd.concat([
+            data["high"] - data["low"],
+            (data["high"] - prev_close).abs(),
+            (data["low"] - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        data[self.name] = ts_ops.rolling_mean(tr, self._period)
+        return data

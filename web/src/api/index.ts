@@ -28,4 +28,12 @@ export const listExperiments = (limit = 50, offset = 0) =>
 
 export const getExperiment = (runId: string) => api.get(`/experiments/${runId}`)
 
+export const deleteExperiment = (runId: string) => api.delete(`/experiments/${runId}`)
+
+export const cleanupExperiments = (keepLast = 200) =>
+  api.post('/experiments/cleanup', null, { params: { keep_last: keepLast } })
+
+// Candidate search
+export const searchCandidates = (data: any) => api.post('/candidates/search', data)
+
 export default api

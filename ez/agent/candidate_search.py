@@ -1,0 +1,103 @@
+"""F1: Parameter grid + random search — generates candidate RunSpecs.
+
+Given a strategy, data range, and parameter search space, produce
+a list of RunSpec instances covering all (grid) or sampled (random)
+parameter combinations.
+"""
+from __future__ import annotations
+
+import itertools
+import random
+from dataclasses import dataclass, field
+from datetime import date
+
+from ez.agent.run_spec import RunSpec
+
+
+@dataclass
+class ParamRange:
+    """Search space for a single parameter."""
+
+    name: str
+    values: list[float]  # discrete choices for grid; sample pool for random
+
+
+@dataclass
+class SearchConfig:
+    """Configuration for candidate generation."""
+
+    strategy_name: str
+    param_ranges: list[ParamRange]
+    symbol: str
+    market: str = "cn_stock"
+    period: str = "daily"
+    start_date: date = field(default_factory=lambda: date(2020, 1, 1))
+    end_date: date = field(default_factory=lambda: date(2024, 12, 31))
+    run_wfo: bool = True
+    wfo_n_splits: int = 3
+    initial_capital: float = 100_000.0
+    commission_rate: float = 0.0003
+    min_commission: float = 5.0
+    slippage_rate: float = 0.0
+
+
+def grid_search(config: SearchConfig) -> list[RunSpec]:
+    """Generate RunSpecs for all parameter combinations (Cartesian product)."""
+    if not config.param_ranges:
+        return [_make_spec(config, {})]
+
+    names = [pr.name for pr in config.param_ranges]
+    value_lists = [pr.values for pr in config.param_ranges]
+
+    specs = []
+    for combo in itertools.product(*value_lists):
+        params = dict(zip(names, combo))
+        specs.append(_make_spec(config, params))
+    return specs
+
+
+def random_search(config: SearchConfig, n_samples: int, seed: int | None = None) -> list[RunSpec]:
+    """Sample n_samples random parameter combinations (no duplicates if possible)."""
+    if not config.param_ranges:
+        return [_make_spec(config, {})]
+
+    rng = random.Random(seed)
+    names = [pr.name for pr in config.param_ranges]
+    value_lists = [pr.values for pr in config.param_ranges]
+
+    # Total possible combinations
+    total = 1
+    for vl in value_lists:
+        total *= len(vl)
+
+    if n_samples >= total:
+        return grid_search(config)
+
+    seen: set[tuple[float, ...]] = set()
+    specs = []
+    while len(specs) < n_samples:
+        combo = tuple(rng.choice(vl) for vl in value_lists)
+        if combo in seen:
+            continue
+        seen.add(combo)
+        params = dict(zip(names, combo))
+        specs.append(_make_spec(config, params))
+    return specs
+
+
+def _make_spec(config: SearchConfig, params: dict[str, float]) -> RunSpec:
+    return RunSpec(
+        strategy_name=config.strategy_name,
+        strategy_params=params,
+        symbol=config.symbol,
+        market=config.market,
+        period=config.period,
+        start_date=config.start_date,
+        end_date=config.end_date,
+        initial_capital=config.initial_capital,
+        commission_rate=config.commission_rate,
+        min_commission=config.min_commission,
+        slippage_rate=config.slippage_rate,
+        run_wfo=config.run_wfo,
+        wfo_n_splits=config.wfo_n_splits,
+    )

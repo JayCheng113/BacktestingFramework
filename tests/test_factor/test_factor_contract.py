@@ -3,11 +3,12 @@ import pandas as pd
 import pytest
 
 from ez.factor.base import Factor
-from ez.factor.builtin.technical import MA, EMA, RSI, MACD, BOLL, Momentum
+from ez.factor.builtin.technical import MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR
 
 
 def all_factors() -> list[Factor]:
-    return [MA(period=5), EMA(period=12), RSI(period=14), MACD(), BOLL(period=20), Momentum(period=20)]
+    return [MA(period=5), EMA(period=12), RSI(period=14), MACD(), BOLL(period=20), Momentum(period=20),
+            VWAP(period=10), OBV(), ATR(period=14)]
 
 
 @pytest.fixture(params=all_factors(), ids=lambda f: f.name)

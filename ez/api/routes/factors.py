@@ -8,13 +8,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ez.api.deps import get_chain
-from ez.factor.builtin.technical import MA, EMA, RSI, MACD, BOLL, Momentum
+from ez.factor.builtin.technical import MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR
 from ez.factor.evaluator import FactorEvaluator
 
 router = APIRouter()
 
 _FACTOR_MAP = {
     "ma": MA, "ema": EMA, "rsi": RSI, "macd": MACD, "boll": BOLL, "momentum": Momentum,
+    "vwap": VWAP, "obv": OBV, "atr": ATR,
 }
 
 
@@ -50,7 +51,8 @@ def evaluate_factor(req: FactorEvalRequest):
         raise HTTPException(status_code=404, detail=f"No data for {req.symbol}")
 
     df = pd.DataFrame([{
-        "time": b.time, "adj_close": b.adj_close, "volume": b.volume,
+        "time": b.time, "open": b.open, "high": b.high, "low": b.low,
+        "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
     } for b in bars]).set_index("time")
 
     computed = factor.compute(df)

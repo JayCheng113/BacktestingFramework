@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.4.1 | Tests: 725 | C++ acceleration: up to 7.9x
+Version: 0.2.5 | Tests: 773 | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -20,7 +20,7 @@ Version: 0.2.4.1 | Tests: 725 | C++ acceleration: up to 7.9x
 - `ez/backtest/` — Backtest engine, Walk-Forward, significance [CLAUDE.md](ez/backtest/CLAUDE.md)
 - `ez/api/` — FastAPI REST endpoints [CLAUDE.md](ez/api/CLAUDE.md)
 - `web/` — React frontend dashboard [CLAUDE.md](web/CLAUDE.md)
-- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore [CLAUDE.md](ez/agent/CLAUDE.md)
+- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter [CLAUDE.md](ez/agent/CLAUDE.md)
 - `ez/live/` — Deploy Gate, OMS, Broker (V2.6+, planned)
 - `ez/ops/` — Scheduling, monitoring, audit (V3.2+, planned)
 
@@ -52,7 +52,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (735 collected, 725 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (783 collected, 773 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -69,4 +69,5 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.3**: Correctness hardening — accounting invariants (173 tests), C++/Python dual-path parity (109 tests), rolling_std Welford O(n) (5.2x vs Python), architecture gate tests (47 tests), ewm_mean span=1 NaN fix
 - **V2.4**: Agent Loop — RunSpec, Runner, ResearchGate (DD sign fix), Report, ExperimentStore, /experiments API, Experiments UI
 - **V2.4.1**: Stability — PK-based idempotency (completed_specs), gate DD sign fix, NaN sanitization, JSON double-encoding fix, concurrent regression tests, 725 total tests
-- **Next: V2.5** — Scale (batch param search, more factors, multi-period frontend, experiment cleanup)
+- **V2.5**: Scale — param grid/random search (144 specs in 4.7s), pre-filter engine, batch runner + ranking, new factors (VWAP/OBV/ATR), multi-period frontend, experiment delete/cleanup, 773 total tests
+- **Next: V2.5.1** — Stability

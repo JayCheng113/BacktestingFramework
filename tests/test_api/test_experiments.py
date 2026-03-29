@@ -161,3 +161,45 @@ class TestGetExperiment:
     def test_get_nonexistent(self):
         resp = client.get("/api/experiments/nonexistent")
         assert resp.status_code == 404
+
+
+class TestDeleteExperiment:
+    def test_delete_existing(self):
+        r1 = client.post("/api/experiments", json={
+            "strategy_name": "MACrossStrategy",
+            "strategy_params": {"short_period": 5, "long_period": 20},
+            "symbol": "000001.SZ",
+            "start_date": "2020-01-01",
+            "end_date": "2023-12-31",
+            "run_wfo": False,
+        })
+        run_id = r1.json()["run_id"]
+        resp = client.delete(f"/api/experiments/{run_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        # Verify gone
+        assert client.get(f"/api/experiments/{run_id}").status_code == 404
+
+    def test_delete_nonexistent(self):
+        resp = client.delete("/api/experiments/nonexistent")
+        assert resp.status_code == 404
+
+
+class TestCleanupExperiments:
+    def test_cleanup_removes_old(self):
+        # Submit 3 experiments with different params (unique spec_ids)
+        for i in range(3):
+            client.post("/api/experiments", json={
+                "strategy_name": "MACrossStrategy",
+                "strategy_params": {"short_period": 5 + i, "long_period": 20},
+                "symbol": "000001.SZ",
+                "start_date": "2020-01-01",
+                "end_date": "2023-12-31",
+                "run_wfo": False,
+            })
+        resp = client.post("/api/experiments/cleanup", params={"keep_last": 1})
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 2
+
+        runs = client.get("/api/experiments").json()
+        assert len(runs) == 1

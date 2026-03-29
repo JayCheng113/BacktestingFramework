@@ -4,13 +4,13 @@ import { listStrategies, runBacktest, runWalkForward } from '../api'
 import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
 
 interface Props {
-  symbol: string; market: string; startDate: string; endDate: string
+  symbol: string; market: string; period?: string; startDate: string; endDate: string
   onTradesUpdate?: (trades: BacktestResult['trades']) => void
 }
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
-export default function BacktestPanel({ symbol, market, startDate, endDate, onTradesUpdate }: Props) {
+export default function BacktestPanel({ symbol, market, period = 'daily', startDate, endDate, onTradesUpdate }: Props) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [selected, setSelected] = useState('')
   const [params, setParams] = useState<Record<string, number>>({})
@@ -48,7 +48,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
       }
       if (mode === 'backtest') {
         const res = await runBacktest({
-          symbol, market, period: 'daily', strategy_name: selected,
+          symbol, market, period, strategy_name: selected,
           strategy_params: params, start_date: startDate, end_date: endDate,
           ...costParams,
         })
@@ -56,7 +56,7 @@ export default function BacktestPanel({ symbol, market, startDate, endDate, onTr
         onTradesUpdate?.(res.data.trades || [])
       } else {
         const res = await runWalkForward({
-          symbol, market, period: 'daily', strategy_name: selected,
+          symbol, market, period, strategy_name: selected,
           strategy_params: params, start_date: startDate, end_date: endDate,
           n_splits: nSplits,
           ...costParams,

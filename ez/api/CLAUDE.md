@@ -18,6 +18,9 @@ REST API exposing market data, backtesting, factor evaluation, and experiments v
 - `POST /api/experiments` — Submit and run experiment (V2.4)
 - `GET /api/experiments` — List recent experiments (V2.4)
 - `GET /api/experiments/{run_id}` — Get experiment detail (V2.4)
+- `DELETE /api/experiments/{run_id}` — Delete experiment run (V2.5)
+- `POST /api/experiments/cleanup` — Cleanup old experiment runs (V2.5)
+- `POST /api/candidates/search` — Batch parameter search (V2.5)
 
 ## Files
 | File | Role |
@@ -27,7 +30,8 @@ REST API exposing market data, backtesting, factor evaluation, and experiments v
 | routes/market_data.py | Market data endpoints |
 | routes/backtest.py | Backtest + walk-forward endpoints |
 | routes/factors.py | Factor listing + evaluation endpoints |
-| routes/experiments.py | Experiment submit/list/get endpoints (V2.4) |
+| routes/experiments.py | Experiment submit/list/get/delete/cleanup endpoints (V2.4+V2.5) |
+| routes/candidates.py | Batch parameter search endpoint (V2.5) |
 
 ## Dependencies
 - Upstream: All ez modules (including ez/agent/ for experiments)
@@ -39,6 +43,7 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 ## Status
-- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments
+- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search
 - V2.2: BacktestRequest accepts `commission_rate`, `min_commission`, `slippage_rate`
 - V2.4: ExperimentRequest with RunSpec validation (422 on invalid), idempotency (duplicate detection), query parameter bounds
+- V2.5: DELETE/cleanup experiments, POST /candidates/search (grid/random + pre-filter + ranking)

@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     close_resources()
 
 
-app = FastAPI(title="ez-trading", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="ez-trading", version="0.2.5", lifespan=lifespan)
 
 config = load_config()
 app.add_middleware(
@@ -68,11 +68,12 @@ async def ez_error_handler(request: Request, exc: EzTradingError):
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-from ez.api.routes import market_data, backtest, factors, experiments  # noqa: E402
+from ez.api.routes import market_data, backtest, factors, experiments, candidates  # noqa: E402
 app.include_router(market_data.router, prefix="/api/market-data", tags=["market-data"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
 app.include_router(factors.router, prefix="/api/factors", tags=["factors"])
 app.include_router(experiments.router, prefix="/api/experiments", tags=["experiments"])
+app.include_router(candidates.router, prefix="/api/candidates", tags=["candidates"])
 
 
 @app.get("/api/health")
@@ -80,7 +81,7 @@ def health():
     from ez.strategy.base import Strategy
     return {
         "status": "ok",
-        "version": "0.1.0",
+        "version": "0.2.5",
         "strategies_registered": len(Strategy._registry),
     }
 

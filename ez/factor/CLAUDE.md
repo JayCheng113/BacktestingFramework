@@ -6,14 +6,14 @@ Compute technical indicators and evaluate their predictive power via IC analysis
 ## Public Interfaces
 - `Factor(ABC)` — [CORE] base class. Properties: `name`, `warmup_period`. Method: `compute(df) -> df`
 - `FactorEvaluator` — [CORE] computes IC, ICIR, IC decay, turnover for a factor
-- `MA, EMA, RSI, MACD, BOLL, Momentum` — [EXTENSION] built-in technical indicators
+- `MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR` — [EXTENSION] built-in technical indicators
 
 ## Files
 | File | Role | Core/Extension |
 |------|------|---------------|
 | base.py | Factor ABC | CORE |
 | evaluator.py | FactorEvaluator | CORE |
-| builtin/technical.py | MA, EMA, RSI, MACD, BOLL | EXTENSION |
+| builtin/technical.py | MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR | EXTENSION |
 
 ## Dependencies
 - Upstream: `ez/types.py`
@@ -26,5 +26,5 @@ Compute technical indicators and evaluate their predictive power via IC analysis
 4. Edit `ez/api/routes/factors.py` `_FACTOR_MAP` to expose the factor via API
 
 ## Status
-- Implemented: MA, EMA, RSI, MACD, BOLL, Momentum, FactorEvaluator (time-series IC)
+- Implemented: MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR, FactorEvaluator (time-series IC)
 - Known limitation: V1 IC is time-series (single stock), not cross-sectional
