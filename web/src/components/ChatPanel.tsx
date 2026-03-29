@@ -59,6 +59,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
       const decoder = new TextDecoder()
       let assistantContent = ''
       let buffer = ''
+      let eventType = '' // Persists across chunks
 
       while (true) {
         const { done, value } = await reader.read()
@@ -69,7 +70,6 @@ export default function ChatPanel({ editorCode = '' }: Props) {
         const lines = buffer.split('\n')
         buffer = lines.pop() || '' // Keep incomplete line in buffer
 
-        let eventType = ''
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             eventType = line.slice(7).trim()

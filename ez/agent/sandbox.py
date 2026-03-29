@@ -9,6 +9,8 @@ Security:
 from __future__ import annotations
 
 import ast
+import importlib
+import importlib.util
 import logging
 import re
 import subprocess
@@ -110,8 +112,21 @@ def get_template(kind: str = "strategy", class_name: str = "", description: str 
     return _STRATEGY_TEMPLATE.format(class_name=class_name, description=description)
 
 
+_FORBIDDEN_BUILTINS = frozenset({
+    "__import__", "eval", "exec", "compile", "open",
+    "getattr", "setattr", "delattr", "globals", "locals",
+    "vars", "dir", "type", "super",
+    "breakpoint", "exit", "quit",
+})
+
+_FORBIDDEN_ATTR_CALLS = frozenset({
+    "system", "popen", "exec_module", "load_module",
+    "run", "call", "check_output", "Popen",
+})
+
+
 def check_syntax(code: str) -> list[str]:
-    """Check Python syntax and forbidden imports. Returns list of errors."""
+    """Check Python syntax, forbidden imports, and dangerous function calls."""
     errors: list[str] = []
     try:
         tree = ast.parse(code)
@@ -120,6 +135,7 @@ def check_syntax(code: str) -> list[str]:
         return errors
 
     for node in ast.walk(tree):
+        # Forbidden import statements
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
@@ -130,6 +146,19 @@ def check_syntax(code: str) -> list[str]:
                 root = node.module.split(".")[0]
                 if root in _FORBIDDEN_MODULES:
                     errors.append(f"Forbidden import: {node.module} (line {node.lineno})")
+
+        # Forbidden builtin calls: __import__(), eval(), exec(), open(), etc.
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = ""
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name in _FORBIDDEN_BUILTINS:
+                errors.append(f"Forbidden call: {name}() (line {node.lineno})")
+            if name in _FORBIDDEN_ATTR_CALLS:
+                errors.append(f"Forbidden call: .{name}() (line {node.lineno})")
 
     return errors
 
@@ -168,8 +197,14 @@ def save_and_validate_strategy(
         return {"success": False, "errors": errors}
 
     target = _STRATEGIES_DIR / safe_name
-    if target.exists() and not overwrite:
+    had_original = target.exists()
+    if had_original and not overwrite:
         return {"success": False, "errors": [f"File already exists: {safe_name}. Use update_strategy to overwrite."]}
+
+    # Back up original before overwriting
+    original_code = ""
+    if had_original:
+        original_code = target.read_text(encoding="utf-8")
 
     # Write file
     _STRATEGIES_DIR.mkdir(parents=True, exist_ok=True)
@@ -178,13 +213,20 @@ def save_and_validate_strategy(
     # Run contract test in subprocess with timeout
     test_result = _run_contract_test(safe_name)
     if not test_result["passed"]:
-        # Remove the file if test failed
-        target.unlink(missing_ok=True)
+        if had_original:
+            # Restore the original file
+            target.write_text(original_code, encoding="utf-8")
+        else:
+            # Remove new file that failed test
+            target.unlink(missing_ok=True)
         return {
             "success": False,
             "errors": [f"Contract test failed: {test_result['output']}"],
             "test_output": test_result["output"],
         }
+
+    # Hot-reload: make the strategy available immediately
+    _reload_user_strategy(safe_name)
 
     return {
         "success": True,
@@ -192,6 +234,43 @@ def save_and_validate_strategy(
         "path": f"strategies/{safe_name}",
         "test_output": test_result["output"],
     }
+
+
+def _reload_user_strategy(filename: str) -> None:
+    """Hot-reload a user strategy after save.
+
+    Steps:
+    1. Remove old module from sys.modules (so re-import is fresh)
+    2. Remove old class from Strategy._registry (avoid duplicate error)
+    3. Re-import the module, triggering __init_subclass__ auto-registration
+    """
+    from ez.strategy.base import Strategy
+
+    stem = filename.replace(".py", "")
+    module_name = f"strategies.{stem}"
+
+    # Find and remove old registry entries from this module
+    old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
+    for k in old_keys:
+        del Strategy._registry[k]
+
+    # Remove old module from sys.modules
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+
+    # Re-import via spec_from_file_location (same as loader fallback)
+    py_file = _STRATEGIES_DIR / filename
+    if not py_file.exists():
+        return
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, py_file)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = mod
+            spec.loader.exec_module(mod)
+            logger.info("Hot-reloaded strategy: %s", filename)
+    except Exception as e:
+        logger.warning("Failed to hot-reload strategy %s: %s", filename, e)
 
 
 def _run_contract_test(filename: str, timeout: int = 30) -> dict:

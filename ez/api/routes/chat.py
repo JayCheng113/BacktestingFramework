@@ -52,13 +52,20 @@ async def send_message(req: ChatRequest):
 
 @router.get("/status")
 def chat_status():
-    """Check if LLM provider is configured."""
+    """Check if LLM provider is configured and has credentials."""
     try:
         provider = create_provider()
+        prov_name = provider._provider if hasattr(provider, "_provider") else "unknown"
+        api_key = provider._api_key if hasattr(provider, "_api_key") else ""
+        # Local providers don't need API key; remote ones do
+        needs_key = prov_name not in ("local",)
+        has_key = bool(api_key)
+        available = has_key or not needs_key
         return {
-            "available": True,
-            "provider": provider._provider if hasattr(provider, "_provider") else "unknown",
+            "available": available,
+            "provider": prov_name,
             "model": provider._model if hasattr(provider, "_model") else "unknown",
+            **({"error": f"Missing API key for {prov_name}"} if not available else {}),
         }
     except Exception as e:
         return {"available": False, "error": str(e)}

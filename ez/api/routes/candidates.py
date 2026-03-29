@@ -105,23 +105,30 @@ def search_candidates(req: SearchRequest):
 
     result = run_batch(specs, data, batch_config, store=store)
 
+    ranked_dicts = [
+        {
+            "spec_id": c.spec.spec_id,
+            "params": c.spec.strategy_params,
+            "sharpe": c.report.sharpe_ratio if c.report else None,
+            "total_return": c.report.total_return if c.report else None,
+            "max_drawdown": c.report.max_drawdown if c.report else None,
+            "trade_count": c.report.trade_count if c.report else 0,
+            "p_value": c.report.p_value if c.report else None,
+            "gate_passed": c.gate_passed,
+            "run_id": c.report.run_id if c.report else None,
+        }
+        for c in result.ranked
+    ]
+
+    # Apply FDR correction for multiple testing
+    from ez.agent.fdr import apply_fdr
+    apply_fdr(ranked_dicts, method="bh", alpha=0.05)
+
     return {
         "total_specs": result.total_specs,
         "prefiltered": result.prefiltered,
         "executed": result.executed,
         "duplicates": result.duplicates,
         "passed_count": len(result.passed),
-        "ranked": [
-            {
-                "spec_id": c.spec.spec_id,
-                "params": c.spec.strategy_params,
-                "sharpe": c.report.sharpe_ratio if c.report else None,
-                "total_return": c.report.total_return if c.report else None,
-                "max_drawdown": c.report.max_drawdown if c.report else None,
-                "trade_count": c.report.trade_count if c.report else 0,
-                "gate_passed": c.gate_passed,
-                "run_id": c.report.run_id if c.report else None,
-            }
-            for c in result.ranked
-        ],
+        "ranked": ranked_dicts,
     }

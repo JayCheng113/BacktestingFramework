@@ -57,6 +57,36 @@ class TestSyntaxCheck:
         errors = check_syntax(code)
         assert len(errors) == 1
 
+    def test_forbidden_dunder_import(self):
+        code = '__import__("os").system("id")'
+        errors = check_syntax(code)
+        assert any("__import__" in e for e in errors)
+
+    def test_forbidden_eval(self):
+        code = 'eval("1+1")'
+        errors = check_syntax(code)
+        assert any("eval" in e for e in errors)
+
+    def test_forbidden_exec(self):
+        code = 'exec("print(1)")'
+        errors = check_syntax(code)
+        assert any("exec" in e for e in errors)
+
+    def test_forbidden_open(self):
+        code = 'open("/etc/passwd")'
+        errors = check_syntax(code)
+        assert any("open" in e for e in errors)
+
+    def test_forbidden_getattr(self):
+        code = 'getattr(__builtins__, "__import__")'
+        errors = check_syntax(code)
+        assert any("getattr" in e for e in errors)
+
+    def test_forbidden_system_call(self):
+        code = 'import os\nos.system("id")'
+        errors = check_syntax(code)
+        assert len(errors) >= 1  # at least the import
+
 
 class TestSafeFilename:
     def test_valid(self):

@@ -33,6 +33,7 @@ export default function CodeEditor() {
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
   const [templateKind, setTemplateKind] = useState<'strategy' | 'factor'>('strategy')
+  const [isFactorCode, setIsFactorCode] = useState(false)
   const [className, setClassName] = useState('')
   const [showChat, setShowChat] = useState(false)
   const editorRef = useRef<any>(null)
@@ -53,6 +54,7 @@ export default function CodeEditor() {
         const data = await res.json()
         setCode(data.code)
         setFilename(fname)
+        setIsFactorCode(false)
         setStatus(`Loaded ${fname}`)
         setErrors([])
         setTestOutput('')
@@ -73,7 +75,10 @@ export default function CodeEditor() {
         const name = className || (templateKind === 'strategy' ? 'MyStrategy' : 'MyFactor')
         const fn = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py'
         setFilename(fn)
-        setStatus('Template generated')
+        setIsFactorCode(templateKind === 'factor')
+        setStatus(templateKind === 'factor'
+          ? 'Factor template generated (reference only — factors must be placed in ez/factor/builtin/ manually)'
+          : 'Template generated')
         setErrors([])
         setTestOutput('')
       }
@@ -203,14 +208,15 @@ export default function CodeEditor() {
             style={{ backgroundColor: '#2563eb', color: '#fff', opacity: validating || !code ? 0.5 : 1 }}>
             {validating ? 'Checking...' : 'Validate'}
           </button>
-          <button onClick={() => save(false)} disabled={saving || !code || !filename}
+          <button onClick={() => save(false)} disabled={saving || !code || !filename || isFactorCode}
             className="text-xs px-3 py-1 rounded"
-            style={{ backgroundColor: '#16a34a', color: '#fff', opacity: saving || !code || !filename ? 0.5 : 1 }}>
-            {saving ? 'Testing...' : 'Save & Test'}
+            title={isFactorCode ? 'Factor files must be placed manually in ez/factor/builtin/' : ''}
+            style={{ backgroundColor: '#16a34a', color: '#fff', opacity: saving || !code || !filename || isFactorCode ? 0.5 : 1 }}>
+            {saving ? 'Testing...' : isFactorCode ? 'Save N/A (Factor)' : 'Save & Test'}
           </button>
-          <button onClick={() => save(true)} disabled={saving || !code || !filename}
+          <button onClick={() => save(true)} disabled={saving || !code || !filename || isFactorCode}
             className="text-xs px-3 py-1 rounded"
-            style={{ backgroundColor: '#d97706', color: '#fff', opacity: saving || !code || !filename ? 0.5 : 1 }}>
+            style={{ backgroundColor: '#d97706', color: '#fff', opacity: saving || !code || !filename || isFactorCode ? 0.5 : 1 }}>
             Overwrite
           </button>
           <div className="flex-1" />

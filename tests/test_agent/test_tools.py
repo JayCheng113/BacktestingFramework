@@ -83,3 +83,14 @@ class TestReadSource:
         result = execute_tool("read_source", {"path": "strategies/nonexistent.py"})
         parsed = json.loads(result)
         assert "error" in parsed
+
+    def test_path_traversal_blocked(self):
+        result = execute_tool("read_source", {"path": "strategies/../ez/config.py"})
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "denied" in parsed["error"].lower()
+
+    def test_dotenv_traversal_blocked(self):
+        result = execute_tool("read_source", {"path": "strategies/../../.env"})
+        parsed = json.loads(result)
+        assert "error" in parsed

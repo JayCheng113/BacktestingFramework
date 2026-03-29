@@ -139,11 +139,16 @@ def _read_source(path: str) -> str:
     from pathlib import Path
 
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-    allowed_prefixes = ["strategies/", "ez/strategy/builtin/", "ez/factor/builtin/"]
-    if not any(path.startswith(p) for p in allowed_prefixes):
-        return json.dumps({"error": f"Access denied: can only read from {allowed_prefixes}"})
-    full = _PROJECT_ROOT / path
-    if not full.exists():
+    allowed_dirs = [
+        (_PROJECT_ROOT / "strategies").resolve(),
+        (_PROJECT_ROOT / "ez" / "strategy" / "builtin").resolve(),
+        (_PROJECT_ROOT / "ez" / "factor" / "builtin").resolve(),
+    ]
+    full = (_PROJECT_ROOT / path).resolve()
+    # Must resolve to inside one of the allowed directories
+    if not any(str(full).startswith(str(d)) for d in allowed_dirs):
+        return json.dumps({"error": "Access denied: path resolves outside allowed directories"})
+    if not full.exists() or not full.is_file():
         return json.dumps({"error": f"File not found: {path}"})
     return full.read_text(encoding="utf-8")
 

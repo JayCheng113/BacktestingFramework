@@ -198,5 +198,19 @@ class OpenAICompatProvider(LLMProvider):
                         if fn.get("arguments"):
                             pending_tools[idx]["arguments"] += fn["arguments"]
 
-                # If stream ended without [DONE]
+                # If stream ended without [DONE], flush pending tool calls
+                for _idx in sorted(pending_tools):
+                    tc_data = pending_tools[_idx]
+                    try:
+                        args = json.loads(tc_data.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    yield LLMEvent(
+                        type="tool_call",
+                        tool_call=ToolCall(
+                            id=tc_data.get("id", ""),
+                            name=tc_data.get("name", ""),
+                            arguments=args,
+                        ),
+                    )
                 yield LLMEvent(type="done")
