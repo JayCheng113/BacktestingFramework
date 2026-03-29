@@ -5,6 +5,7 @@ Candidates that fail pre-filter are skipped from the expensive full pipeline.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import pandas as pd
@@ -79,7 +80,6 @@ def prefilter(
         raw_trades = metrics.get("trade_count")
 
         # NaN/None → fail-safe defaults
-        import math
         sharpe = raw_sharpe if isinstance(raw_sharpe, (int, float)) and math.isfinite(raw_sharpe) else float("-inf")
         dd = abs(raw_dd) if isinstance(raw_dd, (int, float)) and math.isfinite(raw_dd) else float("inf")
         trades = int(raw_trades) if isinstance(raw_trades, (int, float)) and math.isfinite(raw_trades) else 0

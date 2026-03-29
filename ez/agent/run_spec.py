@@ -63,7 +63,10 @@ class RunSpec:
         """
         d = {
             "strategy_name": self.strategy_name,
-            "strategy_params": dict(sorted(self.strategy_params.items())),
+            "strategy_params": {
+                k: int(v) if isinstance(v, float) and v == int(v) else v
+                for k, v in sorted(self.strategy_params.items())
+            },
             "symbol": self.symbol,
             "market": self.market,
             "period": self.period,
