@@ -66,7 +66,8 @@ def _build_search_config(req: SearchRequest) -> SearchConfig:
 @router.post("/search")
 def search_candidates(req: SearchRequest):
     """Run batch parameter search: grid or random."""
-    from ez.api.routes.experiments import _fetch_data, _get_experiment_store
+    from ez.api.routes.experiments import _fetch_data
+    from ez.agent.data_access import get_experiment_store
 
     # Pre-check: reject oversized grids before materializing
     if req.mode == "grid":
@@ -86,7 +87,7 @@ def search_candidates(req: SearchRequest):
         raise HTTPException(status_code=422, detail=str(e)) from e
 
     data = _fetch_data(req.symbol, req.market, req.period, req.start_date, req.end_date)
-    store = _get_experiment_store()
+    store = get_experiment_store()
 
     batch_config = BatchConfig(
         gate_config=GateConfig(

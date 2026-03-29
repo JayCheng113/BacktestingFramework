@@ -1,16 +1,18 @@
-# ez/llm — LLM Provider Abstraction Layer (V2.7)
+# ez/llm — LLM Provider Abstraction Layer (V2.7+)
 
 ## Responsibility
-Unified interface for multiple LLM providers. Handles chat completion + tool calling + streaming.
+Unified interface for multiple LLM providers. Handles chat completion + tool calling + streaming (sync + async).
 
 ## Public Interfaces
-- `LLMProvider(ABC)` — Base class: `chat()`, `stream_chat()`
+- `LLMProvider(ABC)` — Base class: `chat()`, `stream_chat()`, `achat()`, `astream_chat()`, `aclose()`
+- `LLMProvider.provider_name` / `model_name` / `has_api_key` — Public properties (V2.7.1)
 - `LLMMessage` — Message dataclass (role, content, tool_calls)
 - `LLMResponse` — Complete response (content, tool_calls, finish_reason, usage)
 - `LLMEvent` — Streaming event (content/tool_call/done/error)
 - `ToolCall` — Tool invocation (id, name, arguments)
-- `OpenAICompatProvider` — Works with DeepSeek, Qwen, Ollama, OpenAI
-- `create_provider(config)` — Factory function from LLMConfig
+- `OpenAICompatProvider` — Works with DeepSeek, Qwen, Ollama, OpenAI; persistent `httpx.AsyncClient`
+- `create_provider(config)` — Factory with singleton caching (V2.7.1)
+- `reset_provider_cache()` — Invalidate cached provider (settings change)
 
 ## Files
 | File | Role |
@@ -43,5 +45,12 @@ llm:
   temperature: 0.3
 ```
 
+## V2.7.1 Changes
+- Async methods: `achat()`, `astream_chat()` with `httpx.AsyncClient` (non-blocking)
+- Persistent client: `OpenAICompatProvider` holds `httpx.AsyncClient` instance (connection pool)
+- Public properties: `provider_name`, `model_name`, `has_api_key` (replaces private attr access)
+- Factory singleton: `create_provider()` caches by config fingerprint, `reset_provider_cache()` invalidates
+- `aclose()`: Graceful shutdown of async client
+
 ## Status
-- experimental (V2.7)
+- experimental (V2.7+)

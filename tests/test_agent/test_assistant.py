@@ -1,11 +1,11 @@
-"""Tests for the AI assistant agent loop."""
+"""Tests for the AI assistant agent loop (sync + async)."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ez.agent.assistant import MAX_TOOL_ROUNDS, _build_system_prompt, chat_stream, chat_sync
+from ez.agent.assistant import MAX_TOOL_ROUNDS, _build_system_prompt, chat_stream, chat_sync, achat_stream
 from ez.llm.provider import LLMEvent, LLMMessage, LLMProvider, LLMResponse, ToolCall
 
 
@@ -137,3 +137,98 @@ class TestChatStream:
         messages = [LLMMessage(role="user", content="hi")]
         events = list(chat_stream(mock_provider, messages))
         assert any(e["event"] == "error" for e in events)
+
+
+class TestAChatStream:
+    """V2.7.1: Tests for the async streaming chat."""
+
+    @pytest.mark.asyncio
+    async def test_simple_content_stream(self):
+        """Async streaming content yields content + done events."""
+        mock_provider = MagicMock(spec=LLMProvider)
+
+        async def mock_astream(*args, **kwargs):
+            yield LLMEvent(type="content", content="Hello")
+            yield LLMEvent(type="content", content=" async")
+            yield LLMEvent(type="done")
+
+        mock_provider.astream_chat = mock_astream
+
+        messages = [LLMMessage(role="user", content="hi")]
+        events = []
+        async for evt in achat_stream(mock_provider, messages):
+            events.append(evt)
+
+        content_events = [e for e in events if e["event"] == "content"]
+        assert len(content_events) == 2
+        assert content_events[0]["data"]["text"] == "Hello"
+        assert content_events[1]["data"]["text"] == " async"
+        assert events[-1]["event"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_stream(self):
+        """Async streaming with tool calls yields tool_start + tool_result."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        call_count = 0
+
+        async def mock_astream(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield LLMEvent(type="tool_call", tool_call=ToolCall(id="c1", name="list_strategies", arguments={}))
+                yield LLMEvent(type="done")
+            else:
+                yield LLMEvent(type="content", content="Done!")
+                yield LLMEvent(type="done")
+
+        mock_provider.astream_chat = mock_astream
+
+        messages = [LLMMessage(role="user", content="list")]
+        events = []
+        async for evt in achat_stream(mock_provider, messages):
+            events.append(evt)
+
+        event_types = [e["event"] for e in events]
+        assert "tool_start" in event_types
+        assert "tool_result" in event_types
+        assert "content" in event_types
+        assert events[-1]["event"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_error_handling(self):
+        """Error during async streaming yields error event."""
+        mock_provider = MagicMock(spec=LLMProvider)
+
+        async def mock_astream(*args, **kwargs):
+            raise Exception("LLM down")
+            yield  # make it an async generator
+
+        mock_provider.astream_chat = mock_astream
+
+        messages = [LLMMessage(role="user", content="hi")]
+        events = []
+        async for evt in achat_stream(mock_provider, messages):
+            events.append(evt)
+
+        assert any(e["event"] == "error" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_max_rounds_limit(self):
+        """Async version also respects MAX_TOOL_ROUNDS."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        call_count = 0
+
+        async def mock_astream(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            yield LLMEvent(type="tool_call", tool_call=ToolCall(id=f"c{call_count}", name="list_strategies", arguments={}))
+            yield LLMEvent(type="done")
+
+        mock_provider.astream_chat = mock_astream
+
+        messages = [LLMMessage(role="user", content="loop")]
+        events = []
+        async for evt in achat_stream(mock_provider, messages):
+            events.append(evt)
+
+        assert call_count == MAX_TOOL_ROUNDS

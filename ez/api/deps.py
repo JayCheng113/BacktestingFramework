@@ -105,6 +105,6 @@ def close_resources() -> None:
     if _store is not None:
         _store.close()
         _store = None
-    # Close experiment store connection
-    from ez.api.routes.experiments import close_experiment_store
-    close_experiment_store()
+    # Close shared ExperimentStore (V2.7.1: single source in data_access)
+    from ez.agent.data_access import reset_data_access
+    reset_data_access()

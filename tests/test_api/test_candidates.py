@@ -34,7 +34,8 @@ def _mock_fetch_data(symbol, market, period, start, end):
 def _patch_deps():
     conn = duckdb.connect(":memory:")
     store = ExperimentStore(conn)
-    with patch("ez.api.routes.experiments._get_experiment_store", return_value=store), \
+    with patch("ez.api.routes.experiments.get_experiment_store", return_value=store), \
+         patch("ez.agent.data_access.get_experiment_store", return_value=store), \
          patch("ez.api.routes.experiments._fetch_data", side_effect=_mock_fetch_data):
         yield
     conn.close()

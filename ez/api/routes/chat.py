@@ -1,4 +1,8 @@
-"""V2.7: Chat SSE endpoint — streaming AI assistant responses."""
+"""V2.7: Chat SSE endpoint — streaming AI assistant responses.
+
+V2.7.1: Fully async — uses achat_stream() so LLM HTTP calls don't block
+the event loop. chat_status uses public provider properties.
+"""
 from __future__ import annotations
 
 import json
@@ -27,7 +31,7 @@ class ChatRequest(BaseModel):
 
 @router.post("/send")
 async def send_message(req: ChatRequest):
-    """Stream chat response via SSE."""
+    """Stream chat response via SSE (async, non-blocking)."""
     try:
         provider = create_provider()
     except Exception as e:
@@ -35,11 +39,11 @@ async def send_message(req: ChatRequest):
 
     llm_messages = [LLMMessage(role=m.role, content=m.content) for m in req.messages]
 
-    from ez.agent.assistant import chat_stream
+    from ez.agent.assistant import achat_stream
 
-    def generate():
+    async def generate():
         try:
-            for event in chat_stream(provider, llm_messages, editor_code=req.editor_code):
+            async for event in achat_stream(provider, llm_messages, editor_code=req.editor_code):
                 line = f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
                 yield line
         except Exception as e:
@@ -55,16 +59,14 @@ def chat_status():
     """Check if LLM provider is configured and has credentials."""
     try:
         provider = create_provider()
-        prov_name = provider._provider if hasattr(provider, "_provider") else "unknown"
-        api_key = provider._api_key if hasattr(provider, "_api_key") else ""
-        # Local providers don't need API key; remote ones do
+        prov_name = provider.provider_name
+        has_key = provider.has_api_key
         needs_key = prov_name not in ("local",)
-        has_key = bool(api_key)
         available = has_key or not needs_key
         return {
             "available": available,
             "provider": prov_name,
-            "model": provider._model if hasattr(provider, "_model") else "unknown",
+            "model": provider.model_name,
             **({"error": f"Missing API key for {prov_name}"} if not available else {}),
         }
     except Exception as e:

@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.7 | Tests: 897 | C++ acceleration: up to 7.9x
+Version: 0.2.7.1 | Tests: 913 | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -54,7 +54,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (907 collected, 897 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (923 collected, 913 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -77,13 +77,11 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.6.1**: Stability — CORE_FILES 注册, DateBtn 共享组件, lot-size 佣金重算, DB 迁移缩窄, countValues 精度对齐, 801 tests
 - **V2.7**: LLM + Web Coding Assistant — Monaco Editor, AI Chat (DeepSeek/Qwen/Local), Tool框架 (9 tools), 代码沙箱 (AST禁危险import/builtins/dunders), FDR 多重检验 (Bonferroni/BH), 全站中文化, 开发文档 (11章1497行), 设置面板 (LLM/Tushare), 多会话 Chat (localStorage持久化), 897 tests
 - **V2.7 post-release fixes**: 整手买入超预算修复, read_source 前缀校验, FDR None 容错, WF 参数校验, 热重载 pyc 清理, SPA API 404, bool 字符串解析, 凭证清空接口, 因子列名修正 (macd_line/boll_upper_20), 设置 YAML 持久化
-- **Next: V2.7.1** — Stability
+- **V2.7.1**: Stability — Chat async 化 (httpx.AsyncClient + async generator), Provider 单例连接池, LLMProvider public properties, ExperimentStore 单例合并 (消除双连接), 多列因子评估 (MACD/BOLL 全列), 913 tests
+- **Next: V2.8** — Autonomous Research Agent
 
-## Known Limitations (V2.7.1 跟进)
-- 多列因子评估只取第一列 (MACD/BOLL)
+## Known Limitations (V2.8 跟进)
 - 数据源链扁平去重而非按市场独立路由
 - C++ 加速路径持 GIL (并发场景受限)
 - 回测未强平期末持仓 (trade_count 略低于真实)
 - 前端参数面板仅支持数值型 (bool/str 参数不可用)
-- AI Chat 同步阻塞事件循环 (需 async 化)
-- Chat provider 无连接池 (每请求新建)

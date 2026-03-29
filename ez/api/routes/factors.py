@@ -27,6 +27,7 @@ class FactorEvalRequest(BaseModel):
     start_date: date
     end_date: date
     periods: list[int] = [1, 5, 10, 20]
+    column: str = ""  # V2.7.1: specify which column for multi-column factors
 
 
 @router.get("")
@@ -56,26 +57,44 @@ def evaluate_factor(req: FactorEvalRequest):
     } for b in bars]).set_index("time")
 
     computed = factor.compute(df)
-    factor_col = [c for c in computed.columns if c not in df.columns]
-    if not factor_col:
+    factor_cols = [c for c in computed.columns if c not in df.columns]
+    if not factor_cols:
         raise HTTPException(status_code=500, detail="Factor produced no new columns")
 
-    factor_values = computed[factor_col[0]].dropna()
+    # V2.7.1: support multi-column factors (MACD, BOLL, etc.)
+    # If column specified, use it; otherwise evaluate all columns
+    if req.column:
+        if req.column not in factor_cols:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Column '{req.column}' not found. Available: {factor_cols}",
+            )
+        eval_cols = [req.column]
+    else:
+        eval_cols = factor_cols
+
     forward_returns = df["adj_close"].pct_change().shift(-1).dropna()
-
-    if len(factor_values) < 10:
-        raise HTTPException(status_code=400, detail=f"Not enough data for evaluation (need 10+ bars after warmup, got {len(factor_values)})")
-
     evaluator = FactorEvaluator()
-    analysis = evaluator.evaluate(factor_values, forward_returns, req.periods)
+    results: dict = {"columns": eval_cols}
 
-    return {
-        "ic_mean": analysis.ic_mean,
-        "rank_ic_mean": analysis.rank_ic_mean,
-        "icir": analysis.icir,
-        "rank_icir": analysis.rank_icir,
-        "ic_decay": analysis.ic_decay,
-        "turnover": analysis.turnover,
-        "ic_series": analysis.ic_series.tolist(),
-        "rank_ic_series": analysis.rank_ic_series.tolist(),
-    }
+    for col in eval_cols:
+        factor_values = computed[col].dropna()
+        if len(factor_values) < 10:
+            results[col] = {"error": f"Not enough data ({len(factor_values)} bars)"}
+            continue
+        analysis = evaluator.evaluate(factor_values, forward_returns, req.periods)
+        results[col] = {
+            "ic_mean": analysis.ic_mean,
+            "rank_ic_mean": analysis.rank_ic_mean,
+            "icir": analysis.icir,
+            "rank_icir": analysis.rank_icir,
+            "ic_decay": analysis.ic_decay,
+            "turnover": analysis.turnover,
+            "ic_series": analysis.ic_series.tolist(),
+            "rank_ic_series": analysis.rank_ic_series.tolist(),
+        }
+
+    # Backward compat: for single-column factors, flatten to top level
+    if len(eval_cols) == 1 and eval_cols[0] in results and "error" not in results[eval_cols[0]]:
+        return {**results[eval_cols[0]], "columns": eval_cols}
+    return results

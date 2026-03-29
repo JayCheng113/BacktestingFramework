@@ -158,10 +158,12 @@ def update_llm_settings(req: LLMSettings):
         # provider/model/base_url/temperature → YAML
         _update_yaml_llm(req.provider, req.model, req.base_url, req.temperature)
 
-        # Reload config
+        # Reload config + invalidate provider cache
         from ez.config import reset_config, load_config
         reset_config()
         load_config()
+        from ez.llm.factory import reset_provider_cache
+        reset_provider_cache()
 
         return {"status": "ok", "provider": req.provider, "api_key_set": bool(req.api_key)}
     except ValueError as e:

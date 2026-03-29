@@ -3,12 +3,14 @@
 All providers implement chat() and stream_chat() with a unified
 message/tool format. The wire protocol (OpenAI-compatible, Anthropic, etc.)
 is handled inside each provider.
+
+V2.7.1: Added async variants (achat/astream_chat) and public properties.
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 
 @dataclass
@@ -54,6 +56,24 @@ class LLMEvent:
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
 
+    @property
+    @abstractmethod
+    def provider_name(self) -> str:
+        """Provider identifier (e.g. 'deepseek', 'qwen')."""
+        ...
+
+    @property
+    @abstractmethod
+    def model_name(self) -> str:
+        """Model identifier (e.g. 'deepseek-chat')."""
+        ...
+
+    @property
+    @abstractmethod
+    def has_api_key(self) -> bool:
+        """Whether an API key is configured."""
+        ...
+
     @abstractmethod
     def chat(
         self,
@@ -71,3 +91,25 @@ class LLMProvider(ABC):
     ) -> Iterator[LLMEvent]:
         """Send messages and yield streaming events."""
         ...
+
+    @abstractmethod
+    async def achat(
+        self,
+        messages: list[LLMMessage],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """Async variant of chat()."""
+        ...
+
+    @abstractmethod
+    async def astream_chat(
+        self,
+        messages: list[LLMMessage],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[LLMEvent]:
+        """Async variant of stream_chat()."""
+        ...
+
+    async def aclose(self) -> None:
+        """Close any persistent connections. Override if needed."""
+        pass

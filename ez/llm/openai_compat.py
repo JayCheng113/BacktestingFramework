@@ -4,12 +4,15 @@ Works with DeepSeek, Qwen (DashScope), Ollama, vLLM, OpenAI, and any
 provider that implements the OpenAI chat/completions API.
 
 Uses httpx for HTTP calls (already a FastAPI dependency).
+
+V2.7.1: Added async methods (achat/astream_chat) with persistent
+httpx.AsyncClient for connection pooling.
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 import httpx
 
@@ -69,6 +72,56 @@ def _parse_tool_calls(raw: list[dict]) -> list[ToolCall]:
     return calls
 
 
+def _parse_response(data: dict) -> LLMResponse:
+    """Parse a chat/completions JSON response into LLMResponse."""
+    choice = data.get("choices", [{}])[0]
+    msg = choice.get("message", {})
+    tool_calls = _parse_tool_calls(msg.get("tool_calls", []))
+    finish = choice.get("finish_reason", "stop")
+    if tool_calls:
+        finish = "tool_calls"
+    return LLMResponse(
+        content=msg.get("content", "") or "",
+        tool_calls=tool_calls,
+        finish_reason=finish,
+        usage=data.get("usage", {}),
+    )
+
+
+def _flush_pending_tools(pending_tools: dict[int, dict]) -> list[LLMEvent]:
+    """Convert accumulated tool call chunks into LLMEvents."""
+    events = []
+    for _idx in sorted(pending_tools):
+        tc_data = pending_tools[_idx]
+        try:
+            args = json.loads(tc_data.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        events.append(LLMEvent(
+            type="tool_call",
+            tool_call=ToolCall(
+                id=tc_data.get("id", ""),
+                name=tc_data.get("name", ""),
+                arguments=args,
+            ),
+        ))
+    return events
+
+
+def _accumulate_tool_chunk(pending_tools: dict[int, dict], tc_chunk: dict) -> None:
+    """Accumulate a streaming tool_call chunk into pending_tools."""
+    idx = tc_chunk.get("index", 0)
+    if idx not in pending_tools:
+        pending_tools[idx] = {"id": "", "name": "", "arguments": ""}
+    if tc_chunk.get("id"):
+        pending_tools[idx]["id"] = tc_chunk["id"]
+    fn = tc_chunk.get("function", {})
+    if fn.get("name"):
+        pending_tools[idx]["name"] = fn["name"]
+    if fn.get("arguments"):
+        pending_tools[idx]["arguments"] += fn["arguments"]
+
+
 class OpenAICompatProvider(LLMProvider):
     """OpenAI-compatible provider for DeepSeek, Qwen, local models, etc."""
 
@@ -89,6 +142,24 @@ class OpenAICompatProvider(LLMProvider):
         self._timeout = timeout
         self._max_tokens = max_tokens
         self._temperature = temperature
+        # Persistent async client (lazy-init on first async call)
+        self._async_client: httpx.AsyncClient | None = None
+
+    # -- Public properties (V2.7.1) --
+
+    @property
+    def provider_name(self) -> str:
+        return self._provider
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    @property
+    def has_api_key(self) -> bool:
+        return bool(self._api_key)
+
+    # -- Internal helpers --
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -114,6 +185,17 @@ class OpenAICompatProvider(LLMProvider):
             body["tool_choice"] = "auto"
         return body
 
+    def _get_async_client(self) -> httpx.AsyncClient:
+        """Get or create the persistent async client."""
+        if self._async_client is None or self._async_client.is_closed:
+            self._async_client = httpx.AsyncClient(
+                timeout=self._timeout,
+                headers=self._headers(),
+            )
+        return self._async_client
+
+    # -- Sync methods (kept for backward compat / tests) --
+
     def chat(
         self,
         messages: list[LLMMessage],
@@ -127,20 +209,7 @@ class OpenAICompatProvider(LLMProvider):
             resp.raise_for_status()
             data = resp.json()
 
-        choice = data.get("choices", [{}])[0]
-        msg = choice.get("message", {})
-
-        tool_calls = _parse_tool_calls(msg.get("tool_calls", []))
-        finish = choice.get("finish_reason", "stop")
-        if tool_calls:
-            finish = "tool_calls"
-
-        return LLMResponse(
-            content=msg.get("content", "") or "",
-            tool_calls=tool_calls,
-            finish_reason=finish,
-            usage=data.get("usage", {}),
-        )
+        return _parse_response(data)
 
     def stream_chat(
         self,
@@ -153,7 +222,6 @@ class OpenAICompatProvider(LLMProvider):
         with httpx.Client(timeout=self._timeout) as client:
             with client.stream("POST", url, json=body, headers=self._headers()) as resp:
                 resp.raise_for_status()
-                # Accumulate tool calls across chunks
                 pending_tools: dict[int, dict] = {}
 
                 for line in resp.iter_lines():
@@ -161,21 +229,7 @@ class OpenAICompatProvider(LLMProvider):
                         continue
                     payload = line[6:]
                     if payload.strip() == "[DONE]":
-                        # Emit any pending tool calls
-                        for _idx in sorted(pending_tools):
-                            tc_data = pending_tools[_idx]
-                            try:
-                                args = json.loads(tc_data.get("arguments", "{}"))
-                            except (json.JSONDecodeError, TypeError):
-                                args = {}
-                            yield LLMEvent(
-                                type="tool_call",
-                                tool_call=ToolCall(
-                                    id=tc_data.get("id", ""),
-                                    name=tc_data.get("name", ""),
-                                    arguments=args,
-                                ),
-                            )
+                        yield from _flush_pending_tools(pending_tools)
                         yield LLMEvent(type="done")
                         return
 
@@ -185,37 +239,70 @@ class OpenAICompatProvider(LLMProvider):
                         continue
 
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
-
-                    # Content tokens
                     if delta.get("content"):
                         yield LLMEvent(type="content", content=delta["content"])
-
-                    # Tool call chunks (streamed incrementally)
                     for tc_chunk in delta.get("tool_calls", []):
-                        idx = tc_chunk.get("index", 0)
-                        if idx not in pending_tools:
-                            pending_tools[idx] = {"id": "", "name": "", "arguments": ""}
-                        if tc_chunk.get("id"):
-                            pending_tools[idx]["id"] = tc_chunk["id"]
-                        fn = tc_chunk.get("function", {})
-                        if fn.get("name"):
-                            pending_tools[idx]["name"] = fn["name"]
-                        if fn.get("arguments"):
-                            pending_tools[idx]["arguments"] += fn["arguments"]
+                        _accumulate_tool_chunk(pending_tools, tc_chunk)
 
-                # If stream ended without [DONE], flush pending tool calls
-                for _idx in sorted(pending_tools):
-                    tc_data = pending_tools[_idx]
-                    try:
-                        args = json.loads(tc_data.get("arguments", "{}"))
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                    yield LLMEvent(
-                        type="tool_call",
-                        tool_call=ToolCall(
-                            id=tc_data.get("id", ""),
-                            name=tc_data.get("name", ""),
-                            arguments=args,
-                        ),
-                    )
+                # Stream ended without [DONE]
+                yield from _flush_pending_tools(pending_tools)
                 yield LLMEvent(type="done")
+
+    # -- Async methods (V2.7.1) --
+
+    async def achat(
+        self,
+        messages: list[LLMMessage],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        url = f"{self._base_url}/chat/completions"
+        body = self._build_body(messages, tools, stream=False)
+        client = self._get_async_client()
+        resp = await client.post(url, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return _parse_response(data)
+
+    async def astream_chat(
+        self,
+        messages: list[LLMMessage],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[LLMEvent]:
+        url = f"{self._base_url}/chat/completions"
+        body = self._build_body(messages, tools, stream=True)
+        client = self._get_async_client()
+        async with client.stream("POST", url, json=body) as resp:
+            resp.raise_for_status()
+            pending_tools: dict[int, dict] = {}
+
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    for evt in _flush_pending_tools(pending_tools):
+                        yield evt
+                    yield LLMEvent(type="done")
+                    return
+
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                if delta.get("content"):
+                    yield LLMEvent(type="content", content=delta["content"])
+                for tc_chunk in delta.get("tool_calls", []):
+                    _accumulate_tool_chunk(pending_tools, tc_chunk)
+
+            # Stream ended without [DONE]
+            for evt in _flush_pending_tools(pending_tools):
+                yield evt
+            yield LLMEvent(type="done")
+
+    async def aclose(self) -> None:
+        """Close the persistent async client."""
+        if self._async_client and not self._async_client.is_closed:
+            await self._async_client.aclose()
+            self._async_client = None

@@ -65,3 +65,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 ## Status
 - Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search + V2.7 code editor + AI chat + settings
 - V2.7: Code editor API, Chat SSE, Settings API (LLM/Tushare read/write with .env injection guard)
+- V2.7.1: Chat SSE fully async (achat_stream), ExperimentStore shared singleton, multi-column factor evaluation, provider cache invalidation on settings change

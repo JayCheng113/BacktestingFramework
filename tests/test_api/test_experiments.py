@@ -39,7 +39,7 @@ def _patch_deps():
     """Replace store + data fetching with test doubles."""
     conn = duckdb.connect(":memory:")
     store = ExperimentStore(conn)
-    with patch("ez.api.routes.experiments._get_experiment_store", return_value=store), \
+    with patch("ez.api.routes.experiments.get_experiment_store", return_value=store), \
          patch("ez.api.routes.experiments._fetch_data", side_effect=_mock_fetch_data):
         yield
     conn.close()

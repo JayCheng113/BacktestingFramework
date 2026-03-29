@@ -4,11 +4,13 @@ Flow: user message → build context → LLM → tool_calls? → execute → rec
                                           → content → return
 
 Max 10 tool-call rounds to prevent infinite loops.
+
+V2.7.1: Added achat_stream() async generator — does not block the event loop.
 """
 from __future__ import annotations
 
 import logging
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 from ez.llm.provider import LLMEvent, LLMMessage, LLMProvider, LLMResponse, ToolCall
 from ez.agent.tools import execute_tool, get_all_tool_schemas
@@ -110,7 +112,7 @@ def chat_stream(
     messages: list[LLMMessage],
     editor_code: str = "",
 ) -> Iterator[dict]:
-    """Streaming chat with tool-calling loop.
+    """Streaming chat with tool-calling loop (sync version).
 
     Yields SSE-formatted event dicts:
       {"event": "content", "data": {"text": "..."}}
@@ -153,6 +155,59 @@ def chat_stream(
         )
 
         # Execute tools
+        for tc in tool_calls:
+            yield {"event": "tool_start", "data": {"name": tc.name, "args": tc.arguments}}
+            result = execute_tool(tc.name, tc.arguments)
+            yield {"event": "tool_result", "data": {"name": tc.name, "result": result}}
+            full_messages.append(
+                LLMMessage(role="tool", content=result, tool_call_id=tc.id, name=tc.name)
+            )
+
+    yield {"event": "done", "data": {}}
+
+
+async def achat_stream(
+    provider: LLMProvider,
+    messages: list[LLMMessage],
+    editor_code: str = "",
+) -> AsyncIterator[dict]:
+    """Async streaming chat with tool-calling loop (V2.7.1).
+
+    Does NOT block the event loop. Uses provider.astream_chat() for async HTTP.
+    Tool execution remains synchronous (CPU-bound, fast).
+    Yields same SSE event dicts as chat_stream().
+    """
+    system = LLMMessage(role="system", content=_build_system_prompt(editor_code))
+    full_messages = [system] + messages
+    tools = get_all_tool_schemas()
+
+    for _round in range(MAX_TOOL_ROUNDS):
+        content_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+
+        try:
+            async for event in provider.astream_chat(full_messages, tools=tools):
+                if event.type == "content":
+                    content_parts.append(event.content)
+                    yield {"event": "content", "data": {"text": event.content}}
+                elif event.type == "tool_call" and event.tool_call:
+                    tool_calls.append(event.tool_call)
+                elif event.type == "error":
+                    yield {"event": "error", "data": {"message": event.error}}
+                    return
+        except Exception as e:
+            yield {"event": "error", "data": {"message": str(e)}}
+            return
+
+        if not tool_calls:
+            yield {"event": "done", "data": {}}
+            return
+
+        full_content = "".join(content_parts)
+        full_messages.append(
+            LLMMessage(role="assistant", content=full_content, tool_calls=tool_calls)
+        )
+
         for tc in tool_calls:
             yield {"event": "tool_start", "data": {"name": tc.name, "args": tc.arguments}}
             result = execute_tool(tc.name, tc.arguments)

@@ -20,7 +20,8 @@ V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR 
 - `run_batch` — Orchestrate pre-filter → full run → gate → rank → persist (V2.5)
 - `tool()` decorator — Register functions as AI assistant tools (V2.7)
 - `get_all_tool_schemas()` / `execute_tool()` — Tool dispatch framework (V2.7)
-- `chat_sync()` / `chat_stream()` — Agent loop with tool calling (V2.7)
+- `chat_sync()` / `chat_stream()` — Agent loop with tool calling (V2.7, sync)
+- `achat_stream()` — Async streaming agent loop (V2.7.1, non-blocking)
 - `save_and_validate_strategy()` — Code sandbox: save + contract test (V2.7)
 - `apply_fdr()` — FDR correction for batch search results (V2.7)
 
