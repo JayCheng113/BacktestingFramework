@@ -1,19 +1,11 @@
-import { useState, useEffect, forwardRef } from 'react'
+import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { searchCandidates, listStrategies } from '../api'
 import type { StrategyInfo, CandidateResult, SearchResult } from '../types'
+import DateBtn from './shared/DateBtn'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
-
-const DateBtn = forwardRef<HTMLButtonElement, { value?: string; onClick?: () => void }>(
-  ({ value, onClick }, ref) => (
-    <button ref={ref} type="button" onClick={onClick}
-      className="w-full px-2 py-1.5 rounded text-sm text-left" style={inputStyle}>
-      {value || 'Select'}
-    </button>
-  )
-)
 
 interface ParamRangeState {
   name: string
@@ -24,20 +16,23 @@ interface ParamRangeState {
   defaultVal: number
 }
 
-/** Count values in range WITHOUT allocating an array. O(1). */
-function countValues(pr: ParamRangeState): number {
-  if (pr.step <= 0 || pr.min > pr.max) return 0
-  return Math.floor((pr.max - pr.min) / pr.step) + 1
-}
-
-/** Generate values — only for preview (capped at `limit`). */
+/** Generate values using index-based loop to avoid float accumulation drift. */
 function generateValues(pr: ParamRangeState, limit: number = 50): number[] {
   if (pr.step <= 0 || pr.min > pr.max) return []
+  const count = Math.floor((pr.max - pr.min) / pr.step) + 1
+  const n = Math.min(count, limit)
   const vals: number[] = []
-  for (let v = pr.min; v <= pr.max + pr.step * 0.001 && vals.length < limit; v += pr.step) {
+  for (let i = 0; i < n; i++) {
+    const v = pr.min + i * pr.step
     vals.push(pr.type === 'int' ? Math.round(v) : Math.round(v * 1000) / 1000)
   }
   return [...new Set(vals)]
+}
+
+/** Count values — same formula as generateValues, O(1). */
+function countValues(pr: ParamRangeState): number {
+  if (pr.step <= 0 || pr.min > pr.max) return 0
+  return Math.floor((pr.max - pr.min) / pr.step) + 1
 }
 
 function totalCombinations(ranges: ParamRangeState[]): number {

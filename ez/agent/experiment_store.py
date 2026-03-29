@@ -88,7 +88,7 @@ class ExperimentStore:
         # V2.6 migration: add market_rules columns if missing
         try:
             self._conn.execute("SELECT use_market_rules FROM experiment_specs LIMIT 0")
-        except Exception:
+        except duckdb.Error:
             for col, defn in [
                 ("use_market_rules", "BOOLEAN DEFAULT FALSE"),
                 ("t_plus_1", "BOOLEAN DEFAULT TRUE"),
@@ -97,7 +97,7 @@ class ExperimentStore:
             ]:
                 try:
                     self._conn.execute(f"ALTER TABLE experiment_specs ADD COLUMN {col} {defn}")
-                except Exception:
+                except duckdb.Error:
                     pass  # column already exists
 
         # Backfill: only on first init (completed_specs empty) to avoid

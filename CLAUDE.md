@@ -35,8 +35,8 @@ ez/agent/ consumes backtest/core interfaces (V2.4). Future: ez/live/, ez/ops/ â€
 
 ## Core Files (DO NOT MODIFY without proposal in docs/core-changes/)
 ez/types.py, ez/errors.py, ez/config.py, ez/core/matcher.py, ez/core/ts_ops.py,
-ez/data/provider.py, ez/data/validator.py, ez/data/store.py, ez/factor/base.py,
-ez/factor/evaluator.py, ez/strategy/base.py, ez/strategy/loader.py,
+ez/core/market_rules.py, ez/data/provider.py, ez/data/validator.py, ez/data/store.py,
+ez/factor/base.py, ez/factor/evaluator.py, ez/strategy/base.py, ez/strategy/loader.py,
 ez/backtest/engine.py, ez/backtest/portfolio.py, ez/backtest/metrics.py,
 ez/backtest/walk_forward.py, ez/backtest/significance.py
 

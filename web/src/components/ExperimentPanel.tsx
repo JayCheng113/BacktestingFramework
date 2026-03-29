@@ -1,20 +1,12 @@
-import { useState, useEffect, forwardRef } from 'react'
+import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments } from '../api'
 import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
 import CandidateSearch from './CandidateSearch'
+import DateBtn from './shared/DateBtn'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
-
-const DateBtn = forwardRef<HTMLButtonElement, { value?: string; onClick?: () => void }>(
-  ({ value, onClick }, ref) => (
-    <button ref={ref} type="button" onClick={onClick}
-      className="w-full px-2 py-1.5 rounded text-sm text-left" style={inputStyle}>
-      {value || 'Select'}
-    </button>
-  )
-)
 
 export default function ExperimentPanel() {
   const [subTab, setSubTab] = useState<'single' | 'search'>('single')

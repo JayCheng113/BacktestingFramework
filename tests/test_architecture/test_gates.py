@@ -26,6 +26,7 @@ CORE_FILES = [
     "ez/config.py",
     "ez/core/matcher.py",
     "ez/core/ts_ops.py",
+    "ez/core/market_rules.py",
     "ez/data/provider.py",
     "ez/data/validator.py",
     "ez/data/store.py",
