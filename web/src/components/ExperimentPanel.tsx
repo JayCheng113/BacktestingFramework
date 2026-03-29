@@ -1,9 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, forwardRef } from 'react'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments } from '../api'
 import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
 import CandidateSearch from './CandidateSearch'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
+const DateBtn = forwardRef<HTMLButtonElement, { value?: string; onClick?: () => void }>(
+  ({ value, onClick }, ref) => (
+    <button ref={ref} type="button" onClick={onClick}
+      className="w-full px-2 py-1.5 rounded text-sm text-left" style={inputStyle}>
+      {value || 'Select'}
+    </button>
+  )
+)
 
 export default function ExperimentPanel() {
   const [subTab, setSubTab] = useState<'single' | 'search'>('single')
@@ -19,8 +30,8 @@ export default function ExperimentPanel() {
   const [symbol, setSymbol] = useState('000001.SZ')
   const [market] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
-  const [startDate, setStartDate] = useState('2020-01-01')
-  const [endDate, setEndDate] = useState('2024-12-31')
+  const [startDate, setStartDate] = useState<Date>(new Date('2020-01-01'))
+  const [endDate, setEndDate] = useState<Date>(new Date('2024-12-31'))
   const [runWfo, setRunWfo] = useState(true)
   const [wfoSplits, setWfoSplits] = useState(3)
 
@@ -55,12 +66,13 @@ export default function ExperimentPanel() {
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
+      const toStr = (d: Date) => d.toISOString().slice(0, 10)
       const res = await submitExperiment({
         strategy_name: strategyName,
         strategy_params: params,
         symbol, market, period,
-        start_date: startDate,
-        end_date: endDate,
+        start_date: toStr(startDate),
+        end_date: toStr(endDate),
         run_wfo: runWfo,
         ...(runWfo ? { wfo_n_splits: wfoSplits } : {}),
       })
@@ -150,13 +162,17 @@ export default function ExperimentPanel() {
           </div>
           <div>
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start</label>
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-              className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
+            <DatePicker selected={startDate} dateFormat="yyyy-MM-dd"
+              onChange={(d: Date | null) => { if (d) { setStartDate(d); if (d > endDate) setEndDate(d) } }}
+              maxDate={endDate} showMonthDropdown showYearDropdown dropdownMode="select"
+              customInput={<DateBtn />} />
           </div>
           <div>
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End</label>
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-              className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
+            <DatePicker selected={endDate} dateFormat="yyyy-MM-dd"
+              onChange={(d: Date | null) => { if (d) { setEndDate(d); if (d < startDate) setStartDate(d) } }}
+              minDate={startDate} maxDate={new Date()} showMonthDropdown showYearDropdown dropdownMode="select"
+              customInput={<DateBtn />} />
           </div>
         </div>
         {/* WFO Controls */}
