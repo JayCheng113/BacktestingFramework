@@ -14,7 +14,10 @@ export default function App() {
       <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
       {activeTab === 'dashboard' && <Dashboard />}
       {activeTab === 'experiments' && <ExperimentPanel />}
-      {activeTab === 'editor' && <CodeEditor />}
+      {/* CodeEditor uses display:none to keep state alive across tab switches */}
+      <div style={{ display: activeTab === 'editor' ? 'block' : 'none', height: 'calc(100vh - 48px)' }}>
+        <CodeEditor />
+      </div>
       {activeTab === 'docs' && <DocsPage />}
     </div>
   )
