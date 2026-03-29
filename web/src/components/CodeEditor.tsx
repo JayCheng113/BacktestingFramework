@@ -206,7 +206,7 @@ export default function CodeEditor() {
         setFilename(fn)
         setIsFactorCode(templateKind === 'factor')
         setStatus(templateKind === 'factor'
-          ? '因子模板已生成（仅供参考 — 因子需手动放置到 ez/factor/builtin/）'
+          ? '因子模板已生成 — 保存后可被同目录的策略 import 使用'
           : '模板已生成')
         setErrors([])
         setTestOutput('')
@@ -317,7 +317,7 @@ export default function CodeEditor() {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>strategies/</div>
+          <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>strategies/ 文件列表</div>
           {files.length === 0 && <div className="text-xs px-2" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
           {files.map(f => (
             <div key={f.filename}
@@ -347,15 +347,14 @@ export default function CodeEditor() {
             style={{ backgroundColor: '#2563eb', color: '#fff', opacity: validating || !code ? 0.5 : 1 }}>
             {validating ? '检查中...' : '语法检查'}
           </button>
-          <button onClick={() => save(false)} disabled={saving || !code || !filename || isFactorCode}
+          <button onClick={() => save(false)} disabled={saving || !code || !filename}
             className="text-xs px-3 py-1 rounded"
-            title={isFactorCode ? 'Factor files must be placed manually in ez/factor/builtin/' : ''}
-            style={{ backgroundColor: '#16a34a', color: '#fff', opacity: saving || !code || !filename || isFactorCode ? 0.5 : 1 }}>
-            {saving ? '测试中...' : isFactorCode ? '因子不可保存' : '保存并测试'}
+            style={{ backgroundColor: '#16a34a', color: '#fff', opacity: saving || !code || !filename ? 0.5 : 1 }}>
+            {saving ? '测试中...' : '保存并测试'}
           </button>
-          <button onClick={() => save(true)} disabled={saving || !code || !filename || isFactorCode}
+          <button onClick={() => save(true)} disabled={saving || !code || !filename}
             className="text-xs px-3 py-1 rounded"
-            style={{ backgroundColor: '#d97706', color: '#fff', opacity: saving || !code || !filename || isFactorCode ? 0.5 : 1 }}>
+            style={{ backgroundColor: '#d97706', color: '#fff', opacity: saving || !code || !filename ? 0.5 : 1 }}>
             覆盖保存
           </button>
           <div className="flex-1" />

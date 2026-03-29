@@ -110,7 +110,7 @@ export default function CandidateSearch() {
       })
       setResult(res.data)
     } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Search failed')
+      alert(e?.response?.data?.detail || '搜索失败')
     } finally {
       setSearching(false)
     }
@@ -119,40 +119,40 @@ export default function CandidateSearch() {
   return (
     <div className="space-y-4">
       <div className="rounded-lg p-4 space-y-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Parameter Search</h3>
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>参数搜索</h3>
 
         {/* Row 1: Strategy, Symbol, Period, Dates */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Strategy</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>策略</label>
             <select value={strategyName} onChange={e => handleStrategyChange(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
               {strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Symbol</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票代码</label>
             <input value={symbol} onChange={e => setSymbol(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Period</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>周期</label>
             <select value={period} onChange={e => setPeriod(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
+              <option value="daily">日线</option>
+              <option value="weekly">周线</option>
+              <option value="monthly">月线</option>
             </select>
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始</label>
             <DatePicker selected={startDate} dateFormat="yyyy-MM-dd"
               onChange={(d: Date | null) => { if (d) { setStartDate(d); if (d > endDate) setEndDate(d) } }}
               maxDate={endDate} showMonthDropdown showYearDropdown dropdownMode="select"
               customInput={<DateBtn />} />
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束</label>
             <DatePicker selected={endDate} dateFormat="yyyy-MM-dd"
               onChange={(d: Date | null) => { if (d) { setEndDate(d); if (d < startDate) setStartDate(d) } }}
               minDate={startDate} maxDate={new Date()} showMonthDropdown showYearDropdown dropdownMode="select"
@@ -163,14 +163,14 @@ export default function CandidateSearch() {
         {/* Row 2: Mode + Options */}
         <div className="flex gap-4 items-center flex-wrap">
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <input type="radio" checked={mode === 'grid'} onChange={() => setMode('grid')} /> Grid
+            <input type="radio" checked={mode === 'grid'} onChange={() => setMode('grid')} /> 网格搜索
           </label>
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <input type="radio" checked={mode === 'random'} onChange={() => setMode('random')} /> Random
+            <input type="radio" checked={mode === 'random'} onChange={() => setMode('random')} /> 随机搜索
           </label>
           {mode === 'random' && (
             <div className="flex items-center gap-1.5">
-              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Samples</label>
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>采样数</label>
               <input type="number" value={nSamples} min={1} max={1000}
                 onChange={e => setNSamples(Number(e.target.value))}
                 className="w-20 px-2 py-1 rounded text-sm" style={inputStyle} />
@@ -178,18 +178,18 @@ export default function CandidateSearch() {
           )}
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={skipPrefilter} onChange={e => setSkipPrefilter(e.target.checked)} />
-            Skip Pre-filter
+            跳过预筛选
           </label>
         </div>
 
         {/* Row 3: Parameter Ranges — Min/Max/Step */}
         {paramRanges.length > 0 && (
           <div className="space-y-2">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Parameter Ranges</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>参数范围</label>
             <div className="rounded p-3 space-y-2" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
               {/* Header */}
               <div className="grid grid-cols-[120px_1fr_1fr_1fr_1fr] gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                <span>Param</span><span>Min</span><span>Max</span><span>Step</span><span>Values</span>
+                <span>参数</span><span>最小值</span><span>最大值</span><span>步长</span><span>取值</span>
               </div>
               {paramRanges.map((pr, i) => {
                 const count = countValues(pr)
@@ -229,11 +229,11 @@ export default function CandidateSearch() {
           <button onClick={handleSearch} disabled={searching || combos > 1000 || hasRangeErrors || !strategyName}
             className="px-4 py-2 rounded text-sm font-medium"
             style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: (searching || combos > 1000 || hasRangeErrors || !strategyName) ? 0.5 : 1 }}>
-            {searching ? 'Searching...' : 'Search'}
+            {searching ? '搜索中...' : '搜索'}
           </button>
           <span className="text-xs" style={{ color: (combos > 1000 || hasRangeErrors) ? '#ef4444' : 'var(--text-secondary)' }}>
-            {combos} combination{combos !== 1 ? 's' : ''}
-            {combos > 1000 ? ' (max 1000)' : ''}
+            {combos} 个组合
+            {combos > 1000 ? '（最多 1000）' : ''}
           </span>
         </div>
       </div>
@@ -244,18 +244,18 @@ export default function CandidateSearch() {
           <div className="px-4 py-3" style={{ backgroundColor: 'var(--bg-secondary)' }}>
             <div className="flex justify-between items-center flex-wrap gap-2">
               <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Results — {result.passed_count} passed / {result.executed} executed
+                搜索结果 — {result.passed_count} 通过 / {result.executed} 已执行
               </h3>
               <div className="flex gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                <span>Total: {result.total_specs}</span>
-                {result.prefiltered > 0 && <span style={{ color: '#f59e0b' }}>Pre-filtered: {result.prefiltered}</span>}
-                {result.duplicates > 0 && <span>Duplicates: {result.duplicates}</span>}
+                <span>总计: {result.total_specs}</span>
+                {result.prefiltered > 0 && <span style={{ color: '#f59e0b' }}>预筛除: {result.prefiltered}</span>}
+                {result.duplicates > 0 && <span>重复: {result.duplicates}</span>}
               </div>
             </div>
           </div>
           {result.ranked.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-              No candidates executed. {result.prefiltered > 0 ? 'All pre-filtered — try enabling "Skip Pre-filter".' : ''}
+              无候选执行。{result.prefiltered > 0 ? '全部被预筛除 — 勾选"跳过预筛选"重试。' : ''}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -263,11 +263,11 @@ export default function CandidateSearch() {
                 <thead>
                   <tr style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
                     <th className="px-3 py-2 text-left w-10">#</th>
-                    <th className="px-3 py-2 text-left">Params</th>
+                    <th className="px-3 py-2 text-left">参数</th>
                     <th className="px-3 py-2 text-right">Sharpe</th>
-                    <th className="px-3 py-2 text-right">Return</th>
-                    <th className="px-3 py-2 text-right">MaxDD</th>
-                    <th className="px-3 py-2 text-right">Trades</th>
+                    <th className="px-3 py-2 text-right">收益</th>
+                    <th className="px-3 py-2 text-right">回撤</th>
+                    <th className="px-3 py-2 text-right">交易数</th>
                     <th className="px-3 py-2 text-center">Gate</th>
                   </tr>
                 </thead>
