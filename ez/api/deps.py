@@ -108,3 +108,6 @@ def close_resources() -> None:
     # Close shared ExperimentStore (V2.7.1: single source in data_access)
     from ez.agent.data_access import reset_data_access
     reset_data_access()
+    # Close LLM provider's persistent connections (V2.7.1)
+    from ez.llm.factory import reset_provider_cache
+    reset_provider_cache()

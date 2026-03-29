@@ -57,6 +57,10 @@ def create_provider(config: LLMConfig | None = None) -> LLMProvider:
         if _cached_provider is not None and _cached_fingerprint == fp:
             return _cached_provider
 
+        # Close old provider's connections before replacing
+        if _cached_provider is not None:
+            _cached_provider.close()
+
         provider = OpenAICompatProvider(
             provider=config.provider,
             api_key=api_key,
@@ -72,8 +76,10 @@ def create_provider(config: LLMConfig | None = None) -> LLMProvider:
 
 
 def reset_provider_cache() -> None:
-    """Clear cached provider (for settings changes or testing)."""
+    """Clear cached provider (for settings changes or testing). Closes connections."""
     global _cached_provider, _cached_fingerprint
     with _lock:
+        if _cached_provider is not None:
+            _cached_provider.close()
         _cached_provider = None
         _cached_fingerprint = ""

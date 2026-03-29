@@ -110,6 +110,10 @@ class LLMProvider(ABC):
         """Async variant of stream_chat()."""
         ...
 
+    def close(self) -> None:
+        """Synchronous close for non-async contexts (factory reset, shutdown)."""
+        pass
+
     async def aclose(self) -> None:
         """Close any persistent connections. Override if needed."""
         pass

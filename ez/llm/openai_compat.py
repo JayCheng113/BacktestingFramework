@@ -301,6 +301,16 @@ class OpenAICompatProvider(LLMProvider):
                 yield evt
             yield LLMEvent(type="done")
 
+    def close(self) -> None:
+        """Synchronous close — safe to call from non-async contexts (e.g. factory reset)."""
+        if self._async_client and not self._async_client.is_closed:
+            # httpx.AsyncClient supports synchronous .close() since 0.25+
+            try:
+                self._async_client.close()
+            except Exception:
+                pass
+            self._async_client = None
+
     async def aclose(self) -> None:
         """Close the persistent async client."""
         if self._async_client and not self._async_client.is_closed:
