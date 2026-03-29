@@ -16,67 +16,67 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="grid grid-cols-2 gap-4 text-xs" style={{ color: 'var(--text-primary)' }}>
-        {/* Left column */}
+        {/* 左栏 */}
         <div>
           <div style={sectionStyle}>
-            <div style={h2}>Strategy Interface (required)</div>
+            <div style={h2}>策略接口（必须实现）</div>
             <pre style={code}>{`from ez.strategy import Strategy
 from ez.factor import Factor
 from ez.factor.builtin.technical import RSI, MA, EMA, MACD, BOLL
 
 class MyStrategy(Strategy):
 
-    # 1. Parameter schema (for UI form)
+    # 1. 参数定义（用于前端表单自动渲染）
     @classmethod
     def get_parameters_schema(cls) -> dict:
         return {
             "period": {"type": "int", "default": 14,
-                       "min": 5, "max": 50, "label": "RSI Period"},
+                       "min": 5, "max": 50, "label": "RSI 周期"},
         }
 
-    # 2. Required factors (auto-computed by engine)
+    # 2. 依赖因子（引擎自动计算并注入 data）
     def required_factors(self) -> list[Factor]:
         return [RSI(period=self.period)]
 
-    # 3. Signal generation
-    #    Return pd.Series: 0.0=no position, 1.0=full position
+    # 3. 信号生成
+    #    返回 pd.Series: 0.0=空仓, 1.0=满仓
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         return (data["rsi_14"] < 30).astype(float)`}</pre>
           </div>
 
           <div style={sectionStyle}>
-            <div style={h2}>Signal Rules</div>
+            <div style={h2}>信号规则</div>
             <ul style={{ paddingLeft: '16px', listStyle: 'disc' }}>
-              <li style={li}><b>0.0</b> = no position (sell / stay out)</li>
-              <li style={li}><b>1.0</b> = full position (buy / hold)</li>
-              <li style={li}><b>0.0-1.0</b> = fractional position</li>
-              <li style={li}>First <code>warmup_period</code> rows can be NaN</li>
-              <li style={li}>Engine handles entry/exit automatically based on signal changes</li>
+              <li style={li}><b>0.0</b> = 空仓（卖出 / 不持仓）</li>
+              <li style={li}><b>1.0</b> = 满仓（买入 / 持有）</li>
+              <li style={li}><b>0.0~1.0</b> = 部分仓位（如 0.5 = 半仓）</li>
+              <li style={li}>前 <code>warmup_period</code> 行可以为 NaN（因子预热期）</li>
+              <li style={li}>引擎根据信号变化自动处理买卖，无需手动管理仓位</li>
             </ul>
           </div>
         </div>
 
-        {/* Right column */}
+        {/* 右栏 */}
         <div>
           <div style={sectionStyle}>
-            <div style={h2}>Available Factors</div>
+            <div style={h2}>可用因子</div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ textAlign: 'left', padding: '2px 6px' }}>Factor</th>
-                <th style={{ textAlign: 'left', padding: '2px 6px' }}>Column Name</th>
-                <th style={{ textAlign: 'left', padding: '2px 6px' }}>Usage</th>
+                <th style={{ textAlign: 'left', padding: '2px 6px' }}>因子</th>
+                <th style={{ textAlign: 'left', padding: '2px 6px' }}>列名</th>
+                <th style={{ textAlign: 'left', padding: '2px 6px' }}>说明</th>
               </tr></thead>
               <tbody style={{ color: 'var(--text-secondary)' }}>
                 {[
-                  ['MA(period=20)', 'ma_20', 'Moving Average'],
-                  ['EMA(period=12)', 'ema_12', 'Exponential MA'],
-                  ['RSI(period=14)', 'rsi_14', 'Relative Strength Index'],
-                  ['MACD()', 'macd / macd_signal', 'MACD + Signal line'],
-                  ['BOLL(period=20)', 'boll_upper / boll_lower', 'Bollinger Bands'],
-                  ['Momentum(period=20)', 'momentum_20', 'N-day return'],
-                  ['VWAP(period=20)', 'vwap_20', 'Volume-Weighted Avg Price'],
-                  ['OBV()', 'obv', 'On-Balance Volume'],
-                  ['ATR(period=14)', 'atr_14', 'Average True Range'],
+                  ['MA(period=20)', 'ma_20', '移动平均线'],
+                  ['EMA(period=12)', 'ema_12', '指数移动平均'],
+                  ['RSI(period=14)', 'rsi_14', '相对强弱指标'],
+                  ['MACD()', 'macd / macd_signal', 'MACD 指标 + 信号线'],
+                  ['BOLL(period=20)', 'boll_upper / boll_lower', '布林带上下轨'],
+                  ['Momentum(period=20)', 'momentum_20', 'N日收益率（动量）'],
+                  ['VWAP(period=20)', 'vwap_20', '成交量加权均价'],
+                  ['OBV()', 'obv', '能量潮（累计量能）'],
+                  ['ATR(period=14)', 'atr_14', '平均真实波幅'],
                 ].map(([factor, col, desc]) => (
                   <tr key={factor}><td style={{ padding: '2px 6px', fontFamily: 'monospace' }}>{factor}</td>
                   <td style={{ padding: '2px 6px', fontFamily: 'monospace' }}>{col}</td>
@@ -87,18 +87,18 @@ class MyStrategy(Strategy):
           </div>
 
           <div style={sectionStyle}>
-            <div style={h2}>AI Chat Examples</div>
+            <div style={h2}>AI 助手用法示例</div>
             <ul style={{ paddingLeft: '16px', listStyle: 'disc', color: 'var(--text-secondary)' }}>
-              <li style={li}>"Write an RSI reversal strategy, buy below 30, sell above 70"</li>
-              <li style={li}>"Modify the current code to add a stop-loss at -5%"</li>
-              <li style={li}>"Backtest MACrossStrategy on 000001.SZ from 2020 to 2024"</li>
-              <li style={li}>"Explain what MACD factor does"</li>
-              <li style={li}>"List all available strategies and their parameters"</li>
+              <li style={li}>"帮我写一个 RSI 超卖反转策略，低于30买入，高于70卖出"</li>
+              <li style={li}>"修改当前代码，加一个 -5% 止损逻辑"</li>
+              <li style={li}>"用 MACrossStrategy 回测 000001.SZ 2020到2024年"</li>
+              <li style={li}>"解释一下 MACD 因子是什么"</li>
+              <li style={li}>"列出所有可用策略和它们的参数"</li>
             </ul>
           </div>
 
           <div style={sectionStyle}>
-            <div style={h2}>Complete Example: RSI Reversal</div>
+            <div style={h2}>完整示例：RSI 超卖反转</div>
             <pre style={code}>{`class RSIReversal(Strategy):
     def __init__(self, period=14, oversold=30, overbought=70):
         self.period = period
@@ -108,9 +108,9 @@ class MyStrategy(Strategy):
     @classmethod
     def get_parameters_schema(cls):
         return {
-            "period":     {"type":"int",   "default":14,  "min":5, "max":50,  "label":"RSI Period"},
-            "oversold":   {"type":"float", "default":30,  "min":10,"max":40,  "label":"Oversold"},
-            "overbought": {"type":"float", "default":70,  "min":60,"max":90,  "label":"Overbought"},
+            "period":     {"type":"int",   "default":14,  "min":5, "max":50,  "label":"RSI 周期"},
+            "oversold":   {"type":"float", "default":30,  "min":10,"max":40,  "label":"超卖阈值"},
+            "overbought": {"type":"float", "default":70,  "min":60,"max":90,  "label":"超买阈值"},
         }
 
     def required_factors(self):
@@ -119,8 +119,8 @@ class MyStrategy(Strategy):
     def generate_signals(self, data):
         rsi = data[f"rsi_{self.period}"]
         signal = pd.Series(0.0, index=data.index)
-        signal[rsi < self.oversold] = 1.0
-        # Forward-fill to hold position between signals
+        signal[rsi < self.oversold] = 1.0  # 超卖买入
+        # 前向填充：在非超买超卖区间保持当前仓位
         signal = signal.replace(0.0, pd.NA).ffill().fillna(0.0)
         return signal`}</pre>
           </div>
