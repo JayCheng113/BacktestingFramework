@@ -302,14 +302,22 @@ class OpenAICompatProvider(LLMProvider):
             yield LLMEvent(type="done")
 
     def close(self) -> None:
-        """Synchronous close — safe to call from non-async contexts (e.g. factory reset)."""
+        """Sync close for httpx.AsyncClient (which only has async aclose()).
+
+        Strategy: asyncio.run() works from threadpool threads (FastAPI sync endpoints).
+        If already inside an event loop, schedule via create_task.
+        """
         if self._async_client and not self._async_client.is_closed:
-            # httpx.AsyncClient supports synchronous .close() since 0.25+
-            try:
-                self._async_client.close()
-            except Exception:
-                pass
+            import asyncio
+            client = self._async_client
             self._async_client = None
+            try:
+                loop = asyncio.get_running_loop()
+                # Inside event loop thread — schedule as background task
+                loop.create_task(client.aclose())
+            except RuntimeError:
+                # No running loop (threadpool thread or plain sync) — safe to run
+                asyncio.run(client.aclose())
 
     async def aclose(self) -> None:
         """Close the persistent async client."""

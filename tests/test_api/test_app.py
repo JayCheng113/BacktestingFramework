@@ -53,3 +53,26 @@ def test_factors_list_endpoint():
     names = [f["name"] for f in data]
     assert "ma" in names
     assert "rsi" in names
+
+
+class TestStaticPathTraversal:
+    """P0-2: Frontend static route must not serve files outside web/dist."""
+
+    def test_path_traversal_encoded(self):
+        """URL-encoded ../.. must not escape frontend directory."""
+        resp = client.get("/%2E%2E/%2E%2E/pyproject.toml")
+        # Should return index.html (SPA fallback), not the actual file
+        assert resp.status_code == 200
+        content = resp.text
+        assert "[project]" not in content  # pyproject.toml content should NOT appear
+
+    def test_path_traversal_plain(self):
+        resp = client.get("/../../pyproject.toml")
+        assert resp.status_code == 200
+        content = resp.text
+        assert "[project]" not in content
+
+    def test_api_path_still_404(self):
+        resp = client.get("/api/nonexistent")
+        assert resp.status_code == 404
+        assert "API endpoint not found" in resp.json()["detail"]

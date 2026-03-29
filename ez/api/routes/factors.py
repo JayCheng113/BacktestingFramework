@@ -94,7 +94,13 @@ def evaluate_factor(req: FactorEvalRequest):
             "rank_ic_series": analysis.rank_ic_series.tolist(),
         }
 
-    # Backward compat: for single-column factors, flatten to top level
-    if len(eval_cols) == 1 and eval_cols[0] in results and "error" not in results[eval_cols[0]]:
-        return {**results[eval_cols[0]], "columns": eval_cols}
-    return results
+    # Always flatten the first column to top level for backward compatibility.
+    # Multi-column results go in per_column for advanced use.
+    primary_col = eval_cols[0]
+    primary = results.get(primary_col, {})
+    if "error" in primary:
+        raise HTTPException(status_code=400, detail=primary["error"])
+    response = {**primary, "columns": eval_cols}
+    if len(eval_cols) > 1:
+        response["per_column"] = {col: results[col] for col in eval_cols}
+    return response

@@ -75,6 +75,11 @@ def create_provider(config: LLMConfig | None = None) -> LLMProvider:
         return provider
 
 
+def get_cached_provider() -> LLMProvider | None:
+    """Return the cached provider (for async shutdown cleanup)."""
+    return _cached_provider
+
+
 def reset_provider_cache() -> None:
     """Clear cached provider (for settings changes or testing). Closes connections."""
     global _cached_provider, _cached_fingerprint

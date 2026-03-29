@@ -6,9 +6,11 @@ Flow: user message → build context → LLM → tool_calls? → execute → rec
 Max 10 tool-call rounds to prevent infinite loops.
 
 V2.7.1: Added achat_stream() async generator — does not block the event loop.
+Tool execution runs in threadpool via asyncio.to_thread().
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import AsyncIterator, Iterator
 
@@ -210,7 +212,8 @@ async def achat_stream(
 
         for tc in tool_calls:
             yield {"event": "tool_start", "data": {"name": tc.name, "args": tc.arguments}}
-            result = execute_tool(tc.name, tc.arguments)
+            # Run tool in threadpool — tools can be heavy (backtest, subprocess, IO)
+            result = await asyncio.to_thread(execute_tool, tc.name, tc.arguments)
             yield {"event": "tool_result", "data": {"name": tc.name, "result": result}}
             full_messages.append(
                 LLMMessage(role="tool", content=result, tool_call_id=tc.id, name=tc.name)

@@ -69,26 +69,47 @@ def get_chain() -> DataProviderChain:
     return _chain
 
 
-def get_experiment_store() -> ExperimentStore:
-    """Get or create ExperimentStore."""
-    global _exp_store
-    if _exp_store is None:
-        import duckdb
+def _resolve_db_path() -> Path:
+    """Resolve DB path — matches DuckDBStore logic exactly (including EZ_DATA_DIR)."""
+    data_dir = os.environ.get("EZ_DATA_DIR")
+    if data_dir:
+        p = Path(data_dir) / "ez_trading.db"
+    else:
         config = load_config()
         p = Path(config.database.path)
         if not p.is_absolute():
             project_root = Path(__file__).resolve().parent.parent.parent
             p = project_root / p
-        p.parent.mkdir(parents=True, exist_ok=True)
-        conn = duckdb.connect(str(p))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_experiment_store() -> ExperimentStore:
+    """Get or create ExperimentStore (same DB as DuckDBStore)."""
+    global _exp_store
+    if _exp_store is None:
+        import duckdb
+        conn = duckdb.connect(str(_resolve_db_path()))
         _exp_store = ExperimentStore(conn)
     return _exp_store
 
 
-def reset_data_access() -> None:
-    """Reset cached singletons (for testing)."""
-    global _store, _chain, _exp_store
+def reset_chain() -> None:
+    """Reset agent-layer chain cache (e.g., after Tushare token change)."""
+    global _chain
+    if _chain is not None:
+        for p in _chain._providers:
+            try:
+                p.close()
+            except Exception:
+                pass
     _chain = None
+
+
+def reset_data_access() -> None:
+    """Reset cached singletons (for testing / shutdown)."""
+    global _store, _chain, _exp_store
+    reset_chain()
     if _exp_store is not None:
         _exp_store.close()
         _exp_store = None

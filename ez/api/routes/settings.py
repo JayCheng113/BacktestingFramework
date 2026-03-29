@@ -194,9 +194,11 @@ def update_tushare_settings(data: TushareSettings):
         if token:
             _write_env({"TUSHARE_TOKEN": token})
             os.environ["TUSHARE_TOKEN"] = token
-            # P1-5: Rebuild the data provider chain so new token takes effect
+            # Rebuild BOTH chain caches so API and agent see the same providers
             from ez.api.deps import _rebuild_chain
             _rebuild_chain()
+            from ez.agent.data_access import reset_chain
+            reset_chain()
         return {"status": "ok", "token_set": bool(token)}
     except ValueError as e:
         from fastapi import HTTPException

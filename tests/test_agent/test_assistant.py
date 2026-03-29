@@ -1,7 +1,8 @@
 """Tests for the AI assistant agent loop (sync + async)."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+import threading
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -232,3 +233,37 @@ class TestAChatStream:
             events.append(evt)
 
         assert call_count == MAX_TOOL_ROUNDS
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_runs_in_threadpool(self):
+        """P1-7: Tool execution must not run on the event loop thread."""
+        mock_provider = MagicMock(spec=LLMProvider)
+        call_count = 0
+        tool_thread_name = None
+
+        async def mock_astream(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield LLMEvent(type="tool_call", tool_call=ToolCall(id="c1", name="list_strategies", arguments={}))
+                yield LLMEvent(type="done")
+            else:
+                yield LLMEvent(type="content", content="Done!")
+                yield LLMEvent(type="done")
+
+        mock_provider.astream_chat = mock_astream
+
+        def capture_thread_tool(name, args):
+            nonlocal tool_thread_name
+            tool_thread_name = threading.current_thread().name
+            return "[]"
+
+        messages = [LLMMessage(role="user", content="list")]
+        with patch("ez.agent.assistant.execute_tool", side_effect=capture_thread_tool):
+            events = []
+            async for evt in achat_stream(mock_provider, messages):
+                events.append(evt)
+
+        # Tool must run on a different thread (threadpool), not MainThread
+        assert tool_thread_name is not None
+        assert tool_thread_name != threading.main_thread().name

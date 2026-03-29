@@ -54,7 +54,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (923 collected, 913 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (931 collected, 921 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -77,7 +77,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.6.1**: Stability — CORE_FILES 注册, DateBtn 共享组件, lot-size 佣金重算, DB 迁移缩窄, countValues 精度对齐, 801 tests
 - **V2.7**: LLM + Web Coding Assistant — Monaco Editor, AI Chat (DeepSeek/Qwen/Local), Tool框架 (9 tools), 代码沙箱 (AST禁危险import/builtins/dunders), FDR 多重检验 (Bonferroni/BH), 全站中文化, 开发文档 (11章1497行), 设置面板 (LLM/Tushare), 多会话 Chat (localStorage持久化), 897 tests
 - **V2.7 post-release fixes**: 整手买入超预算修复, read_source 前缀校验, FDR None 容错, WF 参数校验, 热重载 pyc 清理, SPA API 404, bool 字符串解析, 凭证清空接口, 因子列名修正 (macd_line/boll_upper_20), 设置 YAML 持久化
-- **V2.7.1**: Stability — Chat async 化 (httpx.AsyncClient + async generator), Provider 单例连接池, LLMProvider public properties, ExperimentStore 单例合并 (消除双连接), 多列因子评估 (MACD/BOLL 全列), 913 tests
+- **V2.7.1**: Stability — Chat async 化 (httpx.AsyncClient + async generator + to_thread 工具执行), Provider 单例连接池 (正确 async close), LLMProvider public properties, ExperimentStore 单例合并 (EZ_DATA_DIR 对齐), 多列因子评估, 静态路由路径穿越修复, chain 双缓存同步, 921 tests
 - **Next: V2.8** — Autonomous Research Agent
 
 ## Known Limitations (V2.8 跟进)

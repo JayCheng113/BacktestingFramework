@@ -241,3 +241,12 @@ class TestOpenAICompatProvider:
         assert p._async_client is not None
         await p.aclose()
         assert p._async_client is None
+
+    def test_sync_close_actually_closes(self):
+        """close() must actually close the async client, not silently fail."""
+        p = OpenAICompatProvider(provider="local")
+        client = p._get_async_client()
+        assert not client.is_closed
+        p.close()
+        assert p._async_client is None
+        assert client.is_closed

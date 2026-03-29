@@ -86,22 +86,29 @@ def get_chain() -> DataProviderChain:
     return _chain
 
 
+def _close_chain_providers() -> None:
+    """Close all providers in the current chain (tushare, fmp, tencent httpx clients)."""
+    global _chain, _tushare_provider
+    if _chain is not None:
+        for p in _chain._providers:
+            try:
+                p.close()
+            except Exception:
+                pass
+        _chain = None
+    # Tushare singleton is also a chain provider, but clear our reference too
+    _tushare_provider = None
+
+
 def _rebuild_chain() -> None:
     """Force rebuild of the data provider chain (e.g., after Tushare token change)."""
-    global _chain, _tushare_provider
-    _chain = None
-    if _tushare_provider is not None:
-        _tushare_provider.close()
-        _tushare_provider = None
+    _close_chain_providers()
     get_chain()  # rebuild
 
 
 def close_resources() -> None:
     global _store, _chain, _tushare_provider
-    _chain = None
-    if _tushare_provider is not None:
-        _tushare_provider.close()
-        _tushare_provider = None
+    _close_chain_providers()
     if _store is not None:
         _store.close()
         _store = None

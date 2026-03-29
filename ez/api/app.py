@@ -31,6 +31,11 @@ async def lifespan(app: FastAPI):
                 logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
         threading.Thread(target=_warm, daemon=True).start()
     yield
+    # Async cleanup of LLM provider (must happen before sync close_resources)
+    from ez.llm.factory import get_cached_provider
+    provider = get_cached_provider()
+    if provider is not None:
+        await provider.aclose()
     close_resources()
 
 
@@ -103,7 +108,9 @@ if _FRONTEND_DIR.exists():
         """Serve React SPA — non-API routes return index.html. API routes get 404."""
         if path.startswith("api/"):
             return JSONResponse(status_code=404, content={"detail": f"API endpoint not found: /{path}"})
-        file = _FRONTEND_DIR / path
-        if file.exists() and file.is_file():
+        # Path traversal protection: resolve and verify containment
+        file = (_FRONTEND_DIR / path).resolve()
+        frontend_root = _FRONTEND_DIR.resolve()
+        if file.is_relative_to(frontend_root) and file.exists() and file.is_file():
             return FileResponse(str(file))
         return FileResponse(str(_FRONTEND_DIR / "index.html"))
