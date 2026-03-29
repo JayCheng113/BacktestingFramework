@@ -112,6 +112,101 @@ class TestLotSize:
         assert fill.shares % 100 != 0 or fill.shares == 0  # not necessarily multiple
 
 
+class TestRetryAfterReject:
+    """C1 regression: engine must retry on next bar when fill is rejected."""
+
+    def test_buy_rejected_retries_next_bar(self):
+        """If buy is rejected (e.g., price limit), engine should retry next bar."""
+        from ez.backtest.engine import VectorizedBacktestEngine
+
+        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+        matcher = MarketRulesMatcher(inner, t_plus_1=True, lot_size=0, price_limit_pct=0.1)
+        engine = VectorizedBacktestEngine(matcher=matcher)
+
+        # Construct data: bar 1 is at upper limit (涨停), bar 2 is normal
+        data = pd.DataFrame({
+            "open":      [10.0, 11.0, 10.5, 10.5, 10.5],
+            "high":      [10.0, 11.0, 10.5, 10.5, 10.5],
+            "low":       [10.0, 11.0, 10.5, 10.5, 10.5],
+            "close":     [10.0, 11.0, 10.5, 10.5, 10.5],
+            "adj_close": [10.0, 11.0, 10.5, 10.5, 10.5],
+            "volume":    [1e6,  1e6,  1e6,  1e6,  1e6],
+        }, index=pd.date_range("2020-01-01", periods=5, freq="B"))
+
+        # Strategy: always want full position (weight=1.0)
+        from ez.factor.base import Factor
+        from ez.strategy.base import Strategy
+
+        class AlwaysIn(Strategy):
+            def required_factors(self): return []
+            def generate_signals(self, data):
+                return pd.Series(1.0, index=data.index)
+
+        # Remove from registry after use
+        key = f"{AlwaysIn.__module__}.{AlwaysIn.__name__}"
+
+        result = engine.run(data, AlwaysIn(), initial_capital=100_000)
+
+        # Bar 1: signal=1 (shifted from bar 0), open=11.0, prev_close=10.0
+        # 11.0 >= 10.0 * 1.1 = 11.0 → upper limit, BLOCKED
+        # Bar 2: signal=1, open=10.5, prev_close=11.0
+        # 10.5 < 11.0 * 1.1 → NOT at limit, should fill
+        # If C1 bug exists: prev_weight was set to 1.0 on bar 1, so bar 2 skips
+        # After fix: prev_weight stays 0, bar 2 retries and succeeds
+        assert result.metrics["trade_count"] >= 0
+        # Equity should NOT be flat (strategy should have entered eventually)
+        equity = result.equity_curve.values
+        assert not np.allclose(equity, equity[0]), \
+            "Equity is flat — engine never entered position (C1 retry bug)"
+
+        # Cleanup registry
+        if key in Strategy._registry:
+            del Strategy._registry[key]
+
+    def test_sell_rejected_retries_next_bar(self):
+        """If sell is rejected (T+1), engine should retry next bar."""
+        from ez.backtest.engine import VectorizedBacktestEngine
+
+        inner = SimpleMatcher(commission_rate=0.0, min_commission=0.0)
+        matcher = MarketRulesMatcher(inner, t_plus_1=True, lot_size=0, price_limit_pct=0.0)
+        engine = VectorizedBacktestEngine(matcher=matcher)
+
+        # Data: 6 bars, price stable
+        n = 6
+        data = pd.DataFrame({
+            "open":      [10.0] * n,
+            "high":      [10.0] * n,
+            "low":       [10.0] * n,
+            "close":     [10.0] * n,
+            "adj_close": [10.0] * n,
+            "volume":    [1e6] * n,
+        }, index=pd.date_range("2020-01-01", periods=n, freq="B"))
+
+        # Strategy: buy on bar 1, sell on bar 2 (same day as buy → T+1 blocks)
+        from ez.strategy.base import Strategy
+
+        class BuySellQuick(Strategy):
+            def required_factors(self): return []
+            def generate_signals(self, data):
+                signals = pd.Series(0.0, index=data.index)
+                signals.iloc[0] = 1.0  # buy signal (will execute on bar 1 after shift)
+                signals.iloc[1] = 0.0  # sell signal (will execute on bar 2 → T+1 blocks)
+                # Bar 3+: still 0 → should retry sell
+                return signals
+
+        key = f"{BuySellQuick.__module__}.{BuySellQuick.__name__}"
+        result = engine.run(data, BuySellQuick(), initial_capital=100_000)
+
+        # The sell should eventually succeed (bar 3 or later)
+        # If C1 bug: prev_weight set to 0 on bar 2 (T+1 block), never retries
+        # After fix: prev_weight stays 1.0, retries on bar 3
+        assert result.metrics["trade_count"] >= 1, \
+            "No trades recorded — sell was never retried after T+1 rejection"
+
+        if key in Strategy._registry:
+            del Strategy._registry[key]
+
+
 class TestBackwardCompat:
     def test_simple_matcher_no_on_bar(self):
         """SimpleMatcher has no on_bar — engine's hasattr check skips it."""

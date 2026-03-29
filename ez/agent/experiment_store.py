@@ -43,6 +43,10 @@ class ExperimentStore:
                 run_wfo BOOLEAN DEFAULT TRUE,
                 wfo_n_splits INTEGER DEFAULT 5,
                 wfo_train_ratio DOUBLE DEFAULT 0.7,
+                use_market_rules BOOLEAN DEFAULT FALSE,
+                t_plus_1 BOOLEAN DEFAULT TRUE,
+                price_limit_pct DOUBLE DEFAULT 0.1,
+                lot_size INTEGER DEFAULT 100,
                 tags VARCHAR DEFAULT '[]',
                 description VARCHAR DEFAULT '',
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -81,6 +85,21 @@ class ExperimentStore:
                 completed_at TIMESTAMPTZ NOT NULL
             )
         """)
+        # V2.6 migration: add market_rules columns if missing
+        try:
+            self._conn.execute("SELECT use_market_rules FROM experiment_specs LIMIT 0")
+        except Exception:
+            for col, defn in [
+                ("use_market_rules", "BOOLEAN DEFAULT FALSE"),
+                ("t_plus_1", "BOOLEAN DEFAULT TRUE"),
+                ("price_limit_pct", "DOUBLE DEFAULT 0.1"),
+                ("lot_size", "INTEGER DEFAULT 100"),
+            ]:
+                try:
+                    self._conn.execute(f"ALTER TABLE experiment_specs ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass  # column already exists
+
         # Backfill: only on first init (completed_specs empty) to avoid
         # unnecessary full-table scan on every startup.
         count = self._conn.execute("SELECT COUNT(*) FROM completed_specs").fetchone()[0]
@@ -101,8 +120,9 @@ class ExperimentStore:
                 period, start_date, end_date, initial_capital,
                 commission_rate, min_commission, slippage_rate,
                 run_backtest, run_wfo, wfo_n_splits, wfo_train_ratio,
+                use_market_rules, t_plus_1, price_limit_pct, lot_size,
                 tags, description
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (spec_id) DO NOTHING
         """, [
             spec_dict["spec_id"],
@@ -121,6 +141,10 @@ class ExperimentStore:
             spec_dict["run_wfo"],
             spec_dict["wfo_n_splits"],
             spec_dict["wfo_train_ratio"],
+            spec_dict.get("use_market_rules", False),
+            spec_dict.get("t_plus_1", True),
+            spec_dict.get("price_limit_pct", 0.1),
+            spec_dict.get("lot_size", 100),
             json.dumps(spec_dict.get("tags", [])),
             spec_dict.get("description", ""),
         ])

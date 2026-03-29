@@ -57,6 +57,10 @@ class RunSpec:
             raise ValueError("initial_capital must be positive")
         if self.commission_rate < 0 or self.min_commission < 0 or self.slippage_rate < 0:
             raise ValueError("cost parameters must be >= 0")
+        if self.price_limit_pct < 0 or self.price_limit_pct > 1:
+            raise ValueError("price_limit_pct must be in [0, 1]")
+        if self.lot_size < 0:
+            raise ValueError("lot_size must be >= 0")
         if not self.run_backtest and not self.run_wfo:
             raise ValueError("at least one of run_backtest/run_wfo must be True")
 

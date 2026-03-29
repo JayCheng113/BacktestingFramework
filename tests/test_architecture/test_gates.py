@@ -157,7 +157,7 @@ class TestLayerDependencies:
 
 EZ_MODULES = [
     "ez.types", "ez.errors", "ez.config",
-    "ez.core", "ez.core.matcher", "ez.core.ts_ops",
+    "ez.core", "ez.core.matcher", "ez.core.ts_ops", "ez.core.market_rules",
     "ez.data", "ez.data.store", "ez.data.validator", "ez.data.provider",
     "ez.factor", "ez.factor.base", "ez.factor.evaluator",
     "ez.strategy", "ez.strategy.base", "ez.strategy.loader",

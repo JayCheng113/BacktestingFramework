@@ -118,6 +118,7 @@ class VectorizedBacktestEngine:
     ) -> tuple[pd.Series, list[TradeRecord], pd.Series]:
         prices = df["adj_close"].values
         open_prices = df["open"].values if "open" in df.columns else prices
+        raw_close = df["close"].values if "close" in df.columns else prices
         weights = signals.values
         n = len(prices)
 
@@ -157,13 +158,17 @@ class VectorizedBacktestEngine:
             exec_price = open_prices[i]
 
             # V2.6: notify matcher of bar context (MarketRules uses this)
+            # Use raw close (not adj_close) for price limit checks —
+            # 涨跌停 is based on unadjusted previous close.
             if hasattr(matcher, 'on_bar'):
-                matcher.on_bar(bar_index=i, prev_close=prices[i - 1])
+                matcher.on_bar(bar_index=i, prev_close=raw_close[i - 1])
 
             if abs(target_weight - prev_weight) > 1e-6:
                 current_equity = cash + shares * exec_price
                 target_value = current_equity * target_weight
                 current_value = shares * exec_price
+
+                filled = False
 
                 if target_value < current_value and shares > 0:
                     # Reduce or close position
@@ -173,36 +178,38 @@ class VectorizedBacktestEngine:
                         sell_shares = (current_value - target_value) / exec_price
 
                     fill = matcher.fill_sell(exec_price, sell_shares)
-                    cash += fill.net_amount
-                    old_shares = shares
-                    shares -= fill.shares
-                    if shares < 1e-10:
-                        shares = 0.0
-                    # Record trade when fully closing; include partial sell PnL
-                    if old_shares > 0 and shares < 1e-10 and entry_time is not None:
-                        final_pnl = (fill.fill_price - entry_price) * old_shares - fill.commission
-                        total_pnl = partial_pnl + final_pnl - entry_comm
-                        total_comm = entry_comm + partial_comm + fill.commission
-                        cost_basis = (entry_price * peak_shares + entry_comm) if peak_shares > 0 else (entry_price * old_shares + entry_comm)
-                        trades.append(TradeRecord(
-                            entry_time=entry_time,
-                            exit_time=time_list[i],
-                            entry_price=entry_price,
-                            exit_price=fill.fill_price,
-                            weight=prev_weight,
-                            pnl=total_pnl,
-                            pnl_pct=total_pnl / cost_basis if cost_basis > 0 else 0,
-                            commission=total_comm,
-                        ))
-                        entry_time = None
-                        entry_comm = 0.0
-                        partial_pnl = 0.0
-                        partial_comm = 0.0
-                        peak_shares = 0.0
-                    elif fill.shares > 0 and entry_time is not None:
-                        # Partial sell — accumulate realized PnL for later
-                        partial_pnl += (fill.fill_price - entry_price) * fill.shares - fill.commission
-                        partial_comm += fill.commission
+                    if fill.shares > 0:
+                        filled = True
+                        cash += fill.net_amount
+                        old_shares = shares
+                        shares -= fill.shares
+                        if shares < 1e-10:
+                            shares = 0.0
+                        # Record trade when fully closing; include partial sell PnL
+                        if old_shares > 0 and shares < 1e-10 and entry_time is not None:
+                            final_pnl = (fill.fill_price - entry_price) * old_shares - fill.commission
+                            total_pnl = partial_pnl + final_pnl - entry_comm
+                            total_comm = entry_comm + partial_comm + fill.commission
+                            cost_basis = (entry_price * peak_shares + entry_comm) if peak_shares > 0 else (entry_price * old_shares + entry_comm)
+                            trades.append(TradeRecord(
+                                entry_time=entry_time,
+                                exit_time=time_list[i],
+                                entry_price=entry_price,
+                                exit_price=fill.fill_price,
+                                weight=prev_weight,
+                                pnl=total_pnl,
+                                pnl_pct=total_pnl / cost_basis if cost_basis > 0 else 0,
+                                commission=total_comm,
+                            ))
+                            entry_time = None
+                            entry_comm = 0.0
+                            partial_pnl = 0.0
+                            partial_comm = 0.0
+                            peak_shares = 0.0
+                        elif entry_time is not None:
+                            # Partial sell — accumulate realized PnL for later
+                            partial_pnl += (fill.fill_price - entry_price) * fill.shares - fill.commission
+                            partial_comm += fill.commission
 
                 elif target_value > current_value:
                     # Increase or open position
@@ -210,6 +217,7 @@ class VectorizedBacktestEngine:
                     if additional > 0:
                         fill = matcher.fill_buy(exec_price, additional)
                         if fill.shares > 0:
+                            filled = True
                             if shares == 0:
                                 entry_time = time_list[i]
                                 entry_price = fill.fill_price
@@ -222,10 +230,12 @@ class VectorizedBacktestEngine:
                             shares += fill.shares
                             peak_shares = max(peak_shares, shares)
                             cash += fill.net_amount
-                        # If fill.shares == 0: commission exceeded amount, skip trade
-                        # but fall through to update prev_weight and record equity
 
-                prev_weight = target_weight
+                # Only update prev_weight if fill succeeded.
+                # If fill was rejected (e.g., T+1, price limit), keep prev_weight
+                # so engine retries on the next bar.
+                if filled:
+                    prev_weight = target_weight
 
             position_value = shares * prices[i]
             equity_arr[i] = cash + position_value
