@@ -7,12 +7,14 @@ Provide the low-level building blocks (matching, time-series ops) that both fact
 - `Matcher(ABC)` — [CORE] order matching interface: `fill_buy()`, `fill_sell()` -> `FillResult`
 - `SimpleMatcher` — [CORE] instant fill with proportional commission (V1 default)
 - `SlippageMatcher` — [CORE] fill with configurable slippage + commission (V2.2)
+- `MarketRulesMatcher` — [CORE] A-share rules decorator: T+1, price limits, lot size (V2.6)
 - `ts_ops` — [CORE] time series functions: `rolling_mean`, `rolling_std`, `ewm_mean`, `diff`, `pct_change`
 
 ## Files
 | File | Role | Core/Extension |
 |------|------|---------------|
-| matcher.py | Matcher ABC + SimpleMatcher | CORE |
+| matcher.py | Matcher ABC + SimpleMatcher + SlippageMatcher | CORE |
+| market_rules.py | MarketRulesMatcher (V2.6) | CORE |
 | ts_ops.py | Time series primitives (pandas wrappers) | CORE |
 
 ## Dependencies
