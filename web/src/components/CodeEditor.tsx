@@ -2,6 +2,134 @@ import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import ChatPanel from './ChatPanel'
 
+function HelpPanel({ onClose }: { onClose: () => void }) {
+  const sectionStyle = { marginBottom: '16px' }
+  const h2 = { color: 'var(--color-accent)', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }
+  const code = { backgroundColor: '#1e293b', padding: '8px 10px', borderRadius: '4px', fontSize: '11px', overflowX: 'auto' as const, whiteSpace: 'pre' as const, display: 'block', lineHeight: '1.5' }
+  const li = { marginBottom: '4px' }
+
+  return (
+    <div className="border-b overflow-y-auto" style={{ borderColor: 'var(--border)', backgroundColor: '#0f172a', maxHeight: '50vh', padding: '12px 16px' }}>
+      <div className="flex justify-between items-center mb-3">
+        <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '14px' }}>Strategy Development Guide</span>
+        <button onClick={onClose} className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Close</button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 text-xs" style={{ color: 'var(--text-primary)' }}>
+        {/* Left column */}
+        <div>
+          <div style={sectionStyle}>
+            <div style={h2}>Strategy Interface (required)</div>
+            <pre style={code}>{`from ez.strategy import Strategy
+from ez.factor import Factor
+from ez.factor.builtin.technical import RSI, MA, EMA, MACD, BOLL
+
+class MyStrategy(Strategy):
+
+    # 1. Parameter schema (for UI form)
+    @classmethod
+    def get_parameters_schema(cls) -> dict:
+        return {
+            "period": {"type": "int", "default": 14,
+                       "min": 5, "max": 50, "label": "RSI Period"},
+        }
+
+    # 2. Required factors (auto-computed by engine)
+    def required_factors(self) -> list[Factor]:
+        return [RSI(period=self.period)]
+
+    # 3. Signal generation
+    #    Return pd.Series: 0.0=no position, 1.0=full position
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        return (data["rsi_14"] < 30).astype(float)`}</pre>
+          </div>
+
+          <div style={sectionStyle}>
+            <div style={h2}>Signal Rules</div>
+            <ul style={{ paddingLeft: '16px', listStyle: 'disc' }}>
+              <li style={li}><b>0.0</b> = no position (sell / stay out)</li>
+              <li style={li}><b>1.0</b> = full position (buy / hold)</li>
+              <li style={li}><b>0.0-1.0</b> = fractional position</li>
+              <li style={li}>First <code>warmup_period</code> rows can be NaN</li>
+              <li style={li}>Engine handles entry/exit automatically based on signal changes</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div>
+          <div style={sectionStyle}>
+            <div style={h2}>Available Factors</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ textAlign: 'left', padding: '2px 6px' }}>Factor</th>
+                <th style={{ textAlign: 'left', padding: '2px 6px' }}>Column Name</th>
+                <th style={{ textAlign: 'left', padding: '2px 6px' }}>Usage</th>
+              </tr></thead>
+              <tbody style={{ color: 'var(--text-secondary)' }}>
+                {[
+                  ['MA(period=20)', 'ma_20', 'Moving Average'],
+                  ['EMA(period=12)', 'ema_12', 'Exponential MA'],
+                  ['RSI(period=14)', 'rsi_14', 'Relative Strength Index'],
+                  ['MACD()', 'macd / macd_signal', 'MACD + Signal line'],
+                  ['BOLL(period=20)', 'boll_upper / boll_lower', 'Bollinger Bands'],
+                  ['Momentum(period=20)', 'momentum_20', 'N-day return'],
+                  ['VWAP(period=20)', 'vwap_20', 'Volume-Weighted Avg Price'],
+                  ['OBV()', 'obv', 'On-Balance Volume'],
+                  ['ATR(period=14)', 'atr_14', 'Average True Range'],
+                ].map(([factor, col, desc]) => (
+                  <tr key={factor}><td style={{ padding: '2px 6px', fontFamily: 'monospace' }}>{factor}</td>
+                  <td style={{ padding: '2px 6px', fontFamily: 'monospace' }}>{col}</td>
+                  <td style={{ padding: '2px 6px' }}>{desc}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={sectionStyle}>
+            <div style={h2}>AI Chat Examples</div>
+            <ul style={{ paddingLeft: '16px', listStyle: 'disc', color: 'var(--text-secondary)' }}>
+              <li style={li}>"Write an RSI reversal strategy, buy below 30, sell above 70"</li>
+              <li style={li}>"Modify the current code to add a stop-loss at -5%"</li>
+              <li style={li}>"Backtest MACrossStrategy on 000001.SZ from 2020 to 2024"</li>
+              <li style={li}>"Explain what MACD factor does"</li>
+              <li style={li}>"List all available strategies and their parameters"</li>
+            </ul>
+          </div>
+
+          <div style={sectionStyle}>
+            <div style={h2}>Complete Example: RSI Reversal</div>
+            <pre style={code}>{`class RSIReversal(Strategy):
+    def __init__(self, period=14, oversold=30, overbought=70):
+        self.period = period
+        self.oversold = oversold
+        self.overbought = overbought
+
+    @classmethod
+    def get_parameters_schema(cls):
+        return {
+            "period":     {"type":"int",   "default":14,  "min":5, "max":50,  "label":"RSI Period"},
+            "oversold":   {"type":"float", "default":30,  "min":10,"max":40,  "label":"Oversold"},
+            "overbought": {"type":"float", "default":70,  "min":60,"max":90,  "label":"Overbought"},
+        }
+
+    def required_factors(self):
+        return [RSI(period=self.period)]
+
+    def generate_signals(self, data):
+        rsi = data[f"rsi_{self.period}"]
+        signal = pd.Series(0.0, index=data.index)
+        signal[rsi < self.oversold] = 1.0
+        # Forward-fill to hold position between signals
+        signal = signal.replace(0.0, pd.NA).ffill().fillna(0.0)
+        return signal`}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface FileInfo {
   filename: string
   class_name: string
@@ -36,6 +164,7 @@ export default function CodeEditor() {
   const [isFactorCode, setIsFactorCode] = useState(false)
   const [className, setClassName] = useState('')
   const [showChat, setShowChat] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const editorRef = useRef<any>(null)
 
   useEffect(() => { loadFiles() }, [])
@@ -220,6 +349,11 @@ export default function CodeEditor() {
             Overwrite
           </button>
           <div className="flex-1" />
+          <button onClick={() => setShowHelp(!showHelp)}
+            className="text-xs px-3 py-1 rounded font-bold"
+            style={{ backgroundColor: showHelp ? '#eab308' : 'var(--bg-primary)', color: showHelp ? '#000' : 'var(--text-secondary)', border: '1px solid var(--border)', minWidth: '28px' }}>
+            ?
+          </button>
           <button onClick={() => setShowChat(!showChat)}
             className="text-xs px-3 py-1 rounded"
             style={{ backgroundColor: showChat ? 'var(--color-accent)' : 'var(--bg-primary)', color: showChat ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
@@ -234,6 +368,9 @@ export default function CodeEditor() {
             {errors.map((e, i) => <div key={i} style={{ color: '#ef4444' }}>{e}</div>)}
           </div>
         )}
+
+        {/* Help panel */}
+        {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
 
         {/* Editor + Chat split */}
         <div className="flex-1 flex">
