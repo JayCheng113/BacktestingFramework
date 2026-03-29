@@ -49,8 +49,8 @@ def _run_batch_for_strategies(
     goal: ResearchGoal,
     data: pd.DataFrame,
     gate_config: GateConfig,
-):
-    """Create RunSpecs and run batch for the given strategies."""
+) -> tuple:
+    """Create RunSpecs and run batch. Returns (batch_result, spec_ids)."""
     specs = [
         RunSpec(
             strategy_name=name,
@@ -65,19 +65,22 @@ def _run_batch_for_strategies(
     ]
     if not specs:
         from types import SimpleNamespace
-        return SimpleNamespace(passed=[], executed=0, candidates=[], ranked=[])
+        return SimpleNamespace(passed=[], executed=0, candidates=[], ranked=[]), []
+    spec_ids = [s.spec_id for s in specs]
     config = BatchConfig(gate_config=gate_config, skip_prefilter=True)
     store = get_experiment_store()
-    return run_batch(specs, data, config=config, store=store)
+    return run_batch(specs, data, config=config, store=store), spec_ids
 
 
 async def run_research_task(
     goal: ResearchGoal,
     loop_config: LoopConfig = LoopConfig(),
     gate_config: GateConfig = GateConfig(),
+    task_id: str = "",
 ) -> str:
-    """Main orchestrator. Returns task_id immediately; runs loop in-place (caller wraps in create_task)."""
-    task_id = uuid.uuid4().hex[:12]
+    """Main orchestrator. Returns task_id; runs loop in-place (caller wraps in create_task)."""
+    if not task_id:
+        task_id = uuid.uuid4().hex[:12]
     _running_tasks[task_id] = {"events": [], "done": False, "state": LoopState()}
 
     provider = create_provider()
@@ -138,7 +141,7 @@ async def run_research_task(
 
             # E3: Batch execution
             _emit(task_id, "batch_start", {"total_specs": len(strategy_names)})
-            batch_result = await asyncio.to_thread(
+            batch_result, spec_ids = await asyncio.to_thread(
                 _run_batch_for_strategies, strategy_names, goal, data, gate_config)
             best_sharpe = max((c.sharpe for c in batch_result.passed), default=0.0)
             _emit(task_id, "batch_complete", {
@@ -166,7 +169,7 @@ async def run_research_task(
                 "strategies_passed": len(batch_result.passed),
                 "best_sharpe": best_sharpe,
                 "analysis": json.dumps({"direction": analysis.direction, "suggestions": analysis.suggestions}),
-                "spec_ids": json.dumps([]),
+                "spec_ids": json.dumps(spec_ids),
             })
             _emit(task_id, "iteration_end", {
                 "iteration": state.iteration,
@@ -191,8 +194,14 @@ async def run_research_task(
     finally:
         if task_id in _running_tasks:
             _running_tasks[task_id]["done"] = True
+        cleanup_finished_tasks()
 
     return task_id
+
+
+def is_any_task_running() -> bool:
+    """Check if any research task is currently running."""
+    return any(not t["done"] for t in _running_tasks.values())
 
 
 def cancel_task(task_id: str) -> bool:
@@ -206,3 +215,11 @@ def cancel_task(task_id: str) -> bool:
 def get_task_events(task_id: str) -> dict | None:
     """Get in-memory event data for SSE streaming."""
     return _running_tasks.get(task_id)
+
+
+def cleanup_finished_tasks(keep: int = 5) -> None:
+    """Remove old finished task events from memory (prevent leak)."""
+    finished = [(tid, t) for tid, t in _running_tasks.items() if t["done"]]
+    if len(finished) > keep:
+        for tid, _ in finished[:-keep]:
+            del _running_tasks[tid]

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from ez.agent.hypothesis import ResearchGoal
 from ez.agent.loop_controller import LoopConfig
 from ez.agent.gates import GateConfig
-from ez.agent.research_runner import run_research_task, cancel_task, get_task_events
+from ez.agent.research_runner import run_research_task, cancel_task, get_task_events, is_any_task_running
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,33 +53,13 @@ async def start_research(req: ResearchRequest):
         min_sharpe=req.gate_min_sharpe, max_drawdown=req.gate_max_drawdown,
     )
 
-    # Run in background
-    async def _run():
-        await run_research_task(goal, loop_config, gate_config)
+    # Serialization: only one research task at a time
+    if is_any_task_running():
+        raise HTTPException(status_code=409, detail="已有研究任务运行中，请等待完成或取消后重试")
 
-    task_id_future: list[str] = []
-
-    async def _run_and_capture():
-        tid = await run_research_task(goal, loop_config, gate_config)
-        task_id_future.append(tid)
-
-    # We need the task_id before the background task finishes.
-    # run_research_task creates the task_id at the start, so we run it
-    # directly and let it complete in the background via create_task.
     import uuid
-    # Pre-generate task_id and pass via a wrapper
-    from ez.agent.research_runner import _running_tasks, LoopState
     task_id = uuid.uuid4().hex[:12]
-
-    asyncio.create_task(_run())
-
-    # Wait briefly for task_id to appear in _running_tasks
-    for _ in range(10):
-        if _running_tasks:
-            task_id = list(_running_tasks.keys())[-1]
-            break
-        await asyncio.sleep(0.05)
-
+    asyncio.create_task(run_research_task(goal, loop_config, gate_config, task_id=task_id))
     return {"task_id": task_id, "status": "started"}
 
 

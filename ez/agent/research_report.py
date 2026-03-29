@@ -56,12 +56,23 @@ async def build_report(
     except (json.JSONDecodeError, TypeError):
         pass
 
+    # Collect best strategies from iterations' spec_ids
+    best_strategies: list[dict] = []
+    all_spec_ids: list[str] = []
+    for it in iterations:
+        try:
+            sids = json.loads(it.get("spec_ids", "[]"))
+            all_spec_ids.extend(sids)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     report = ResearchReport(
         task_id=task_id,
         goal=task.get("goal", ""),
         config=config,
         status=task.get("status", "completed"),
         iterations=iterations,
+        best_strategies=best_strategies,
         total_specs=total_specs,
         total_passed=total_passed,
         stop_reason=stop_reason,
