@@ -110,26 +110,58 @@ def get_llm_settings():
     }
 
 
+_YAML_FILE = _PROJECT_ROOT / "configs" / "default.yaml"
+
+
+def _update_yaml_llm(provider: str, model: str, base_url: str, temperature: float) -> None:
+    """Update the llm section in configs/default.yaml."""
+    import yaml
+    data: dict = {}
+    if _YAML_FILE.exists():
+        with open(_YAML_FILE) as f:
+            data = yaml.safe_load(f) or {}
+    if "llm" not in data:
+        data["llm"] = {}
+    data["llm"]["provider"] = provider
+    if model:
+        data["llm"]["model"] = model
+    elif "model" in data["llm"]:
+        del data["llm"]["model"]
+    if base_url:
+        data["llm"]["base_url"] = base_url
+    elif "base_url" in data["llm"]:
+        del data["llm"]["base_url"]
+    data["llm"]["temperature"] = temperature
+    _YAML_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_YAML_FILE, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+
 @router.post("/llm")
 def update_llm_settings(req: LLMSettings):
-    """Update LLM settings — writes to .env and reloads config."""
-    updates: dict[str, str] = {}
+    """Update LLM settings — writes api_key to .env, rest to YAML, reloads config."""
+    try:
+        # API key → .env
+        env_updates: dict[str, str] = {}
+        env_key = _KEY_MAP.get(req.provider, "")
+        if env_key and req.api_key:
+            env_updates[env_key] = req.api_key
+            os.environ[env_key] = req.api_key
+        if env_updates:
+            _write_env(env_updates)
 
-    # Set the API key for the selected provider
-    env_key = _KEY_MAP.get(req.provider, "")
-    if env_key and req.api_key:
-        updates[env_key] = req.api_key
-        os.environ[env_key] = req.api_key
+        # provider/model/base_url/temperature → YAML
+        _update_yaml_llm(req.provider, req.model, req.base_url, req.temperature)
 
-    if updates:
-        _write_env(updates)
+        # Reload config
+        from ez.config import reset_config, load_config
+        reset_config()
+        load_config()
 
-    # Reload config to pick up changes (reset forces re-read of .env + yaml)
-    from ez.config import reset_config, load_config
-    reset_config()
-    load_config()
-
-    return {"status": "ok", "provider": req.provider, "api_key_set": bool(req.api_key)}
+        return {"status": "ok", "provider": req.provider, "api_key_set": bool(req.api_key)}
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/tushare")
@@ -149,9 +181,16 @@ class TushareSettings(BaseModel):
 
 @router.post("/tushare")
 def update_tushare_settings(data: TushareSettings):
-    """Update Tushare token."""
-    token = data.token
-    if token:
-        _write_env({"TUSHARE_TOKEN": token})
-        os.environ["TUSHARE_TOKEN"] = token
-    return {"status": "ok", "token_set": bool(token)}
+    """Update Tushare token and rebuild data provider chain."""
+    try:
+        token = data.token
+        if token:
+            _write_env({"TUSHARE_TOKEN": token})
+            os.environ["TUSHARE_TOKEN"] = token
+            # P1-5: Rebuild the data provider chain so new token takes effect
+            from ez.api.deps import _rebuild_chain
+            _rebuild_chain()
+        return {"status": "ok", "token_set": bool(token)}
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail=str(e))

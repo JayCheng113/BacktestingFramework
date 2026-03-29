@@ -86,6 +86,16 @@ def get_chain() -> DataProviderChain:
     return _chain
 
 
+def _rebuild_chain() -> None:
+    """Force rebuild of the data provider chain (e.g., after Tushare token change)."""
+    global _chain, _tushare_provider
+    _chain = None
+    if _tushare_provider is not None:
+        _tushare_provider.close()
+        _tushare_provider = None
+    get_chain()  # rebuild
+
+
 def close_resources() -> None:
     global _store, _chain, _tushare_provider
     _chain = None

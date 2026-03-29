@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 interface Props {
   editorCode?: string
@@ -87,12 +87,6 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  const updateActiveMessages = useCallback((updater: (prev: ChatMsg[]) => ChatMsg[]) => {
-    setConversations(prev => prev.map(c =>
-      c.id === activeId ? { ...c, messages: updater(c.messages), updatedAt: Date.now() } : c
-    ))
-  }, [activeId])
 
   const createConversation = () => {
     const conv: Conversation = {

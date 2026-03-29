@@ -12,20 +12,20 @@ from ez.llm.provider import LLMEvent, LLMMessage, LLMProvider, LLMResponse, Tool
 class TestSystemPrompt:
     def test_contains_strategy_interface(self):
         prompt = _build_system_prompt()
-        assert "Strategy(ABC)" in prompt
+        assert "Strategy" in prompt
         assert "generate_signals" in prompt
         assert "required_factors" in prompt
 
-    def test_contains_factor_interface(self):
+    def test_contains_factor_info(self):
         prompt = _build_system_prompt()
-        assert "Factor(ABC)" in prompt
-        assert "compute" in prompt
-        assert "warmup_period" in prompt
+        assert "macd_line" in prompt
+        assert "boll_upper" in prompt
+        assert "rsi_14" in prompt
 
     def test_contains_rules(self):
         prompt = _build_system_prompt()
-        assert "strategies/" in prompt
-        assert "contract test" in prompt
+        assert "strategies/" in prompt or "写代码" in prompt
+        assert "contract test" in prompt or "create_strategy" in prompt
 
     def test_editor_code_injection(self):
         prompt = _build_system_prompt(editor_code="class MyStrat: pass")

@@ -141,12 +141,6 @@ interface ValidationResult {
   errors: string[]
 }
 
-interface SaveResult {
-  success: boolean
-  errors: string[]
-  path?: string
-  test_output?: string
-}
 
 const api = (path: string, opts?: RequestInit) =>
   fetch(`/api/code${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
@@ -161,7 +155,6 @@ export default function CodeEditor() {
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
   const [templateKind, setTemplateKind] = useState<'strategy' | 'factor'>('strategy')
-  const [isFactorCode, setIsFactorCode] = useState(false)
   const [className, setClassName] = useState('')
   const [showChat, setShowChat] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
@@ -183,7 +176,6 @@ export default function CodeEditor() {
         const data = await res.json()
         setCode(data.code)
         setFilename(fname)
-        setIsFactorCode(false)
         setStatus(`已加载 ${fname}`)
         setErrors([])
         setTestOutput('')
@@ -204,7 +196,6 @@ export default function CodeEditor() {
         const name = className || (templateKind === 'strategy' ? 'MyStrategy' : 'MyFactor')
         const fn = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py'
         setFilename(fn)
-        setIsFactorCode(templateKind === 'factor')
         setStatus(templateKind === 'factor'
           ? '因子模板已生成 — 保存后可被同目录的策略 import 使用'
           : '模板已生成')
@@ -401,7 +392,7 @@ export default function CodeEditor() {
           </div>
           {showChat && (
             <div className="border-l" style={{ flex: '0 0 40%', borderColor: 'var(--border)', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-              <ChatPanel editorCode={code} onCodeUpdate={(c, f) => { setCode(c); if (f) setFilename(f); setIsFactorCode(false) }} />
+              <ChatPanel editorCode={code} onCodeUpdate={(c, f) => { setCode(c); if (f) setFilename(f) }} />
             </div>
           )}
         </div>
