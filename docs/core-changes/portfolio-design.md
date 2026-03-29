@@ -1,8 +1,8 @@
 # Portfolio / Rotation Strategy Design
 
-> **状态**: 设计文档（未实施）
+> **状态**: 设计文档（未实施，已通过自审）
 > **目标版本**: V2.9
-> **依赖**: V2.5 (BatchRunner), V2.6 (MarketRules)
+> **依赖**: V2.5 (BatchRunner)。V2.6 (MarketRules) 可选集成。
 > **前置条件**: 单股回测正确性已验证 (V2.3)，Agent Loop 已就位 (V2.4)
 
 ---
@@ -26,11 +26,11 @@
 
 | 阶段 | 内容 | 核心改动 | 复杂度 |
 |------|------|---------|--------|
-| **Phase 1** | 组合封装层 — 复用单股引擎，加权聚合 | 0 核心改动 | 低 |
-| **Phase 2** | 截面因子 + 排名策略 | 0 核心改动（新 ABC） | 中 |
-| **Phase 3** | 原生多股引擎（如需要） | 需 core-change 提案 | 高 |
+| **V2.9** | 组合引擎 + 截面因子 + 排名策略（最小可用组合） | 0 核心改动 | 中 |
+| **Future** | 原生多股引擎（如需要） | 需 core-change 提案 | 高 |
 
-**V2.9 只做 Phase 1 + Phase 2。** Phase 3 视性能需求决定。
+**注意**: 轮动的本质是截面排名，截面因子和组合引擎必须同时交付。
+不拆成独立 Phase——没有截面因子的组合层只能做固定权重，价值极低。
 
 ### 2.2 新模块: `ez/portfolio/`
 
@@ -240,15 +240,15 @@ class TopNRotation(PortfolioStrategy):
     典型用法：动量轮动 — 每月选动量最强的 N 只股票。
     """
 
-    def __init__(self, factor_name: str, top_n: int = 10):
-        self._factor_name = factor_name
+    def __init__(self, factor: CrossSectionalFactor, top_n: int = 10):
+        self._factor = factor
         self._top_n = top_n
 
     def required_cross_factors(self) -> list[CrossSectionalFactor]:
-        return [MomentumRank()]  # 默认动量，可覆盖
+        return [self._factor]
 
     def generate_weights(self, universe_data, factor_scores) -> pd.DataFrame:
-        scores = factor_scores[self._factor_name]
+        scores = factor_scores[self._factor.name]
         weights = pd.DataFrame(0.0, index=scores.index, columns=scores.columns)
 
         for date in scores.index:
@@ -376,11 +376,42 @@ class PortfolioEngine:
             initial_capital: 初始资金
             benchmark: 可选基准净值（默认等权买入持有）
 
-        算法:
-        1. 在每个换仓日，按目标权重调整持仓
-        2. 非换仓日，持仓随价格变动自然漂移
-        3. 换仓成本 = 交易额 × 手续费率
-        4. 每日组合收益 = sum(weight_i * return_i) - cost
+        算法 (逐日模拟，非简单加权聚合):
+
+        rebalance_dates = Rebalancer(freq).get_rebalance_dates(dates)
+        actual_weights = {sym: 0.0 for sym in symbols}  # 实际持仓权重
+        portfolio_value = initial_capital
+
+        for day in trading_days:
+            # 1. 计算当日个股收益
+            returns = {sym: data[sym].adj_close.pct_change()[day] for sym}
+
+            # 2. 权重自然漂移（非换仓日的关键行为）
+            for sym in symbols:
+                actual_weights[sym] *= (1 + returns[sym])
+            # 归一化（总权重可能 != 1 因为价格变动）
+            total = sum(actual_weights.values())
+            if total > 0:
+                actual_weights = {s: w / total for s, w in actual_weights.items()}
+
+            # 3. 换仓日：调整到目标权重
+            if day in rebalance_dates:
+                # 前瞻偏差防护：使用 day-1 的因子/权重做决策
+                target = weights.shift(1).loc[day]  # ← shift(1) 防前瞻
+                turnover = sum(|target[s] - actual_weights[s]|) / 2
+                cost = turnover * portfolio_value * commission_rate
+                actual_weights = target
+                record RebalanceEvent(day, old, new, turnover, cost)
+
+            # 4. 当日 PnL
+            daily_return = sum(actual_weights[s] * returns[s]) - cost/portfolio_value
+            portfolio_value *= (1 + daily_return)
+
+        关键设计点:
+        - shift(1) 确保换仓日使用前一日信号（防前瞻偏差，与单股引擎一致）
+        - 非换仓日权重随价格漂移（涨的股占比自然增大）
+        - 停牌股 NaN 收益 → 0（价格不变，权重保持）
+        - 换仓时跳过无数据/停牌股票
         """
         ...
 ```
@@ -474,7 +505,7 @@ universe = Universe.from_list([
 data = fetch_universe_data(universe, date(2020,1,1), date(2024,12,31), chain)
 
 # 3. 策略: 每月选动量 top-5
-strategy = TopNRotation(factor_name="momentum_rank_20", top_n=5)
+strategy = TopNRotation(factor=MomentumRank(20), top_n=5)
 
 # 4. 计算截面因子
 factor_scores = {}
@@ -504,7 +535,7 @@ print(f"平均持股: {result.metrics['avg_holding_count']:.0f}")
 ```python
 from ez.portfolio.cross_factor import ReverseVolatilityRank
 
-strategy = TopNRotation(factor_name="reverse_vol_rank_20", top_n=10)
+strategy = TopNRotation(factor=ReverseVolatilityRank(20), top_n=10)
 # ... 同上流程
 ```
 
@@ -627,35 +658,61 @@ Layer 1: ez/core/ (不动)
 
 ## 9. 实施计划
 
-### V2.9 Phase 1: 组合封装层（约 4 个任务）
+### V2.9 交付（8 个任务，不拆 Phase）
 
-- P1. Universe + fetch_universe_data
-- P2. PortfolioEngine（加权聚合，换仓模拟）
-- P3. Allocator（EqualWeight, MaxWeight）
-- P4. 组合 API + 前端基础页面
-
-### V2.9 Phase 2: 截面因子 + 排名策略（约 4 个任务）
-
-- P5. CrossSectionalFactor ABC + MomentumRank, VolumeRank, ReverseVolatilityRank
-- P6. PortfolioStrategy ABC + TopNRotation
-- P7. 组合级指标（换手率/集中度/归因）
-- P8. 前端增强（持仓分析/归因/权重时序图）
+- P1. Universe + fetch_universe_data + 时间对齐 + NaN 处理规则
+- P2. CrossSectionalFactor ABC + MomentumRank, VolumeRank, ReverseVolatilityRank
+- P3. PortfolioStrategy ABC + TopNRotation（接收因子实例）+ MultiFactorRotation
+- P4. Allocator — EqualWeight, MaxWeight, RiskParity
+- P5. PortfolioEngine — 逐日模拟（权重漂移 + shift(1) 防前瞻 + 换仓成本）
+- P6. 组合级指标（换手率 / 集中度 / 归因 / vs 基准）
+- P7. 组合 API (`/api/portfolio/`) + 持久化（新 DuckDB 表）
+- P8. 前端 Portfolio 页面（股票池 + 策略配置 + 净值曲线 + 持仓分析）
 
 ### Exit Gate
 
-- 12 只股票的动量轮动跑通（月度换仓，2020-2024）
-- 组合净值曲线 + 基准对比正确
-- 换仓成本计算正确
-- 权重和不变量 <= 1.0
-- 截面因子 contract test 通过
-- 前端可视化可用
+- [ ] 12 只股票的动量轮动跑通（月度换仓，2020-2024）
+- [ ] 前瞻偏差验证：shuffle 权重后收益不优于随机
+- [ ] 组合净值曲线 + 基准对比正确
+- [ ] 换仓成本计算正确（交易额 × 费率）
+- [ ] 权重和不变量 <= 1.0，现金 >= 0
+- [ ] 非换仓日权重自然漂移（不是每天强制调回目标）
+- [ ] 停牌股 NaN 处理正确（收益→0，换仓时跳过）
+- [ ] 截面因子 contract test 通过
+- [ ] 单股组合结果 ≈ 单股回测结果（退化验证）
+- [ ] 前端可视化可用
 
 ---
 
-## 10. 优先级较低（不是不做，时机未到）
+## 10. 已知局限（V2.9 范围内不解决）
+
+| 局限 | 说明 | 预计解决版本 |
+|------|------|-------------|
+| **静态股票池** | Universe.symbols 是固定列表，不支持动态成分股调整（IPO/退市/指数换样）。存在幸存者偏差。 | V2.9.1+ |
+| **停牌处理** | 停牌股 NaN 收益 → 0（假设价格不变）。换仓时跳过无数据股票，不强制卖出。 | V2.9 内文档化 |
+| **无 MarketRules 集成** | V2.9 不集成 T+1/涨跌停/整手交易。PortfolioEngine 预留 `market_rules` 可选参数，V2.9.1 再接入。 | V2.9.1 |
+| **无离散股数** | 按权重比例分配，不考虑整手（100股倍数）。适合研究，不适合小资金实盘。 | V3.0+ |
+| **无行业/风格约束** | 不限制行业集中度。需要行业分类数据源。 | Future |
+
+---
+
+## 11. 优先级较低（不是不做，时机未到）
 
 - **多空组合**: long top-N + short bottom-N（需要融券支持，A股限制大）
 - **行业约束**: 行业权重上限（需要行业分类数据）
 - **优化器**: 均值-方差 / Black-Litterman（需要协方差矩阵估计）
 - **交易型组合**: 逐笔撮合（需要 V3.0 OMS 支持）
 - **跨市场组合**: A股+港股+美股（需要汇率+时区对齐）
+
+---
+
+## 12. 自审修复记录
+
+| # | 问题 | 严重度 | 修复 |
+|---|------|--------|------|
+| 1 | generate_weights 接收全量数据，无前瞻偏差防护 | P0 | PortfolioEngine 在换仓日对 weights 做 shift(1)，与单股引擎一致 |
+| 2 | Phase 1 没有截面因子无法做轮动 | P1 | 合并 Phase 1+2 为单次交付 |
+| 3 | "加权聚合"描述模糊，缺逐日模拟伪代码 | P1 | 补充完整伪代码，区分目标权重/实际权重/漂移 |
+| 4 | 静态股票池 + NaN 处理未定义 | P1 | 新增"已知局限"章节，定义 NaN→0 规则 |
+| 5 | MarketRules 依赖声明但未设计接口 | P2 | 改为可选依赖，PortfolioEngine 预留 market_rules 参数 |
+| 6 | TopNRotation.required_cross_factors 和 factor_name 脱耦 | P2 | 改为接收因子实例而非名称字符串 |
