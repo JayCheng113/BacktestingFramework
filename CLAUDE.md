@@ -69,4 +69,4 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.3**: Correctness hardening — accounting invariants (173 tests), C++/Python dual-path parity (109 tests), rolling_std Welford O(n) (5.2x vs Python), architecture gate tests (47 tests), ewm_mean span=1 NaN fix
 - **V2.4**: Agent Loop — RunSpec, Runner, ResearchGate (DD sign fix), Report, ExperimentStore, /experiments API, Experiments UI
 - **V2.4.1**: Stability — PK-based idempotency (completed_specs), gate DD sign fix, NaN sanitization, JSON double-encoding fix, concurrent regression tests, 725 total tests
-- **Next: V2.5** — Scale (batch search, MarketRules, multi-period, Web code editor)
+- **Next: V2.5** — Scale (batch param search, more factors, multi-period frontend, experiment cleanup)
