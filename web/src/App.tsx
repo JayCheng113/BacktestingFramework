@@ -3,6 +3,7 @@ import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
 import ExperimentPanel from './components/ExperimentPanel'
 import CodeEditor from './components/CodeEditor'
+import ResearchPanel from './components/ResearchPanel'
 import DocsPage from './pages/DocsPage'
 import './styles/global.css'
 
@@ -26,6 +27,7 @@ export default function App() {
           <CodeEditor />
         </div>
       )}
+      {activeTab === 'research' && <ResearchPanel />}
       {activeTab === 'docs' && <DocsPage />}
     </div>
   )
