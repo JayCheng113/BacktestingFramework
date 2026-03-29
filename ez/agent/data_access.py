@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from ez.agent.experiment_store import ExperimentStore
+from ez.agent.research_store import ResearchStore
 from ez.config import load_config
 from ez.data.provider import DataProvider, DataProviderChain
 from ez.data.store import DuckDBStore
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 _store: DuckDBStore | None = None
 _chain: DataProviderChain | None = None
 _exp_store: ExperimentStore | None = None
+_research_store: ResearchStore | None = None
 
 
 def _get_store() -> DuckDBStore:
@@ -106,10 +108,23 @@ def reset_chain() -> None:
     _chain = None
 
 
+def get_research_store() -> ResearchStore:
+    """Get or create ResearchStore (same DB path as ExperimentStore)."""
+    global _research_store
+    if _research_store is None:
+        import duckdb
+        conn = duckdb.connect(str(_resolve_db_path()))
+        _research_store = ResearchStore(conn)
+    return _research_store
+
+
 def reset_data_access() -> None:
     """Reset cached singletons (for testing / shutdown)."""
-    global _store, _chain, _exp_store
+    global _store, _chain, _exp_store, _research_store
     reset_chain()
+    if _research_store is not None:
+        _research_store.close()
+        _research_store = None
     if _exp_store is not None:
         _exp_store.close()
         _exp_store = None
