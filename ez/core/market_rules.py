@@ -68,9 +68,11 @@ class MarketRulesMatcher(Matcher):
                 return _zero_fill(price)
             actual_shares = lots * self._lot
             if actual_shares < fill.shares:
-                # Recalculate: only buy actual_shares worth
+                # Recalculate: only buy actual_shares worth.
+                # Commission from inner matcher was computed on full amount;
+                # kept as-is (slightly pessimistic) since recomputing would
+                # require re-calling inner matcher with different amount.
                 actual_amount = actual_shares * fill.fill_price + fill.commission
-                refund = amount - actual_amount
                 fill = FillResult(
                     shares=actual_shares,
                     fill_price=fill.fill_price,

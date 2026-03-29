@@ -10,7 +10,7 @@ Version: 0.2.6 | Tests: 795 | C++ acceleration: up to 7.9x
 - [Engineering Governance](docs/architecture/governance.md) — thin core, lifecycle labels, version discipline
 - [V2.3+ Roadmap](docs/core-changes/v2.3-roadmap.md) — detailed per-version plan with exit gates
 
-**Note**: ResearchGate implemented in V2.4 (ez/agent/gates.py). Deploy/Runtime gates planned for V2.6+.
+**Note**: ResearchGate implemented in V2.4 (ez/agent/gates.py). MarketRules in V2.6 (ez/core/market_rules.py). Deploy/Runtime gates planned for V2.7+.
 
 ## Module Map
 - `ez/core/` — Computational primitives: matcher, ts_ops (C++ accelerated) [CLAUDE.md](ez/core/CLAUDE.md)
