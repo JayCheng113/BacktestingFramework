@@ -9,7 +9,7 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
   const li = { marginBottom: '4px' }
 
   return (
-    <div className="border-b overflow-y-auto" style={{ borderColor: 'var(--border)', backgroundColor: '#0f172a', maxHeight: '50vh', padding: '12px 16px' }}>
+    <div className="overflow-y-auto" style={{ backgroundColor: '#0f172a', padding: '16px 20px', borderRadius: '8px' }}>
       <div className="flex justify-between items-center mb-3">
         <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '14px' }}>Strategy Development Guide</span>
         <button onClick={onClose} className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Close</button>
@@ -278,6 +278,16 @@ export default function CodeEditor() {
 
   return (
     <div className="flex" style={{ height: 'calc(100vh - 48px)' }}>
+      {/* Help modal overlay */}
+      {showHelp && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} onClick={() => setShowHelp(false)} />
+          <div style={{ position: 'relative', zIndex: 51, width: '90vw', maxWidth: '1000px', maxHeight: '80vh', overflow: 'auto', borderRadius: '8px' }}>
+            <HelpPanel onClose={() => setShowHelp(false)} />
+          </div>
+        </div>
+      )}
+
       {/* File sidebar */}
       <div className="flex flex-col w-56 border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
@@ -368,9 +378,6 @@ export default function CodeEditor() {
             {errors.map((e, i) => <div key={i} style={{ color: '#ef4444' }}>{e}</div>)}
           </div>
         )}
-
-        {/* Help panel */}
-        {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
 
         {/* Editor + Chat split */}
         <div className="flex-1 flex">
