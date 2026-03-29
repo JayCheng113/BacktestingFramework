@@ -26,7 +26,7 @@ export default function ExperimentPanel() {
   const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
   const [runWfo, setRunWfo] = useState(true)
   const [wfoSplits, setWfoSplits] = useState(3)
-  const [useMarketRules, setUseMarketRules] = useState(false)
+  const [useMarketRules, setUseMarketRules] = useState(true)
 
   useEffect(() => {
     loadRuns()
@@ -177,7 +177,7 @@ export default function ExperimentPanel() {
           </label>
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={useMarketRules} onChange={e => setUseMarketRules(e.target.checked)} />
-            A-Share Rules (T+1, Lot 100)
+            A股规则 (T+1 / 涨跌停10% / 整手100股)
           </label>
           {runWfo && (
             <div className="flex items-center gap-1.5">
