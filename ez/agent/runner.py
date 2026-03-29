@@ -60,6 +60,11 @@ def _resolve_strategy(name: str, params: dict) -> Strategy:
                 if k in schema:
                     expected = schema[k].get("type", "float")
                     if expected == "int":
+                        if isinstance(v, float) and v != int(v):
+                            raise ValueError(
+                                f"Parameter '{k}' expects int but got {v} "
+                                f"(non-integer float would be silently truncated)"
+                            )
                         merged[k] = int(v)
                     elif expected == "float":
                         merged[k] = float(v)

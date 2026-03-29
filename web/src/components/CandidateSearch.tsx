@@ -24,17 +24,25 @@ interface ParamRangeState {
   defaultVal: number
 }
 
-function generateValues(pr: ParamRangeState): number[] {
-  if (pr.step <= 0 || pr.min > pr.max) return [pr.defaultVal]
+/** Count values in range WITHOUT allocating an array. O(1). */
+function countValues(pr: ParamRangeState): number {
+  if (pr.step <= 0 || pr.min > pr.max) return 0
+  return Math.floor((pr.max - pr.min) / pr.step) + 1
+}
+
+/** Generate values — only for preview (capped at `limit`). */
+function generateValues(pr: ParamRangeState, limit: number = 50): number[] {
+  if (pr.step <= 0 || pr.min > pr.max) return []
   const vals: number[] = []
-  for (let v = pr.min; v <= pr.max + pr.step * 0.001; v += pr.step) {
+  for (let v = pr.min; v <= pr.max + pr.step * 0.001 && vals.length < limit; v += pr.step) {
     vals.push(pr.type === 'int' ? Math.round(v) : Math.round(v * 1000) / 1000)
   }
   return [...new Set(vals)]
 }
 
 function totalCombinations(ranges: ParamRangeState[]): number {
-  return ranges.reduce((acc, pr) => acc * Math.max(generateValues(pr).length, 1), 1)
+  if (ranges.length === 0) return 1
+  return ranges.reduce((acc, pr) => acc * Math.max(countValues(pr), 1), 1)
 }
 
 export default function CandidateSearch() {
@@ -45,14 +53,14 @@ export default function CandidateSearch() {
   const [strategyName, setStrategyName] = useState('')
   const [symbol, setSymbol] = useState('000001.SZ')
   const [period, setPeriod] = useState('daily')
-  const [startDate, setStartDate] = useState<Date>(new Date('2020-01-01'))
-  const [endDate, setEndDate] = useState<Date>(new Date('2024-12-31'))
+  const [startDate, setStartDate] = useState<Date>(new Date(2020, 0, 1))
+  const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
   const [mode, setMode] = useState<'grid' | 'random'>('grid')
   const [nSamples, setNSamples] = useState(20)
   const [skipPrefilter, setSkipPrefilter] = useState(false)
   const [paramRanges, setParamRanges] = useState<ParamRangeState[]>([])
 
-  const toStr = (d: Date) => d.toISOString().slice(0, 10)
+  const toStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
   useEffect(() => {
     listStrategies().then(r => {
@@ -91,7 +99,7 @@ export default function CandidateSearch() {
     try {
       const ranges = paramRanges.map(pr => ({
         name: pr.name,
-        values: generateValues(pr),
+        values: generateValues(pr, 10000),
       })).filter(pr => pr.values.length > 0)
 
       const res = await searchCandidates({
@@ -189,7 +197,8 @@ export default function CandidateSearch() {
                 <span>Param</span><span>Min</span><span>Max</span><span>Step</span><span>Values</span>
               </div>
               {paramRanges.map((pr, i) => {
-                const vals = generateValues(pr)
+                const count = countValues(pr)
+                const preview = generateValues(pr, 6)  // only 6 for display
                 const hasError = pr.min > pr.max || pr.step <= 0
                 const errStyle = hasError ? { ...inputStyle, border: '1px solid #ef4444' } : inputStyle
                 return (
@@ -208,10 +217,10 @@ export default function CandidateSearch() {
                       className="px-2 py-1 rounded text-sm w-full" style={pr.step <= 0 ? errStyle : inputStyle} />
                     <span className="text-xs truncate"
                       style={{ color: hasError ? '#ef4444' : 'var(--text-secondary)' }}
-                      title={hasError ? (pr.min > pr.max ? 'Min > Max' : 'Step must be > 0') : vals.join(', ')}>
+                      title={hasError ? (pr.min > pr.max ? 'Min > Max' : 'Step must be > 0') : preview.join(', ')}>
                       {hasError
                         ? (pr.min > pr.max ? 'Min > Max' : 'Step > 0')
-                        : `[${vals.length}] ${vals.slice(0, 6).join(', ')}${vals.length > 6 ? '...' : ''}`}
+                        : `[${count}] ${preview.join(', ')}${count > 6 ? '...' : ''}`}
                     </span>
                   </div>
                 )

@@ -30,8 +30,8 @@ export default function ExperimentPanel() {
   const [symbol, setSymbol] = useState('000001.SZ')
   const [market] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
-  const [startDate, setStartDate] = useState<Date>(new Date('2020-01-01'))
-  const [endDate, setEndDate] = useState<Date>(new Date('2024-12-31'))
+  const [startDate, setStartDate] = useState<Date>(new Date(2020, 0, 1))
+  const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
   const [runWfo, setRunWfo] = useState(true)
   const [wfoSplits, setWfoSplits] = useState(3)
 
@@ -66,7 +66,7 @@ export default function ExperimentPanel() {
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
-      const toStr = (d: Date) => d.toISOString().slice(0, 10)
+      const toStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const res = await submitExperiment({
         strategy_name: strategyName,
         strategy_params: params,
