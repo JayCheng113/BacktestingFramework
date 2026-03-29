@@ -94,6 +94,19 @@ class TestRunner:
         assert result.status == "failed"
         assert "not found" in result.error
 
+    def test_non_integer_float_param_rejected(self, sample_data):
+        """P0 regression: int(3.5)→3 was silently truncating. Must fail."""
+        spec = RunSpec(
+            strategy_name="MACrossStrategy",
+            strategy_params={"short_period": 3.5, "long_period": 20},
+            symbol="TEST.SZ", market="cn_stock",
+            start_date=date(2022, 1, 1), end_date=date(2022, 12, 31),
+            run_wfo=False,
+        )
+        result = Runner().run(spec, sample_data)
+        assert result.status == "failed"
+        assert "non-integer" in result.error.lower()
+
     def test_run_ids_unique(self, spec, sample_data):
         r1 = Runner().run(spec, sample_data)
         r2 = Runner().run(spec, sample_data)
