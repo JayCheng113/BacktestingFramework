@@ -7,6 +7,7 @@ const tabs = [
   { id: 'dashboard', label: '看板' },
   { id: 'experiments', label: '实验' },
   { id: 'editor', label: '代码编辑器' },
+  { id: 'docs', label: '开发文档' },
 ]
 
 export default function Navbar({ activeTab, onTabChange }: Props) {
