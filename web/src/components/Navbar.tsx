@@ -4,9 +4,9 @@ interface Props {
 }
 
 const tabs = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'experiments', label: 'Experiments' },
-  { id: 'editor', label: 'Code Editor' },
+  { id: 'dashboard', label: '看板' },
+  { id: 'experiments', label: '实验' },
+  { id: 'editor', label: '代码编辑器' },
 ]
 
 export default function Navbar({ activeTab, onTabChange }: Props) {
@@ -30,7 +30,7 @@ export default function Navbar({ activeTab, onTabChange }: Props) {
           ))}
         </div>
       </div>
-      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Agent-Native Quant Platform</span>
+      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Agent-Native 量化交易平台</span>
     </nav>
   )
 }

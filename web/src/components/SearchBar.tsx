@@ -176,7 +176,7 @@ export default function SearchBar({ onSearch }: Props) {
     <div className="flex flex-wrap gap-3 items-end p-4" style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
       {/* Symbol search with autocomplete */}
       <div className="flex flex-col gap-1 relative" ref={dropdownRef}>
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Symbol</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票</label>
         <div
           className="px-3 py-1.5 rounded text-sm cursor-pointer flex items-center gap-2 min-w-[200px]"
           style={{ ...inputStyle, minHeight: '32px' }}
@@ -229,29 +229,29 @@ export default function SearchBar({ onSearch }: Props) {
 
       {/* Market selector */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Market</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>市场</label>
         <select value={market} onChange={e => handleMarketChange(e.target.value)}
           className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-          <option value="cn_stock">A-Shares</option>
-          <option value="us_stock">US Stock</option>
-          <option value="hk_stock">HK Stock</option>
+          <option value="cn_stock">A股</option>
+          <option value="us_stock">美股</option>
+          <option value="hk_stock">港股</option>
         </select>
       </div>
 
       {/* Period selector */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Period</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>周期</label>
         <select value={period} onChange={e => setPeriod(e.target.value)}
           className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
+          <option value="daily">日线</option>
+          <option value="weekly">周线</option>
+          <option value="monthly">月线</option>
         </select>
       </div>
 
       {/* Date range — calendar dropdown, click-only (no manual input) */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start Date</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始日期</label>
         <DatePicker
           selected={startDate}
           onChange={(d: Date | null) => {
@@ -267,11 +267,11 @@ export default function SearchBar({ onSearch }: Props) {
           showMonthDropdown
           showYearDropdown
           dropdownMode="select"
-          customInput={<DateButton label="Select start" />}
+          customInput={<DateButton label="选择开始日期" />}
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End Date</label>
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束日期</label>
         <DatePicker
           selected={endDate}
           onChange={(d: Date | null) => {
@@ -288,13 +288,13 @@ export default function SearchBar({ onSearch }: Props) {
           showMonthDropdown
           showYearDropdown
           dropdownMode="select"
-          customInput={<DateButton label="Select end" />}
+          customInput={<DateButton label="选择结束日期" />}
         />
       </div>
 
       <button onClick={handleSearch}
         className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: 'var(--color-accent)' }}>
-        Search
+        查询
       </button>
     </div>
   )

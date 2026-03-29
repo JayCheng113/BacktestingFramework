@@ -79,21 +79,21 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
 
   const equityOption = result ? {
     backgroundColor: '#0d1117',
-    title: { text: 'Equity Curve', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: '权益曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
-    legend: { data: ['Strategy', `Benchmark (Buy & Hold)`], textStyle: { color: '#8b949e' }, top: 25 },
+    legend: { data: ['策略', '基准(买入持有)'], textStyle: { color: '#8b949e' }, top: 25 },
     grid: { left: 60, right: 20, top: 60, bottom: 30 },
     xAxis: { type: 'category', data: result.equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
     series: [
-      { name: 'Strategy', type: 'line', data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
-      { name: 'Benchmark (Buy & Hold)', type: 'line', data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' }, showSymbol: false },
+      { name: '策略', type: 'line', data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
+      { name: '基准(买入持有)', type: 'line', data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' }, showSymbol: false },
     ],
   } : null
 
   const wfEquityOption = wfResult ? {
     backgroundColor: '#0d1117',
-    title: { text: 'OOS Equity Curve', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: '样本外权益曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
     xAxis: { type: 'category', data: wfResult.oos_equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
@@ -152,20 +152,20 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-medium mb-3">Backtest</h3>
+      <h3 className="text-sm font-medium mb-3">回测</h3>
       <div className="flex flex-wrap gap-3 items-end mb-4">
         {/* Mode toggle */}
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Mode</label>
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>模式</label>
           <select value={mode} onChange={e => { setMode(e.target.value as any); setResult(null); setWfResult(null) }}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            <option value="backtest">Single Backtest</option>
-            <option value="walk-forward">Walk-Forward</option>
+            <option value="backtest">单次回测</option>
+            <option value="walk-forward">前推验证</option>
           </select>
         </div>
         {/* Strategy */}
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Strategy</label>
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>策略</label>
           <select value={selected} onChange={e => onStrategyChange(e.target.value)}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             {strategies.map(s => <option key={s.key} value={s.name}>{s.name}</option>)}
@@ -206,7 +206,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         {/* WF splits */}
         {mode === 'walk-forward' && (
           <div className="flex flex-col gap-1">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Splits</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>分割数</label>
             <input type="number" value={nSplits} min={2} max={20}
               onChange={e => setNSplits(Number(e.target.value))}
               className="px-3 py-1.5 rounded text-sm w-16" style={inputStyle} />
@@ -215,7 +215,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         <button onClick={handleRun} disabled={loading}
           className="px-4 py-1.5 rounded text-sm font-medium text-white"
           style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
-          {loading ? 'Running...' : 'Run'}
+          {loading ? '运行中...' : '运行'}
         </button>
       </div>
 
@@ -232,7 +232,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           </div>
           <div className="flex items-center gap-2 mb-3">
             <span className={`text-xs px-2 py-0.5 rounded ${result.significance.is_significant ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>
-              {result.significance.is_significant ? 'Significant' : 'Not Significant'}
+              {result.significance.is_significant ? '显著' : '不显著'}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
               p={result.significance.p_value.toFixed(3)} | Sharpe CI [{result.significance.sharpe_ci_lower.toFixed(2)}, {result.significance.sharpe_ci_upper.toFixed(2)}]
@@ -243,14 +243,14 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           {result.trades.length > 0 && (
             <div className="mt-4">
               <div className="flex justify-between items-center mb-2">
-                <h4 className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Trade Records ({result.trades.length})</h4>
-                <button onClick={() => exportCSV(result)} className="text-xs px-2 py-1 rounded" style={{ ...inputStyle, cursor: 'pointer' }}>Export CSV</button>
+                <h4 className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>交易记录 ({result.trades.length})</h4>
+                <button onClick={() => exportCSV(result)} className="text-xs px-2 py-1 rounded" style={{ ...inputStyle, cursor: 'pointer' }}>导出CSV</button>
               </div>
               <div className="overflow-x-auto max-h-64 overflow-y-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                 <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: 'var(--bg-primary)', position: 'sticky', top: 0 }}>
-                      {['#', 'Entry', 'Exit', 'Entry Price', 'Exit Price', 'PnL', 'PnL%', 'Commission'].map(h => (
+                      {['#', '买入日期', '卖出日期', '买入价', '卖出价', '盈亏', '盈亏%', '手续费'].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
@@ -305,7 +305,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           </div>
           <div className="flex items-center gap-2 mb-3">
             <span className={`text-xs px-2 py-0.5 rounded ${wfResult.overfitting_score <= 0.3 ? 'bg-green-900 text-green-300' : wfResult.overfitting_score <= 0.6 ? 'bg-yellow-900 text-yellow-300' : 'bg-red-900 text-red-300'}`}>
-              {wfResult.overfitting_score <= 0.3 ? 'Robust' : wfResult.overfitting_score <= 0.6 ? 'Moderate Overfit' : 'Overfitting'}
+              {wfResult.overfitting_score <= 0.3 ? '稳健' : wfResult.overfitting_score <= 0.6 ? '轻微过拟合' : '过拟合'}
             </span>
           </div>
           {wfEquityOption && <ReactECharts option={wfEquityOption} style={{ height: 300 }} />}

@@ -37,7 +37,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   const icStd = result && icN > 1 ? Math.sqrt(result.ic_series.reduce((s: number, v: number) => s + (v - icMean) ** 2, 0) / (icN - 1)) : 0
   const icTimeSeriesOption = result ? {
     backgroundColor: '#0d1117',
-    title: { text: 'IC Time Series', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: 'IC 时间序列', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
     xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
@@ -53,7 +53,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   // IC Decay curve
   const icDecayOption = result && result.ic_decay ? {
     backgroundColor: '#0d1117',
-    title: { text: 'IC Decay', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: 'IC 衰减', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
     xAxis: { type: 'category', data: Object.keys(result.ic_decay).map(k => `${k}d`), axisLabel: { color: '#8b949e' } },
@@ -76,7 +76,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     const labels = Array.from({ length: bins }, (_, i) => (min + step * (i + 0.5)).toFixed(3))
     return {
       backgroundColor: '#0d1117',
-      title: { text: 'IC Distribution', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+      title: { text: 'IC 分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
       tooltip: { trigger: 'axis' },
       grid: { left: 60, right: 20, top: 40, bottom: 30 },
       xAxis: { type: 'category', data: labels, axisLabel: { color: '#8b949e', rotate: 45, fontSize: 10 } },
@@ -87,10 +87,10 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-medium mb-3">Factor Analysis</h3>
+      <h3 className="text-sm font-medium mb-3">因子分析</h3>
       <div className="flex gap-3 items-end mb-4">
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Factor</label>
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>
           <select value={factor} onChange={e => setFactor(e.target.value)}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             {FACTORS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
@@ -98,7 +98,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
         </div>
         <button onClick={handleEval} disabled={loading}
           className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
-          {loading ? 'Evaluating...' : 'Evaluate'}
+          {loading ? '评估中...' : '评估'}
         </button>
       </div>
       {result && (
@@ -106,8 +106,8 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
           {/* Metric cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             {[
-              ['IC Mean', result.ic_mean], ['Rank IC', result.rank_ic_mean],
-              ['ICIR', result.icir], ['Rank ICIR', result.rank_icir], ['Turnover', result.turnover],
+              ['IC 均值', result.ic_mean], ['Rank IC', result.rank_ic_mean],
+              ['ICIR', result.icir], ['Rank ICIR', result.rank_icir], ['换手率', result.turnover],
             ].map(([label, val]) => (
               <div key={label as string} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
                 <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{label as string}</div>

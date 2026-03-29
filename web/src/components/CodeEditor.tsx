@@ -11,8 +11,8 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="overflow-y-auto" style={{ backgroundColor: '#0f172a', padding: '16px 20px', borderRadius: '8px' }}>
       <div className="flex justify-between items-center mb-3">
-        <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '14px' }}>Strategy Development Guide</span>
-        <button onClick={onClose} className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Close</button>
+        <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '14px' }}>策略开发指南</span>
+        <button onClick={onClose} className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>
       </div>
 
       <div className="grid grid-cols-2 gap-4 text-xs" style={{ color: 'var(--text-primary)' }}>
@@ -184,7 +184,7 @@ export default function CodeEditor() {
         setCode(data.code)
         setFilename(fname)
         setIsFactorCode(false)
-        setStatus(`Loaded ${fname}`)
+        setStatus(`已加载 ${fname}`)
         setErrors([])
         setTestOutput('')
       }
@@ -206,8 +206,8 @@ export default function CodeEditor() {
         setFilename(fn)
         setIsFactorCode(templateKind === 'factor')
         setStatus(templateKind === 'factor'
-          ? 'Factor template generated (reference only — factors must be placed in ez/factor/builtin/ manually)'
-          : 'Template generated')
+          ? '因子模板已生成（仅供参考 — 因子需手动放置到 ez/factor/builtin/）'
+          : '模板已生成')
         setErrors([])
         setTestOutput('')
       }
@@ -225,10 +225,10 @@ export default function CodeEditor() {
       if (res.ok) {
         const data: ValidationResult = await res.json()
         if (data.valid) {
-          setStatus('Syntax check passed')
+          setStatus('语法检查通过')
           setErrors([])
         } else {
-          setStatus('Syntax check failed')
+          setStatus('语法检查失败')
           setErrors(data.errors)
         }
       }
@@ -237,11 +237,11 @@ export default function CodeEditor() {
   }
 
   const save = async (overwrite = false) => {
-    if (!filename) { setStatus('Please set a filename'); return }
+    if (!filename) { setStatus('请设置文件名'); return }
     setSaving(true)
     setErrors([])
     setTestOutput('')
-    setStatus('Saving & running contract test...')
+    setStatus('保存中，正在运行合约测试...')
     try {
       const res = await api('/save', {
         method: 'POST',
@@ -249,14 +249,14 @@ export default function CodeEditor() {
       })
       const data = await res.json()
       if (res.ok) {
-        setStatus(`Saved to ${data.path} — contract test passed!`)
+        setStatus(`已保存至 ${data.path} — 合约测试通过!`)
         setErrors([])
         setTestOutput(data.test_output || '')
         loadFiles()
       } else {
         // 422 error from backend
         const detail = data.detail || data
-        setStatus('Save failed')
+        setStatus('保存失败')
         setErrors(detail.errors || [JSON.stringify(detail)])
         if (detail.test_output) setTestOutput(detail.test_output)
       }
@@ -265,13 +265,13 @@ export default function CodeEditor() {
   }
 
   const deleteFile = async (fname: string) => {
-    if (!confirm(`Delete ${fname}?`)) return
+    if (!confirm(`确认删除 ${fname}?`)) return
     try {
       const res = await api(`/files/${fname}`, { method: 'DELETE' })
       if (res.ok) {
         loadFiles()
         if (fname === filename) { setCode(''); setFilename('') }
-        setStatus(`Deleted ${fname}`)
+        setStatus(`已删除 ${fname}`)
       }
     } catch {}
   }
@@ -291,17 +291,17 @@ export default function CodeEditor() {
       {/* File sidebar */}
       <div className="flex flex-col w-56 border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>New File</div>
+          <div className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>新建文件</div>
           <div className="flex gap-1 mb-2">
             <button onClick={() => setTemplateKind('strategy')}
               className="text-xs px-2 py-1 rounded"
               style={{ backgroundColor: templateKind === 'strategy' ? 'var(--color-accent)' : 'var(--bg-primary)', color: templateKind === 'strategy' ? '#fff' : 'var(--text-secondary)' }}>
-              Strategy
+              策略
             </button>
             <button onClick={() => setTemplateKind('factor')}
               className="text-xs px-2 py-1 rounded"
               style={{ backgroundColor: templateKind === 'factor' ? 'var(--color-accent)' : 'var(--bg-primary)', color: templateKind === 'factor' ? '#fff' : 'var(--text-secondary)' }}>
-              Factor
+              因子
             </button>
           </div>
           <input
@@ -313,12 +313,12 @@ export default function CodeEditor() {
           <button onClick={generateTemplate}
             className="w-full text-xs px-2 py-1 rounded"
             style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
-            Generate Template
+            生成模板
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>strategies/</div>
-          {files.length === 0 && <div className="text-xs px-2" style={{ color: 'var(--text-secondary)' }}>No files yet</div>}
+          {files.length === 0 && <div className="text-xs px-2" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
           {files.map(f => (
             <div key={f.filename}
               className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
@@ -345,18 +345,18 @@ export default function CodeEditor() {
           <button onClick={validate} disabled={validating || !code}
             className="text-xs px-3 py-1 rounded"
             style={{ backgroundColor: '#2563eb', color: '#fff', opacity: validating || !code ? 0.5 : 1 }}>
-            {validating ? 'Checking...' : 'Validate'}
+            {validating ? '检查中...' : '语法检查'}
           </button>
           <button onClick={() => save(false)} disabled={saving || !code || !filename || isFactorCode}
             className="text-xs px-3 py-1 rounded"
             title={isFactorCode ? 'Factor files must be placed manually in ez/factor/builtin/' : ''}
             style={{ backgroundColor: '#16a34a', color: '#fff', opacity: saving || !code || !filename || isFactorCode ? 0.5 : 1 }}>
-            {saving ? 'Testing...' : isFactorCode ? 'Save N/A (Factor)' : 'Save & Test'}
+            {saving ? '测试中...' : isFactorCode ? '因子不可保存' : '保存并测试'}
           </button>
           <button onClick={() => save(true)} disabled={saving || !code || !filename || isFactorCode}
             className="text-xs px-3 py-1 rounded"
             style={{ backgroundColor: '#d97706', color: '#fff', opacity: saving || !code || !filename || isFactorCode ? 0.5 : 1 }}>
-            Overwrite
+            覆盖保存
           </button>
           <div className="flex-1" />
           <button onClick={() => setShowHelp(!showHelp)}
@@ -367,7 +367,7 @@ export default function CodeEditor() {
           <button onClick={() => setShowChat(!showChat)}
             className="text-xs px-3 py-1 rounded"
             style={{ backgroundColor: showChat ? 'var(--color-accent)' : 'var(--bg-primary)', color: showChat ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-            AI Chat {showChat ? '<<' : '>>'}
+            AI助手 {showChat ? '<<' : '>>'}
           </button>
         </div>
 
@@ -410,7 +410,7 @@ export default function CodeEditor() {
         {/* Test output panel */}
         {testOutput && (
           <div className="border-t overflow-auto" style={{ borderColor: 'var(--border)', maxHeight: '200px', backgroundColor: 'var(--bg-primary)' }}>
-            <div className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Contract Test Output</div>
+            <div className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>合约测试输出</div>
             <pre className="px-3 pb-2 text-xs whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{testOutput}</pre>
           </div>
         )}

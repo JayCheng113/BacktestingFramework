@@ -48,7 +48,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Request failed' }))
-        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.detail || res.statusText}` }])
+        setMessages(prev => [...prev, { role: 'assistant', content: `错误: ${err.detail || res.statusText}` }])
         setStreaming(false)
         return
       }
@@ -112,7 +112,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
                 // Reset for next assistant content after tool results
                 assistantContent = ''
               } else if (eventType === 'error') {
-                setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${data.message}` }])
+                setMessages(prev => [...prev, { role: 'assistant', content: `错误: ${data.message}` }])
               }
               eventType = '' // Reset after processing to prevent stale type
             } catch {}
@@ -123,7 +123,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
         }
       }
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Network error: ${e.message}` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `网络错误: ${e.message}` }])
     } finally {
       setStreaming(false)
     }
@@ -133,10 +133,10 @@ export default function ChatPanel({ editorCode = '' }: Props) {
     <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Header */}
       <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
-        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>AI Assistant</span>
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>AI 助手</span>
         {llmStatus && (
           <span className="text-xs" style={{ color: llmStatus.available ? '#22c55e' : '#ef4444' }}>
-            {llmStatus.available ? `${llmStatus.provider}/${llmStatus.model}` : 'Not configured'}
+            {llmStatus.available ? `${llmStatus.provider}/${llmStatus.model}` : '未配置'}
           </span>
         )}
       </div>
@@ -145,8 +145,8 @@ export default function ChatPanel({ editorCode = '' }: Props) {
       <div className="flex-1 overflow-y-auto p-3 space-y-3" style={{ minHeight: 0 }}>
         {messages.length === 0 && (
           <div className="text-xs text-center py-8" style={{ color: 'var(--text-secondary)' }}>
-            <p>Ask me to help write strategies, debug code, or run backtests.</p>
-            <p className="mt-2 opacity-70">Example: "Help me write a RSI reversal strategy"</p>
+            <p>可以让我帮你编写策略、调试代码或运行回测</p>
+            <p className="mt-2 opacity-70">示例: "帮我写一个 RSI 超卖反转策略"</p>
           </div>
         )}
         {messages.map((m, i) => (
@@ -169,7 +169,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
         {streaming && (
           <div className="flex justify-start">
             <div className="rounded-lg px-3 py-2 text-xs animate-pulse" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-              Thinking...
+              思考中...
             </div>
           </div>
         )}
@@ -184,7 +184,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-            placeholder={llmStatus?.available ? "Ask me anything..." : "Configure LLM API key first"}
+            placeholder={llmStatus?.available ? "输入消息..." : "请先配置 LLM API Key"}
             disabled={streaming || !llmStatus?.available}
             className="flex-1 text-xs px-3 py-2 rounded"
             style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
@@ -194,7 +194,7 @@ export default function ChatPanel({ editorCode = '' }: Props) {
             disabled={streaming || !input.trim() || !llmStatus?.available}
             className="text-xs px-3 py-2 rounded"
             style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: streaming || !input.trim() ? 0.5 : 1 }}>
-            Send
+            发送
           </button>
         </div>
       </div>

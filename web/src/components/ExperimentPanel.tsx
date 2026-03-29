@@ -71,7 +71,7 @@ export default function ExperimentPanel() {
         use_market_rules: useMarketRules,
       })
       if (res.data?.status === 'duplicate') {
-        alert(`Duplicate: this experiment already has a completed run (${res.data.existing_run_id || res.data.spec_id})`)
+        alert(`重复: 该实验已有完成的运行记录 (${res.data.existing_run_id || res.data.spec_id})`)
       }
       loadRuns()
     } catch (e: any) {
@@ -83,24 +83,24 @@ export default function ExperimentPanel() {
 
   const handleDelete = async (runId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm('Delete this experiment run?')) return
+    if (!confirm('确认删除此实验记录?')) return
     try {
       await deleteExperiment(runId)
       if (detail?.run_id === runId) setDetail(null)
       loadRuns()
-    } catch { alert('Delete failed') }
+    } catch { alert('删除失败') }
   }
 
   const handleCleanup = async () => {
-    const keepStr = prompt('Keep most recent N runs (delete older ones):', '200')
+    const keepStr = prompt('保留最近 N 条记录(删除更旧的):', '200')
     if (!keepStr) return
     const keep = parseInt(keepStr, 10)
     if (isNaN(keep) || keep < 1) return
     try {
       const res = await cleanupExperiments(keep)
-      alert(`Cleaned up ${res.data.deleted} old runs`)
+      alert(`已清理 ${res.data.deleted} 条旧记录`)
       loadRuns()
-    } catch { alert('Cleanup failed') }
+    } catch { alert('清理失败') }
   }
 
   const parseGateReasons = (r: ExperimentRun): GateReason[] => {
@@ -123,7 +123,7 @@ export default function ExperimentPanel() {
               color: subTab === t ? '#fff' : 'var(--text-secondary)',
               border: '1px solid var(--border)',
             }}>
-            {t === 'single' ? 'Single Run' : 'Param Search'}
+            {t === 'single' ? '单次运行' : '参数搜索'}
           </button>
         ))}
       </div>
@@ -131,38 +131,38 @@ export default function ExperimentPanel() {
       {subTab === 'search' ? <CandidateSearch /> : <>
       {/* Submit Form */}
       <div className="rounded-lg p-4 space-y-3" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>New Experiment</h3>
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>新建实验</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Strategy</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>策略</label>
             <select value={strategyName} onChange={e => handleStrategyChange(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
               {strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Symbol</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票代码</label>
             <input value={symbol} onChange={e => setSymbol(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle} />
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Period</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>周期</label>
             <select value={period} onChange={e => setPeriod(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
+              <option value="daily">日线</option>
+              <option value="weekly">周线</option>
+              <option value="monthly">月线</option>
             </select>
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始</label>
             <DatePicker selected={startDate} dateFormat="yyyy-MM-dd"
               onChange={(d: Date | null) => { if (d) { setStartDate(d); if (d > endDate) setEndDate(d) } }}
               maxDate={endDate} showMonthDropdown showYearDropdown dropdownMode="select"
               customInput={<DateBtn />} />
           </div>
           <div>
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>End</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束</label>
             <DatePicker selected={endDate} dateFormat="yyyy-MM-dd"
               onChange={(d: Date | null) => { if (d) { setEndDate(d); if (d < startDate) setStartDate(d) } }}
               minDate={startDate} maxDate={new Date()} showMonthDropdown showYearDropdown dropdownMode="select"
@@ -173,7 +173,7 @@ export default function ExperimentPanel() {
         <div className="flex gap-4 items-center flex-wrap">
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={runWfo} onChange={e => setRunWfo(e.target.checked)} />
-            Walk-Forward
+            前推验证
           </label>
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={useMarketRules} onChange={e => setUseMarketRules(e.target.checked)} />
@@ -181,7 +181,7 @@ export default function ExperimentPanel() {
           </label>
           {runWfo && (
             <div className="flex items-center gap-1.5">
-              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Splits</label>
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>分割数</label>
               <input type="number" value={wfoSplits} min={2} max={20}
                 onChange={e => setWfoSplits(Number(e.target.value))}
                 className="w-16 px-2 py-1 rounded text-sm" style={inputStyle} />
@@ -203,20 +203,20 @@ export default function ExperimentPanel() {
         <button onClick={handleSubmit} disabled={submitting || !strategyName}
           className="px-4 py-2 rounded text-sm font-medium"
           style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: (submitting || !strategyName) ? 0.5 : 1 }}>
-          {submitting ? 'Running...' : !strategyName ? 'No Strategies' : 'Run Experiment'}
+          {submitting ? '运行中...' : !strategyName ? '无可用策略' : '运行实验'}
         </button>
       </div>
 
       {/* Runs Table */}
       <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
         <div className="px-4 py-3 flex justify-between items-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Experiment Runs</h3>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>实验记录</h3>
           <div className="flex gap-2">
             <button onClick={handleCleanup} className="text-xs px-2 py-1 rounded" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              Cleanup
+              清理
             </button>
             <button onClick={loadRuns} className="text-xs px-2 py-1 rounded" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              {loading ? '...' : 'Refresh'}
+              {loading ? '...' : '刷新'}
             </button>
           </div>
         </div>
@@ -224,22 +224,22 @@ export default function ExperimentPanel() {
           <table className="w-full text-sm" style={{ color: 'var(--text-primary)' }}>
             <thead>
               <tr style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-                <th className="px-3 py-2 text-left">Time</th>
-                <th className="px-3 py-2 text-left">Strategy</th>
-                <th className="px-3 py-2 text-left">Symbol</th>
+                <th className="px-3 py-2 text-left">时间</th>
+                <th className="px-3 py-2 text-left">策略</th>
+                <th className="px-3 py-2 text-left">股票</th>
                 <th className="px-3 py-2 text-right">Sharpe</th>
-                <th className="px-3 py-2 text-right">Return</th>
-                <th className="px-3 py-2 text-right">MaxDD</th>
-                <th className="px-3 py-2 text-right">Trades</th>
+                <th className="px-3 py-2 text-right">收益</th>
+                <th className="px-3 py-2 text-right">回撤</th>
+                <th className="px-3 py-2 text-right">交易数</th>
                 <th className="px-3 py-2 text-center">Gate</th>
-                <th className="px-3 py-2 text-right">Duration</th>
+                <th className="px-3 py-2 text-right">耗时</th>
                 <th className="px-3 py-2 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {runs.length === 0 && (
                 <tr><td colSpan={10} className="px-3 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                  No experiments yet
+                  暂无实验记录
                 </td></tr>
               )}
               {runs.map(r => (
