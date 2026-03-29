@@ -74,4 +74,4 @@ def pct_change(s: pd.Series, periods: int = 1) -> pd.Series:
         raise ValueError("periods must be positive")
     if _USE_CPP:
         return pd.Series(_cpp_pct_change(_to_contig(s), periods), index=s.index, name=s.name)
-    return s.pct_change(periods=periods, fill_method=None)
+    return s / s.shift(periods) - 1

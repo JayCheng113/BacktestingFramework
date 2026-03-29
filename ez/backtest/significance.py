@@ -66,6 +66,14 @@ def compute_significance(
         sig_vals = sig_vals[:n]
         ar_vals = ar_vals[:n]
 
+        # Skip permutation for constant signals (e.g., buy-and-hold):
+        # shuffling a constant array produces the same result → p≈0 (false positive)
+        if np.std(sig_vals) < 1e-10:
+            return SignificanceTest(
+                sharpe_ci_lower=ci_lower, sharpe_ci_upper=ci_upper,
+                monte_carlo_p_value=float("nan"), is_significant=False,
+            )
+
         perm_sharpes = np.array([
             _sharpe(rng.permutation(sig_vals) * ar_vals, daily_rf)
             for _ in range(n_permutations)

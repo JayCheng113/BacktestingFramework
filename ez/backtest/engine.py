@@ -147,6 +147,12 @@ class VectorizedBacktestEngine:
         matcher = self._matcher
 
         for i in range(1, n):
+            # Guard: skip trading on NaN prices, carry equity forward
+            if np.isnan(prices[i]) or np.isnan(open_prices[i]):
+                equity_arr[i] = equity_arr[i - 1]
+                daily_ret[i] = 0.0
+                continue
+
             target_weight = weights[i] if i < len(weights) else 0.0
             exec_price = open_prices[i]
 
@@ -173,7 +179,7 @@ class VectorizedBacktestEngine:
                         final_pnl = (fill.fill_price - entry_price) * old_shares - fill.commission
                         total_pnl = partial_pnl + final_pnl - entry_comm
                         total_comm = entry_comm + partial_comm + fill.commission
-                        cost_basis = entry_price * peak_shares if peak_shares > 0 else entry_price * old_shares
+                        cost_basis = (entry_price * peak_shares + entry_comm) if peak_shares > 0 else (entry_price * old_shares + entry_comm)
                         trades.append(TradeRecord(
                             entry_time=entry_time,
                             exit_time=time_list[i],

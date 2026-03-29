@@ -38,8 +38,10 @@ class MetricsCalculator:
         excess = daily_returns - daily_rf
         sharpe = float(excess.mean() / excess.std() * np.sqrt(self._td)) if excess.std() > 1e-10 else 0.0
 
-        downside = excess[excess < 0]
-        sortino = float(excess.mean() / downside.std() * np.sqrt(self._td)) if len(downside) > 0 and downside.std() > 1e-10 else 0.0
+        # Downside deviation: sqrt(mean(min(excess, 0)^2)) over ALL days
+        downside_sq = np.minimum(excess, 0) ** 2
+        downside_dev = float(np.sqrt(downside_sq.mean()))
+        sortino = float(excess.mean() / downside_dev * np.sqrt(self._td)) if downside_dev > 1e-10 else 0.0
 
         running_max = equity_curve.cummax()
         drawdown = (equity_curve - running_max) / running_max
