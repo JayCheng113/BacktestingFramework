@@ -42,7 +42,11 @@ jobs:
         shell: bash
         run: |
           pip install pyinstaller
-          pip install "fastapi>=0.115" "uvicorn[standard]>=0.30" "duckdb>=1.0" "pandas>=2.2" "numpy>=2.0" "httpx>=0.27" "pyyaml>=6.0" "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14"
+          pip install -e ".[dev]" --no-build-isolation
+
+      - name: Run tests before build
+        shell: bash
+        run: python -m pytest tests/ -q --tb=short -x
 
       - name: Build with PyInstaller
         run: |

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]" --no-build-isolation
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -q --tb=short -x
+
+      - name: Verify version consistency
+        run: |
+          PYPROJECT_VER=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          RUNTIME_VER=$(python -c "from fastapi.testclient import TestClient; from ez.api.app import app; c=TestClient(app); print(c.get('/api/health').json()['version'])")
+          echo "pyproject.toml: $PYPROJECT_VER"
+          echo "runtime: $RUNTIME_VER"
+          if [ "$PYPROJECT_VER" != "$RUNTIME_VER" ]; then
+            echo "ERROR: Version mismatch!"
+            exit 1
+          fi
