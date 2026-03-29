@@ -80,3 +80,32 @@ class TestPrefilter:
         results = prefilter(specs, sample_data)
         for r in results:
             assert r.spec.run_wfo is True  # original spec had WFO enabled
+
+    def test_nan_metrics_do_not_pass(self, sample_data):
+        """NaN sharpe/drawdown/trades must fail pre-filter, not bypass it."""
+        from unittest.mock import patch, MagicMock
+        from ez.agent.run_spec import RunSpec
+
+        spec = RunSpec(
+            strategy_name="MACrossStrategy",
+            strategy_params={"short_period": 5, "long_period": 20},
+            symbol="000001.SZ", market="cn_stock",
+            start_date=date(2020, 1, 1), end_date=date(2024, 12, 31),
+        )
+
+        # Mock a RunResult with NaN metrics
+        mock_result = MagicMock()
+        mock_result.status = "completed"
+        mock_result.backtest.metrics = {
+            "sharpe_ratio": float("nan"),
+            "max_drawdown": float("nan"),
+            "trade_count": float("nan"),
+        }
+        mock_result.error = None
+
+        with patch("ez.agent.prefilter.Runner") as MockRunner:
+            MockRunner.return_value.run.return_value = mock_result
+            results = prefilter([spec], sample_data, PrefilterConfig(min_sharpe=0.0))
+
+        assert len(results) == 1
+        assert results[0].passed is False

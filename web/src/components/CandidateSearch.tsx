@@ -46,7 +46,7 @@ export default function CandidateSearch() {
     try {
       const ranges = paramRanges.map(pr => ({
         name: pr.name,
-        values: pr.values.split(',').map(v => Number(v.trim())).filter(v => !isNaN(v)),
+        values: [...new Set(pr.values.split(',').map(v => v.trim()).filter(v => v !== '').map(Number).filter(v => !isNaN(v)))].sort((a, b) => a - b),
       })).filter(pr => pr.values.length > 0)
 
       const res = await searchCandidates({

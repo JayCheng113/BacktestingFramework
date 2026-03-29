@@ -94,3 +94,18 @@ class TestBatchRunner:
         result = run_batch(specs, sample_data, BatchConfig(skip_prefilter=True))
         for c in result.passed:
             assert c.gate_passed is True
+
+    def test_save_completed_run_false_counts_as_duplicate(self, specs, sample_data, store):
+        """If save_completed_run returns False (race), batch should count it as duplicate."""
+        from unittest.mock import patch
+
+        # First run succeeds
+        run_batch(specs[:1], sample_data, BatchConfig(skip_prefilter=True), store=store)
+
+        # Patch save_completed_run to always return False (simulate race)
+        with patch.object(store, "save_completed_run", return_value=False), \
+             patch.object(store, "get_completed_run_id", return_value=None):
+            result = run_batch(specs[:1], sample_data, BatchConfig(skip_prefilter=True), store=store)
+
+        assert result.duplicates == 1
+        assert result.executed == 0

@@ -48,13 +48,21 @@ def _get_git_sha() -> str:
         return "unknown"
 
 
-def _resolve_strategy(name: str, params: dict[str, float]) -> Strategy:
+def _resolve_strategy(name: str, params: dict) -> Strategy:
     """Find strategy by name in the registry and instantiate with params."""
     for key, cls in Strategy._registry.items():
         if cls.__name__ == name or key == name:
             schema = cls.get_parameters_schema()
             merged = {k: v["default"] for k, v in schema.items()}
             merged.update(params)
+            # Coerce types per schema (JSON/Pydantic may send float for int params)
+            for k, v in merged.items():
+                if k in schema:
+                    expected = schema[k].get("type", "float")
+                    if expected == "int":
+                        merged[k] = int(v)
+                    elif expected == "float":
+                        merged[k] = float(v)
             return cls(**merged)
     raise ValueError(f"Strategy '{name}' not found in registry")
 

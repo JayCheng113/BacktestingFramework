@@ -117,7 +117,12 @@ def run_batch(
         # Persist
         if store is not None:
             store.save_spec(spec.to_dict())
-            store.save_completed_run(report.to_dict())
+            inserted = store.save_completed_run(report.to_dict())
+            if not inserted:
+                # Lost race — another process completed this spec
+                result.candidates.append(CandidateResult(spec=spec, skipped_duplicate=True))
+                result.duplicates += 1
+                continue
 
         result.candidates.append(CandidateResult(spec=spec, report=report))
         result.executed += 1

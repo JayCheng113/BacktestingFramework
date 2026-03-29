@@ -19,7 +19,7 @@ router = APIRouter()
 
 class ParamRangeRequest(BaseModel):
     name: str
-    values: list[float]
+    values: list[int | float]
 
 
 class SearchRequest(BaseModel):
@@ -68,15 +68,22 @@ def search_candidates(req: SearchRequest):
     """Run batch parameter search: grid or random."""
     from ez.api.routes.experiments import _fetch_data, _get_experiment_store
 
-    search_config = _build_search_config(req)
-
+    # Pre-check: reject oversized grids before materializing
     if req.mode == "grid":
-        specs = grid_search(search_config)
-    else:
-        specs = random_search(search_config, req.n_samples, req.seed)
+        total = 1
+        for pr in req.param_ranges:
+            total *= max(len(pr.values), 1)
+        if total > 1000:
+            raise HTTPException(status_code=400, detail=f"Too many candidates ({total}), max 1000")
 
-    if len(specs) > 1000:
-        raise HTTPException(status_code=400, detail=f"Too many candidates ({len(specs)}), max 1000")
+    try:
+        search_config = _build_search_config(req)
+        if req.mode == "grid":
+            specs = grid_search(search_config)
+        else:
+            specs = random_search(search_config, req.n_samples, req.seed)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     data = _fetch_data(req.symbol, req.market, req.period, req.start_date, req.end_date)
     store = _get_experiment_store()

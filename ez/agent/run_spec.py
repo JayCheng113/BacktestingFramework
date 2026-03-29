@@ -19,7 +19,7 @@ class RunSpec:
 
     # Required
     strategy_name: str
-    strategy_params: dict[str, float]
+    strategy_params: dict[str, int | float]
     symbol: str
     market: str
     start_date: date

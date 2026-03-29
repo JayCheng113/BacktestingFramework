@@ -97,7 +97,7 @@ class TestCandidateSearch:
         assert data["prefiltered"] == 4
         assert data["executed"] == 0
 
-    def test_ranked_has_sharpe(self):
+    def test_ranked_has_sharpe_and_run_id(self):
         resp = client.post("/api/candidates/search", json={
             "strategy_name": "MACrossStrategy",
             "param_ranges": [
@@ -111,6 +111,55 @@ class TestCandidateSearch:
         })
         data = resp.json()
         for c in data["ranked"]:
-            assert "sharpe" in c
+            assert c["sharpe"] is not None, "sharpe should not be None for executed candidate"
+            assert c["run_id"] is not None, "run_id should not be None for executed candidate"
             assert "params" in c
-            assert "run_id" in c
+
+    def test_int_params_preserved(self):
+        """Int strategy params (e.g., short_period) must not break from float coercion."""
+        resp = client.post("/api/candidates/search", json={
+            "strategy_name": "MACrossStrategy",
+            "param_ranges": [
+                {"name": "short_period", "values": [5]},
+                {"name": "long_period", "values": [20]},
+            ],
+            "symbol": "000001.SZ",
+            "start_date": "2020-01-01",
+            "end_date": "2023-12-31",
+            "skip_prefilter": True,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["executed"] == 1
+        # Verify the candidate actually completed (not silently failed)
+        assert len(data["ranked"]) == 1
+        assert data["ranked"][0]["sharpe"] is not None
+
+    def test_invalid_dates_returns_422(self):
+        """start_date > end_date should return 422, not 500."""
+        resp = client.post("/api/candidates/search", json={
+            "strategy_name": "MACrossStrategy",
+            "param_ranges": [
+                {"name": "short_period", "values": [5]},
+                {"name": "long_period", "values": [20]},
+            ],
+            "symbol": "000001.SZ",
+            "start_date": "2025-01-01",
+            "end_date": "2020-01-01",
+        })
+        assert resp.status_code == 422
+
+    def test_oversized_grid_rejected_early(self):
+        """Grid exceeding 1000 combinations should be rejected before generation."""
+        resp = client.post("/api/candidates/search", json={
+            "strategy_name": "MACrossStrategy",
+            "param_ranges": [
+                {"name": "short_period", "values": list(range(1, 102))},  # 101 values
+                {"name": "long_period", "values": list(range(1, 12))},    # 11 values → 1111
+            ],
+            "symbol": "000001.SZ",
+            "start_date": "2020-01-01",
+            "end_date": "2023-12-31",
+        })
+        assert resp.status_code == 400
+        assert "Too many" in resp.json()["detail"]

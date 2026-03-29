@@ -19,7 +19,7 @@ class ParamRange:
     """Search space for a single parameter."""
 
     name: str
-    values: list[float]  # discrete choices for grid; sample pool for random
+    values: list[int | float]  # discrete choices for grid; sample pool for random
 
 
 @dataclass
@@ -85,7 +85,7 @@ def random_search(config: SearchConfig, n_samples: int, seed: int | None = None)
     return specs
 
 
-def _make_spec(config: SearchConfig, params: dict[str, float]) -> RunSpec:
+def _make_spec(config: SearchConfig, params: dict[str, int | float]) -> RunSpec:
     return RunSpec(
         strategy_name=config.strategy_name,
         strategy_params=params,
