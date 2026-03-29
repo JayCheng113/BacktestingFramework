@@ -335,7 +335,7 @@ def _run_experiment(
     result = Runner().run(spec, df)
     gate = ResearchGate()
     verdict = gate.evaluate(result)
-    report = ExperimentReport.from_run(result, verdict)
+    report = ExperimentReport.from_result(result, verdict)
     report_dict = report.to_dict()
 
     store.save_spec(spec.__dict__)

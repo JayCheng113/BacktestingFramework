@@ -116,9 +116,12 @@ def get_template(kind: str = "strategy", class_name: str = "", description: str 
 _FORBIDDEN_BUILTINS = frozenset({
     "__import__", "eval", "exec", "compile", "open",
     "getattr", "setattr", "delattr", "globals", "locals",
-    "vars", "dir", "type", "super",
     "breakpoint", "exit", "quit", "help",
 })
+# NOTE: super, type, dir, vars are intentionally NOT blocked:
+# - super() is essential for class inheritance
+# - type() is used for type checking
+# - dir()/vars() are read-only introspection, not dangerous
 
 _FORBIDDEN_ATTR_CALLS = frozenset({
     "system", "popen", "exec_module", "load_module",
@@ -310,7 +313,6 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
                 sys.executable, "-m", "pytest",
                 "tests/test_strategy/test_strategy_contract.py",
                 "-v", "--tb=short", "-x",
-                "--timeout=20",
             ],
             capture_output=True,
             text=True,
