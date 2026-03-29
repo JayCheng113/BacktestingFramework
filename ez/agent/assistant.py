@@ -176,7 +176,7 @@ async def achat_stream(
     """Async streaming chat with tool-calling loop (V2.7.1).
 
     Does NOT block the event loop. Uses provider.astream_chat() for async HTTP.
-    Tool execution remains synchronous (CPU-bound, fast).
+    Tool execution runs in threadpool via asyncio.to_thread (does not block event loop).
     Yields same SSE event dicts as chat_stream().
     """
     system = LLMMessage(role="system", content=_build_system_prompt(editor_code))

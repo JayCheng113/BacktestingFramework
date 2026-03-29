@@ -31,7 +31,9 @@ async def lifespan(app: FastAPI):
                 logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
         threading.Thread(target=_warm, daemon=True).start()
     yield
-    # Async cleanup of LLM provider (must happen before sync close_resources)
+    # Async cleanup of LLM provider (must happen before sync close_resources).
+    # close_resources() also calls reset_provider_cache() → close(), but that is
+    # a no-op because aclose() already sets _async_client = None.
     from ez.llm.factory import get_cached_provider
     provider = get_cached_provider()
     if provider is not None:
