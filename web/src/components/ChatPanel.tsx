@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 
 interface Props {
   editorCode?: string
+  onCodeUpdate?: (code: string, filename?: string) => void
 }
 
 interface ChatMsg {
@@ -42,7 +43,7 @@ function titleFromMsg(msg: string): string {
   return clean.length > 24 ? clean.slice(0, 24) + '...' : clean
 }
 
-export default function ChatPanel({ editorCode = '' }: Props) {
+export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeId, setActiveId] = useState<string>(() => localStorage.getItem(ACTIVE_KEY) || '')
   const [input, setInput] = useState('')
@@ -218,6 +219,18 @@ export default function ChatPanel({ editorCode = '' }: Props) {
                   }
                   return updated
                 })
+                // Push code to editor when strategy is created/updated
+                if ((data.name === 'create_strategy' || data.name === 'update_strategy') && onCodeUpdate) {
+                  try {
+                    const r = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
+                    if (r.success && r.path) {
+                      const fname = r.path.replace('strategies/', '')
+                      fetch(`/api/code/files/${fname}`).then(resp => resp.json()).then(f => {
+                        if (f.code) onCodeUpdate(f.code, fname)
+                      }).catch(() => {})
+                    }
+                  } catch {}
+                }
                 assistantContent = ''
               } else if (eventType === 'error') {
                 updateMsgs(prev => [...prev, { role: 'assistant', content: `错误: ${data.message}` }])

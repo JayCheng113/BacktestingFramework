@@ -380,8 +380,8 @@ export default function CodeEditor() {
         )}
 
         {/* Editor + Chat split */}
-        <div className="flex-1 flex">
-          <div className={showChat ? 'w-3/5' : 'w-full'} style={{ minHeight: 0 }}>
+        <div className="flex-1 flex" style={{ minHeight: 0, overflow: 'hidden' }}>
+          <div style={{ flex: showChat ? '0 0 60%' : '1 1 100%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
             <Editor
               height="100%"
               language="python"
@@ -401,8 +401,8 @@ export default function CodeEditor() {
             />
           </div>
           {showChat && (
-            <div className="w-2/5 border-l" style={{ borderColor: 'var(--border)', minHeight: 0 }}>
-              <ChatPanel editorCode={code} />
+            <div className="border-l" style={{ flex: '0 0 40%', borderColor: 'var(--border)', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+              <ChatPanel editorCode={code} onCodeUpdate={(c, f) => { setCode(c); if (f) setFilename(f); setIsFactorCode(false) }} />
             </div>
           )}
         </div>
