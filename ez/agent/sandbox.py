@@ -122,7 +122,7 @@ _FORBIDDEN_BUILTINS = frozenset({
 # vars() IS blocked — at module scope it returns globals(), allowing sandbox escape
 # - super() is essential for class inheritance
 # - type() is used for type checking
-# - dir()/vars() are read-only introspection, not dangerous
+# - dir() is read-only introspection, not dangerous
 
 _FORBIDDEN_ATTR_CALLS = frozenset({
     "system", "popen", "exec_module", "load_module",
