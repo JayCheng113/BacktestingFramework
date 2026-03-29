@@ -34,6 +34,7 @@ export default function ExperimentPanel() {
   const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
   const [runWfo, setRunWfo] = useState(true)
   const [wfoSplits, setWfoSplits] = useState(3)
+  const [useMarketRules, setUseMarketRules] = useState(false)
 
   useEffect(() => {
     loadRuns()
@@ -75,6 +76,7 @@ export default function ExperimentPanel() {
         end_date: toStr(endDate),
         run_wfo: runWfo,
         ...(runWfo ? { wfo_n_splits: wfoSplits } : {}),
+        use_market_rules: useMarketRules,
       })
       if (res.data?.status === 'duplicate') {
         alert(`Duplicate: this experiment already has a completed run (${res.data.existing_run_id || res.data.spec_id})`)
@@ -175,11 +177,15 @@ export default function ExperimentPanel() {
               customInput={<DateBtn />} />
           </div>
         </div>
-        {/* WFO Controls */}
+        {/* WFO + Market Rules Controls */}
         <div className="flex gap-4 items-center flex-wrap">
           <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={runWfo} onChange={e => setRunWfo(e.target.checked)} />
             Walk-Forward
+          </label>
+          <label className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <input type="checkbox" checked={useMarketRules} onChange={e => setUseMarketRules(e.target.checked)} />
+            A-Share Rules (T+1, Lot 100)
           </label>
           {runWfo && (
             <div className="flex items-center gap-1.5">

@@ -76,15 +76,26 @@ def _resolve_strategy(name: str, params: dict) -> Strategy:
 
 def _build_matcher(spec: RunSpec) -> Matcher:
     if spec.slippage_rate > 0:
-        return SlippageMatcher(
+        inner: Matcher = SlippageMatcher(
             slippage_rate=spec.slippage_rate,
             commission_rate=spec.commission_rate,
             min_commission=spec.min_commission,
         )
-    return SimpleMatcher(
-        commission_rate=spec.commission_rate,
-        min_commission=spec.min_commission,
-    )
+    else:
+        inner = SimpleMatcher(
+            commission_rate=spec.commission_rate,
+            min_commission=spec.min_commission,
+        )
+    # V2.6: wrap with market rules if enabled
+    if spec.use_market_rules:
+        from ez.core.market_rules import MarketRulesMatcher
+        inner = MarketRulesMatcher(
+            inner,
+            t_plus_1=spec.t_plus_1,
+            price_limit_pct=spec.price_limit_pct,
+            lot_size=spec.lot_size,
+        )
+    return inner
 
 
 class Runner:

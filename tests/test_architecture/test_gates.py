@@ -189,7 +189,7 @@ class TestCoreStability:
 
     def test_core_package_no_unlisted_python_files(self):
         """ez/core/ should not contain unlisted .py files (excluding _cpp/)."""
-        expected = {"__init__.py", "matcher.py", "ts_ops.py"}
+        expected = {"__init__.py", "matcher.py", "ts_ops.py", "market_rules.py"}
         actual = {
             f.name
             for f in (EZ_ROOT / "core").iterdir()

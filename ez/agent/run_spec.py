@@ -32,6 +32,12 @@ class RunSpec:
     min_commission: float = 5.0
     slippage_rate: float = 0.0
 
+    # Market rules (V2.6)
+    use_market_rules: bool = False
+    t_plus_1: bool = True
+    price_limit_pct: float = 0.1
+    lot_size: int = 100
+
     # Run modes
     run_backtest: bool = True
     run_wfo: bool = True
@@ -80,6 +86,10 @@ class RunSpec:
             "run_wfo": self.run_wfo,
             "wfo_n_splits": self.wfo_n_splits,
             "wfo_train_ratio": self.wfo_train_ratio,
+            "use_market_rules": self.use_market_rules,
+            "t_plus_1": self.t_plus_1,
+            "price_limit_pct": self.price_limit_pct,
+            "lot_size": self.lot_size,
         }
         raw = json.dumps(d, sort_keys=True).encode()
         return hashlib.sha256(raw).hexdigest()[:16]
@@ -103,6 +113,10 @@ class RunSpec:
             "run_wfo": self.run_wfo,
             "wfo_n_splits": self.wfo_n_splits,
             "wfo_train_ratio": self.wfo_train_ratio,
+            "use_market_rules": self.use_market_rules,
+            "t_plus_1": self.t_plus_1,
+            "price_limit_pct": self.price_limit_pct,
+            "lot_size": self.lot_size,
             "tags": self.tags,
             "description": self.description,
         }

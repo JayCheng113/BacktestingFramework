@@ -156,6 +156,10 @@ class VectorizedBacktestEngine:
             target_weight = weights[i] if i < len(weights) else 0.0
             exec_price = open_prices[i]
 
+            # V2.6: notify matcher of bar context (MarketRules uses this)
+            if hasattr(matcher, 'on_bar'):
+                matcher.on_bar(bar_index=i, prev_close=prices[i - 1])
+
             if abs(target_weight - prev_weight) > 1e-6:
                 current_equity = cash + shares * exec_price
                 target_value = current_equity * target_weight

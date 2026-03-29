@@ -42,6 +42,12 @@ class ExperimentRequest(BaseModel):
     tags: list[str] = []
     description: str = ""
 
+    # Market rules (V2.6)
+    use_market_rules: bool = False
+    t_plus_1: bool = True
+    price_limit_pct: float = Field(default=0.1, ge=0, le=0.5)
+    lot_size: int = Field(default=100, ge=0)
+
     # Gate config (optional overrides)
     gate_min_sharpe: float = 0.5
     gate_max_drawdown: float = 0.3
@@ -124,6 +130,10 @@ def submit_experiment(req: ExperimentRequest):
             run_wfo=req.run_wfo,
             wfo_n_splits=req.wfo_n_splits,
             wfo_train_ratio=req.wfo_train_ratio,
+            use_market_rules=req.use_market_rules,
+            t_plus_1=req.t_plus_1,
+            price_limit_pct=req.price_limit_pct,
+            lot_size=req.lot_size,
             tags=req.tags,
             description=req.description,
         )
