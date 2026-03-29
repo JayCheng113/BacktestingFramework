@@ -35,7 +35,12 @@ _DEFAULT_MODELS = {
 
 def _msg_to_dict(msg: LLMMessage) -> dict:
     """Convert LLMMessage to OpenAI API format."""
-    d: dict = {"role": msg.role, "content": msg.content}
+    content = msg.content
+    # Some providers (Ollama/Qwen) require content=null when there are
+    # tool_calls and no text content. Safe for DeepSeek/OpenAI too.
+    if msg.tool_calls and not content:
+        content = None
+    d: dict = {"role": msg.role, "content": content}
     if msg.tool_calls:
         d["tool_calls"] = [
             {

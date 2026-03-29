@@ -114,7 +114,11 @@ export default function ChatPanel({ editorCode = '' }: Props) {
               } else if (eventType === 'error') {
                 setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${data.message}` }])
               }
+              eventType = '' // Reset after processing to prevent stale type
             } catch {}
+          } else if (line.trim() === '') {
+            // SSE blank line = end of event, reset type defensively
+            eventType = ''
           }
         }
       }

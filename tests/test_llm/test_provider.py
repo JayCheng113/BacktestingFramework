@@ -49,8 +49,15 @@ class TestMsgConversion:
         msg = LLMMessage(role="assistant", content="", tool_calls=[tc])
         d = _msg_to_dict(msg)
         assert d["role"] == "assistant"
+        assert d["content"] is None  # empty content + tool_calls → null
         assert len(d["tool_calls"]) == 1
         assert d["tool_calls"][0]["function"]["name"] == "fn"
+
+    def test_assistant_with_content_and_tool_calls(self):
+        tc = ToolCall(id="c1", name="fn", arguments={})
+        msg = LLMMessage(role="assistant", content="Let me check", tool_calls=[tc])
+        d = _msg_to_dict(msg)
+        assert d["content"] == "Let me check"  # non-empty content preserved
 
     def test_tool_response(self):
         msg = LLMMessage(role="tool", content="result", tool_call_id="c1", name="fn")
