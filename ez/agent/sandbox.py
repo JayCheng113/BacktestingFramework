@@ -118,7 +118,8 @@ _FORBIDDEN_BUILTINS = frozenset({
     "getattr", "setattr", "delattr", "globals", "locals", "vars",
     "breakpoint", "exit", "quit", "help",
 })
-# NOTE: super, type, dir are intentionally NOT blocked:
+# NOTE: super, type, dir are intentionally NOT blocked (safe introspection)
+# vars() IS blocked — at module scope it returns globals(), allowing sandbox escape
 # - super() is essential for class inheritance
 # - type() is used for type checking
 # - dir()/vars() are read-only introspection, not dangerous
