@@ -70,3 +70,13 @@ class TestRunSpec:
     def test_validation_no_run_mode(self):
         with pytest.raises(ValueError, match="run_backtest"):
             _make_spec(run_backtest=False, run_wfo=False)
+
+    def test_validation_price_limit_pct(self):
+        with pytest.raises(ValueError, match="price_limit_pct"):
+            _make_spec(price_limit_pct=-0.1)
+        with pytest.raises(ValueError, match="price_limit_pct"):
+            _make_spec(price_limit_pct=1.5)
+
+    def test_validation_lot_size(self):
+        with pytest.raises(ValueError, match="lot_size"):
+            _make_spec(lot_size=-1)

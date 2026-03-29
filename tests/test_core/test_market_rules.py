@@ -134,7 +134,6 @@ class TestRetryAfterReject:
         }, index=pd.date_range("2020-01-01", periods=5, freq="B"))
 
         # Strategy: always want full position (weight=1.0)
-        from ez.factor.base import Factor
         from ez.strategy.base import Strategy
 
         class AlwaysIn(Strategy):
