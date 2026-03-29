@@ -49,6 +49,7 @@ LAYER_MAP = {
     "ez.types": 0,
     "ez.errors": 0,
     "ez.config": 0,
+    "ez.llm": 0,     # infrastructure — only depends on ez.config
     "ez.core": 1,
     "ez.data": 2,
     "ez.factor": 3,

@@ -1,7 +1,7 @@
 # ez/api — API Layer
 
 ## Responsibility
-REST API exposing market data, backtesting, factor evaluation, and experiments via FastAPI.
+REST API exposing market data, backtesting, factor evaluation, experiments, code editor, and AI chat via FastAPI.
 
 ## Public Interfaces
 - `GET /api/health` — Health check
@@ -21,6 +21,14 @@ REST API exposing market data, backtesting, factor evaluation, and experiments v
 - `DELETE /api/experiments/{run_id}` — Delete experiment run (V2.5)
 - `POST /api/experiments/cleanup` — Cleanup old experiment runs (V2.5)
 - `POST /api/candidates/search` — Batch parameter search (V2.5)
+- `POST /api/code/template` — Generate strategy/factor template (V2.7)
+- `POST /api/code/validate` — Validate Python code syntax + security (V2.7)
+- `POST /api/code/save` — Save code + run contract test (V2.7)
+- `GET /api/code/files` — List user strategy files (V2.7)
+- `GET /api/code/files/{filename}` — Read a strategy file (V2.7)
+- `DELETE /api/code/files/{filename}` — Delete a strategy file (V2.7)
+- `POST /api/chat/send` — SSE streaming chat with AI assistant (V2.7)
+- `GET /api/chat/status` — Check LLM provider availability (V2.7)
 
 ## Files
 | File | Role |
@@ -32,9 +40,11 @@ REST API exposing market data, backtesting, factor evaluation, and experiments v
 | routes/factors.py | Factor listing + evaluation endpoints |
 | routes/experiments.py | Experiment submit/list/get/delete/cleanup endpoints (V2.4+V2.5) |
 | routes/candidates.py | Batch parameter search endpoint (V2.5) |
+| routes/code.py | Code editor: template, validate, save, list, read, delete (V2.7) |
+| routes/chat.py | AI chat SSE endpoint + status (V2.7) |
 
 ## Dependencies
-- Upstream: All ez modules (including ez/agent/ for experiments)
+- Upstream: All ez modules (including ez/agent/ for experiments, ez/llm/ for chat)
 - Downstream: web/ (frontend)
 
 ## Running
@@ -43,7 +53,5 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 ## Status
-- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search
-- V2.2: BacktestRequest accepts `commission_rate`, `min_commission`, `slippage_rate`
-- V2.4: ExperimentRequest with RunSpec validation (422 on invalid), idempotency (duplicate detection), query parameter bounds
-- V2.5: DELETE/cleanup experiments, POST /candidates/search (grid/random + pre-filter + ranking)
+- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search + V2.7 code editor + AI chat
+- V2.7: Code editor API (template/validate/save/list/read/delete), Chat SSE endpoint (stream + status)

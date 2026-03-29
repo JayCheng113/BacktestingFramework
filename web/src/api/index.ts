@@ -36,4 +36,22 @@ export const cleanupExperiments = (keepLast = 200) =>
 // Candidate search
 export const searchCandidates = (data: any) => api.post('/candidates/search', data)
 
+// Code editor (V2.7)
+export const generateTemplate = (data: { kind: string; class_name?: string; description?: string }) =>
+  api.post('/code/template', data)
+
+export const validateCode = (code: string) => api.post('/code/validate', { code })
+
+export const saveCode = (data: { filename: string; code: string; overwrite?: boolean }) =>
+  api.post('/code/save', data)
+
+export const listCodeFiles = () => api.get('/code/files')
+
+export const readCodeFile = (filename: string) => api.get(`/code/files/${filename}`)
+
+export const deleteCodeFile = (filename: string) => api.delete(`/code/files/${filename}`)
+
+// Chat (V2.7)
+export const chatStatus = () => api.get('/chat/status')
+
 export default api

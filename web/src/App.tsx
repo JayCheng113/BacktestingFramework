@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
 import ExperimentPanel from './components/ExperimentPanel'
+import CodeEditor from './components/CodeEditor'
 import './styles/global.css'
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
       <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
       {activeTab === 'dashboard' && <Dashboard />}
       {activeTab === 'experiments' && <ExperimentPanel />}
+      {activeTab === 'editor' && <CodeEditor />}
     </div>
   )
 }

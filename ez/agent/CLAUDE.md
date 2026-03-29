@@ -4,6 +4,7 @@
 Provide a standardized pipeline for automated and human-driven strategy research:
 RunSpec → Runner → Gate → Report → Store.
 V2.5 adds batch parameter search: CandidateSearch → PreFilter → BatchRunner → Ranking.
+V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR correction.
 
 ## Public Interfaces
 - `RunSpec` — Immutable experiment input with content-hash `spec_id` for idempotency
@@ -17,6 +18,11 @@ V2.5 adds batch parameter search: CandidateSearch → PreFilter → BatchRunner 
 - `grid_search` / `random_search` — Generate candidate RunSpecs from search space (V2.5)
 - `prefilter` — Quick backtest-only elimination of weak candidates (V2.5)
 - `run_batch` — Orchestrate pre-filter → full run → gate → rank → persist (V2.5)
+- `tool()` decorator — Register functions as AI assistant tools (V2.7)
+- `get_all_tool_schemas()` / `execute_tool()` — Tool dispatch framework (V2.7)
+- `chat_sync()` / `chat_stream()` — Agent loop with tool calling (V2.7)
+- `save_and_validate_strategy()` — Code sandbox: save + contract test (V2.7)
+- `apply_fdr()` — FDR correction for batch search results (V2.7)
 
 ## Files
 | File | Role |
@@ -29,10 +35,35 @@ V2.5 adds batch parameter search: CandidateSearch → PreFilter → BatchRunner 
 | candidate_search.py | Grid + random parameter search (V2.5) |
 | prefilter.py | Pre-filter rule engine for fast elimination (V2.5) |
 | batch_runner.py | Batch execution + ranking pipeline (V2.5) |
+| tools.py | Tool registration framework + 9 built-in tools (V2.7) |
+| assistant.py | Agent loop: message → LLM → tool_use → execute → respond (V2.7) |
+| sandbox.py | Code validation: syntax check, forbidden imports, contract test (V2.7) |
+| fdr.py | False Discovery Rate correction: Bonferroni, Benjamini-Hochberg (V2.7) |
+| data_access.py | Agent-layer data singletons (avoids L5→L6 import) (V2.7) |
 
 ## Dependencies
-- Upstream: ez/backtest/ (Engine, WFO, significance), ez/core/ (Matcher), ez/strategy/ (Strategy registry)
-- Downstream: ez/api/routes/experiments.py, ez/api/routes/candidates.py, web/ExperimentPanel, web/CandidateSearch
+- Upstream: ez/backtest/ (Engine, WFO, significance), ez/core/ (Matcher), ez/strategy/ (Strategy registry), ez/llm/ (LLMProvider, V2.7)
+- Downstream: ez/api/routes/experiments.py, ez/api/routes/candidates.py, ez/api/routes/code.py, ez/api/routes/chat.py, web/
+
+## Agent Tools (V2.7)
+| Tool | Capability | Permission |
+|------|-----------|------------|
+| list_strategies | List registered strategies + params | Read-only |
+| list_factors | List available factors | Read-only |
+| read_source | Read strategy/factor source code | Read-only (strategies/, ez/strategy/builtin/, ez/factor/builtin/) |
+| create_strategy | Create file + contract test | Write (strategies/ only) |
+| update_strategy | Update file + contract test | Write (strategies/ only) |
+| run_backtest | Single backtest execution | Execute (no data modification) |
+| run_experiment | Full experiment pipeline | Execute (persists to ExperimentStore) |
+| list_experiments | Recent experiment list | Read-only |
+| explain_metrics | Experiment detail + gate reasons | Read-only |
+
+## Sandbox Security (V2.7)
+- **Forbidden imports**: os, sys, subprocess, socket, shutil, pathlib, importlib, ctypes, multiprocessing, threading, signal, pickle, http, urllib, requests, httpx, duckdb, etc.
+- **File writes**: Only to strategies/ directory
+- **Filename validation**: No path traversal, no hidden files, no underscore prefix
+- **Contract test**: Runs in subprocess with 30s timeout
+- **Failed test cleanup**: File is deleted if contract test fails
 
 ## Gate Rules (configurable via GateConfig)
 | Rule | Default | Description |
@@ -50,6 +81,8 @@ V2.5 adds batch parameter search: CandidateSearch → PreFilter → BatchRunner 
 - Same spec_id with completed run → API returns duplicate status (idempotency)
 - Pre-filter uses backtest-only mode (no WFO) for speed — full pipeline runs on survivors only
 - BatchRunner skips duplicates via ExperimentStore.get_completed_run_id() (V2.5)
+- Agent tools use ez/agent/data_access.py for singletons, NOT ez/api/deps.py (layer discipline)
+- Tool framework uses decorator pattern — `@tool(name, description, params)` auto-registers
 
 ## Status
 - experimental (V2.4+) — interfaces may change
