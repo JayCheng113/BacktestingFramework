@@ -69,7 +69,10 @@ def _resolve_strategy(name: str, params: dict) -> Strategy:
                     elif expected == "float":
                         merged[k] = float(v)
                     elif expected == "bool":
-                        merged[k] = bool(v)
+                        if isinstance(v, str):
+                            merged[k] = v.lower() not in ("false", "0", "no", "")
+                        else:
+                            merged[k] = bool(v)
             return cls(**merged)
     raise ValueError(f"Strategy '{name}' not found in registry")
 

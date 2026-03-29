@@ -68,22 +68,17 @@ class MarketRulesMatcher(Matcher):
                 return _zero_fill(price)
             actual_shares = lots * self._lot
             if actual_shares < fill.shares:
-                # Re-call inner matcher with reduced amount for correct commission
-                reduced_amount = actual_shares * fill.fill_price * 1.01  # slight buffer for commission
-                fill = self._inner.fill_buy(price, reduced_amount)
-                # Re-round in case inner produced slightly different shares
-                if fill.shares > 0:
-                    final_shares = int(fill.shares // self._lot) * self._lot
-                    if final_shares == 0:
-                        return _zero_fill(price)
-                    if final_shares != fill.shares:
-                        actual_amount = final_shares * fill.fill_price + fill.commission
-                        fill = FillResult(
-                            shares=final_shares,
-                            fill_price=fill.fill_price,
-                            commission=fill.commission,
-                            net_amount=-(actual_amount),
-                        )
+                # Recompute commission proportionally instead of re-calling inner
+                # (re-calling with a buffer can exceed the original budget)
+                ratio = actual_shares / fill.shares
+                adj_commission = fill.commission * ratio
+                adj_amount = actual_shares * fill.fill_price + adj_commission
+                fill = FillResult(
+                    shares=actual_shares,
+                    fill_price=fill.fill_price,
+                    commission=adj_commission,
+                    net_amount=-adj_amount,
+                )
 
         if fill.shares > 0:
             self._buy_bar = self._bar

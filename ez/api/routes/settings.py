@@ -16,6 +16,7 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 class LLMSettings(BaseModel):
     provider: str = "deepseek"
     api_key: str = ""
+    clear_api_key: bool = False  # set True to explicitly remove the key
     model: str = ""
     base_url: str = ""
     temperature: float = 0.3
@@ -144,9 +145,13 @@ def update_llm_settings(req: LLMSettings):
         # API key → .env
         env_updates: dict[str, str] = {}
         env_key = _KEY_MAP.get(req.provider, "")
-        if env_key and req.api_key:
-            env_updates[env_key] = req.api_key
-            os.environ[env_key] = req.api_key
+        if env_key:
+            if req.clear_api_key:
+                env_updates[env_key] = ""
+                os.environ.pop(env_key, None)
+            elif req.api_key:
+                env_updates[env_key] = req.api_key
+                os.environ[env_key] = req.api_key
         if env_updates:
             _write_env(env_updates)
 

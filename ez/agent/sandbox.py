@@ -291,7 +291,13 @@ def _reload_user_strategy(filename: str) -> None:
         if module_name in sys.modules:
             del sys.modules[module_name]
 
-        # Invalidate import caches to avoid stale bytecode (P1-6 time resolution)
+        # Delete .pyc to defeat Python's mtime-based bytecode cache
+        # (same-second writes produce same mtime → stale .pyc reuse)
+        py_file = _STRATEGIES_DIR / filename
+        pycache = _STRATEGIES_DIR / "__pycache__"
+        if pycache.exists():
+            for pyc in pycache.glob(f"{stem}*.pyc"):
+                pyc.unlink(missing_ok=True)
         importlib.invalidate_caches()
 
         # Re-import via spec_from_file_location (same as loader fallback)
@@ -321,8 +327,21 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
         capture_output=True, timeout=5,
     )
     if check.returncode != 0:
-        logger.warning("pytest not installed — skipping contract test, syntax-only validation")
-        return {"passed": True, "output": "(pytest not installed — syntax check only)"}
+        # Fallback: try to import the file and verify it defines a Strategy subclass
+        logger.warning("pytest not installed — running import-only validation")
+        verify = subprocess.run(
+            [sys.executable, "-c",
+             f"import importlib.util, sys; "
+             f"spec=importlib.util.spec_from_file_location('_check','{_STRATEGIES_DIR / filename}'); "
+             f"mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
+             f"from ez.strategy.base import Strategy; "
+             f"classes=[v for v in vars(mod).values() if isinstance(v,type) and issubclass(v,Strategy) and v is not Strategy]; "
+             f"assert classes, 'No Strategy subclass found'; print(f'OK: {{[c.__name__ for c in classes]}}')"],
+            capture_output=True, text=True, timeout=15, cwd=str(_PROJECT_ROOT),
+        )
+        passed = verify.returncode == 0
+        output = (verify.stdout + verify.stderr)[-1000:]
+        return {"passed": passed, "output": f"(pytest不可用，import验证) {output}"}
 
     try:
         result = subprocess.run(

@@ -146,7 +146,7 @@ def _read_source(path: str) -> str:
     ]
     full = (_PROJECT_ROOT / path).resolve()
     # Must resolve to inside one of the allowed directories
-    if not any(str(full).startswith(str(d)) for d in allowed_dirs):
+    if not any(str(full).startswith(str(d) + "/") or str(full) == str(d) for d in allowed_dirs):
         return json.dumps({"error": "Access denied: path resolves outside allowed directories"})
     if not full.exists() or not full.is_file():
         return json.dumps({"error": f"File not found: {path}"})

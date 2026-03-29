@@ -100,7 +100,9 @@ if _FRONTEND_DIR.exists():
 
     @app.get("/{path:path}")
     async def serve_frontend(path: str):
-        """Serve React SPA — any non-API route returns index.html."""
+        """Serve React SPA — non-API routes return index.html. API routes get 404."""
+        if path.startswith("api/"):
+            return JSONResponse(status_code=404, content={"detail": f"API endpoint not found: /{path}"})
         file = _FRONTEND_DIR / path
         if file.exists() and file.is_file():
             return FileResponse(str(file))

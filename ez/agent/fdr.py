@@ -38,7 +38,7 @@ def bonferroni(
         return []
     results = []
     for spec_id, p in p_values:
-        if math.isnan(p) or math.isinf(p):
+        if not isinstance(p, (int, float)) or math.isnan(p) or math.isinf(p):
             results.append(FDRResult(spec_id=spec_id, raw_p_value=p, adjusted_p_value=float("nan"), is_significant=False))
             continue
         adj = min(p * n, 1.0)
@@ -66,9 +66,11 @@ def benjamini_hochberg(
     if n == 0:
         return []
 
-    # Separate NaN p-values
-    valid = [(sid, p) for sid, p in p_values if not (math.isnan(p) or math.isinf(p))]
-    nan_ids = {sid for sid, p in p_values if math.isnan(p) or math.isinf(p)}
+    # Separate invalid p-values (None, NaN, Inf)
+    def _is_valid(p):
+        return isinstance(p, (int, float)) and not (math.isnan(p) or math.isinf(p))
+    valid = [(sid, p) for sid, p in p_values if _is_valid(p)]
+    nan_ids = {sid for sid, p in p_values if not _is_valid(p)}
 
     if not valid:
         return [FDRResult(spec_id=sid, raw_p_value=p, adjusted_p_value=float("nan"), is_significant=False) for sid, p in p_values]
@@ -125,7 +127,7 @@ def apply_fdr(
         alpha: significance threshold.
     """
     p_values = [
-        (r.get("spec_id", ""), r.get("p_value", float("nan")))
+        (r.get("spec_id", ""), r.get("p_value") if isinstance(r.get("p_value"), (int, float)) else float("nan"))
         for r in ranked_results
     ]
 
