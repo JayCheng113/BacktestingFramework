@@ -202,10 +202,10 @@ export default function ExperimentPanel() {
             ))}
           </div>
         )}
-        <button onClick={handleSubmit} disabled={submitting}
+        <button onClick={handleSubmit} disabled={submitting || !strategyName}
           className="px-4 py-2 rounded text-sm font-medium"
-          style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: submitting ? 0.5 : 1 }}>
-          {submitting ? 'Running...' : 'Run Experiment'}
+          style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: (submitting || !strategyName) ? 0.5 : 1 }}>
+          {submitting ? 'Running...' : !strategyName ? 'No Strategies' : 'Run Experiment'}
         </button>
       </div>
 

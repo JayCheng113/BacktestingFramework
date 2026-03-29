@@ -268,13 +268,14 @@ class ExperimentStore:
         if not row:
             return False
         spec_id = row[0]
-        self._conn.execute("DELETE FROM completed_specs WHERE run_id = ?", [run_id])
+        # Delete run first
         self._conn.execute("DELETE FROM experiment_runs WHERE run_id = ?", [run_id])
-        # Clean orphan spec if no runs remain
+        # Clean orphan completed_specs + spec if no runs remain
         remaining = self._conn.execute(
             "SELECT COUNT(*) FROM experiment_runs WHERE spec_id = ?", [spec_id],
         ).fetchone()[0]
         if remaining == 0:
+            self._conn.execute("DELETE FROM completed_specs WHERE spec_id = ?", [spec_id])
             self._conn.execute("DELETE FROM experiment_specs WHERE spec_id = ?", [spec_id])
         return True
 

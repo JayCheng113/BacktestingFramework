@@ -82,6 +82,7 @@ export default function CandidateSearch() {
     setParamRanges(next)
   }
 
+  const hasRangeErrors = paramRanges.some(pr => pr.min > pr.max || pr.step <= 0)
   const combos = mode === 'grid' ? totalCombinations(paramRanges) : Math.min(nSamples, totalCombinations(paramRanges))
 
   const handleSearch = async () => {
@@ -189,22 +190,28 @@ export default function CandidateSearch() {
               </div>
               {paramRanges.map((pr, i) => {
                 const vals = generateValues(pr)
+                const hasError = pr.min > pr.max || pr.step <= 0
+                const errStyle = hasError ? { ...inputStyle, border: '1px solid #ef4444' } : inputStyle
                 return (
                   <div key={pr.name} className="grid grid-cols-[120px_1fr_1fr_1fr_1fr] gap-2 items-center">
                     <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}
                       title={pr.name}>{pr.name}</span>
                     <input type="number" value={pr.min} step={pr.type === 'int' ? 1 : 0.1}
                       onChange={e => updateRange(i, 'min', Number(e.target.value))}
-                      className="px-2 py-1 rounded text-sm w-full" style={inputStyle} />
+                      className="px-2 py-1 rounded text-sm w-full" style={pr.min > pr.max ? errStyle : inputStyle} />
                     <input type="number" value={pr.max} step={pr.type === 'int' ? 1 : 0.1}
                       onChange={e => updateRange(i, 'max', Number(e.target.value))}
-                      className="px-2 py-1 rounded text-sm w-full" style={inputStyle} />
-                    <input type="number" value={pr.step} step={pr.type === 'int' ? 1 : 0.1} min={pr.type === 'int' ? 1 : 0.01}
-                      onChange={e => updateRange(i, 'step', Number(e.target.value))}
-                      className="px-2 py-1 rounded text-sm w-full" style={inputStyle} />
-                    <span className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}
-                      title={vals.join(', ')}>
-                      [{vals.length}] {vals.slice(0, 6).join(', ')}{vals.length > 6 ? '...' : ''}
+                      className="px-2 py-1 rounded text-sm w-full" style={pr.min > pr.max ? errStyle : inputStyle} />
+                    <input type="number" value={pr.step} step={pr.type === 'int' ? 1 : 0.1}
+                      min={pr.type === 'int' ? 1 : 0.01}
+                      onChange={e => updateRange(i, 'step', Math.max(pr.type === 'int' ? 1 : 0.01, Number(e.target.value)))}
+                      className="px-2 py-1 rounded text-sm w-full" style={pr.step <= 0 ? errStyle : inputStyle} />
+                    <span className="text-xs truncate"
+                      style={{ color: hasError ? '#ef4444' : 'var(--text-secondary)' }}
+                      title={hasError ? (pr.min > pr.max ? 'Min > Max' : 'Step must be > 0') : vals.join(', ')}>
+                      {hasError
+                        ? (pr.min > pr.max ? 'Min > Max' : 'Step > 0')
+                        : `[${vals.length}] ${vals.slice(0, 6).join(', ')}${vals.length > 6 ? '...' : ''}`}
                     </span>
                   </div>
                 )
@@ -215,12 +222,12 @@ export default function CandidateSearch() {
 
         {/* Row 4: Search button + combo count */}
         <div className="flex items-center gap-3">
-          <button onClick={handleSearch} disabled={searching || combos > 1000}
+          <button onClick={handleSearch} disabled={searching || combos > 1000 || hasRangeErrors || !strategyName}
             className="px-4 py-2 rounded text-sm font-medium"
-            style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: (searching || combos > 1000) ? 0.5 : 1 }}>
+            style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: (searching || combos > 1000 || hasRangeErrors || !strategyName) ? 0.5 : 1 }}>
             {searching ? 'Searching...' : 'Search'}
           </button>
-          <span className="text-xs" style={{ color: combos > 1000 ? '#ef4444' : 'var(--text-secondary)' }}>
+          <span className="text-xs" style={{ color: (combos > 1000 || hasRangeErrors) ? '#ef4444' : 'var(--text-secondary)' }}>
             {combos} combination{combos !== 1 ? 's' : ''}
             {combos > 1000 ? ' (max 1000)' : ''}
           </span>

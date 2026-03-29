@@ -73,9 +73,12 @@ def random_search(config: SearchConfig, n_samples: int, seed: int | None = None)
     if n_samples >= total:
         return grid_search(config)
 
-    seen: set[tuple[float, ...]] = set()
+    seen: set[tuple] = set()
     specs = []
-    while len(specs) < n_samples:
+    max_iters = n_samples * 100  # safety limit to prevent infinite loop
+    iters = 0
+    while len(specs) < n_samples and iters < max_iters:
+        iters += 1
         combo = tuple(rng.choice(vl) for vl in value_lists)
         if combo in seen:
             continue

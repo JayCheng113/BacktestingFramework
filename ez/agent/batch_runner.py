@@ -59,7 +59,7 @@ class BatchResult:
     def ranked(self) -> list[CandidateResult]:
         """Candidates sorted by Sharpe descending (gate-passed first)."""
         executed = [c for c in self.candidates if c.report is not None]
-        return sorted(executed, key=lambda c: (c.gate_passed, c.sharpe), reverse=True)
+        return sorted(executed, key=lambda c: (c.gate_passed, c.sharpe, c.spec.spec_id), reverse=True)
 
     @property
     def passed(self) -> list[CandidateResult]:

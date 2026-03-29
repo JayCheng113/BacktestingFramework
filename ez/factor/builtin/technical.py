@@ -161,7 +161,7 @@ class VWAP(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        typical_price = (data["high"] + data["low"] + data["close"]) / 3
+        typical_price = (data["high"] + data["low"] + data["adj_close"]) / 3
         tp_vol = typical_price * data["volume"]
         data[self.name] = (
             tp_vol.rolling(self._period).sum()
@@ -188,7 +188,7 @@ class OBV(Factor):
         import numpy as np
 
         data = data.copy()
-        sign = np.sign(ts_ops.diff(data["close"]))
+        sign = np.sign(ts_ops.diff(data["adj_close"]))
         data[self.name] = (data["volume"] * sign).cumsum()
         return data
 
@@ -209,7 +209,7 @@ class ATR(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        prev_close = data["close"].shift(1)
+        prev_close = data["adj_close"].shift(1)
         tr = pd.concat([
             data["high"] - data["low"],
             (data["high"] - prev_close).abs(),
