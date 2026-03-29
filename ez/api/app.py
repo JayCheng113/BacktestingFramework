@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     close_resources()
 
 
-app = FastAPI(title="ez-trading", version="0.2.7.1", lifespan=lifespan)
+app = FastAPI(title="ez-trading", version="0.2.8", lifespan=lifespan)
 
 config = load_config()
 app.add_middleware(
@@ -92,7 +92,7 @@ def health():
     from ez.strategy.base import Strategy
     return {
         "status": "ok",
-        "version": "0.2.7.1",
+        "version": "0.2.8",
         "strategies_registered": len(Strategy._registry),
     }
 

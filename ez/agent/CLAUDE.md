@@ -85,5 +85,16 @@ V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR 
 - Agent tools use ez/agent/data_access.py for singletons, NOT ez/api/deps.py (layer discipline)
 - Tool framework uses decorator pattern — `@tool(name, description, params)` auto-registers
 
+## V2.8 Autonomous Research Agent
+| File | Role |
+|------|------|
+| hypothesis.py | E1: LLM hypothesis generation from research goal |
+| code_gen.py | E2: LLM strategy code generation with sandbox validation |
+| analyzer.py | E4: LLM result analysis and direction suggestions |
+| loop_controller.py | E5: Budget tracking, convergence detection, stop conditions |
+| research_report.py | E6: Aggregate iterations into final report |
+| research_store.py | DuckDB persistence: research_tasks + research_iterations |
+| research_runner.py | Main orchestrator: coordinate E1-E6 in async loop with SSE events |
+
 ## Status
 - experimental (V2.4+) — interfaces may change
