@@ -57,6 +57,11 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 ```
 
+## Critical Notes
+- SPA catch-all (`/{path:path}`) returns 404 JSON for `/api/*` paths, HTML for all others
+- Settings endpoints write to `.env` (api keys) and `configs/default.yaml` (provider/model)
+- Walk-Forward: `n_splits >= 2`, `0 < train_ratio < 1` enforced by Pydantic
+
 ## Status
-- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search + V2.7 code editor + AI chat
-- V2.7: Code editor API (template/validate/save/list/read/delete), Chat SSE endpoint (stream + status)
+- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search + V2.7 code editor + AI chat + settings
+- V2.7: Code editor API, Chat SSE, Settings API (LLM/Tushare read/write with .env injection guard)

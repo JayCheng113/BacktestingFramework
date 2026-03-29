@@ -43,6 +43,14 @@ These remain direct pandas calls. Only factor-layer time-series math routes thro
 - `slippage_rate=0` is equivalent to SimpleMatcher
 - Negative parameters rejected (ValueError)
 
+## MarketRulesMatcher (V2.6)
+- Decorator wrapping inner Matcher (SimpleMatcher/SlippageMatcher)
+- T+1: cannot sell shares bought on the same bar (`_buy_bar == _bar`)
+- Price limits: 涨停不可买 (`price >= prev_close * 1.1`), 跌停不可卖
+- Lot size: round down to `lot_size` multiples, proportional commission adjustment
+- `on_bar(bar_index, prev_close)` called by engine via `hasattr` check
+- **Note**: 整手佣金用比例缩减 (`ratio = actual_shares / fill.shares`)，不重调 inner matcher
+
 ## Critical: ewm_mean adjust=True
 pandas `ewm(adjust=True)` (default) uses a divisor-corrected formula, NOT simple
 recursive `EMA = alpha*x + (1-alpha)*prev`. C++ implementation MUST match:
