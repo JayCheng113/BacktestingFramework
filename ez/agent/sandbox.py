@@ -13,6 +13,7 @@ import importlib
 import importlib.util
 import logging
 import re
+import threading
 import subprocess
 import sys
 from pathlib import Path
@@ -116,12 +117,25 @@ _FORBIDDEN_BUILTINS = frozenset({
     "__import__", "eval", "exec", "compile", "open",
     "getattr", "setattr", "delattr", "globals", "locals",
     "vars", "dir", "type", "super",
-    "breakpoint", "exit", "quit",
+    "breakpoint", "exit", "quit", "help",
 })
 
 _FORBIDDEN_ATTR_CALLS = frozenset({
     "system", "popen", "exec_module", "load_module",
     "run", "call", "check_output", "Popen",
+})
+
+# Dunder attributes that are safe (needed for normal Python code)
+_SAFE_DUNDERS = frozenset({
+    "__init__", "__name__", "__doc__", "__class__", "__module__",
+    "__str__", "__repr__", "__len__", "__iter__", "__next__",
+    "__enter__", "__exit__", "__eq__", "__ne__", "__lt__", "__gt__",
+    "__le__", "__ge__", "__hash__", "__bool__", "__add__", "__sub__",
+    "__mul__", "__truediv__", "__floordiv__", "__mod__", "__pow__",
+    "__getitem__", "__setitem__", "__contains__", "__call__",
+    "__annotations__", "__dict__", "__slots__", "__all__",
+    "__init_subclass__", "__post_init__", "__abstractmethods__",
+    "__future__",
 })
 
 
@@ -159,6 +173,17 @@ def check_syntax(code: str) -> list[str]:
                 errors.append(f"Forbidden call: {name}() (line {node.lineno})")
             if name in _FORBIDDEN_ATTR_CALLS:
                 errors.append(f"Forbidden call: .{name}() (line {node.lineno})")
+
+        # Block dangerous dunder attribute access (e.g. __subclasses__, __bases__)
+        elif isinstance(node, ast.Attribute):
+            attr = node.attr
+            if attr.startswith("__") and attr.endswith("__") and attr not in _SAFE_DUNDERS:
+                errors.append(f"Forbidden dunder access: .{attr} (line {node.lineno})")
+
+        # Block __builtins__ name access (dict-style bypass)
+        elif isinstance(node, ast.Name):
+            if node.id == "__builtins__":
+                errors.append(f"Forbidden name: __builtins__ (line {node.lineno})")
 
     return errors
 
@@ -236,8 +261,11 @@ def save_and_validate_strategy(
     }
 
 
+_reload_lock = threading.Lock()
+
+
 def _reload_user_strategy(filename: str) -> None:
-    """Hot-reload a user strategy after save.
+    """Hot-reload a user strategy after save (thread-safe).
 
     Steps:
     1. Remove old module from sys.modules (so re-import is fresh)
@@ -249,28 +277,29 @@ def _reload_user_strategy(filename: str) -> None:
     stem = filename.replace(".py", "")
     module_name = f"strategies.{stem}"
 
-    # Find and remove old registry entries from this module
-    old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
-    for k in old_keys:
-        del Strategy._registry[k]
+    with _reload_lock:
+        # Find and remove old registry entries from this module
+        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
+        for k in old_keys:
+            del Strategy._registry[k]
 
-    # Remove old module from sys.modules
-    if module_name in sys.modules:
-        del sys.modules[module_name]
+        # Remove old module from sys.modules
+        if module_name in sys.modules:
+            del sys.modules[module_name]
 
-    # Re-import via spec_from_file_location (same as loader fallback)
-    py_file = _STRATEGIES_DIR / filename
-    if not py_file.exists():
-        return
-    try:
-        spec = importlib.util.spec_from_file_location(module_name, py_file)
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = mod
-            spec.loader.exec_module(mod)
-            logger.info("Hot-reloaded strategy: %s", filename)
-    except Exception as e:
-        logger.warning("Failed to hot-reload strategy %s: %s", filename, e)
+        # Re-import via spec_from_file_location (same as loader fallback)
+        py_file = _STRATEGIES_DIR / filename
+        if not py_file.exists():
+            return
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+                logger.info("Hot-reloaded strategy: %s", filename)
+        except Exception as e:
+            logger.warning("Failed to hot-reload strategy %s: %s", filename, e)
 
 
 def _run_contract_test(filename: str, timeout: int = 30) -> dict:

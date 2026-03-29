@@ -87,6 +87,34 @@ class TestSyntaxCheck:
         errors = check_syntax(code)
         assert len(errors) >= 1  # at least the import
 
+    def test_forbidden_subclasses(self):
+        code = '().__class__.__bases__[0].__subclasses__()'
+        errors = check_syntax(code)
+        assert any("__subclasses__" in e for e in errors)
+
+    def test_forbidden_builtins_dict(self):
+        code = '__builtins__["open"]'
+        errors = check_syntax(code)
+        assert any("__builtins__" in e for e in errors)
+
+    def test_forbidden_globals_attr(self):
+        code = 'x.__globals__'
+        errors = check_syntax(code)
+        assert any("__globals__" in e for e in errors)
+
+    def test_allowed_init_dunder(self):
+        code = 'class Foo:\n  def __init__(self): pass'
+        assert check_syntax(code) == []
+
+    def test_allowed_future_import(self):
+        code = 'from __future__ import annotations'
+        assert check_syntax(code) == []
+
+    def test_forbidden_help(self):
+        code = 'help()'
+        errors = check_syntax(code)
+        assert any("help" in e for e in errors)
+
 
 class TestSafeFilename:
     def test_valid(self):

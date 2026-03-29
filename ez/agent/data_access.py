@@ -83,3 +83,13 @@ def get_experiment_store() -> ExperimentStore:
         conn = duckdb.connect(str(p))
         _exp_store = ExperimentStore(conn)
     return _exp_store
+
+
+def reset_data_access() -> None:
+    """Reset cached singletons (for testing)."""
+    global _store, _chain, _exp_store
+    _chain = None
+    _exp_store = None
+    if _store is not None:
+        _store.close()
+        _store = None
