@@ -81,12 +81,10 @@ class EtfMacdRotation(PortfolioStrategy):
             if len(close_ma.dropna()) < self.rank_period + 2:
                 continue
 
-            # MA-smoothed momentum
-            ratio = (close_ma.iloc[-2] - close_ma.iloc[-self.rank_period - 1])
-            if close_ma.iloc[-self.rank_period - 1] != 0:
-                ratio = ratio / close_ma.iloc[-self.rank_period - 1]
-            if close_ma.iloc[-2] != 0:
-                ratio = ratio / close_ma.iloc[-2]
+            # MA-smoothed momentum (standard percent return)
+            start_val = close_ma.iloc[-self.rank_period - 1]
+            end_val = close_ma.iloc[-2]
+            ratio = (end_val - start_val) / start_val if start_val != 0 else 0
             returns[sym] = ratio
 
             # Historical returns for exponential weighting (adaptive: use available data)
@@ -119,7 +117,7 @@ class EtfMacdRotation(PortfolioStrategy):
                 continue
             # max historical return as confidence signal (dimensionless)
             _EXP_SCALE = 10  # tuning: higher = more aggressive differentiation between assets
-            exp_rets[sym] = math.exp(max(hr) * _EXP_SCALE)
+            exp_rets[sym] = math.exp(min(max(hr) * _EXP_SCALE, 500))
             total_exp += exp_rets[sym]
 
         # Market panic check: >75% negative → stay cash
@@ -220,7 +218,7 @@ class EtfSectorSwitch(PortfolioStrategy):
                 cW[sym] = cW[sym][-20:]
 
             vote = 0
-            for j, v in enumerate(reversed(cW[sym][:2])):
+            for j, v in enumerate(reversed(cW[sym][-2:])):
                 vote += v * (2 - j) / 2
 
             # Penalty from prev_returns
@@ -304,8 +302,7 @@ class EtfStockEnhance(PortfolioStrategy):
             raise ValueError(f"top_n must be >= 1, got {top_n}")
         self.top_n = top_n
         self.stock_ratio = max(0, min(1, stock_ratio))
-        self._inner = EtfSectorSwitch.__new__(EtfSectorSwitch)
-        self._inner.__init__(top_n=top_n, broad_symbols=broad_symbols, sector_symbols=sector_symbols)
+        self._inner = EtfSectorSwitch(top_n=top_n, broad_symbols=broad_symbols, sector_symbols=sector_symbols)
 
     @property
     def lookback_days(self) -> int:

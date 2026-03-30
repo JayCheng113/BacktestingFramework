@@ -137,7 +137,7 @@ def run_portfolio_backtest(
         prices: dict[str, float] = {}
         raw_close_today: dict[str, float] = {}
         has_bar_today: set[str] = set()
-        for sym in set(list(holdings.keys()) + list(tradeable)):
+        for sym in holdings.keys() | tradeable:
             if sym not in _sym_data:
                 continue
             sdates, adj_arr, raw_arr, date_set = _sym_data[sym]
@@ -150,11 +150,11 @@ def run_portfolio_backtest(
                     prices[sym] = adj_val
                 elif not np.isnan(raw_val):
                     prices[sym] = raw_val
-                elif sym in prev_prices:
+                elif sym in prev_prices and not np.isnan(prev_prices[sym]):
                     prices[sym] = prev_prices[sym]
                 if not np.isnan(raw_val):
                     raw_close_today[sym] = raw_val
-            elif sym in prev_prices:
+            elif sym in prev_prices and not np.isnan(prev_prices[sym]):
                 prices[sym] = prev_prices[sym]
             if day in date_set:
                 has_bar_today.add(sym)
@@ -304,28 +304,22 @@ def run_portfolio_backtest(
         prev_raw_close = dict(raw_close_today)
 
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
-    # C3 fix: first_price must be at backtest start, not data start (which includes lookback)
-    if benchmark_symbol and benchmark_symbol in universe_data and result.dates:
-        bench_df = universe_data[benchmark_symbol]
-        price_col = "adj_close" if "adj_close" in bench_df.columns else "close"
-        # Find benchmark price at backtest start date
+    # O(n) single-pass via pre-indexed prices (was O(n²) df.loc per day)
+    if benchmark_symbol and benchmark_symbol in _sym_data and result.dates:
+        bench_dates, bench_adj, bench_raw, _ = _sym_data[benchmark_symbol]
+        # Find first_price at backtest start
         first_day = result.dates[0]
-        if isinstance(bench_df.index, pd.DatetimeIndex):
-            start_mask = bench_df.index.date <= first_day
+        idx0 = bisect.bisect_right(bench_dates, first_day) - 1
+        first_price = bench_adj[idx0] if idx0 >= 0 and not np.isnan(bench_adj[idx0]) else 0
+        if first_price > 0:
+            for day in result.dates:
+                idx = bisect.bisect_right(bench_dates, day) - 1
+                if idx >= 0 and not np.isnan(bench_adj[idx]):
+                    result.benchmark_curve.append(float(initial_cash * bench_adj[idx] / first_price))
+                else:
+                    result.benchmark_curve.append(result.benchmark_curve[-1] if result.benchmark_curve else initial_cash)
         else:
-            start_mask = bench_df.index <= first_day
-        start_data = bench_df.loc[start_mask]
-        first_price = float(start_data[price_col].iloc[-1]) if not start_data.empty else 0
-        for day in result.dates:
-            if isinstance(bench_df.index, pd.DatetimeIndex):
-                mask = bench_df.index.date <= day
-            else:
-                mask = bench_df.index <= day
-            valid = bench_df.loc[mask]
-            if not valid.empty and first_price > 0:
-                result.benchmark_curve.append(float(initial_cash * valid[price_col].iloc[-1] / first_price))
-            else:
-                result.benchmark_curve.append(initial_cash)
+            result.benchmark_curve = [initial_cash] * len(result.dates)
     else:
         result.benchmark_curve = [initial_cash] * len(result.dates)
 
