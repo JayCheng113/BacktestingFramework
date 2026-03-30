@@ -92,6 +92,9 @@ No version tag without review pass. No push without critical issues resolved.
 - 配对交易空腿、市场中性 — A 股不可行，推迟到 V3.x 有期货基础设施后考虑
 
 ## Known Limitations (后续版本跟进)
+- 单股回测 API 未接 MarketRulesMatcher — 前端 BacktestSettings 显示印花税/整手/涨跌停，但后端只透传 commission_rate 给 SimpleMatcher (V2.9.1 修)
+- 单股引擎无印花税 — SimpleMatcher 不支持卖出额外扣税 (V2.9.1 修)
+- 组合引擎价格查找 O(days×symbols) 性能 — 大 universe 可能慢 (V2.9.1 优化)
 - 研究任务不支持进程恢复 (crash recovery)
 - 研究任务串行 (同时只跑 1 个)
 - 数据源链扁平去重而非按市场独立路由
