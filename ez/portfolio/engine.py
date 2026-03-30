@@ -26,7 +26,8 @@ EPS_FUND = 0.01  # accounting tolerance (cents)
 
 @dataclass
 class CostModel:
-    commission_rate: float = 0.0003
+    buy_commission_rate: float = 0.0003
+    sell_commission_rate: float = 0.0003
     min_commission: float = 5.0
     stamp_tax_rate: float = 0.0005  # sell-side only (A-share)
     slippage_rate: float = 0.0
@@ -207,8 +208,9 @@ def run_portfolio_backtest(
                 price = prices[sym]
                 amount = abs(delta) * price
 
-                # Costs
-                comm = _compute_commission(amount, cost_model.commission_rate, cost_model.min_commission)
+                # Costs (buy/sell use different commission rates)
+                rate = cost_model.buy_commission_rate if delta > 0 else cost_model.sell_commission_rate
+                comm = _compute_commission(amount, rate, cost_model.min_commission)
                 stamp = amount * cost_model.stamp_tax_rate if delta < 0 else 0.0  # sell only
                 slip = amount * cost_model.slippage_rate
                 total_cost = comm + stamp + slip
@@ -219,7 +221,7 @@ def run_portfolio_backtest(
                     if total_buy > cash:
                         # Reduce shares to fit budget (include min_commission in estimate)
                         min_cost = max(cost_model.min_commission, 0)
-                        affordable = (cash - min_cost) / (price * (1 + cost_model.commission_rate + cost_model.slippage_rate)) if price > 0 else 0
+                        affordable = (cash - min_cost) / (price * (1 + cost_model.buy_commission_rate + cost_model.slippage_rate)) if price > 0 else 0
                         if affordable <= 0:
                             continue  # can't even afford min_commission
                         tgt = cur + _lot_round(affordable, lot_size)
@@ -227,7 +229,7 @@ def run_portfolio_backtest(
                         if delta <= 0:
                             continue
                         amount = delta * price
-                        comm = _compute_commission(amount, cost_model.commission_rate, cost_model.min_commission)
+                        comm = _compute_commission(amount, cost_model.buy_commission_rate, cost_model.min_commission)
                         total_cost = comm + amount * cost_model.slippage_rate
                         total_buy = amount + total_cost
 

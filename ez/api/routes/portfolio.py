@@ -39,7 +39,9 @@ class PortfolioRunRequest(BaseModel):
     freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly|quarterly)$")
     strategy_params: dict = {}
     initial_cash: float = Field(default=1_000_000, ge=10_000)
-    commission_rate: float = 0.0003
+    buy_commission_rate: float = 0.0003
+    sell_commission_rate: float = 0.0003
+    commission_rate: float | None = None  # backward compat: if set, overrides both buy/sell
     min_commission: float = 5.0
     stamp_tax_rate: float = 0.0005
     slippage_rate: float = 0.0
@@ -149,8 +151,11 @@ def run_portfolio(req: PortfolioRunRequest):
     universe = Universe(req.symbols)
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy.lookback_days)
 
+    buy_rate = req.commission_rate if req.commission_rate is not None else req.buy_commission_rate
+    sell_rate = req.commission_rate if req.commission_rate is not None else req.sell_commission_rate
     cost_model = CostModel(
-        commission_rate=req.commission_rate,
+        buy_commission_rate=buy_rate,
+        sell_commission_rate=sell_rate,
         min_commission=req.min_commission,
         stamp_tax_rate=req.stamp_tax_rate,
         slippage_rate=req.slippage_rate,

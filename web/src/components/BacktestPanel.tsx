@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listStrategies, runBacktest, runWalkForward } from '../api'
 import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
+import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
+import type { BacktestSettingsValue } from './BacktestSettings'
 
 interface Props {
   symbol: string; market: string; period?: string; startDate: string; endDate: string
@@ -16,9 +18,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   const [params, setParams] = useState<Record<string, number | string | boolean>>({})
   const [mode, setMode] = useState<'backtest' | 'walk-forward'>('backtest')
   const [nSplits, setNSplits] = useState(5)
-  const [commissionRate, setCommissionRate] = useState(0.0003)
-  const [minCommission, setMinCommission] = useState(5)
-  const [slippageRate, setSlippageRate] = useState(0)
+  const [costSettings, setCostSettings] = useState<BacktestSettingsValue>({
+    ...DEFAULT_SETTINGS, benchmark: '', // no benchmark for single-stock
+  })
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [wfResult, setWfResult] = useState<WalkForwardResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -43,9 +45,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     setWfResult(null)
     try {
       const costParams = {
-        commission_rate: commissionRate,
-        min_commission: minCommission,
-        slippage_rate: slippageRate,
+        commission_rate: costSettings.buy_commission_rate,
+        min_commission: costSettings.min_commission,
+        slippage_rate: costSettings.slippage_rate,
       }
       if (mode === 'backtest') {
         const res = await runBacktest({
@@ -210,24 +212,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             </div>
           )
         })}
-        {/* Trading costs */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>手续费率</label>
-          <input type="number" value={commissionRate} step={0.0001} min={0}
-            onChange={e => setCommissionRate(Number(e.target.value))}
-            className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
         </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>最低手续费</label>
-          <input type="number" value={minCommission} step={1} min={0}
-            onChange={e => setMinCommission(Number(e.target.value))}
-            className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>滑点率</label>
-          <input type="number" value={slippageRate} step={0.001} min={0} max={0.1}
-            onChange={e => setSlippageRate(Number(e.target.value))}
-            className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
+        <div className="mb-3">
+          <BacktestSettings value={costSettings} onChange={setCostSettings} showBenchmark={false} showInitialCash={false} />
         </div>
         {/* WF splits */}
         {mode === 'walk-forward' && (
