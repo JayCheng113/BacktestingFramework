@@ -15,6 +15,7 @@ from ez.portfolio.calendar import TradingCalendar
 from ez.portfolio.cross_factor import MomentumRank, VolumeRank, ReverseVolatilityRank
 from ez.portfolio.engine import CostModel, run_portfolio_backtest
 from ez.portfolio.portfolio_strategy import PortfolioStrategy, TopNRotation, MultiFactorRotation
+from ez.portfolio.builtin_strategies import EtfMacdRotation, EtfSectorSwitch, EtfStockEnhance  # noqa: F401
 from ez.portfolio.universe import Universe
 
 router = APIRouter()
