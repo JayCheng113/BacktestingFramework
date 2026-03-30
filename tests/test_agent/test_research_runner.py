@@ -14,6 +14,7 @@ from ez.agent.loop_controller import LoopConfig, LoopController
 from ez.agent.research_runner import (
     run_research_task, cancel_task, get_task_events, _running_tasks,
     _emit, is_any_task_running, cleanup_finished_tasks, register_task,
+    get_start_lock,
 )
 from ez.agent.research_store import ResearchStore
 from ez.llm.provider import LLMResponse
@@ -112,6 +113,40 @@ class TestCleanupFinishedTasks:
         _running_tasks["t1"] = {"events": [], "done": True}
         cleanup_finished_tasks(keep=5)
         assert "t1" in _running_tasks
+
+    def test_cleanup_keeps_newest_by_finished_at(self):
+        """V2.8.1: cleanup sorts by finished_at, keeps newest."""
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        # oldest finished first
+        _running_tasks["old"] = {"events": [], "done": True, "finished_at": now - timedelta(hours=3)}
+        _running_tasks["mid"] = {"events": [], "done": True, "finished_at": now - timedelta(hours=1)}
+        _running_tasks["new"] = {"events": [], "done": True, "finished_at": now}
+        cleanup_finished_tasks(keep=1)
+        assert "new" in _running_tasks
+        assert "old" not in _running_tasks
+        assert "mid" not in _running_tasks
+
+
+# --- get_start_lock tests (V2.8.1) ---
+
+class TestGetStartLock:
+    def test_returns_asyncio_lock(self):
+        lock = get_start_lock()
+        assert isinstance(lock, asyncio.Lock)
+
+    def test_returns_same_lock(self):
+        assert get_start_lock() is get_start_lock()
+
+
+# --- register_task tests (V2.8.1) ---
+
+class TestRegisterTask:
+    def test_register_has_created_at(self):
+        from datetime import datetime
+        register_task("test_register")
+        assert "created_at" in _running_tasks["test_register"]
+        assert isinstance(_running_tasks["test_register"]["created_at"], datetime)
 
 
 # --- get_task_events tests ---

@@ -70,7 +70,7 @@ class TestHealthVersion:
     def test_version_updated(self):
         resp = client.get("/api/health")
         assert resp.status_code == 200
-        assert resp.json()["version"] == "0.2.8"
+        assert resp.json()["version"] == "0.2.8.1"
 
 
 class TestPromote:
@@ -92,3 +92,32 @@ class TestPromote:
     def test_promote_path_traversal(self):
         resp = client.post("/api/code/promote", json={"filename": "research_../../etc/passwd.py"})
         assert resp.status_code in (400, 404)  # Blocked by either validation or file-not-found
+
+
+class TestPromoteRegex:
+    """V2.8.1: Promote regex only matches Research + uppercase (class name pattern)."""
+
+    def test_class_rename_pattern(self):
+        import re
+        code = 'class ResearchMomentumRsi(Strategy):'
+        result = re.sub(r'class Research([A-Z]\w*)\(', r'class \1(', code)
+        assert result == 'class MomentumRsi(Strategy):'
+
+    def test_return_rename_pattern(self):
+        import re
+        code = 'return "ResearchMomentumRsi: a momentum strategy"'
+        result = re.sub(r'return "Research([A-Z])', r'return "\1', code)
+        assert result == 'return "MomentumRsi: a momentum strategy"'
+
+    def test_no_rename_lowercase(self):
+        """Research followed by lowercase should NOT be renamed."""
+        import re
+        code = 'return "Research is important"'
+        result = re.sub(r'return "Research([A-Z])', r'return "\1', code)
+        assert result == code  # unchanged
+
+    def test_class_rename_requires_uppercase(self):
+        import re
+        code = 'class Researcher(object):'  # not a Research-prefixed strategy
+        result = re.sub(r'class Research([A-Z]\w*)\(', r'class \1(', code)
+        assert result == code  # unchanged — 'e' is lowercase

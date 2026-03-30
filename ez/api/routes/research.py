@@ -16,7 +16,7 @@ from ez.agent.loop_controller import LoopConfig
 from ez.agent.gates import GateConfig
 from ez.agent.research_runner import (
     run_research_task, cancel_task, get_task_events,
-    is_any_task_running, register_task, _start_lock,
+    is_any_task_running, register_task, get_start_lock,
 )
 
 router = APIRouter()
@@ -58,7 +58,7 @@ async def start_research(req: ResearchRequest):
     )
 
     # P0-2: Atomic check-and-start via lock (prevents concurrent starts)
-    async with _start_lock:
+    async with get_start_lock():
         if is_any_task_running():
             raise HTTPException(status_code=409, detail="已有研究任务运行中，请等待完成或取消后重试")
         task_id = uuid.uuid4().hex[:12]
@@ -104,14 +104,21 @@ async def stream_research_task(task_id: str):
 
     async def generate():
         idx = 0
+        heartbeat_counter = 0
         while True:
             while idx < len(events_data["events"]):
                 evt = events_data["events"][idx]
                 line = f"event: {evt['event']}\ndata: {json.dumps(evt['data'], ensure_ascii=False)}\n\n"
                 yield line
                 idx += 1
+                heartbeat_counter = 0  # reset after real event
             if events_data["done"]:
                 break
             await asyncio.sleep(0.5)
+            heartbeat_counter += 1
+            # Send keepalive every 15s (30 × 0.5s) to prevent proxy/browser timeout
+            if heartbeat_counter >= 30:
+                yield ": keepalive\n\n"
+                heartbeat_counter = 0
 
     return StreamingResponse(generate(), media_type="text/event-stream")

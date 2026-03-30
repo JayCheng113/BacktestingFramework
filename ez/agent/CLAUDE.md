@@ -98,9 +98,9 @@ pending → running → completed
 ```
 
 ### Concurrency
-- Task-level serial: `asyncio.Lock` ensures only 1 task runs at a time
-- Init failure safe: try/finally guarantees `done=True` even on early exception
-- `register_task()` pre-registers in memory before background work (prevents SSE 404)
+- Task-level serial: `asyncio.Lock` via `get_start_lock()` ensures only 1 task runs at a time (V2.8.1: public accessor)
+- Init failure safe: try/finally guarantees `done=True` + `finished_at` timestamp even on early exception
+- `register_task()` pre-registers in memory with `created_at` timestamp before background work (prevents SSE 404)
 
 ### Persistence
 - research_tasks: task_id(PK), goal, config, status, stop_reason, summary

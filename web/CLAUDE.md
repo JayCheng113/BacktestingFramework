@@ -6,11 +6,11 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 ## Components
 | Component | Role |
 |-----------|------|
-| Navbar | Top navigation: 看板 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.8) |
+| Navbar | Top navigation: 看板 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.8.1) |
 | SearchBar | Symbol + market + period + date range (calendar dropdown + stock search) |
 | KlineChart | ECharts candlestick + volume + MA5/10/20/60 + BOLL bands + buy/sell markers |
-| BacktestPanel | Strategy dropdown (filters research_) + params + costs + results + trade table + CSV |
-| FactorPanel | Factor IC evaluation + IC decay + distribution |
+| BacktestPanel | Strategy dropdown (filters research_) + params (number/bool/str) + costs + results + trade table + CSV (V2.8.1: multi-type params) |
+| FactorPanel | Factor IC evaluation + IC decay + distribution (V2.8.1: dynamic factor list from API) |
 | ExperimentPanel | Single Run / Param Search sub-tabs + runs table (filters research_) + gate detail + date range column (V2.8) |
 | CandidateSearch | Parameter grid/random search form + ranked results table (filters research_) |
 | CodeEditor | Monaco editor + "新建策略/因子" buttons + file-bound AI chat + grouped sidebar (strategies/factors) (V2.8) |

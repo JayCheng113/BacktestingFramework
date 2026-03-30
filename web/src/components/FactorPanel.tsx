@@ -1,26 +1,36 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { evaluateFactor } from '../api'
+import { listFactors, evaluateFactor } from '../api'
 import type { FactorResult } from '../types'
 
 interface Props {
   symbol: string; market: string; startDate: string; endDate: string
 }
 
-const FACTORS = [
-  { value: 'ma', label: '移动平均 (MA)' },
-  { value: 'ema', label: '指数均线 (EMA)' },
-  { value: 'rsi', label: '相对强弱 (RSI)' },
-  { value: 'macd', label: 'MACD' },
-  { value: 'boll', label: '布林带 (BOLL)' },
-  { value: 'momentum', label: '动量 (Momentum)' },
-]
+// Chinese labels for known factors; unknown factors show class name
+const _LABELS: Record<string, string> = {
+  ma: '移动平均 (MA)', ema: '指数均线 (EMA)', rsi: '相对强弱 (RSI)',
+  macd: 'MACD', boll: '布林带 (BOLL)', momentum: '动量 (Momentum)',
+  vwap: '成交量加权均价 (VWAP)', obv: '能量潮 (OBV)', atr: '真实波幅 (ATR)',
+}
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function FactorPanel({ symbol, market, startDate, endDate }: Props) {
-  const [factor, setFactor] = useState(FACTORS[0].value)
+  const [factors, setFactors] = useState<{ value: string; label: string }[]>([])
+  const [factor, setFactor] = useState('')
   const [result, setResult] = useState<FactorResult | null>(null)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    listFactors().then(r => {
+      const list = (r.data as { name: string; class: string }[]).map(f => ({
+        value: f.name,
+        label: _LABELS[f.name] || `${f.class} (${f.name})`,
+      }))
+      setFactors(list)
+      if (list.length > 0 && !factor) setFactor(list[0].value)
+    }).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleEval = async () => {
     setLoading(true)
@@ -93,7 +103,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>
           <select value={factor} onChange={e => setFactor(e.target.value)}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            {FACTORS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            {factors.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </div>
         <button onClick={handleEval} disabled={loading}

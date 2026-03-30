@@ -74,3 +74,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 - V2.7: Code editor API, Chat SSE, Settings API (LLM/Tushare read/write with .env injection guard)
 - V2.7.1: Chat SSE fully async (achat_stream), ExperimentStore shared singleton, multi-column factor evaluation, provider cache invalidation on settings change
 - V2.8: Research API (start/list/detail/cancel/stream), promote endpoint, asyncio.Lock serialization guard, register_task pre-registration for SSE, experiment list_runs加start_date/end_date
+- V2.8.1: SSE heartbeat (15s keepalive), get_start_lock() public accessor, promote regex precision (Research+uppercase only)

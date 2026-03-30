@@ -23,7 +23,7 @@ export default function Navbar({ activeTab, onTabChange }: Props) {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
             <span className="text-xl font-bold" style={{ color: 'var(--color-accent)' }}>ez-trading</span>
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>v0.2.8</span>
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>v0.2.8.1</span>
           </div>
           <div className="flex gap-1">
             {tabs.map(t => (

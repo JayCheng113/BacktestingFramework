@@ -127,10 +127,10 @@ def promote_research_strategy(req: PromoteRequest):
 
     code = src_path.read_text(encoding="utf-8")
 
-    # Rename class: ResearchXxx → Xxx
+    # Rename class: ResearchXxx → Xxx (only when followed by uppercase = class name pattern)
     import re
-    code = re.sub(r'class Research(\w+)\(', r'class \1(', code)
-    code = re.sub(r'return "Research', r'return "', code)
+    code = re.sub(r'class Research([A-Z]\w*)\(', r'class \1(', code)
+    code = re.sub(r'return "Research([A-Z])', r'return "\1', code)
 
     result = save_and_validate_strategy(safe_dst, code, overwrite=False)
     if not result["success"]:

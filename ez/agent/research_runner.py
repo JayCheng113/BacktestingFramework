@@ -28,6 +28,11 @@ _running_tasks: dict[str, dict] = {}
 _start_lock = asyncio.Lock()
 
 
+def get_start_lock() -> asyncio.Lock:
+    """Public accessor for the task-start serialization lock."""
+    return _start_lock
+
+
 def _emit(task_id: str, event: str, data: dict) -> None:
     """Append an SSE event to the task's event queue."""
     if task_id in _running_tasks:
@@ -72,7 +77,10 @@ def _run_batch_for_strategies(
 
 def register_task(task_id: str) -> None:
     """Pre-register task in memory BEFORE background work starts (prevents SSE 404)."""
-    _running_tasks[task_id] = {"events": [], "done": False, "state": LoopState()}
+    _running_tasks[task_id] = {
+        "events": [], "done": False, "state": LoopState(),
+        "created_at": datetime.now(),
+    }
 
 
 async def run_research_task(
@@ -130,12 +138,13 @@ async def run_research_task(
             for i, h in enumerate(hypotheses):
                 _emit(task_id, "hypothesis", {"index": i, "total": len(hypotheses), "text": h})
 
-            # E2: Code generation — count each hypothesis as 2 LLM calls (conservative)
+            # E2: Code generation — approximate: count each hypothesis as ~2 LLM calls
+            # (chat_sync may do 1-3 rounds internally; 2 is a conservative estimate)
             strategy_names: list[str] = []
             strategy_files: list[str] = []
             for i, hypothesis in enumerate(hypotheses):
                 filename, class_name, error = await generate_strategy_code(provider, hypothesis)
-                llm_calls += 2  # chat_sync does >=1 round + tool execution
+                llm_calls += 2  # approximate: chat_sync internal rounds vary
                 if class_name:
                     strategy_names.append(class_name)
                     if filename:
@@ -229,6 +238,7 @@ async def run_research_task(
         # P0-1: ALWAYS mark done, even if init failed
         if task_id in _running_tasks:
             _running_tasks[task_id]["done"] = True
+            _running_tasks[task_id]["finished_at"] = datetime.now()
         cleanup_finished_tasks()
 
     return task_id
@@ -253,8 +263,10 @@ def get_task_events(task_id: str) -> dict | None:
 
 
 def cleanup_finished_tasks(keep: int = 5) -> None:
-    """Remove old finished task events from memory (prevent leak)."""
+    """Remove old finished task events from memory (keep newest by finished_at)."""
     finished = [(tid, t) for tid, t in _running_tasks.items() if t["done"]]
     if len(finished) > keep:
+        # Sort by finished_at ascending (oldest first), then remove oldest
+        finished.sort(key=lambda x: x[1].get("finished_at", datetime.min))
         for tid, _ in finished[:-keep]:
             del _running_tasks[tid]

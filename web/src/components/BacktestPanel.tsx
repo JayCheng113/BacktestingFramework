@@ -13,7 +13,7 @@ const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid va
 export default function BacktestPanel({ symbol, market, period = 'daily', startDate, endDate, onTradesUpdate }: Props) {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [selected, setSelected] = useState('')
-  const [params, setParams] = useState<Record<string, number>>({})
+  const [params, setParams] = useState<Record<string, number | string | boolean>>({})
   const [mode, setMode] = useState<'backtest' | 'walk-forward'>('backtest')
   const [nSplits, setNSplits] = useState(5)
   const [commissionRate, setCommissionRate] = useState(0.0003)
@@ -29,7 +29,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
       setStrategies(userStrategies)
       if (userStrategies.length > 0) {
         setSelected(userStrategies[0].name)
-        const defaults: Record<string, number> = {}
+        const defaults: Record<string, number | string | boolean> = {}
         for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as any).default
         setParams(defaults)
       }
@@ -72,7 +72,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     setSelected(name)
     const s = strategies.find(s => s.name === name)
     if (s) {
-      const defaults: Record<string, number> = {}
+      const defaults: Record<string, number | string | boolean> = {}
       for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as any).default
       setParams(defaults)
     }
@@ -178,13 +178,38 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           )}
         </div>
         {/* Strategy params */}
-        {Object.entries(params).map(([k, v]) => (
-          <div key={k} className="flex flex-col gap-1">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{k}</label>
-            <input type="number" value={v} onChange={e => setParams({ ...params, [k]: Number(e.target.value) })}
-              className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
-          </div>
-        ))}
+        {Object.entries(params).map(([k, v]) => {
+          const schema = strategies.find(s => s.name === selected)?.parameters?.[k]
+          const ptype = schema?.type || (typeof v)
+          if (ptype === 'bool' || typeof v === 'boolean') {
+            return (
+              <div key={k} className="flex items-center gap-2 self-end pb-1">
+                <input type="checkbox" checked={!!v} onChange={e => setParams({ ...params, [k]: e.target.checked })}
+                  className="rounded" />
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{schema?.label || k}</label>
+              </div>
+            )
+          }
+          if (ptype === 'str' || typeof v === 'string') {
+            return (
+              <div key={k} className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{schema?.label || k}</label>
+                <input type="text" value={String(v)} onChange={e => setParams({ ...params, [k]: e.target.value })}
+                  className="px-3 py-1.5 rounded text-sm w-28" style={inputStyle} />
+              </div>
+            )
+          }
+          return (
+            <div key={k} className="flex flex-col gap-1">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{schema?.label || k}</label>
+              <input type="number" value={Number(v)} onChange={e => setParams({ ...params, [k]: Number(e.target.value) })}
+                className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle}
+                {...(schema?.min != null ? { min: schema.min } : {})}
+                {...(schema?.max != null ? { max: schema.max } : {})}
+                {...(schema?.step != null ? { step: schema.step } : {})} />
+            </div>
+          )
+        })}
         {/* Trading costs */}
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>手续费率</label>

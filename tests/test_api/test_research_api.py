@@ -125,3 +125,14 @@ class TestStreamEndpoint:
         body = resp.text
         assert "event: iteration_start" in body
         assert "event: task_complete" in body
+
+
+class TestFactorList:
+    """V2.8.1: Factor list API returns all registered factors."""
+
+    def test_list_factors_has_all_builtin(self):
+        resp = client.get("/api/factors")
+        assert resp.status_code == 200
+        names = [f["name"] for f in resp.json()]
+        for expected in ["ma", "ema", "rsi", "macd", "boll", "momentum", "vwap", "obv", "atr"]:
+            assert expected in names, f"Missing factor: {expected}"
