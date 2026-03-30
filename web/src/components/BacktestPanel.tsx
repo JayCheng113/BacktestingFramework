@@ -212,11 +212,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             </div>
           )
         })}
-        </div>
-        <div className="mb-3">
-          <BacktestSettings value={costSettings} onChange={setCostSettings} showBenchmark={false} showInitialCash={false} />
-        </div>
-        {/* WF splits */}
+      </div>
+      <div className="mb-3">
+        <BacktestSettings value={costSettings} onChange={setCostSettings} showBenchmark={false} showInitialCash={false} />
+      </div>
+      <div className="flex flex-wrap gap-3 items-end mb-4">
         {mode === 'walk-forward' && (
           <div className="flex flex-col gap-1">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>分割数</label>
