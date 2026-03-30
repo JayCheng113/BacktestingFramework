@@ -237,6 +237,68 @@ def run_portfolio(req: PortfolioRunRequest):
     }
 
 
+class PortfolioWFRequest(BaseModel):
+    strategy_name: str = "TopNRotation"
+    symbols: list[str]
+    market: str = "cn_stock"
+    start_date: date | None = None
+    end_date: date | None = None
+    freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly|quarterly)$")
+    strategy_params: dict = {}
+    initial_cash: float = Field(default=1_000_000, ge=10_000)
+    n_splits: int = Field(default=5, ge=2, le=20)
+    train_ratio: float = Field(default=0.7, gt=0.0, lt=1.0)
+    lot_size: int = Field(default=100, ge=1)
+    limit_pct: float = Field(default=0.10, ge=0, le=0.30)
+
+
+@router.post("/walk-forward")
+def portfolio_walk_forward_api(req: PortfolioWFRequest):
+    """Run walk-forward validation on a portfolio strategy."""
+    from ez.portfolio.walk_forward import portfolio_walk_forward, portfolio_significance
+
+    end = req.end_date or date.today()
+    start = req.start_date or (end - timedelta(days=365 * 3))
+
+    def strategy_factory():
+        return _create_strategy(req.strategy_name, req.strategy_params)
+
+    universe = Universe(req.symbols)
+    strategy_tmp = strategy_factory()
+    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy_tmp.lookback_days)
+
+    try:
+        wf_result = portfolio_walk_forward(
+            strategy_factory=strategy_factory,
+            universe=universe, universe_data=universe_data, calendar=calendar,
+            start=start, end=end, n_splits=req.n_splits, train_ratio=req.train_ratio,
+            freq=req.freq, initial_cash=req.initial_cash,
+            lot_size=req.lot_size, limit_pct=req.limit_pct,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Significance on OOS equity curve
+    sig = portfolio_significance(wf_result.oos_equity_curve, seed=42) if wf_result.oos_equity_curve else None
+
+    return {
+        "n_splits": wf_result.n_splits,
+        "is_sharpes": wf_result.is_sharpes,
+        "oos_sharpes": wf_result.oos_sharpes,
+        "degradation": wf_result.degradation,
+        "overfitting_score": wf_result.overfitting_score,
+        "oos_metrics": wf_result.oos_metrics,
+        "oos_equity_curve": [round(v, 2) for v in wf_result.oos_equity_curve],
+        "oos_dates": wf_result.oos_dates,
+        "significance": {
+            "sharpe_ci_lower": sig.sharpe_ci_lower if sig else 0,
+            "sharpe_ci_upper": sig.sharpe_ci_upper if sig else 0,
+            "p_value": sig.monte_carlo_p_value if sig else 1,
+            "is_significant": sig.is_significant if sig else False,
+        } if sig else None,
+    }
+
+
 @router.get("/runs")
 def list_portfolio_runs(
     limit: int = Query(default=50, ge=1, le=500),
