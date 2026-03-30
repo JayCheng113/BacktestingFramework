@@ -12,7 +12,7 @@ ez-trading 是 **Agent-Native 量化交易系统**。
 - 所有操作都有审计日志，Agent 和人类的操作同等可追溯
 - 系统自动验证和反馈（Gate 机制），不管是谁提交的都自动检验
 
-当前状态：**研究/回测阶段**（Layer 0-3 部分完成）。
+当前状态：**研究/回测阶段**（Layer 0-3 已完成，V2.8.1）。计划 V2.9-V2.11 扩展组合/多因子/基本面，V3.0+ 进入交易面。
 
 ---
 
@@ -164,7 +164,7 @@ Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
 | 印花税 | 卖出 0.05% | — | A 股特有卖出税 |
 | 交易时间 | 9:30-11:30, 13:00-15:00 | 9:30-16:00 ET | — |
 
-**当前实现**：❌ 未实现。引擎假设可随时买卖任意数量。V2.5 实现 MarketRules 模块。
+**当前实现**：✅ V2.6 已实现。MarketRulesMatcher 支持 T+1、涨跌停（10%/20%）、整手（100 股）。印花税通过交易成本参数配置。
 
 **依赖关系**：OMS (V3.0) 消费 MarketRules (V2.5) 做订单校验。MarketRules 必须在 OMS 之前完成。
 
@@ -197,16 +197,18 @@ Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
 ```
 ┌─────────────────────────────────────────────────────┐
 │  因子计算 (ts_ops, C++ 加速)                          │
-│  ├── 技术: MA/EMA/RSI/MACD/BOLL/Momentum (已有)      │
-│  ├── [未来] 量价: VWAP, OBV, 资金流                   │
-│  ├── [未来] 基本面: PE/PB/ROE (Tushare daily_basic)   │
+│  ├── 技术: MA/EMA/RSI/MACD/BOLL/Momentum/VWAP/OBV/ATR│
+│  ├── [V2.9] 截面因子: MomentumRank/VolumeRank/ReverseVol│
+│  ├── [V2.10] ML Alpha: walk-forward sklearn/LightGBM  │
+│  ├── [V2.11] 基本面: PE/PB/ROE/Growth (Tushare)       │
 │  ├── [未来] 舆情: 中文新闻情绪 (A股特色)              │
 │  └── [未来] 公式化 alpha 批量生成                     │
 │                                                      │
-│  因子评估 (FactorEvaluator)                           │
-│  └── IC/ICIR/IC Decay/Turnover                        │
+│  因子评估                                             │
+│  ├── 时序 IC (FactorEvaluator, 单股)            [已有] │
+│  └── [V2.10] 截面 IC (CrossSectionalEvaluator, 多股)  │
 │                                                      │
-│  当前实现: 6 因子 + IC 评估 + C++ 加速                │
+│  当前实现: 9 技术因子 + 时序IC评估 + C++ 加速 + FDR   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -215,24 +217,28 @@ Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
 ```
 ┌─────────────────────────────────────────────────────┐
 │  策略/因子来源（管线对提交者无感）                    │
-│  ├── 人类研究员: Web/CLI 创建因子、编写策略           │
-│  ├── Agent: API/Tool Calling 自主生成                 │
-│  ├── 内置: MACross/Momentum/BollReversion (已有)      │
+│  ├── 人类研究员: Web 代码编辑器 + AI 对话辅助          │
+│  ├── Agent: Tool Calling 自主生成 + 自主研究 (V2.8)   │
+│  ├── 单股策略: Strategy ABC (3 内置 + 用户自定义)     │
+│  ├── [V2.9] 组合策略: PortfolioStrategy ABC (有状态)  │
 │  └── 所有来源走同一条 contract test → Gate 管线       │
 │                                                      │
 │  策略注册表                                           │
 │  ├── 人类手写 + Agent 生成 + 内置，统一注册           │
-│  └── [未来] 参数网格搜索 + 批量预筛                  │
+│  ├── 参数网格搜索 + 批量预筛 (V2.5 已实现)           │
+│  └── [V2.10] Alpha 组合 + 组合优化 + 指数增强        │
 │                                                      │
 │  因子自定义                                           │
-│  ├── 人类: 继承 Factor ABC, 实现 compute()            │
+│  ├── 人类: 继承 Factor/CrossSectionalFactor ABC       │
 │  ├── Agent: 生成因子代码 + contract test 验证         │
-│  └── [未来] Web 可视化因子组合器                      │
+│  └── [V2.10] ML Alpha (walk-forward, sklearn 兼容)   │
 │                                                      │
-│  Pre-filter (快速淘汰)                                │
-│  └── Sharpe/MaxDD/trades 门槛 [未来, V2.4 Gate]      │
+│  Pre-filter (快速淘汰) + FDR                          │
+│  ├── Sharpe/MaxDD/trades 门槛 (V2.5 已实现)          │
+│  └── Bonferroni/BH FDR 校正 (V2.7 已实现)            │
 │                                                      │
-│  当前实现: 3 策略 + 6 因子 + 自动注册 + contract test │
+│  当前实现: 3 单股策略 + 9 因子 + 批量搜索 + FDR      │
+│  代码编辑器 + AI 助手 + 研究 Agent (V2.7-V2.8)       │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -248,15 +254,14 @@ Agent 默认仅有 Research 权限。Deploy/Live 操作必须人类签名。
 │  第4层: 成本压力 (2x 交易成本仍盈利)          [未来] │
 │  第5层: 鲁棒性 (不同市场状态下的表现)         [未来] │
 │                                                      │
-│  多重检验控制 [未来]                                  │
-│  └── 当候选数 > 阈值时，应用 FDR 或 Bonferroni 校正  │
-│      或采用"外层留出集 + 内层调参"两层验证            │
-│      防止参数搜索的数据挖掘偏差                       │
+│  多重检验控制 (V2.7 已实现)                           │
+│  └── Bonferroni + Benjamini-Hochberg FDR 校正         │
 │                                                      │
 │  Gate 判定: 全部通过 → RESEARCH_PASSED                │
 │            任一失败 → REJECTED + reject_reason_codes  │
 │                                                      │
-│  当前实现: 前3层引擎已有, Gate 框架未实现 (V2.4)     │
+│  当前实现: 5 层检验全部已有 (V2.4 Gate + V2.5 批量)  │
+│  Agent: V2.8 自主研究 (假设→代码→回测→分析→迭代)    │
 └─────────────────────────────────────────────────────┘
 
 **实验流程（V2.4，连接 Layer 2 和 Layer 3）**：
