@@ -158,8 +158,6 @@ export default function CodeEditor() {
   const [testOutput, setTestOutput] = useState('')
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
-  const [templateKind, setTemplateKind] = useState<'strategy' | 'factor'>('strategy')
-  const [className, setClassName] = useState('')
   const [showChat, setShowChat] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const editorRef = useRef<any>(null)
@@ -208,28 +206,6 @@ export default function CodeEditor() {
         setTestOutput('')
       }
     } catch {}
-  }
-
-  const generateTemplate = async () => {
-    try {
-      const res = await api('/template', {
-        method: 'POST',
-        body: JSON.stringify({ kind: templateKind, class_name: className || '' }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setCode(data.code)
-        // Auto-generate filename from class name
-        const name = className || (templateKind === 'strategy' ? 'MyStrategy' : 'MyFactor')
-        const fn = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py'
-        setFilename(fn)
-        setStatus(templateKind === 'factor'
-          ? '因子模板已生成 — 保存后可被同目录的策略 import 使用'
-          : '模板已生成')
-        setErrors([])
-        setTestOutput('')
-      }
-    } catch (e: any) { setStatus(`Error: ${e.message}`) }
   }
 
   const validate = async () => {

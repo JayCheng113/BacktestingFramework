@@ -71,3 +71,24 @@ class TestHealthVersion:
         resp = client.get("/api/health")
         assert resp.status_code == 200
         assert resp.json()["version"] == "0.2.8"
+
+
+class TestPromote:
+    """Tests for POST /api/code/promote endpoint."""
+
+    def test_promote_nonexistent_file(self):
+        resp = client.post("/api/code/promote", json={"filename": "research_nope.py"})
+        assert resp.status_code == 404
+
+    def test_promote_non_research_file(self):
+        resp = client.post("/api/code/promote", json={"filename": "my_strategy.py"})
+        assert resp.status_code == 400
+        assert "research_" in resp.json()["detail"]
+
+    def test_promote_invalid_extension(self):
+        resp = client.post("/api/code/promote", json={"filename": "research_bad.txt"})
+        assert resp.status_code == 400
+
+    def test_promote_path_traversal(self):
+        resp = client.post("/api/code/promote", json={"filename": "research_../../etc/passwd.py"})
+        assert resp.status_code in (400, 404)  # Blocked by either validation or file-not-found

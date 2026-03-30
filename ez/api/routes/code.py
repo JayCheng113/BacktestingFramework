@@ -119,16 +119,20 @@ def promote_research_strategy(req: PromoteRequest):
     if not src_path.exists():
         raise HTTPException(status_code=404, detail=f"文件不存在: {src}")
 
-    # New filename: remove research_ prefix
+    # New filename: remove research_ prefix, validate with same rules as other endpoints
     dst = src.replace("research_", "", 1)
+    safe_dst = _safe_filename(dst)
+    if not safe_dst:
+        raise HTTPException(status_code=400, detail=f"目标文件名不合法: {dst}")
+
     code = src_path.read_text(encoding="utf-8")
 
-    # Also rename class: ResearchXxx → Xxx
+    # Rename class: ResearchXxx → Xxx
     import re
     code = re.sub(r'class Research(\w+)\(', r'class \1(', code)
     code = re.sub(r'return "Research', r'return "', code)
 
-    result = save_and_validate_strategy(dst, code, overwrite=False)
+    result = save_and_validate_strategy(safe_dst, code, overwrite=False)
     if not result["success"]:
-        return {"success": False, "errors": result["errors"]}
-    return {"success": True, "filename": dst, "path": result.get("path", "")}
+        raise HTTPException(status_code=422, detail=result["errors"][0] if result["errors"] else "验证失败")
+    return {"success": True, "filename": safe_dst, "path": result.get("path", "")}

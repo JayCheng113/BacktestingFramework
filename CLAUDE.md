@@ -54,7 +54,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (1036 collected, 1026 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (1060 collected, 1050 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```

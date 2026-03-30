@@ -60,7 +60,7 @@ export default function CandidateSearch() {
 
   useEffect(() => {
     listStrategies().then(r => {
-      const userStrategies = r.data.filter((s: StrategyInfo) => !s.name.startsWith('Research'))
+      const userStrategies = r.data.filter((s: StrategyInfo) => !s.key?.includes('research_'))
       setStrategies(userStrategies)
       if (userStrategies.length > 0) handleStrategyChange(userStrategies[0].name, userStrategies)
     }).catch(() => {})
