@@ -132,11 +132,14 @@ async def run_research_task(
 
             # E2: Code generation — count each hypothesis as 2 LLM calls (conservative)
             strategy_names: list[str] = []
+            strategy_files: list[str] = []
             for i, hypothesis in enumerate(hypotheses):
                 filename, class_name, error = await generate_strategy_code(provider, hypothesis)
                 llm_calls += 2  # chat_sync does >=1 round + tool execution
                 if class_name:
                     strategy_names.append(class_name)
+                    if filename:
+                        strategy_files.append(filename)
                     _emit(task_id, "code_success", {
                         "index": i, "filename": filename, "class_name": class_name})
                 else:
@@ -188,7 +191,7 @@ async def run_research_task(
                 "strategies_tried": len(strategy_names),
                 "strategies_passed": len(batch_result.passed),
                 "best_sharpe": best_sharpe,
-                "analysis": json.dumps({"direction": analysis.direction, "suggestions": analysis.suggestions}),
+                "analysis": json.dumps({"direction": analysis.direction, "suggestions": analysis.suggestions, "strategy_files": strategy_files}),
                 "spec_ids": json.dumps(spec_ids),
             })
             _emit(task_id, "iteration_end", {

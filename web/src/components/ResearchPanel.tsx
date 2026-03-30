@@ -165,8 +165,9 @@ export default function ResearchPanel() {
     try {
       const res = await fetch(`/api/research/tasks/${taskId}`)
       if (res.ok) {
-        setSelectedTask(await res.json())
-        loadResearchFiles()
+        const task = await res.json()
+        setSelectedTask(task)
+        loadResearchFiles(task)
       }
     } catch {}
   }
@@ -178,12 +179,29 @@ export default function ResearchPanel() {
   const [researchFiles, setResearchFiles] = useState<{filename: string; class_name: string}[]>([])
   const [promoted, setPromoted] = useState<Set<string>>(new Set())
 
-  const loadResearchFiles = async () => {
+  const loadResearchFiles = async (task?: ResearchTask | null) => {
     try {
       const res = await fetch('/api/code/files')
-      if (res.ok) {
-        const all = await res.json()
-        setResearchFiles(all.filter((f: any) => f.filename.startsWith('research_')))
+      if (!res.ok) return
+      const all: {filename: string; class_name: string}[] = await res.json()
+      const researchAll = all.filter((f) => f.filename.startsWith('research_'))
+
+      if (task?.iterations && task.iterations.length > 0) {
+        // Extract filenames created during THIS task from iteration analysis.strategy_files
+        const taskFiles = new Set<string>()
+        for (const it of task.iterations) {
+          try {
+            const analysis = JSON.parse(it.analysis || '{}')
+            for (const f of (analysis.strategy_files || [])) taskFiles.add(f)
+          } catch {}
+        }
+        if (taskFiles.size > 0) {
+          setResearchFiles(researchAll.filter(f => taskFiles.has(f.filename)))
+        } else {
+          setResearchFiles(researchAll) // fallback for old tasks without strategy_files
+        }
+      } else {
+        setResearchFiles(researchAll)
       }
     } catch {}
   }
