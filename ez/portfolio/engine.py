@@ -52,6 +52,41 @@ def _compute_commission(amount: float, rate: float, minimum: float) -> float:
     return max(abs(amount) * rate, minimum) if abs(amount) > 0 else 0.0
 
 
+def _check_limit_price(
+    sym: str, day: date, universe_data: dict[str, pd.DataFrame],
+    prev_prices: dict[str, float], limit_pct: float = 0.10,
+) -> tuple[bool, bool]:
+    """Check if a stock hit limit up or limit down.
+
+    Returns (limit_up, limit_down).
+    limit_up=True means cannot buy (涨停不可买).
+    limit_down=True means cannot sell (跌停不可卖).
+    """
+    if sym not in prev_prices or sym not in universe_data:
+        return False, False
+    prev_close = prev_prices[sym]
+    if prev_close <= 0:
+        return False, False
+
+    df = universe_data[sym]
+    if isinstance(df.index, pd.DatetimeIndex):
+        mask = df.index.date == day
+    else:
+        mask = df.index == day
+    today = df.loc[mask]
+    if today.empty or "close" not in today.columns:
+        return False, False
+
+    today_close = float(today["close"].iloc[-1])
+    change_pct = (today_close - prev_close) / prev_close
+
+    # 涨停: change >= limit_pct → cannot buy
+    # 跌停: change <= -limit_pct → cannot sell
+    limit_up = change_pct >= limit_pct - 0.001  # small tolerance
+    limit_down = change_pct <= -limit_pct + 0.001
+    return limit_up, limit_down
+
+
 def run_portfolio_backtest(
     strategy: PortfolioStrategy,
     universe: Universe,
@@ -64,6 +99,7 @@ def run_portfolio_backtest(
     cost_model: CostModel | None = None,
     allocator: Allocator | None = None,
     lot_size: int = 100,
+    limit_pct: float = 0.10,  # A-share 涨跌停 10% (科创板/创业板 20%)
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -156,6 +192,14 @@ def run_portfolio_backtest(
                     continue
                 if sym not in prices:
                     continue
+
+                # A-share 涨跌停检查
+                if limit_pct > 0:
+                    lim_up, lim_down = _check_limit_price(sym, day, universe_data, prev_prices, limit_pct)
+                    if delta > 0 and lim_up:
+                        continue  # 涨停不可买
+                    if delta < 0 and lim_down:
+                        continue  # 跌停不可卖
 
                 price = prices[sym]
                 amount = abs(delta) * price

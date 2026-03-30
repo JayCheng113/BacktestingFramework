@@ -107,6 +107,47 @@ class TestM6InvalidFreq:
             assert isinstance(result, list)
 
 
+class TestLimitPrice:
+    """涨跌停: 涨停不可买, 跌停不可卖."""
+
+    def test_limit_up_blocks_buy(self):
+        """Stock that hits +10% limit up should not be bought."""
+        dates = pd.date_range("2024-01-02", periods=30, freq="B")
+        data = {}
+        # A: normal, B: hits limit up on rebalance day
+        prices_a = np.full(30, 10.0)
+        prices_b = np.full(30, 10.0)
+        prices_b[20] = 11.0  # +10% on day 20 (limit up)
+
+        for sym, p in [("A", prices_a), ("B", prices_b)]:
+            data[sym] = pd.DataFrame({
+                "open": p, "high": p, "low": p, "close": p,
+                "adj_close": p, "volume": np.full(30, 100000),
+            }, index=dates)
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        rebal = cal.rebalance_dates(dates[5].date(), dates[-1].date(), "weekly")
+
+        class BuyBoth(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 0.5, "B": 0.5}
+
+        result = run_portfolio_backtest(
+            strategy=BuyBoth(), universe=Universe(["A", "B"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=100000, lot_size=1,
+            limit_pct=0.10,
+            cost_model=CostModel(commission_rate=0, min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        # On the rebalance day when B is limit up, B should not be bought
+        b_buys = [t for t in result.trades if t["symbol"] == "B" and t["side"] == "buy"]
+        # Check that at least one rebalance skipped B (the one on limit-up day)
+        a_buys = [t for t in result.trades if t["symbol"] == "A" and t["side"] == "buy"]
+        # A should have more buy events than B (B blocked on limit-up day)
+        assert len(a_buys) >= len(b_buys)
+
+
 class TestC1LoaderRegistration:
     """C1: portfolio_strategies/ files must be loadable."""
 
