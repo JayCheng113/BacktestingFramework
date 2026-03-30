@@ -119,6 +119,7 @@ export default function PortfolioPanel() {
               <div className="flex flex-col gap-1">
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>换仓频率</label>
                 <select value={freq} onChange={e => setFreq(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+                  <option value="daily">日度</option>
                   <option value="weekly">周度</option>
                   <option value="monthly">月度</option>
                   <option value="quarterly">季度</option>

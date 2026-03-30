@@ -393,6 +393,19 @@ def _explain_metrics(run_id: str) -> dict:
 
 
 @tool(
+    name="list_portfolio_strategies",
+    description="List all registered portfolio strategies with their parameter schemas.",
+    params={"type": "object", "properties": {}, "required": []},
+)
+def list_portfolio_strategies() -> list[dict]:
+    from ez.portfolio.portfolio_strategy import PortfolioStrategy
+    return [
+        {"name": name, "description": cls.get_description().strip()[:200] if hasattr(cls, 'get_description') else ""}
+        for name, cls in PortfolioStrategy.get_registry().items()
+    ]
+
+
+@tool(
     name="create_portfolio_strategy",
     description="Create a new portfolio strategy file in portfolio_strategies/. Runs contract test (weights>=0, sum<=1). Returns test result.",
     params={
@@ -407,6 +420,23 @@ def _explain_metrics(run_id: str) -> dict:
 def create_portfolio_strategy(filename: str, code: str) -> dict:
     from ez.agent.sandbox import save_and_validate_code
     return save_and_validate_code(filename, code, kind="portfolio_strategy")
+
+
+@tool(
+    name="create_cross_factor",
+    description="Create a new cross-sectional factor file in cross_factors/. Runs contract test (returns Series, not all NaN). Returns test result.",
+    params={
+        "type": "object",
+        "properties": {
+            "filename": {"type": "string", "description": "Filename like 'my_factor.py'"},
+            "code": {"type": "string", "description": "Python code defining a CrossSectionalFactor subclass"},
+        },
+        "required": ["filename", "code"],
+    },
+)
+def create_cross_factor(filename: str, code: str) -> dict:
+    from ez.agent.sandbox import save_and_validate_code
+    return save_and_validate_code(filename, code, kind="cross_factor")
 
 
 @tool(
@@ -436,7 +466,7 @@ def run_portfolio_backtest_tool(
     from ez.agent.data_access import get_chain
     from ez.portfolio.calendar import TradingCalendar
     from ez.portfolio.cross_factor import MomentumRank, VolumeRank, ReverseVolatilityRank
-    from ez.portfolio.engine import run_portfolio_backtest, CostModel
+    from ez.portfolio.engine import run_portfolio_backtest
     from ez.portfolio.portfolio_strategy import PortfolioStrategy, TopNRotation, MultiFactorRotation
     from ez.portfolio.universe import Universe
 
@@ -486,6 +516,7 @@ def run_portfolio_backtest_tool(
             universe_data[sym] = df
             all_dates.update(d.date() for d in df.index)
         except Exception as e:
+            logger.warning("Failed to fetch %s: %s", sym, e)
             continue
 
     if not universe_data:
