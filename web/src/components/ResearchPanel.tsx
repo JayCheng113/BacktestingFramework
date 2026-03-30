@@ -161,17 +161,49 @@ export default function ResearchPanel() {
   }
 
   const selectTask = async (taskId: string) => {
-    // If clicking the already-streaming task, just scroll to progress
     if (streamingTaskId === taskId) return
     try {
       const res = await fetch(`/api/research/tasks/${taskId}`)
-      if (res.ok) setSelectedTask(await res.json())
+      if (res.ok) {
+        setSelectedTask(await res.json())
+        loadResearchFiles()
+      }
     } catch {}
   }
 
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [events])
+
+  const [researchFiles, setResearchFiles] = useState<{filename: string; class_name: string}[]>([])
+  const [promoted, setPromoted] = useState<Set<string>>(new Set())
+
+  const loadResearchFiles = async () => {
+    try {
+      const res = await fetch('/api/code/files')
+      if (res.ok) {
+        const all = await res.json()
+        setResearchFiles(all.filter((f: any) => f.filename.startsWith('research_')))
+      }
+    } catch {}
+  }
+
+  const promoteStrategy = async (filename: string) => {
+    try {
+      const res = await fetch('/api/code/promote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.success) {
+          setPromoted(prev => new Set([...prev, filename]))
+        } else {
+          alert(`注册失败: ${data.errors?.join(', ')}`)
+        }
+      }
+    } catch (e) { alert(`注册失败: ${e}`) }
+  }
 
   const statusColor = (s: string) => ({ running: '#3b82f6', completed: '#22c55e', failed: '#ef4444', cancelled: '#6b7280' }[s] || '#6b7280')
   const statusLabel = (s: string) => ({ running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' }[s] || s)
@@ -363,6 +395,33 @@ export default function ResearchPanel() {
           {selectedTask.error && (
             <div className="p-2 rounded mb-4 text-xs" style={{ backgroundColor: '#7f1d1d20', color: '#ef4444', border: '1px solid #ef444440' }}>
               {selectedTask.error}
+            </div>
+          )}
+
+          {/* Promote strategies */}
+          {researchFiles.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold mb-2">生成的策略</h4>
+              <div className="space-y-1">
+                {researchFiles.map(f => (
+                  <div key={f.filename} className="flex items-center justify-between px-3 py-2 rounded text-sm"
+                    style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+                    <span>{f.class_name || f.filename}</span>
+                    {promoted.has(f.filename) ? (
+                      <span className="text-xs" style={{ color: '#22c55e' }}>已注册</span>
+                    ) : (
+                      <button onClick={() => promoteStrategy(f.filename)}
+                        className="text-xs px-2 py-0.5 rounded"
+                        style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
+                        注册到全局
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                注册后策略将出现在看板和实验的下拉框中
+              </div>
             </div>
           )}
 

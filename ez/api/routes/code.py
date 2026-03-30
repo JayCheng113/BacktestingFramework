@@ -103,3 +103,32 @@ def delete_file(filename: str):
     except Exception:
         pass  # best-effort cleanup
     return {"deleted": safe_name}
+
+
+class PromoteRequest(BaseModel):
+    filename: str  # research_xxx.py
+
+
+@router.post("/promote")
+def promote_research_strategy(req: PromoteRequest):
+    """Copy a research_ strategy to a user strategy (remove research_ prefix), register globally."""
+    src = req.filename
+    if not src.startswith("research_") or not src.endswith(".py"):
+        raise HTTPException(status_code=400, detail="只能注册 research_ 开头的策略文件")
+    src_path = _STRATEGIES_DIR / src
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail=f"文件不存在: {src}")
+
+    # New filename: remove research_ prefix
+    dst = src.replace("research_", "", 1)
+    code = src_path.read_text(encoding="utf-8")
+
+    # Also rename class: ResearchXxx → Xxx
+    import re
+    code = re.sub(r'class Research(\w+)\(', r'class \1(', code)
+    code = re.sub(r'return "Research', r'return "', code)
+
+    result = save_and_validate_strategy(dst, code, overwrite=False)
+    if not result["success"]:
+        return {"success": False, "errors": result["errors"]}
+    return {"success": True, "filename": dst, "path": result.get("path", "")}
