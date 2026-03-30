@@ -6,7 +6,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 ## Components
 | Component | Role |
 |-----------|------|
-| Navbar | Top navigation: 看板 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.8.1) |
+| Navbar | Top navigation: 看板 / 组合 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.9) |
 | SearchBar | Symbol + market + period + date range (calendar dropdown + stock search) |
 | KlineChart | ECharts candlestick + volume + MA5/10/20/60 + BOLL bands + buy/sell markers |
 | BacktestPanel | Strategy dropdown (filters research_) + params (number/bool/str) + costs + results + trade table + CSV (V2.8.1: multi-type params) |
@@ -18,6 +18,8 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | SettingsModal | LLM + Tushare config modal, writes to .env via API (V2.7) |
 | DocsPage | Comprehensive documentation — 12 sections, 1658 lines (V2.8) |
 | ResearchPanel | Autonomous research: goal form + date presets + SSE Chinese progress + task list + report + "注册到全局" promote button (V2.8) |
+| PortfolioPanel | Portfolio backtest: strategy selection + ETF pool + BacktestSettings + equity curve vs benchmark + metrics + trades + history (V2.9) |
+| BacktestSettings | Shared cost/rules component: buy/sell commission, stamp tax, slippage, lot size, limit price (V2.9) |
 | Dashboard | Main page, orchestrates chart/backtest/factor components |
 
 ## Theme

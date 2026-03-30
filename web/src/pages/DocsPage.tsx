@@ -8,6 +8,7 @@ const sections = [
   { id: 'market-rules', label: 'A股规则' },
   { id: 'experiment', label: '实验流水线' },
   { id: 'research', label: '研究助手' },
+  { id: 'portfolio', label: '组合回测' },
   { id: 'data', label: '数据源' },
   { id: 'api', label: 'API 参考' },
   { id: 'ai', label: 'AI 助手' },
@@ -903,6 +904,86 @@ Agent 循环:
 "在 MACrossStrategy 基础上增加 ATR 止损和趋势过滤"
 "改进 RSI 策略，加入多时间框架确认"`}</pre>
           <div style={note}>目标描述越具体，Agent 的搜索方向越聚焦，生成质量越高。建议至少提到想用的因子或策略类型。</div>
+        </>}
+
+        {/* ================================================================ */}
+        {/*  6.8 组合回测 (V2.9)                                              */}
+        {/* ================================================================ */}
+        {active === 'portfolio' && <>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>组合回测 (V2.9)</h1>
+
+          <div style={h2s}>概述</div>
+          <p style={ps}>从"单股票单策略"升级到"多股票组合/轮动"回测。支持 ETF、个股、混合标的池。</p>
+          <div style={note}>导航栏 → "组合" tab → 选策略 → 填标的池 → 运行 → 查看净值曲线与指标</div>
+
+          <div style={h2s}>内置策略</div>
+          <table style={tbl}><thead><tr><th style={ths}>策略</th><th style={ths}>说明</th><th style={ths}>关键参数</th></tr></thead><tbody>
+            <tr><td style={tds}>TopNRotation</td><td style={tds}>截面因子排名选 Top N，等权持有</td><td style={tds}>top_n, factor</td></tr>
+            <tr><td style={tds}>MultiFactorRotation</td><td style={tds}>多因子 z-score 合成排名</td><td style={tds}>top_n, factors</td></tr>
+            <tr><td style={tds}>EtfMacdRotation</td><td style={tds}>ETF 动量轮动 + 周线 MACD 过滤 + 恐慌保护</td><td style={tds}>top_n, rank_period</td></tr>
+            <tr><td style={tds}>EtfSectorSwitch</td><td style={tds}>多信号加权 + 行业宽基切换 + 累积投票</td><td style={tds}>top_n</td></tr>
+            <tr><td style={tds}>EtfStockEnhance</td><td style={tds}>ETF 轮动底仓 + 个股增强</td><td style={tds}>top_n, stock_ratio</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>标的池示例</div>
+          <div style={h3s}>策略 1 (EtfMacdRotation) — 10 只 ETF</div>
+          <pre style={code}>510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ</pre>
+          <div style={h3s}>策略 2/3 (SectorSwitch/StockEnhance) — 22 只 ETF</div>
+          <pre style={code}>510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH</pre>
+
+          <div style={h2s}>核心概念</div>
+          <div style={h3s}>交易日历 (TradingCalendar)</div>
+          <p style={ps}>A 股不是每天都能交易（周末、春节、国庆休市）。交易日历记录真实交易日，用于计算换仓日。不用"每周五"硬编码，而是"每周最后一个交易日"。</p>
+          <div style={h3s}>PIT 证券池 (Point-In-Time Universe)</div>
+          <p style={ps}>回测时使用当时的成分股，不穿越未来。如用 2024 年的沪深 300 成分回测 2020 年会有幸存者偏差。PIT 自动过滤退市股和刚上市新股（默认排除上市不足 60 天的股票）。</p>
+          <div style={h3s}>截面因子 (CrossSectionalFactor)</div>
+          <p style={ps}>和单股因子（如 RSI）不同。截面因子是同一天对全 universe 排名。例如"20 日动量排名"——全池 500 只股票谁涨最多排第一。组合策略用排名决定买哪几只。</p>
+
+          <div style={h2s}>回测设置</div>
+          <table style={tbl}><thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>初始资金</td><td style={tds}>1,000,000</td><td style={tds}>回测起始资金</td></tr>
+            <tr><td style={tds}>基准</td><td style={tds}>510300.SH</td><td style={tds}>基准标的（留空=现金基准）</td></tr>
+            <tr><td style={tds}>买入佣金</td><td style={tds}>0.0003 (万三)</td><td style={tds}>按成交额比例</td></tr>
+            <tr><td style={tds}>卖出佣金</td><td style={tds}>0.0003</td><td style={tds}>可与买入不同</td></tr>
+            <tr><td style={tds}>最低佣金</td><td style={tds}>5 元</td><td style={tds}>每笔最低</td></tr>
+            <tr><td style={tds}>印花税(卖)</td><td style={tds}>0.0005 (万五)</td><td style={tds}>A 股卖出时收取</td></tr>
+            <tr><td style={tds}>滑点率</td><td style={tds}>0</td><td style={tds}>模拟市场冲击</td></tr>
+            <tr><td style={tds}>整手</td><td style={tds}>100 股</td><td style={tds}>A 股最小交易单位</td></tr>
+            <tr><td style={tds}>涨跌停</td><td style={tds}>10%</td><td style={tds}>涨停不可买，跌停不可卖（科创板/创业板设 20%）</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>引擎保障</div>
+          <table style={tbl}><thead><tr><th style={ths}>保障</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>会计不变量</td><td style={tds}>每日检查 cash + 持仓市值 = 总权益，违反即报错</td></tr>
+            <tr><td style={tds}>防前瞻</td><td style={tds}>策略只能看到调仓日前一天的数据</td></tr>
+            <tr><td style={tds}>离散股数</td><td style={tds}>权重 → 目标金额 → 股数（整手取整）→ 余额回现金</td></tr>
+            <tr><td style={tds}>先卖后买</td><td style={tds}>同一天先卖出再买入，释放现金</td></tr>
+            <tr><td style={tds}>停牌保护</td><td style={tds}>当日无数据的标的不交易</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>自定义策略</div>
+          <p style={ps}>在代码编辑器中继承 <code>PortfolioStrategy</code>，实现 <code>generate_weights()</code> 方法：</p>
+          <pre style={code}>{`from ez.portfolio.portfolio_strategy import PortfolioStrategy
+
+class MyRotation(PortfolioStrategy):
+    @property
+    def lookback_days(self) -> int:
+        return 300  # 需要多少天历史
+
+    def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        # universe_data: {symbol: DataFrame} 已切片至 date-1
+        # self.state: 跨周期持久状态
+        # 返回 {symbol: weight}, weight >= 0, sum <= 1.0
+        return {"510300.SH": 0.5, "518880.SH": 0.5}`}</pre>
+
+          <div style={h2s}>API 端点</div>
+          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>/api/portfolio/strategies</td><td style={tds}>GET</td><td style={tds}>列出已注册策略 + 可用因子</td></tr>
+            <tr><td style={tds}>/api/portfolio/run</td><td style={tds}>POST</td><td style={tds}>执行组合回测</td></tr>
+            <tr><td style={tds}>/api/portfolio/runs</td><td style={tds}>GET</td><td style={tds}>历史回测列表</td></tr>
+            <tr><td style={tds}>/api/portfolio/runs/{'<id>'}</td><td style={tds}>GET</td><td style={tds}>回测详情</td></tr>
+            <tr><td style={tds}>/api/portfolio/runs/{'<id>'}</td><td style={tds}>DELETE</td><td style={tds}>删除回测</td></tr>
+          </tbody></table>
         </>}
 
         {/* ================================================================ */}

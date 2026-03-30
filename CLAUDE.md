@@ -21,7 +21,8 @@ Version: 0.2.9 | Tests: 1119 (1129 collected, 10 skip) | C++ acceleration: up to
 - `ez/api/` — FastAPI REST endpoints [CLAUDE.md](ez/api/CLAUDE.md)
 - `web/` — React frontend dashboard [CLAUDE.md](web/CLAUDE.md)
 - `ez/llm/` — LLM provider abstraction: DeepSeek/Qwen/Local/OpenAI (V2.7) [CLAUDE.md](ez/llm/CLAUDE.md)
-- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter, Tools, Assistant, Sandbox, FDR + V2.8 Research Agent (Hypothesis, CodeGen, Analyzer, LoopController, ResearchRunner, ResearchStore, ResearchReport) [CLAUDE.md](ez/agent/CLAUDE.md)
+- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter, Tools, Assistant, Sandbox, FDR + V2.8 Research Agent [CLAUDE.md](ez/agent/CLAUDE.md)
+- `ez/portfolio/` — Portfolio backtesting: Universe, CrossSectionalFactor, PortfolioStrategy, Allocator, Engine, 5 built-in strategies (V2.9) [CLAUDE.md](ez/portfolio/CLAUDE.md)
 - `ez/live/` — Deploy Gate, OMS, Broker (V2.6+, planned)
 - `ez/ops/` — Scheduling, monitoring, audit (V3.2+, planned)
 
