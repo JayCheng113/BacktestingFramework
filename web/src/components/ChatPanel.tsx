@@ -12,6 +12,19 @@ interface ChatMsg {
   toolArgs?: string
 }
 
+const _TOOL_LABELS: Record<string, string> = {
+  create_strategy: '创建策略', update_strategy: '更新策略',
+  read_source: '读取代码', list_strategies: '查询策略列表',
+  list_factors: '查询因子列表', run_backtest: '运行回测',
+  run_experiment: '运行实验', list_experiments: '查询实验',
+  explain_metrics: '查看指标',
+}
+
+function _toolLabel(name: string, content: string): string {
+  const label = _TOOL_LABELS[name] || name
+  return content.includes('调用中') ? `⏳ ${label}...` : `✓ ${label}`
+}
+
 interface Conversation {
   id: string
   title: string
@@ -325,21 +338,25 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className="max-w-full rounded-lg px-3 py-2 text-xs" style={{
-              backgroundColor: m.role === 'user' ? 'var(--color-accent)' : m.role === 'tool' ? '#1e293b' : 'var(--bg-secondary)',
-              color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
-              border: m.role === 'tool' ? '1px solid #334155' : 'none',
-              maxWidth: '90%',
-            }}>
-              {m.role === 'tool' && (
-                <div className="text-xs opacity-60 mb-1" style={{ color: '#94a3b8' }}>Tool: {m.toolName}</div>
-              )}
-              <pre className="whitespace-pre-wrap font-sans" style={{ fontFamily: m.role === 'tool' ? 'monospace' : 'inherit' }}>
-                {m.content}
-              </pre>
+          m.role === 'tool' ? (
+            <div key={i} className="flex justify-start">
+              <div className="text-xs px-3 py-1 rounded" style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+                {m.toolName && _toolLabel(m.toolName, m.content)}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className="rounded-lg px-3 py-2 text-xs" style={{
+                backgroundColor: m.role === 'user' ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
+                maxWidth: '90%', overflow: 'hidden',
+              }}>
+                <pre className="whitespace-pre-wrap font-sans" style={{ overflowWrap: 'break-word', wordBreak: 'break-word', maxWidth: '100%' }}>
+                  {m.content}
+                </pre>
+              </div>
+            </div>
+          )
         ))}
         {streaming && (
           <div className="flex justify-start">

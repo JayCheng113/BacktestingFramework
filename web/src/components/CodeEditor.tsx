@@ -272,7 +272,7 @@ export default function CodeEditor() {
   }
 
   return (
-    <div className="flex" style={{ height: '100%' }}>
+    <div className="flex" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
       {/* Help modal overlay */}
       {showHelp && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
