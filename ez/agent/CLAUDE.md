@@ -87,7 +87,7 @@ V2.8 adds autonomous research agent: Hypothesis → CodeGen → BatchExec → An
 |-----------|---------|-------------|
 | max_iterations | 10 | Maximum loop rounds |
 | max_specs | 500 | Total backtest count limit |
-| max_llm_calls | 100 | LLM API call limit (approximate) |
+| max_llm_calls | 100 | LLM API call limit (approximate: E2 counts ~2 per hypothesis, actual may vary with tool rounds) |
 | no_improve_limit | 3 | Stop after N consecutive rounds with 0 new gate-passed |
 
 ### Task State Machine

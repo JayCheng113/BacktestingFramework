@@ -106,7 +106,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
             {factors.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </div>
-        <button onClick={handleEval} disabled={loading}
+        <button onClick={handleEval} disabled={loading || !factor}
           className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
           {loading ? '评估中...' : '评估'}
         </button>

@@ -94,15 +94,9 @@ async def run_research_task(
         task_id = uuid.uuid4().hex[:12]
         register_task(task_id)
 
-    # Everything inside try/finally so done=True is always set
-    stop_reason = ""
+    # Persist task record BEFORE any init that might fail (audit trail guarantee)
     try:
-        provider = create_provider()
         research_store = get_research_store()
-        controller = LoopController(loop_config)
-        state = LoopState()
-        start_time = datetime.now()
-
         research_store.save_task({
             "task_id": task_id,
             "goal": goal.description,
@@ -115,6 +109,17 @@ async def run_research_task(
             }),
             "status": "running",
         })
+    except Exception:
+        pass  # store init may fail, but we still proceed — task exists in memory
+
+    # Everything inside try/finally so done=True is always set
+    stop_reason = ""
+    try:
+        provider = create_provider()
+        research_store = get_research_store()
+        controller = LoopController(loop_config)
+        state = LoopState()
+        start_time = datetime.now()
 
         data = await asyncio.to_thread(_fetch_data, goal)
         previous_analysis = ""

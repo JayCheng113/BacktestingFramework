@@ -9,7 +9,7 @@ class LoopConfig:
     """Budget and convergence settings for a research loop."""
     max_iterations: int = 10
     max_specs: int = 500
-    max_llm_calls: int = 100
+    max_llm_calls: int = 100  # approximate — chat_sync internal rounds counted as ~2 per hypothesis
     no_improve_limit: int = 3
 
 

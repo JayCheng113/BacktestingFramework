@@ -187,7 +187,7 @@ export default function ResearchPanel() {
       const researchAll = all.filter((f) => f.filename.startsWith('research_'))
 
       if (task?.iterations && task.iterations.length > 0) {
-        // Extract filenames created during THIS task from iteration analysis.strategy_files
+        // Only show files created during THIS task (from iteration analysis.strategy_files)
         const taskFiles = new Set<string>()
         for (const it of task.iterations) {
           try {
@@ -195,13 +195,9 @@ export default function ResearchPanel() {
             for (const f of (analysis.strategy_files || [])) taskFiles.add(f)
           } catch {}
         }
-        if (taskFiles.size > 0) {
-          setResearchFiles(researchAll.filter(f => taskFiles.has(f.filename)))
-        } else {
-          setResearchFiles(researchAll) // fallback for old tasks without strategy_files
-        }
+        setResearchFiles(researchAll.filter(f => taskFiles.has(f.filename)))
       } else {
-        setResearchFiles(researchAll)
+        setResearchFiles([]) // no iterations = no files to promote
       }
     } catch {}
   }
@@ -219,6 +215,9 @@ export default function ResearchPanel() {
         } else {
           alert(`注册失败: ${data.errors?.join(', ')}`)
         }
+      } else {
+        const errData = await res.json().catch(() => ({ detail: res.statusText }))
+        alert(`注册失败 (${res.status}): ${errData.detail || '未知错误'}`)
       }
     } catch (e) { alert(`注册失败: ${e}`) }
   }
