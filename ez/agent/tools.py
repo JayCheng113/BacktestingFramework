@@ -387,3 +387,130 @@ def _explain_metrics(run_id: str) -> dict:
     if not run:
         return {"error": f"Run {run_id} not found"}
     return run
+
+
+# ── V2.9 Portfolio tools ─────────────────────────────────────────────
+
+
+@tool(
+    name="create_portfolio_strategy",
+    description="Create a new portfolio strategy file in portfolio_strategies/. Runs contract test (weights>=0, sum<=1). Returns test result.",
+    params={
+        "type": "object",
+        "properties": {
+            "filename": {"type": "string", "description": "Filename like 'my_rotation.py'"},
+            "code": {"type": "string", "description": "Python code defining a PortfolioStrategy subclass"},
+        },
+        "required": ["filename", "code"],
+    },
+)
+def create_portfolio_strategy(filename: str, code: str) -> dict:
+    from ez.agent.sandbox import save_and_validate_code
+    return save_and_validate_code(filename, code, kind="portfolio_strategy")
+
+
+@tool(
+    name="run_portfolio_backtest",
+    description="Run a portfolio backtest with multiple stocks. Returns metrics (Sharpe, return, drawdown, turnover).",
+    params={
+        "type": "object",
+        "properties": {
+            "strategy_name": {"type": "string", "description": "Registered strategy name (e.g. 'TopNRotation')"},
+            "symbols": {"type": "array", "items": {"type": "string"}, "description": "Stock/ETF codes"},
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD"},
+            "freq": {"type": "string", "description": "Rebalance frequency: daily/weekly/monthly/quarterly", "default": "monthly"},
+            "strategy_params": {"type": "object", "description": "Strategy parameters (e.g. {top_n: 10, factor: 'momentum_rank_20'})", "default": {}},
+        },
+        "required": ["strategy_name", "symbols", "start_date", "end_date"],
+    },
+)
+def run_portfolio_backtest_tool(
+    strategy_name: str, symbols: list[str],
+    start_date: str, end_date: str,
+    freq: str = "monthly", strategy_params: dict | None = None,
+) -> dict:
+    from datetime import date, timedelta
+    import numpy as np
+    import pandas as pd
+    from ez.agent.data_access import get_chain
+    from ez.portfolio.calendar import TradingCalendar
+    from ez.portfolio.cross_factor import MomentumRank, VolumeRank, ReverseVolatilityRank
+    from ez.portfolio.engine import run_portfolio_backtest, CostModel
+    from ez.portfolio.portfolio_strategy import PortfolioStrategy, TopNRotation, MultiFactorRotation
+    from ez.portfolio.universe import Universe
+
+    _factor_map = {
+        "momentum_rank_20": lambda: MomentumRank(20),
+        "momentum_rank_10": lambda: MomentumRank(10),
+        "volume_rank_20": lambda: VolumeRank(20),
+        "reverse_vol_rank_20": lambda: ReverseVolatilityRank(20),
+    }
+
+    params = dict(strategy_params or {})
+    registry = PortfolioStrategy.get_registry()
+
+    # Create strategy instance
+    if strategy_name == "TopNRotation":
+        factor_name = params.pop("factor", "momentum_rank_20")
+        factory = _factor_map.get(factor_name)
+        if not factory:
+            return {"error": f"Unknown factor: {factor_name}"}
+        strategy = TopNRotation(factor=factory(), top_n=params.pop("top_n", 10))
+    elif strategy_name == "MultiFactorRotation":
+        factor_names = params.pop("factors", ["momentum_rank_20"])
+        factors = [_factor_map[f]() for f in factor_names if f in _factor_map]
+        strategy = MultiFactorRotation(factors=factors, top_n=params.pop("top_n", 10))
+    elif strategy_name in registry:
+        strategy = registry[strategy_name](**params)
+    else:
+        return {"error": f"Strategy '{strategy_name}' not found"}
+
+    # Fetch data
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    chain = get_chain()
+    fetch_start = start - timedelta(days=400)
+
+    universe_data = {}
+    all_dates = set()
+    for sym in symbols:
+        try:
+            bars = chain.get_kline(sym, "cn_stock", "daily", fetch_start, end)
+            if not bars:
+                continue
+            df = pd.DataFrame([{
+                "open": b.open, "high": b.high, "low": b.low,
+                "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
+            } for b in bars], index=pd.DatetimeIndex([b.time for b in bars]))
+            universe_data[sym] = df
+            all_dates.update(d.date() for d in df.index)
+        except Exception as e:
+            continue
+
+    if not universe_data:
+        return {"error": "No data available for any symbol"}
+
+    calendar = TradingCalendar.from_dates(sorted(all_dates))
+    universe = Universe(symbols)
+
+    result = run_portfolio_backtest(
+        strategy=strategy, universe=universe, universe_data=universe_data,
+        calendar=calendar, start=start, end=end, freq=freq,
+    )
+
+    # Sanitize metrics
+    metrics = {}
+    for k, v in result.metrics.items():
+        if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+            metrics[k] = None
+        else:
+            metrics[k] = v
+
+    return {
+        "metrics": metrics,
+        "trade_count": len(result.trades),
+        "rebalance_count": len(result.rebalance_dates),
+        "equity_start": result.equity_curve[0] if result.equity_curve else 0,
+        "equity_end": result.equity_curve[-1] if result.equity_curve else 0,
+    }

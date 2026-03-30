@@ -54,4 +54,12 @@ export const deleteCodeFile = (filename: string) => api.delete(`/code/files/${fi
 // Chat (V2.7)
 export const chatStatus = () => api.get('/chat/status')
 
+// Portfolio (V2.9)
+export const listPortfolioStrategies = () => api.get('/portfolio/strategies')
+export const runPortfolioBacktest = (data: any) => api.post('/portfolio/run', data)
+export const listPortfolioRuns = (limit = 50, offset = 0) =>
+  api.get('/portfolio/runs', { params: { limit, offset } })
+export const getPortfolioRun = (runId: string) => api.get(`/portfolio/runs/${runId}`)
+export const deletePortfolioRun = (runId: string) => api.delete(`/portfolio/runs/${runId}`)
+
 export default api

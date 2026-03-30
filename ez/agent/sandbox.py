@@ -514,11 +514,13 @@ def save_and_validate_code(
 
 def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> dict:
     """Contract test for portfolio strategies and cross-sectional factors."""
+    # Use forward slashes for Windows compat (Python accepts them on all platforms)
+    safe_path = str(target_dir / filename).replace("\\", "/")
     if kind == "portfolio_strategy":
         test_code = f"""
 import importlib.util, sys, numpy as np, pandas as pd
 from datetime import datetime
-spec = importlib.util.spec_from_file_location('_check', '{target_dir / filename}')
+spec = importlib.util.spec_from_file_location('_check', '{safe_path}')
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 from ez.portfolio.portfolio_strategy import PortfolioStrategy
 classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, PortfolioStrategy) and v is not PortfolioStrategy]
@@ -543,7 +545,7 @@ print(f'OK: {{cls.__name__}} weights={{w}}')
         test_code = f"""
 import importlib.util, numpy as np, pandas as pd
 from datetime import datetime
-spec = importlib.util.spec_from_file_location('_check', '{target_dir / filename}')
+spec = importlib.util.spec_from_file_location('_check', '{safe_path}')
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 from ez.portfolio.cross_factor import CrossSectionalFactor
 classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, CrossSectionalFactor) and v is not CrossSectionalFactor]
