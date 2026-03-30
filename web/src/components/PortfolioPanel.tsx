@@ -77,7 +77,9 @@ export default function PortfolioPanel() {
     try {
       await deletePortfolioRun(runId)
       loadHistory()
-    } catch {}
+    } catch (e: any) {
+      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || '未知错误'))
+    }
   }
 
   const updateParam = (key: string, value: any) => {

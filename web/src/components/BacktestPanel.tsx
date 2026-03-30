@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listStrategies, runBacktest, runWalkForward } from '../api'
 import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
-import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
+import BacktestSettings, { getDefaultSettings } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
 interface Props {
@@ -18,9 +18,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   const [params, setParams] = useState<Record<string, number | string | boolean>>({})
   const [mode, setMode] = useState<'backtest' | 'walk-forward'>('backtest')
   const [nSplits, setNSplits] = useState(5)
-  const [costSettings, setCostSettings] = useState<BacktestSettingsValue>({
-    ...DEFAULT_SETTINGS, benchmark: '', // no benchmark for single-stock
-  })
+  const [costSettings, setCostSettings] = useState<BacktestSettingsValue>(() => ({
+    ...getDefaultSettings(market), benchmark: '', // no benchmark for single-stock
+  }))
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [wfResult, setWfResult] = useState<WalkForwardResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -37,6 +37,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
       }
     }).catch(() => {})
   }, [])
+
+  // Reset cost settings when market changes (A-share rules only for cn_stock)
+  useEffect(() => {
+    setCostSettings(prev => ({ ...getDefaultSettings(market), benchmark: prev.benchmark }))
+  }, [market])
 
   const handleRun = async () => {
     if (!selected || !symbol) return

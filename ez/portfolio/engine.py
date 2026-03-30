@@ -116,6 +116,20 @@ def run_portfolio_backtest(
             raw_list = [raw_list[i] for i in order]
         _sym_data[sym] = (dates_list, adj_list, raw_list, set(dates_list))
 
+    # Initialize prev_prices/prev_raw_close from data before first trading day
+    # so that limit check works on the very first day of the backtest
+    if trading_days:
+        first_day = trading_days[0]
+        for sym, (sdates, adj_arr, raw_arr, date_set) in _sym_data.items():
+            idx = bisect.bisect_left(sdates, first_day) - 1
+            if idx >= 0:
+                if not np.isnan(adj_arr[idx]):
+                    prev_prices[sym] = adj_arr[idx]
+                elif not np.isnan(raw_arr[idx]):
+                    prev_prices[sym] = raw_arr[idx]
+                if not np.isnan(raw_arr[idx]):
+                    prev_raw_close[sym] = raw_arr[idx]
+
     for day in trading_days:
         tradeable = set(universe.tradeable_at(day))
 

@@ -122,3 +122,17 @@ export const DEFAULT_SETTINGS: BacktestSettingsValue = {
   lot_size: 100,
   limit_pct: 0.10,
 }
+
+/** Market-aware defaults: A-share rules only for cn_stock */
+export function getDefaultSettings(market: string): BacktestSettingsValue {
+  if (market === 'cn_stock') return { ...DEFAULT_SETTINGS }
+  // US/HK/other: no stamp tax, no lot size restriction, no limit price
+  return {
+    ...DEFAULT_SETTINGS,
+    benchmark: '',
+    stamp_tax_rate: 0,
+    lot_size: 1,
+    limit_pct: 0,
+    min_commission: 0,
+  }
+}

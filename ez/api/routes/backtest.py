@@ -36,6 +36,9 @@ class _SellSideTaxMatcher(Matcher):
         if result.shares <= 0:
             return result
         tax = result.shares * result.fill_price * self._tax
+        # Cap tax so net_amount stays >= 0 (inner may have already capped commission)
+        max_tax = max(result.net_amount, 0.0)
+        tax = min(tax, max_tax)
         return FillResult(
             shares=result.shares,
             fill_price=result.fill_price,

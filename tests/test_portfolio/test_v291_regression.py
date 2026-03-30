@@ -429,6 +429,18 @@ class TestSellSideTaxMatcher:
         assert result.shares == 0
         assert result.commission == 0
 
+    def test_net_amount_never_negative(self):
+        """Stamp tax must not push net_amount below 0."""
+        from ez.api.routes.backtest import _SellSideTaxMatcher
+        from ez.core.matcher import SimpleMatcher
+
+        # Extreme: high commission + high tax, tiny sell
+        inner = SimpleMatcher(commission_rate=0.5, min_commission=0)  # 50% commission
+        wrapper = _SellSideTaxMatcher(inner, stamp_tax_rate=0.5)  # 50% stamp tax
+        result = wrapper.fill_sell(1.0, 1)  # sell 1 share at 1.0 = value 1.0
+        # Inner: comm = 0.5, net = 0.5. Tax would be 0.5, but capped to keep net >= 0
+        assert result.net_amount >= 0, f"net_amount={result.net_amount} is negative"
+
 
 # ─── Issue 2 fix: limit tolerance precision ───
 
@@ -470,6 +482,40 @@ class TestLimitTolerancePrecision:
                          if t["date"] == day10.isoformat() and t["side"] == "buy"]
         # +9.95% is NOT limit up → buy MUST succeed on first rebalance
         assert len(buys_on_day10) > 0, "+9.95% was wrongly blocked as limit up"
+
+    def test_exact_10pct_blocked_on_first_day(self):
+        """Exactly +10% on the first trading day MUST be blocked (limit up)."""
+        dates = pd.date_range("2024-01-02", periods=20, freq="B")
+        prices = np.full(20, 10.0)
+        prices[10] = 11.0  # exactly +10% = limit up
+
+        data = {"A": pd.DataFrame({
+            "open": prices, "high": prices * 1.01, "low": prices * 0.99,
+            "close": prices, "adj_close": prices,
+            "volume": np.full(20, 100000),
+        }, index=dates)}
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        class AlwaysBuy(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 1.0}
+
+        # Start on day 10 — prev_raw_close should be initialized from day 9 (=10.0)
+        day10 = dates[10].date()
+        result = run_portfolio_backtest(
+            strategy=AlwaysBuy(), universe=Universe(["A"]),
+            universe_data=data, calendar=cal,
+            start=day10, end=dates[-1].date(),
+            freq="daily", initial_cash=100000, lot_size=1,
+            limit_pct=0.10,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        buys_on_day10 = [t for t in result.trades
+                         if t["date"] == day10.isoformat() and t["side"] == "buy"]
+        # +10% = limit up → buy MUST be blocked on first day
+        assert len(buys_on_day10) == 0, "Limit-up stock bought on first day (prev_raw_close not initialized)"
 
 
 # ─── Issue 3 fix: unsorted input doesn't break engine ───
