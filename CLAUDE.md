@@ -54,7 +54,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (990 collected, 980 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (1036 collected, 1026 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -78,10 +78,15 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.7**: LLM + Web Coding Assistant — Monaco Editor, AI Chat (DeepSeek/Qwen/Local), Tool框架 (9 tools), 代码沙箱 (AST禁危险import/builtins/dunders), FDR 多重检验 (Bonferroni/BH), 全站中文化, 开发文档 (11章1497行), 设置面板 (LLM/Tushare), 多会话 Chat (localStorage持久化), 897 tests
 - **V2.7 post-release fixes**: 整手买入超预算修复, read_source 前缀校验, FDR None 容错, WF 参数校验, 热重载 pyc 清理, SPA API 404, bool 字符串解析, 凭证清空接口, 因子列名修正 (macd_line/boll_upper_20), 设置 YAML 持久化
 - **V2.7.1**: Stability — Chat async 化, Provider 连接池, ExperimentStore 合并, 多列因子评估, 路径穿越修复, 921 tests
-- **V2.8**: Autonomous Research Agent — 全自治策略探索 (E1假设生成+E2代码生成+E3批量回测+E4结果分析+E5循环控制+E6报告), ResearchStore持久化, SSE进度流, 研究助手前端, 980 tests
+- **V2.8**: Autonomous Research Agent — 全自治策略探索 (E1假设生成+E2代码生成+E3批量回测+E4结果分析+E5循环控制+E6报告), ResearchStore持久化 (2张新表), SSE进度流, 研究助手前端, asyncio.Lock串行保护, cancel→cancelled状态机, 预算预检查, allowed_tools工具过滤, 1026 tests
+- **V2.8 post-release fixes**: 任务卡死(try/finally全包裹), 串行竞态(asyncio.Lock), 取消语义(cancelled≠completed), store连接泄漏(close实现), 预算硬约束(批前检查), LLM计数(保守估计), code_gen异常重试, best_strategies查询, SSE预注册, E2工具最小权限
 - **Next: V2.8.1** — Stability
 
 ## Known Limitations (V2.8.1 跟进)
+- _start_lock 私有名跨模块导入 (应封装为函数)
+- LLM 调用计数近似 (chat_sync 内部多轮不精确计入)
+- SSE 流无 heartbeat (长迭代时代理可能断开)
+- 前端 409 串行拒绝无用户提示
 - 研究任务不支持进程恢复 (crash recovery)
 - 研究任务串行 (同时只跑 1 个)
 - 数据源链扁平去重而非按市场独立路由

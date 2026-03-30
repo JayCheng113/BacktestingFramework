@@ -5,6 +5,7 @@ Provide a standardized pipeline for automated and human-driven strategy research
 RunSpec → Runner → Gate → Report → Store.
 V2.5 adds batch parameter search: CandidateSearch → PreFilter → BatchRunner → Ranking.
 V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR correction.
+V2.8 adds autonomous research agent: Hypothesis → CodeGen → BatchExec → Analyzer → LoopController → Report.
 
 ## Public Interfaces
 - `RunSpec` — Immutable experiment input with content-hash `spec_id` for idempotency
@@ -20,10 +21,18 @@ V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR 
 - `run_batch` — Orchestrate pre-filter → full run → gate → rank → persist (V2.5)
 - `tool()` decorator — Register functions as AI assistant tools (V2.7)
 - `get_all_tool_schemas()` / `execute_tool()` — Tool dispatch framework (V2.7)
-- `chat_sync()` / `chat_stream()` — Agent loop with tool calling (V2.7, sync)
+- `chat_sync()` — Agent loop with tool calling, supports `allowed_tools` filter (V2.7+V2.8)
+- `chat_stream()` — Sync streaming agent loop (V2.7)
 - `achat_stream()` — Async streaming agent loop (V2.7.1, non-blocking)
 - `save_and_validate_strategy()` — Code sandbox: save + contract test (V2.7)
 - `apply_fdr()` — FDR correction for batch search results (V2.7)
+- `generate_hypotheses()` — LLM-powered strategy hypothesis generation (V2.8)
+- `generate_strategy_code()` — LLM-powered code generation with sandbox validation (V2.8)
+- `analyze_results()` — LLM-powered batch result analysis (V2.8)
+- `LoopController` — Budget/convergence/stop condition management (V2.8)
+- `ResearchReport` / `build_report()` — Aggregate iterations + LLM summary (V2.8)
+- `ResearchStore` — DuckDB persistence for research tasks + iterations (V2.8)
+- `run_research_task()` — Async orchestrator: E1→E2→E3→E4→E5→E6 loop (V2.8)
 
 ## Files
 | File | Role |
@@ -37,14 +46,21 @@ V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR 
 | prefilter.py | Pre-filter rule engine for fast elimination (V2.5) |
 | batch_runner.py | Batch execution + ranking pipeline (V2.5) |
 | tools.py | Tool registration framework + 9 built-in tools (V2.7) |
-| assistant.py | Agent loop: message → LLM → tool_use → execute → respond (V2.7) |
+| assistant.py | Agent loop: message → LLM → tool_use → execute → respond (V2.7+V2.8: allowed_tools) |
 | sandbox.py | Code validation: syntax check, forbidden imports, contract test (V2.7) |
 | fdr.py | False Discovery Rate correction: Bonferroni, Benjamini-Hochberg (V2.7) |
-| data_access.py | Agent-layer data singletons (avoids L5→L6 import) (V2.7) |
+| data_access.py | Agent-layer data singletons: chain, experiment_store, research_store (V2.7+V2.8) |
+| hypothesis.py | E1: LLM hypothesis generation from research goal (V2.8) |
+| code_gen.py | E2: LLM strategy code generation with filtered tools + retry (V2.8) |
+| analyzer.py | E4: LLM result analysis and direction suggestions (V2.8) |
+| loop_controller.py | E5: Budget tracking, convergence detection, 4 stop conditions (V2.8) |
+| research_report.py | E6: Aggregate iterations into final report + Top 5 strategies (V2.8) |
+| research_store.py | DuckDB persistence: research_tasks + research_iterations (V2.8) |
+| research_runner.py | Main orchestrator: async loop with SSE events + cancel + budget (V2.8) |
 
 ## Dependencies
-- Upstream: ez/backtest/ (Engine, WFO, significance), ez/core/ (Matcher), ez/strategy/ (Strategy registry), ez/llm/ (LLMProvider, V2.7)
-- Downstream: ez/api/routes/experiments.py, ez/api/routes/candidates.py, ez/api/routes/code.py, ez/api/routes/chat.py, web/
+- Upstream: ez/backtest/ (Engine, WFO, significance), ez/core/ (Matcher), ez/strategy/ (Strategy registry), ez/llm/ (LLMProvider, V2.7+)
+- Downstream: ez/api/routes/experiments.py, ez/api/routes/candidates.py, ez/api/routes/code.py, ez/api/routes/chat.py, ez/api/routes/research.py, web/
 
 ## Agent Tools (V2.7)
 | Tool | Capability | Permission |
@@ -58,6 +74,37 @@ V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR 
 | run_experiment | Full experiment pipeline | Execute (persists to ExperimentStore) |
 | list_experiments | Recent experiment list | Read-only |
 | explain_metrics | Experiment detail + gate reasons | Read-only |
+
+## V2.8 Research Agent Pipeline
+```
+用户目标 → E1 生成假设 → E2 代码生成 (filtered tools: create_strategy/read_source/list_factors)
+         → E3 run_batch() → E4 分析结果 → E5 循环控制 (预算/收敛/取消)
+         → E6 报告 (Top 5 策略 + LLM 总结)
+```
+
+### Budget Control (LoopConfig)
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| max_iterations | 10 | Maximum loop rounds |
+| max_specs | 500 | Total backtest count limit |
+| max_llm_calls | 100 | LLM API call limit (approximate) |
+| no_improve_limit | 3 | Stop after N consecutive rounds with 0 new gate-passed |
+
+### Task State Machine
+```
+pending → running → completed
+                  → cancelled (user cancel)
+                  → failed (exception)
+```
+
+### Concurrency
+- Task-level serial: `asyncio.Lock` ensures only 1 task runs at a time
+- Init failure safe: try/finally guarantees `done=True` even on early exception
+- `register_task()` pre-registers in memory before background work (prevents SSE 404)
+
+### Persistence
+- research_tasks: task_id(PK), goal, config, status, stop_reason, summary
+- research_iterations: (task_id, iteration)(PK), hypotheses, tried/passed, best_sharpe, analysis, spec_ids
 
 ## Sandbox Security (V2.7)
 - **Forbidden imports**: os, sys, subprocess, socket, shutil, pathlib, importlib, ctypes, multiprocessing, threading, signal, pickle, http, urllib, requests, httpx, duckdb, etc.
@@ -84,17 +131,8 @@ V2.7 adds AI assistant: Tools → Assistant → Chat, plus code sandbox and FDR 
 - BatchRunner skips duplicates via ExperimentStore.get_completed_run_id() (V2.5)
 - Agent tools use ez/agent/data_access.py for singletons, NOT ez/api/deps.py (layer discipline)
 - Tool framework uses decorator pattern — `@tool(name, description, params)` auto-registers
-
-## V2.8 Autonomous Research Agent
-| File | Role |
-|------|------|
-| hypothesis.py | E1: LLM hypothesis generation from research goal |
-| code_gen.py | E2: LLM strategy code generation with sandbox validation |
-| analyzer.py | E4: LLM result analysis and direction suggestions |
-| loop_controller.py | E5: Budget tracking, convergence detection, stop conditions |
-| research_report.py | E6: Aggregate iterations into final report |
-| research_store.py | DuckDB persistence: research_tasks + research_iterations |
-| research_runner.py | Main orchestrator: coordinate E1-E6 in async loop with SSE events |
+- E2 code_gen uses `allowed_tools` to restrict LLM to create_strategy/read_source/list_factors only (V2.8)
+- Research runner pre-checks budget before batch execution (V2.8)
 
 ## Status
 - experimental (V2.4+) — interfaces may change

@@ -33,6 +33,11 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 - `POST /api/settings/llm` — Update LLM provider/key/model (V2.7)
 - `GET /api/settings/tushare` — Get Tushare token status (V2.7)
 - `POST /api/settings/tushare` — Update Tushare token (V2.7)
+- `POST /api/research/start` — Start autonomous research task (V2.8)
+- `GET /api/research/tasks` — List research tasks (V2.8)
+- `GET /api/research/tasks/{task_id}` — Get research task detail + iterations (V2.8)
+- `POST /api/research/tasks/{task_id}/cancel` — Cancel running research task (V2.8)
+- `GET /api/research/tasks/{task_id}/stream` — SSE progress stream (V2.8)
 
 ## Files
 | File | Role |
@@ -47,6 +52,7 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 | routes/code.py | Code editor: template, validate, save, list, read, delete (V2.7) |
 | routes/chat.py | AI chat SSE endpoint + status (V2.7) |
 | routes/settings.py | LLM + Tushare config read/write (V2.7) |
+| routes/research.py | Autonomous research: start/list/detail/cancel/stream + serialization guard (V2.8) |
 
 ## Dependencies
 - Upstream: All ez modules (including ez/agent/ for experiments, ez/llm/ for chat)
@@ -63,6 +69,7 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 - Walk-Forward: `n_splits >= 2`, `0 < train_ratio < 1` enforced by Pydantic
 
 ## Status
-- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search + V2.7 code editor + AI chat + settings
+- Implemented: All V1 endpoints + V2.2 trading costs + V2.4 experiments + V2.5 batch search + V2.7 code editor + AI chat + settings + V2.8 research
 - V2.7: Code editor API, Chat SSE, Settings API (LLM/Tushare read/write with .env injection guard)
 - V2.7.1: Chat SSE fully async (achat_stream), ExperimentStore shared singleton, multi-column factor evaluation, provider cache invalidation on settings change
+- V2.8: Research API (start/list/detail/cancel/stream), asyncio.Lock serialization guard, register_task pre-registration for SSE

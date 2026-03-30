@@ -6,7 +6,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 ## Components
 | Component | Role |
 |-----------|------|
-| Navbar | Top navigation with tab switching (Dashboard / Experiments / Code Editor) |
+| Navbar | Top navigation with tab switching (Dashboard / Experiments / Code Editor / Research / Docs) |
 | SearchBar | Symbol + market + period + date range (calendar dropdown + stock search) |
 | KlineChart | ECharts candlestick + volume + MA5/10/20/60 + BOLL bands + buy/sell markers |
 | BacktestPanel | Strategy + params + trading costs + Single/WF mode + results + trade table + CSV export |
@@ -17,6 +17,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | ChatPanel | AI assistant sidebar — SSE streaming, tool action display, multi-conversation + localStorage (V2.7) |
 | SettingsModal | LLM + Tushare config modal, writes to .env via API (V2.7) |
 | DocsPage | Comprehensive documentation — 11 sections, 1497 lines (V2.7) |
+| ResearchPanel | Autonomous research: goal form + task list + SSE progress + report view (V2.8) |
 | Dashboard | Main page, orchestrates chart/backtest/factor components |
 
 ## Theme
@@ -43,3 +44,4 @@ API proxied to http://localhost:8000
 | components/ChatPanel.tsx | AI assistant chat panel with SSE (V2.7) |
 | components/SettingsModal.tsx | Settings modal for API keys (V2.7) |
 | pages/DocsPage.tsx | Full documentation page (V2.7) |
+| components/ResearchPanel.tsx | Autonomous research UI: goal form + SSE progress + report (V2.8) |
