@@ -25,8 +25,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
 
   useEffect(() => {
     listStrategies().then(r => {
-      setStrategies(r.data)
-      if (r.data.length > 0) {
+      const userStrategies = r.data.filter((s: StrategyInfo) => !s.name.startsWith('Research'))
+      setStrategies(userStrategies)
+      if (userStrategies.length > 0) {
         setSelected(r.data[0].name)
         const defaults: Record<string, number> = {}
         for (const [k, v] of Object.entries(r.data[0].parameters)) defaults[k] = (v as any).default

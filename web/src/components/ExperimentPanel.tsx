@@ -31,9 +31,10 @@ export default function ExperimentPanel() {
   useEffect(() => {
     loadRuns()
     listStrategies().then(r => {
-      setStrategies(r.data)
-      if (r.data.length > 0) {
-        setStrategyName(r.data[0].name)
+      const userStrategies = r.data.filter((s: StrategyInfo) => !s.name.startsWith('Research'))
+      setStrategies(userStrategies)
+      if (userStrategies.length > 0) {
+        setStrategyName(userStrategies[0].name)
         const defaults: Record<string, number> = {}
         for (const [k, v] of Object.entries(r.data[0].parameters)) defaults[k] = (v as any).default
         setParams(defaults)
@@ -43,7 +44,11 @@ export default function ExperimentPanel() {
 
   const loadRuns = () => {
     setLoading(true)
-    listExperiments().then(r => setRuns(r.data)).catch(() => {}).finally(() => setLoading(false))
+    listExperiments().then(r => {
+      // Filter out research agent experiments (strategy names starting with Research)
+      const userRuns = r.data.filter((run: ExperimentRun) => !run.strategy_name?.startsWith('Research'))
+      setRuns(userRuns)
+    }).catch(() => {}).finally(() => setLoading(false))
   }
 
   const handleStrategyChange = (name: string) => {

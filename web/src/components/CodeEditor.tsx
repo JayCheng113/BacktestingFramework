@@ -321,12 +321,12 @@ export default function CodeEditor() {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {files.length === 0 && <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
-          {/* Strategies group */}
-          {files.filter(f => f.class_name && !f.filename.includes('factor')).length > 0 && (
+          {files.filter(f => !f.filename.startsWith('research_')).length === 0 && <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
+          {/* Strategies group (exclude research_) */}
+          {files.filter(f => f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).length > 0 && (
             <>
               <div className="text-xs font-medium px-2 py-1 mt-1" style={{ color: 'var(--color-accent)' }}>策略</div>
-              {files.filter(f => f.class_name && !f.filename.includes('factor')).map(f => (
+              {files.filter(f => f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).map(f => (
                 <div key={f.filename}
                   className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
                   style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
@@ -338,11 +338,11 @@ export default function CodeEditor() {
               ))}
             </>
           )}
-          {/* Factors group */}
-          {files.filter(f => f.filename.includes('factor')).length > 0 && (
+          {/* Factors group (exclude research_) */}
+          {files.filter(f => f.filename.includes('factor') && !f.filename.startsWith('research_')).length > 0 && (
             <>
               <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: '#7c3aed' }}>因子</div>
-              {files.filter(f => f.filename.includes('factor')).map(f => (
+              {files.filter(f => f.filename.includes('factor') && !f.filename.startsWith('research_')).map(f => (
                 <div key={f.filename}
                   className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
                   style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
@@ -354,11 +354,11 @@ export default function CodeEditor() {
               ))}
             </>
           )}
-          {/* Uncategorized */}
-          {files.filter(f => !f.class_name && !f.filename.includes('factor')).length > 0 && (
+          {/* Uncategorized (exclude research_) */}
+          {files.filter(f => !f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).length > 0 && (
             <>
               <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: 'var(--text-secondary)' }}>其他</div>
-              {files.filter(f => !f.class_name && !f.filename.includes('factor')).map(f => (
+              {files.filter(f => !f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).map(f => (
                 <div key={f.filename}
                   className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
                   style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}

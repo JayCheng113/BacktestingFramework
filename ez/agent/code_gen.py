@@ -48,8 +48,8 @@ BOLL(20)→boll_mid_20/boll_upper_20/boll_lower_20
 Momentum(20)→momentum_20, VWAP(20)→vwap_20, OBV()→obv, ATR(14)→atr_14
 
 ## 规则
-- 文件名使用蛇形命名且唯一 (如 rsi_reversal_v1.py)
-- 类名使用驼峰命名
+- 文件名必须以 research_ 开头，蛇形命名且唯一 (如 research_rsi_reversal.py)
+- 类名以 Research 开头，驼峰命名 (如 ResearchRsiReversal)
 - 信号返回 0.0 (空仓) 到 1.0 (满仓) 的 pd.Series
 - 必须使用 create_strategy 工具保存代码
 - 不要跑回测或实验，只创建策略文件
