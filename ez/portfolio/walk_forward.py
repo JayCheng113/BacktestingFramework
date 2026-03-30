@@ -146,7 +146,7 @@ def portfolio_walk_forward(
                 for eq in oos_result.equity_curve:
                     result.oos_equity_curve.append(chain_value * eq / fold_start)
                 chain_value = result.oos_equity_curve[-1]  # next fold starts here
-            result.oos_dates.extend(d.isoformat() for d in oos_result.dates)
+                result.oos_dates.extend(d.isoformat() for d in oos_result.dates)
 
     # Aggregate
     if result.is_sharpes:

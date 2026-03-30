@@ -149,3 +149,60 @@ class TestPortfolioSignificance:
         s2 = portfolio_significance(eq, seed=99)
         assert s1.sharpe_ci_lower == s2.sharpe_ci_lower
         assert s1.monte_carlo_p_value == s2.monte_carlo_p_value
+
+    def test_strong_drift_has_low_pvalue(self):
+        """Strong positive drift should produce p < 0.1 (strategy has real alpha)."""
+        eq = list(np.cumprod(1 + np.random.default_rng(42).normal(0.003, 0.01, 500)) * 100000)
+        sig = portfolio_significance(eq, seed=42, n_permutations=500)
+        assert sig.observed_sharpe > 1.0, "Expected strong Sharpe"
+        assert sig.monte_carlo_p_value < 0.1, f"p={sig.monte_carlo_p_value} too high for strong drift"
+
+
+class TestWFRegressions:
+    """Regression tests for WF fixes (OOS continuity, compound return)."""
+
+    def test_oos_equity_continuous(self):
+        """OOS equity curve must not have non-trading jumps at fold boundaries."""
+        data, cal, universe, dates = _make_data()
+        result = portfolio_walk_forward(
+            strategy_factory=lambda: TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[60].date(), end=dates[-1].date(),
+            n_splits=3, freq="monthly",
+        )
+        if len(result.oos_equity_curve) > 1:
+            # No single-day jump > 20% (would indicate fold boundary discontinuity)
+            for i in range(1, len(result.oos_equity_curve)):
+                prev = result.oos_equity_curve[i - 1]
+                cur = result.oos_equity_curve[i]
+                if prev > 0:
+                    change = abs(cur - prev) / prev
+                    assert change < 0.20, f"Jump of {change:.1%} at index {i} (fold boundary?)"
+
+    def test_oos_dates_equity_aligned(self):
+        """oos_dates and oos_equity_curve must have same length."""
+        data, cal, universe, dates = _make_data()
+        result = portfolio_walk_forward(
+            strategy_factory=lambda: TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[60].date(), end=dates[-1].date(),
+            n_splits=3, freq="monthly",
+        )
+        assert len(result.oos_dates) == len(result.oos_equity_curve)
+
+    def test_compound_total_return(self):
+        """OOS total_return must be compound, not mean."""
+        data, cal, universe, dates = _make_data()
+        result = portfolio_walk_forward(
+            strategy_factory=lambda: TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[60].date(), end=dates[-1].date(),
+            n_splits=3, freq="monthly",
+        )
+        if result.oos_returns:
+            compound = 1.0
+            for r in result.oos_returns:
+                compound *= (1 + r)
+            expected = compound - 1
+            actual = result.oos_metrics.get("total_return", 0)
+            assert abs(actual - expected) < 1e-10, f"Expected compound {expected}, got {actual}"
