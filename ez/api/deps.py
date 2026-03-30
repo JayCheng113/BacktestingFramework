@@ -118,3 +118,6 @@ def close_resources() -> None:
     # Close LLM provider's persistent connections (V2.7.1)
     from ez.llm.factory import reset_provider_cache
     reset_provider_cache()
+    # Close PortfolioStore (V2.9)
+    from ez.api.routes.portfolio import reset_portfolio_store
+    reset_portfolio_store()

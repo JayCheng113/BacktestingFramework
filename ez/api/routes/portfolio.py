@@ -66,8 +66,8 @@ def _create_strategy(name: str, params: dict) -> PortfolioStrategy:
             factors.append(factory())
         top_n = p.pop("top_n", 10)
         return MultiFactorRotation(factors=factors, top_n=top_n, **p)
-    elif name in PortfolioStrategy._registry:
-        cls = PortfolioStrategy._registry[name]
+    elif name in PortfolioStrategy.get_registry():
+        cls = PortfolioStrategy.get_registry()[name]
         return cls(**p)
     else:
         raise HTTPException(404, f"Strategy '{name}' not found")
@@ -103,24 +103,31 @@ def _fetch_data(symbols: list[str], market: str, start: date, end: date):
     return universe_data, calendar
 
 
+_portfolio_store = None
+
+
 def _get_store():
-    """Lazy singleton for PortfolioStore."""
-    import duckdb
-    from ez.portfolio.portfolio_store import PortfolioStore
-    if not hasattr(_get_store, "_instance"):
-        from ez.config import load_config
-        config = load_config()
-        db_path = config.database.path
-        conn = duckdb.connect(str(db_path))
-        _get_store._instance = PortfolioStore(conn)
-    return _get_store._instance
+    """Lazy singleton for PortfolioStore. Shares DuckDB connection via deps.get_store()."""
+    global _portfolio_store
+    if _portfolio_store is None:
+        from ez.api.deps import get_store
+        from ez.portfolio.portfolio_store import PortfolioStore
+        # Share DuckDB connection with existing store (I2: avoid separate connection)
+        _portfolio_store = PortfolioStore(get_store()._conn)
+    return _portfolio_store
+
+
+def reset_portfolio_store() -> None:
+    """Reset singleton (called by deps.close_resources)."""
+    global _portfolio_store
+    _portfolio_store = None
 
 
 @router.get("/strategies")
 def list_portfolio_strategies():
     """List available portfolio strategies."""
     result = []
-    for name, cls in PortfolioStrategy._registry.items():
+    for name, cls in PortfolioStrategy.get_registry().items():
         result.append({
             "name": name,
             "description": cls.get_description().strip()[:200] if hasattr(cls, 'get_description') else "",

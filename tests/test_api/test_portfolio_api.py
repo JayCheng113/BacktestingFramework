@@ -4,6 +4,7 @@ from __future__ import annotations
 from unittest.mock import patch, MagicMock
 
 import duckdb
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -70,6 +71,46 @@ class TestDeleteRun:
     def test_delete_nonexistent(self):
         resp = client.delete("/api/portfolio/runs/nope")
         assert resp.status_code == 404
+
+
+class TestRunEndToEnd:
+    def test_full_run_with_mock_data(self, _patch_store):
+        """E2E: POST /run with mocked data → engine execution → persist → response."""
+        import numpy as np
+        from ez.portfolio.calendar import TradingCalendar
+
+        dates = pd.date_range("2023-01-02", periods=200, freq="B")
+        mock_data = {}
+        rng = np.random.default_rng(42)
+        for sym in ["A", "B", "C", "D", "E"]:
+            prices = 10 * np.cumprod(1 + rng.normal(0.001, 0.015, 200))
+            mock_data[sym] = pd.DataFrame({
+                "open": prices, "high": prices * 1.01, "low": prices * 0.99,
+                "close": prices, "adj_close": prices,
+                "volume": rng.integers(100_000, 1_000_000, 200),
+            }, index=dates)
+        mock_cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        with patch("ez.api.routes.portfolio._fetch_data", return_value=(mock_data, mock_cal)):
+            resp = client.post("/api/portfolio/run", json={
+                "strategy_name": "TopNRotation",
+                "symbols": ["A", "B", "C", "D", "E"],
+                "start_date": "2023-02-01", "end_date": "2023-12-31",
+                "freq": "monthly",
+                "strategy_params": {"top_n": 3, "factor": "momentum_rank_20"},
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "run_id" in data
+        assert "metrics" in data
+        assert "equity_curve" in data
+        assert len(data["equity_curve"]) > 100
+        assert data["metrics"]["trade_count"] > 0
+
+        # Verify persisted in store
+        runs = _patch_store.list_runs()
+        assert len(runs) == 1
+        assert runs[0]["run_id"] == data["run_id"]
 
 
 class TestRunValidation:

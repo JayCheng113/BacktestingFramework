@@ -2,10 +2,22 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import datetime
 
 import duckdb
+
+
+def _sanitize_nans(obj):
+    """Replace NaN/Inf with None in nested dicts/lists."""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nans(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_nans(v) for v in obj]
+    return obj
 
 
 class PortfolioStore:
@@ -37,7 +49,7 @@ class PortfolioStore:
     def save_run(self, data: dict) -> str:
         run_id = data.get("run_id") or uuid.uuid4().hex[:12]
         self._conn.execute(
-            """INSERT INTO portfolio_runs
+            """INSERT OR IGNORE INTO portfolio_runs
                (run_id, strategy_name, strategy_params, symbols, start_date, end_date,
                 freq, initial_cash, metrics, equity_curve, trade_count, rebalance_count)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -67,7 +79,7 @@ class PortfolioStore:
         ).fetchall()
         result = []
         for r in rows:
-            metrics = json.loads(r[5]) if r[5] else {}
+            metrics = _sanitize_nans(json.loads(r[5])) if r[5] else {}
             result.append({
                 "run_id": r[0], "strategy_name": r[1],
                 "start_date": r[2], "end_date": r[3], "freq": r[4],
@@ -88,7 +100,7 @@ class PortfolioStore:
         d = dict(zip(cols, row))
         for key in ("strategy_params", "symbols", "metrics", "equity_curve"):
             if d[key] and isinstance(d[key], str):
-                d[key] = json.loads(d[key])
+                d[key] = _sanitize_nans(json.loads(d[key]))
         if d["created_at"]:
             d["created_at"] = str(d["created_at"])
         return d

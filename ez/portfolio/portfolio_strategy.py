@@ -28,6 +28,11 @@ class PortfolioStrategy(ABC):
         if not getattr(cls, '__abstractmethods__', None):
             PortfolioStrategy._registry[cls.__name__] = cls
 
+    @classmethod
+    def get_registry(cls) -> dict[str, type]:
+        """Public accessor for the strategy registry."""
+        return dict(cls._registry)
+
     def __init__(self, **params):
         self.state: dict = {}
         self._params = params
