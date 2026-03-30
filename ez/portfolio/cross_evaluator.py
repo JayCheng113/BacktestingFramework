@@ -19,7 +19,7 @@ from scipy import stats
 
 from ez.portfolio.calendar import TradingCalendar
 from ez.portfolio.cross_factor import CrossSectionalFactor
-from ez.portfolio.universe import Universe, slice_universe_data
+from ez.portfolio.universe import slice_universe_data
 
 
 @dataclass
@@ -82,23 +82,19 @@ def _get_price_at(index: dict[str, tuple[list[date], list[float]]], sym: str, d:
 
 def _get_forward_return(index: dict[str, tuple[list[date], list[float]]],
                         sym: str, d: date, forward_days: int) -> float | None:
-    """Compute forward N-day return from date d."""
-    p0 = _get_price_at(index, sym, d)
-    if p0 is None or p0 <= 0:
+    """Compute forward N-trading-day return from date d."""
+    if sym not in index:
         return None
-    target = d + timedelta(days=int(forward_days * 1.6))  # buffer for weekends
-    p1 = _get_price_at(index, sym, target)
-    if p1 is None:
-        return None
-    # Find actual price on or after d + forward_days trading days
-    # Use the pre-indexed dates to find the right one
     dates, prices = index[sym]
+    # Find d in the pre-indexed dates (or closest prior date)
     idx0 = bisect.bisect_left(dates, d)
     if idx0 >= len(dates) or dates[idx0] != d:
-        # d not in dates, use closest
         idx0 = bisect.bisect_right(dates, d) - 1
         if idx0 < 0:
             return None
+    p0 = prices[idx0]
+    if p0 <= 0:
+        return None
     target_idx = idx0 + forward_days
     if target_idx >= len(dates):
         return None
@@ -140,7 +136,6 @@ def evaluate_cross_sectional_factor(
 
     # Pre-build price index for forward returns
     price_index = _build_price_index(universe_data)
-    universe = Universe(list(universe_data.keys()))
 
     ic_list: list[float] = []
     rank_ic_list: list[float] = []
@@ -185,12 +180,13 @@ def evaluate_cross_sectional_factor(
         # Rank IC (Spearman)
         rank_ic = float(stats.spearmanr(s, r).statistic) if len(s) >= 5 else 0.0
 
-        if not np.isnan(ic):
-            ic_list.append(ic)
-            result.ic_series.append(ic)
-        if not np.isnan(rank_ic):
-            rank_ic_list.append(rank_ic)
-            result.rank_ic_series.append(rank_ic)
+        # Keep lists aligned: always append (NaN → 0.0 for aggregation lists)
+        ic_val = ic if not np.isnan(ic) else 0.0
+        rank_ic_val = rank_ic if not np.isnan(rank_ic) else 0.0
+        ic_list.append(ic_val)
+        rank_ic_list.append(rank_ic_val)
+        result.ic_series.append(ic_val)
+        result.rank_ic_series.append(rank_ic_val)
         result.eval_dates.append(eval_date.isoformat())
         stock_counts.append(len(common))
 
@@ -271,7 +267,6 @@ def compute_factor_correlation(
         names = [f.name for f in factors]
         return pd.DataFrame(np.eye(len(factors)), index=names, columns=names)
 
-    universe = Universe(list(universe_data.keys()))
 
     # Collect factor scores across dates
     all_scores: dict[str, list[pd.Series]] = {f.name: [] for f in factors}

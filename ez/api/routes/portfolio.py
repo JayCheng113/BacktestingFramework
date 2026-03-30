@@ -248,8 +248,14 @@ class PortfolioWFRequest(BaseModel):
     initial_cash: float = Field(default=1_000_000, ge=10_000)
     n_splits: int = Field(default=5, ge=2, le=20)
     train_ratio: float = Field(default=0.7, gt=0.0, lt=1.0)
+    buy_commission_rate: float = Field(default=0.0003, ge=0)
+    sell_commission_rate: float = Field(default=0.0003, ge=0)
+    min_commission: float = Field(default=5.0, ge=0)
+    stamp_tax_rate: float = Field(default=0.0005, ge=0)
+    slippage_rate: float = Field(default=0.0, ge=0)
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)
+    benchmark_symbol: str = ""
 
 
 @router.post("/walk-forward")
@@ -267,13 +273,22 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     strategy_tmp = strategy_factory()
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy_tmp.lookback_days)
 
+    cost_model = CostModel(
+        buy_commission_rate=req.buy_commission_rate,
+        sell_commission_rate=req.sell_commission_rate,
+        min_commission=req.min_commission,
+        stamp_tax_rate=req.stamp_tax_rate,
+        slippage_rate=req.slippage_rate,
+    )
+
     try:
         wf_result = portfolio_walk_forward(
             strategy_factory=strategy_factory,
             universe=universe, universe_data=universe_data, calendar=calendar,
             start=start, end=end, n_splits=req.n_splits, train_ratio=req.train_ratio,
-            freq=req.freq, initial_cash=req.initial_cash,
+            freq=req.freq, initial_cash=req.initial_cash, cost_model=cost_model,
             lot_size=req.lot_size, limit_pct=req.limit_pct,
+            benchmark_symbol=req.benchmark_symbol,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -377,20 +392,25 @@ def evaluate_factors(req: FactorEvalRequest):
             factor=factor, universe_data=universe_data, calendar=calendar,
             start=start, end=end, lags=[1, 5, 10, 20], eval_freq=req.eval_freq,
         )
+        def _safe(v):
+            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+                return None
+            return v
+
         results.append({
             "factor_name": result.factor_name,
-            "mean_ic": result.mean_ic,
-            "mean_rank_ic": result.mean_rank_ic,
-            "ic_std": result.ic_std,
-            "icir": result.icir,
-            "rank_icir": result.rank_icir,
+            "mean_ic": _safe(result.mean_ic),
+            "mean_rank_ic": _safe(result.mean_rank_ic),
+            "ic_std": _safe(result.ic_std),
+            "icir": _safe(result.icir),
+            "rank_icir": _safe(result.rank_icir),
             "n_eval_dates": result.n_eval_dates,
-            "avg_stocks_per_date": result.avg_stocks_per_date,
-            "ic_series": result.ic_series,
-            "rank_ic_series": result.rank_ic_series,
+            "avg_stocks_per_date": _safe(result.avg_stocks_per_date),
+            "ic_series": [_safe(v) for v in result.ic_series],
+            "rank_ic_series": [_safe(v) for v in result.rank_ic_series],
             "eval_dates": result.eval_dates,
-            "quintile_returns": result.quintile_returns,
-            "ic_decay": decay,
+            "quintile_returns": {k: _safe(v) for k, v in result.quintile_returns.items()},
+            "ic_decay": {k: _safe(v) for k, v in decay.items()},
         })
 
     return {"results": results, "symbols_count": len(universe_data)}
