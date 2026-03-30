@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun } from '../api'
+import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
@@ -16,6 +16,7 @@ interface PortfolioRunResult {
   run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
   benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
   symbols_fetched?: number; symbols_skipped?: string[]
+  latest_weights?: Record<string, number>
 }
 
 interface HistoryRun {
@@ -42,6 +43,9 @@ export default function PortfolioPanel() {
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
   const [tab, setTab] = useState<'run' | 'history'>('run')
+  const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
+  const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
+  const [comparing, setComparing] = useState(false)
 
   // Current strategy's parameter schema
   const currentSchema = useMemo(() => {
@@ -70,6 +74,61 @@ export default function PortfolioPanel() {
 
   const loadHistory = () => {
     listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch(() => {})
+  }
+
+  const toggleRunSelection = (runId: string) => {
+    setSelectedRuns(prev => {
+      const next = new Set(prev)
+      if (next.has(runId)) next.delete(runId)
+      else next.add(runId)
+      return next
+    })
+  }
+
+  const handleCompare = async () => {
+    if (selectedRuns.size < 2) { alert('请至少选择 2 条记录'); return }
+    setComparing(true)
+    setCompareData([])
+    try {
+      const data = await Promise.all(
+        Array.from(selectedRuns).map(async id => {
+          const res = await getPortfolioRun(id)
+          const d = res.data
+          return {
+            id, name: `${d.strategy_name} (${d.start_date?.slice(0, 10)}~${d.end_date?.slice(0, 10)})`,
+            equity: d.equity_curve || [], dates: [], metrics: d.metrics || {},
+          }
+        })
+      )
+      setCompareData(data)
+    } catch (e: any) { alert('加载失败: ' + (e?.message || '')) }
+    finally { setComparing(false) }
+  }
+
+  const downloadCSV = (filename: string, content: string) => {
+    const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportEquityCurve = () => {
+    if (!result) return
+    const rows = ['日期,组合净值,基准净值']
+    result.dates.forEach((d, i) => {
+      rows.push(`${d},${result.equity_curve[i]?.toFixed(2) ?? ''},${result.benchmark_curve[i]?.toFixed(2) ?? ''}`)
+    })
+    downloadCSV('equity_curve.csv', rows.join('\n'))
+  }
+
+  const exportTrades = () => {
+    if (!result) return
+    const rows = ['日期,标的,方向,股数,价格,成本']
+    result.trades.forEach(t => {
+      rows.push(`${t.date},${t.symbol},${t.side},${t.shares},${Number(t.price).toFixed(2)},${Number(t.cost).toFixed(2)}`)
+    })
+    downloadCSV('trades.csv', rows.join('\n'))
   }
 
   const handleDeleteRun = async (runId: string) => {
@@ -263,7 +322,15 @@ export default function PortfolioPanel() {
               <BacktestSettings value={settings} onChange={setSettings} />
             </div>
             <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>标的池 (逗号分隔)</label>
+              <div className="flex items-center gap-2 mb-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>标的池 (逗号分隔)</label>
+                <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH,513880.SH,513260.SH,159985.SZ')}
+                  className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>宽基ETF</button>
+                <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ')}
+                  className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>ETF轮动池</button>
+                <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH')}
+                  className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>行业+宽基22只</button>
+              </div>
               <textarea value={symbols} onChange={e => setSymbols(e.target.value)} rows={2} className="w-full px-3 py-1.5 rounded text-sm font-mono" style={inputStyle} />
             </div>
             <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
@@ -279,6 +346,10 @@ export default function PortfolioPanel() {
                   （可能未上市或 Tushare 无覆盖）
                 </div>
               )}
+              <div className="flex gap-2 mb-3">
+                <button onClick={exportEquityCurve} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>导出净值CSV</button>
+                {result.trades.length > 0 && <button onClick={exportTrades} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>导出交易CSV</button>}
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 {Object.entries(result.metrics).filter(([k]) => k in metricLabels).map(([k, v]) => (
                   <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -290,6 +361,29 @@ export default function PortfolioPanel() {
                 ))}
               </div>
               {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
+              {/* 持仓分布饼图 */}
+              {result.latest_weights && Object.keys(result.latest_weights).length > 0 && (
+                <div className="mt-3">
+                  <ReactECharts option={{
+                    backgroundColor: '#0d1117',
+                    title: { text: '最新持仓分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                    tooltip: { trigger: 'item' as const, formatter: '{b}: {d}%' },
+                    series: [{
+                      type: 'pie', radius: ['30%', '55%'], center: ['50%', '55%'],
+                      label: { color: '#8b949e', fontSize: 10 },
+                      data: [
+                        ...Object.entries(result.latest_weights)
+                          .filter(([, w]) => w > 0.001)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([sym, w]) => ({ name: sym, value: Math.round(w * 10000) / 100 })),
+                        ...(1 - Object.values(result.latest_weights).reduce((s, w) => s + w, 0) > 0.001
+                          ? [{ name: '现金', value: Math.round((1 - Object.values(result.latest_weights).reduce((s, w) => s + w, 0)) * 10000) / 100 }]
+                          : []),
+                      ],
+                    }],
+                  }} style={{ height: 250 }} />
+                </div>
+              )}
               {result.trades.length > 0 && (
                 <div className="mt-4">
                   <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>交易记录 ({result.trades.length}{result.trades.length >= 100 ? '+' : ''})</h4>
@@ -321,17 +415,29 @@ export default function PortfolioPanel() {
 
       {tab === 'history' && (
         <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <h3 className="text-sm font-medium mb-3">历史组合回测</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium">历史组合回测</h3>
+            {selectedRuns.size >= 2 && (
+              <button onClick={handleCompare} disabled={comparing}
+                className="text-xs px-3 py-1 rounded font-medium text-white"
+                style={{ backgroundColor: comparing ? '#30363d' : '#2563eb' }}>
+                {comparing ? '加载中...' : `对比选中 (${selectedRuns.size})`}
+              </button>
+            )}
+          </div>
           {history.length === 0 ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>暂无记录</p> : (
             <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
               <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                 <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  {['策略', '区间', '频率', '夏普', '总收益', '最大回撤', '交易数', '时间', ''].map(h => (
+                  {['', '策略', '区间', '频率', '夏普', '总收益', '最大回撤', '交易数', '时间', ''].map(h => (
                     <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>{history.map(r => (
-                  <tr key={r.run_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <tr key={r.run_id} style={{ borderBottom: '1px solid var(--border)', backgroundColor: selectedRuns.has(r.run_id) ? '#1e3a5f20' : 'transparent' }}>
+                    <td className="px-3 py-1.5">
+                      <input type="checkbox" checked={selectedRuns.has(r.run_id)} onChange={() => toggleRunSelection(r.run_id)} />
+                    </td>
                     <td className="px-3 py-1.5">{r.strategy_name}</td>
                     <td className="px-3 py-1.5">{r.start_date?.slice(0, 10)}~{r.end_date?.slice(0, 10)}</td>
                     <td className="px-3 py-1.5">{r.freq}</td>
@@ -347,6 +453,53 @@ export default function PortfolioPanel() {
                   </tr>
                 ))}</tbody>
               </table>
+            </div>
+          )}
+
+          {/* Compare overlay chart + metrics table */}
+          {compareData.length >= 2 && (
+            <div className="mt-4 p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>对比净值曲线 ({compareData.length} 条)</h4>
+              <ReactECharts option={{
+                backgroundColor: '#0d1117',
+                tooltip: { trigger: 'axis' as const },
+                legend: { data: compareData.map(d => d.name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 5, type: 'scroll' as const },
+                grid: { left: 70, right: 20, top: 40, bottom: 30 },
+                xAxis: { type: 'value' as const, name: '交易日', axisLabel: { color: '#8b949e' } },
+                yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+                color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#f97316'],
+                series: compareData.map(d => ({
+                  name: d.name, type: 'line' as const,
+                  data: d.equity.map((v, i) => [i, v]),
+                  showSymbol: false, lineStyle: { width: 1.5 },
+                })),
+              }} style={{ height: 280 }} />
+
+              <h4 className="text-xs font-medium mt-3 mb-2" style={{ color: 'var(--text-secondary)' }}>指标对比</h4>
+              <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+                <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                    <th className="px-3 py-1.5 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>策略</th>
+                    {['总收益', '年化收益', '夏普', 'Sortino', '最大回撤', '年化波动', '交易数'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-right font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>{compareData.map(d => (
+                    <tr key={d.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td className="px-3 py-1.5 font-medium" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</td>
+                      <td className="px-3 py-1.5 text-right">{fmt(d.metrics?.total_return, true)}</td>
+                      <td className="px-3 py-1.5 text-right">{fmt(d.metrics?.annualized_return, true)}</td>
+                      <td className="px-3 py-1.5 text-right">{fmt(d.metrics?.sharpe_ratio)}</td>
+                      <td className="px-3 py-1.5 text-right">{fmt(d.metrics?.sortino_ratio)}</td>
+                      <td className="px-3 py-1.5 text-right" style={{ color: 'var(--color-down)' }}>{fmt(d.metrics?.max_drawdown, true)}</td>
+                      <td className="px-3 py-1.5 text-right">{fmt(d.metrics?.annualized_volatility, true)}</td>
+                      <td className="px-3 py-1.5 text-right">{d.metrics?.trade_count ?? '-'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <button onClick={() => setCompareData([])} className="mt-2 text-xs px-2 py-1 rounded"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭对比</button>
             </div>
           )}
         </div>

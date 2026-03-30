@@ -234,6 +234,7 @@ def run_portfolio(req: PortfolioRunRequest):
         "rebalance_dates": [d.isoformat() for d in result.rebalance_dates],
         "symbols_fetched": fetched_count,
         "symbols_skipped": skipped,
+        "latest_weights": result.weights_history[-1] if result.weights_history else {},
     }
 
 
