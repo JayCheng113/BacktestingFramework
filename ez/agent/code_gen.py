@@ -108,7 +108,8 @@ async def generate_strategy_code(
         try:
             await asyncio.to_thread(
                 chat_sync, provider, messages,
-                allowed_tools=["create_strategy", "read_source", "list_factors"])
+                allowed_tools=["create_strategy", "read_source", "list_factors",
+                               "list_portfolio_strategies", "create_portfolio_strategy", "create_cross_factor"])
             filename, class_name = _find_latest_strategy(before)
             if filename and class_name:
                 logger.info("Code gen success: %s (%s)", filename, class_name)

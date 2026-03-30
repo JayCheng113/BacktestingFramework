@@ -106,6 +106,20 @@ def _rebuild_chain() -> None:
     get_chain()  # rebuild
 
 
+def fetch_kline_df(symbol: str, market: str, period: str, start, end):
+    """Shared single-stock kline fetch → DataFrame. Used by backtest + experiments."""
+    import pandas as pd
+    from fastapi import HTTPException
+    chain = get_chain()
+    bars = chain.get_kline(symbol, market, period, start, end)
+    if not bars:
+        raise HTTPException(status_code=404, detail=f"No data for {symbol}")
+    return pd.DataFrame([{
+        "time": b.time, "open": b.open, "high": b.high, "low": b.low,
+        "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
+    } for b in bars]).set_index("time")
+
+
 def close_resources() -> None:
     global _store, _chain, _tushare_provider
     _close_chain_providers()

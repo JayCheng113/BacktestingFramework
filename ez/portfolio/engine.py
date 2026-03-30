@@ -198,9 +198,10 @@ def run_portfolio_backtest(
                 target_shares[sym] = _lot_round(raw_shares, lot_size)
 
             # Execute trades: TWO passes — sells first (free cash), then buys
-            all_syms = sorted(set(list(holdings.keys()) + list(target_shares.keys())))
+            all_syms = sorted(holdings.keys() | target_shares.keys())
             sell_syms = [s for s in all_syms if target_shares.get(s, 0) < holdings.get(s, 0)]
             buy_syms = [s for s in all_syms if target_shares.get(s, 0) > holdings.get(s, 0)]
+            sold_today: set[str] = set()  # T+1: track sold symbols
             for sym in sell_syms + buy_syms:  # sells first, then buys
                 cur = holdings.get(sym, 0)
                 tgt = target_shares.get(sym, 0)
@@ -214,6 +215,10 @@ def run_portfolio_backtest(
                 if sym not in has_bar_today:
                     continue
 
+                # T+1: cannot buy a symbol that was sold today
+                if delta > 0 and sym in sold_today:
+                    continue
+
                 # A-share 涨跌停检查 (C1: use raw close, not adj_close)
                 if limit_pct > 0 and sym in raw_close_today and sym in prev_raw_close:
                     change = (raw_close_today[sym] - prev_raw_close[sym]) / prev_raw_close[sym] if prev_raw_close[sym] > 0 else 0
@@ -222,15 +227,19 @@ def run_portfolio_backtest(
                     if delta < 0 and change <= -limit_pct + 1e-6:
                         continue  # 跌停不可卖
 
-                price = prices[sym]
+                base_price = prices[sym]
+                # Directional slippage: buy pushes price UP, sell pushes DOWN
+                if delta > 0:
+                    price = base_price * (1 + cost_model.slippage_rate)
+                else:
+                    price = base_price * (1 - cost_model.slippage_rate)
                 amount = abs(delta) * price
 
                 # Costs (buy/sell use different commission rates)
                 rate = cost_model.buy_commission_rate if delta > 0 else cost_model.sell_commission_rate
                 comm = _compute_commission(amount, rate, cost_model.min_commission)
                 stamp = amount * cost_model.stamp_tax_rate if delta < 0 else 0.0  # sell only
-                slip = amount * cost_model.slippage_rate
-                total_cost = comm + stamp + slip
+                total_cost = comm + stamp
 
                 if delta > 0:
                     # Buy: need cash
@@ -258,6 +267,7 @@ def run_portfolio_backtest(
                 else:
                     # Sell: receive cash minus costs
                     cash += amount - total_cost
+                    sold_today.add(sym)  # T+1: record sold symbol
                     if tgt == 0:
                         holdings.pop(sym, None)
                     else:

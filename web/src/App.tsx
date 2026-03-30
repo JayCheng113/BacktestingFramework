@@ -25,7 +25,7 @@ export default function App() {
       {activeTab === 'experiments' && <ExperimentPanel />}
       {editorMounted && (
         <div style={{ display: activeTab === 'editor' ? 'block' : 'none', height: 'calc(100vh - 48px)' }}>
-          <CodeEditor />
+          <CodeEditor onNavigate={handleTabChange} />
         </div>
       )}
       {activeTab === 'research' && <ResearchPanel />}

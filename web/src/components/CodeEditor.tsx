@@ -165,7 +165,7 @@ const KIND_COLORS: Record<CodeKind, string> = {
 const api = (path: string, opts?: RequestInit) =>
   fetch(`/api/code${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
 
-export default function CodeEditor() {
+export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [code, setCode] = useState('')
   const [filename, setFilename] = useState('')
   const [currentKind, setCurrentKind] = useState<CodeKind>('strategy')
@@ -434,6 +434,13 @@ export default function CodeEditor() {
             style={{ backgroundColor: showHelp ? '#eab308' : 'var(--bg-primary)', color: showHelp ? '#000' : 'var(--text-secondary)', border: '1px solid var(--border)', minWidth: '28px' }}>
             ?
           </button>
+          {onNavigate && (currentKind === 'portfolio_strategy' || currentKind === 'cross_factor') && (
+            <button onClick={() => onNavigate('portfolio')}
+              className="text-xs px-3 py-1 rounded"
+              style={{ backgroundColor: '#0891b2', color: '#fff' }}>
+              去组合回测
+            </button>
+          )}
           <button onClick={() => setShowChat(!showChat)}
             className="text-xs px-3 py-1 rounded"
             style={{ backgroundColor: showChat ? 'var(--color-accent)' : 'var(--bg-primary)', color: showChat ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>

@@ -64,15 +64,8 @@ class ExperimentRequest(BaseModel):
 
 
 def _fetch_data(symbol: str, market: str, period: str, start: date, end: date):
-    import pandas as pd
-    chain = get_chain()
-    bars = chain.get_kline(symbol, market, period, start, end)
-    if not bars:
-        raise HTTPException(status_code=404, detail=f"No data for {symbol}")
-    return pd.DataFrame([{
-        "time": b.time, "open": b.open, "high": b.high, "low": b.low,
-        "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
-    } for b in bars]).set_index("time")
+    from ez.api.deps import fetch_kline_df
+    return fetch_kline_df(symbol, market, period, start, end)
 
 
 # ---- Endpoints ----

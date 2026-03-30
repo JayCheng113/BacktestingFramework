@@ -17,6 +17,7 @@ interface PortfolioRunResult {
   run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
   benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
   symbols_fetched?: number; symbols_skipped?: string[]
+  weights_history?: { date: string; weights: Record<string, number> }[]
   latest_weights?: Record<string, number>
 }
 
@@ -402,6 +403,29 @@ export default function PortfolioPanel() {
                       ],
                     }],
                   }} style={{ height: 250 }} />
+                </div>
+              )}
+              {/* 持仓变动表 */}
+              {result.weights_history && result.weights_history.length > 0 && (
+                <div className="mt-3">
+                  <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>持仓变动 (最近{result.weights_history.length}期)</h4>
+                  <div className="overflow-x-auto max-h-48 overflow-y-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+                    <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                      <thead><tr style={{ backgroundColor: 'var(--bg-primary)', position: 'sticky', top: 0 }}>
+                        <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>换仓日</th>
+                        <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>持仓</th>
+                      </tr></thead>
+                      <tbody>{result.weights_history.map((wh, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td className="px-3 py-1">{wh.date}</td>
+                          <td className="px-3 py-1">
+                            {Object.entries(wh.weights).filter(([, w]) => w > 0.001).sort((a, b) => b[1] - a[1])
+                              .map(([sym, w]) => `${sym}(${(w * 100).toFixed(1)}%)`).join(', ') || '全现金'}
+                          </td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
                 </div>
               )}
               {result.trades.length > 0 && (

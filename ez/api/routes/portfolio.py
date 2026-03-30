@@ -251,6 +251,11 @@ def run_portfolio(req: PortfolioRunRequest):
         "symbols_fetched": fetched_count,
         "symbols_skipped": skipped,
         "latest_weights": result.weights_history[-1] if result.weights_history else {},
+        "weights_history": [
+            {"date": result.rebalance_dates[i].isoformat() if i < len(result.rebalance_dates) else "",
+             "weights": result.weights_history[i]}
+            for i in range(max(0, len(result.weights_history) - 20), len(result.weights_history))
+        ] if result.weights_history else [],
     }
 
 

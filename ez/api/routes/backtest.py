@@ -80,14 +80,8 @@ def _get_strategy(name: str, params: dict) -> Strategy:
 
 
 def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
-    chain = get_chain()
-    bars = chain.get_kline(req.symbol, req.market, req.period, req.start_date, req.end_date)
-    if not bars:
-        raise HTTPException(status_code=404, detail=f"No data for {req.symbol}")
-    return pd.DataFrame([{
-        "time": b.time, "open": b.open, "high": b.high, "low": b.low,
-        "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
-    } for b in bars]).set_index("time")
+    from ez.api.deps import fetch_kline_df
+    return fetch_kline_df(req.symbol, req.market, req.period, req.start_date, req.end_date)
 
 
 def _build_matcher(req: BacktestRequest) -> Matcher:
