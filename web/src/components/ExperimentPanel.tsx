@@ -250,7 +250,7 @@ export default function ExperimentPanel() {
               {runs.map(r => (
                 <tr key={r.run_id} className="cursor-pointer hover:opacity-80" onClick={() => setDetail(detail?.run_id === r.run_id ? null : r)}
                   style={{ borderTop: '1px solid var(--border)' }}>
-                  <td className="px-3 py-2 text-xs">{r.created_at?.slice(0, 16)}</td>
+                  <td className="px-3 py-2 text-xs">{r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                   <td className="px-3 py-2">{r.strategy_name}</td>
                   <td className="px-3 py-2">{r.symbol}</td>
                   <td className="px-3 py-2 text-right">{r.sharpe_ratio?.toFixed(2) ?? '-'}</td>
