@@ -31,17 +31,17 @@ _BUILTIN_FACTOR_MAP = {
 }
 
 
+_BUILTIN_CLASS_NAMES = {"MomentumRank", "VolumeRank", "ReverseVolatilityRank"}
+
+
 def _get_factor_map() -> dict:
     """Build factor map: builtins + dynamically registered CrossSectionalFactor subclasses."""
     from ez.portfolio.cross_factor import CrossSectionalFactor
     result = dict(_BUILTIN_FACTOR_MAP)
-    # Collect builtin class names to skip duplicates
-    builtin_classes = {type(f()).__name__ if callable(f) else "" for f in _BUILTIN_FACTOR_MAP.values()}
     for name, cls in CrossSectionalFactor.get_registry().items():
         # Skip builtin classes (already mapped with parameterized keys)
-        if name in builtin_classes:
+        if name in _BUILTIN_CLASS_NAMES:
             continue
-        # User factors: register by class name (only if not already present)
         if name not in result:
             result[name] = cls
     return result

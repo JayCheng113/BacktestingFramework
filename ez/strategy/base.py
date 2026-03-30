@@ -26,6 +26,11 @@ class Strategy(ABC):
             cls._registry[key] = cls
 
     @classmethod
+    def get_registry(cls) -> dict[str, type]:
+        """Public accessor for the strategy registry."""
+        return dict(cls._registry)
+
+    @classmethod
     def get_parameters_schema(cls) -> dict[str, dict]:
         """Parameter schema for frontend form rendering."""
         return {}

@@ -1,7 +1,7 @@
 """V2.7+V2.9: Code validation sandbox for user/AI-generated code.
 
 Security:
-  - Only writes to whitelisted directories: strategies/, portfolio_strategies/, cross_factors/
+  - Only writes to whitelisted directories: strategies/, factors/, portfolio_strategies/, cross_factors/
   - Validates Python syntax before saving
   - Runs contract test in subprocess with timeout
   - AST check for dangerous imports (os, subprocess, socket, etc.)
@@ -681,12 +681,16 @@ def _reload_factor_code(filename: str, target_dir: Path) -> None:
         py_file = target_dir / filename
         if not py_file.exists():
             return
-        spec = importlib.util.spec_from_file_location(module_name, py_file)
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = mod
-            spec.loader.exec_module(mod)
-            logger.info("Hot-reloaded factor: %s", filename)
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+                logger.info("Hot-reloaded factor: %s", filename)
+        except Exception as e:
+            logger.warning("Failed to hot-reload factor %s: %s", filename, e)
+            raise
 
 
 def list_user_strategies() -> list[dict]:
