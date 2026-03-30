@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
@@ -23,21 +23,39 @@ interface HistoryRun {
   freq: string; metrics: PortfolioMetrics; trade_count: number; created_at: string
 }
 
+interface ParamSchema {
+  type: string; default: any; min?: number; max?: number; label?: string
+}
+
 export default function PortfolioPanel() {
-  const [strategies, setStrategies] = useState<{ name: string; description: string; parameters: any }[]>([])
+  const [strategies, setStrategies] = useState<{ name: string; description: string; parameters: Record<string, ParamSchema> }[]>([])
   const [factors, setFactors] = useState<string[]>([])
   const [selected, setSelected] = useState('')
   const [symbols, setSymbols] = useState('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH')
   const [startDate, setStartDate] = useState('2020-01-01')
   const [endDate, setEndDate] = useState('2024-12-31')
   const [freq, setFreq] = useState('monthly')
-  const [topN, setTopN] = useState(3)
-  const [factor, setFactor] = useState('momentum_rank_20')
+  const [strategyParams, setStrategyParams] = useState<Record<string, any>>({})
   const [settings, setSettings] = useState<BacktestSettingsValue>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
   const [tab, setTab] = useState<'run' | 'history'>('run')
+
+  // Current strategy's parameter schema
+  const currentSchema = useMemo(() => {
+    const s = strategies.find(s => s.name === selected)
+    return s?.parameters || {}
+  }, [strategies, selected])
+
+  // Initialize params from schema defaults when strategy changes
+  useEffect(() => {
+    const defaults: Record<string, any> = {}
+    for (const [key, schema] of Object.entries(currentSchema)) {
+      defaults[key] = schema.default
+    }
+    setStrategyParams(defaults)
+  }, [currentSchema])
 
   useEffect(() => {
     listPortfolioStrategies().then(r => {
@@ -53,6 +71,10 @@ export default function PortfolioPanel() {
     listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch(() => {})
   }
 
+  const updateParam = (key: string, value: any) => {
+    setStrategyParams(prev => ({ ...prev, [key]: value }))
+  }
+
   const handleRun = async () => {
     setLoading(true); setResult(null)
     try {
@@ -60,7 +82,7 @@ export default function PortfolioPanel() {
       const res = await runPortfolioBacktest({
         strategy_name: selected, symbols: symbolList,
         start_date: startDate, end_date: endDate, freq,
-        strategy_params: { top_n: topN, factor },
+        strategy_params: strategyParams,
         initial_cash: settings.initial_cash,
         buy_commission_rate: settings.buy_commission_rate,
         sell_commission_rate: settings.sell_commission_rate,
@@ -81,6 +103,82 @@ export default function PortfolioPanel() {
   const fmt = (v: number | null | undefined, pct = false) => {
     if (v == null) return '-'
     return pct ? `${(v * 100).toFixed(2)}%` : v.toFixed(4)
+  }
+
+  // Render a single param input based on schema type
+  const renderParamInput = (key: string, schema: ParamSchema) => {
+    const label = schema.label || key
+    const value = strategyParams[key] ?? schema.default
+
+    if (schema.type === 'select') {
+      // Use available_factors as options
+      const options = factors.length > 0 ? factors : [String(schema.default)]
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+          <select value={value} onChange={e => updateParam(key, e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      )
+    }
+
+    if (schema.type === 'multi_select') {
+      // Render as comma-separated input (simple for now)
+      const options = factors.length > 0 ? factors : []
+      const selected_vals: string[] = Array.isArray(value) ? value : [String(value)]
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+          <div className="flex flex-wrap gap-1">
+            {options.map(o => (
+              <button key={o} onClick={() => {
+                const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
+                if (cur.includes(o)) updateParam(key, cur.filter(x => x !== o))
+                else updateParam(key, [...cur, o])
+              }}
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ backgroundColor: selected_vals.includes(o) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                         color: selected_vals.includes(o) ? '#fff' : 'var(--text-secondary)',
+                         border: '1px solid var(--border)' }}>
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    if (schema.type === 'int') {
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+          <input type="number" value={value} min={schema.min} max={schema.max}
+            onChange={e => updateParam(key, parseInt(e.target.value) || schema.default)}
+            className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
+        </div>
+      )
+    }
+
+    if (schema.type === 'float') {
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+          <input type="number" value={value} min={schema.min} max={schema.max} step={0.01}
+            onChange={e => updateParam(key, parseFloat(e.target.value) || schema.default)}
+            className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
+        </div>
+      )
+    }
+
+    // Fallback: text input
+    return (
+      <div key={key} className="flex flex-col gap-1">
+        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+        <input type="text" value={value} onChange={e => updateParam(key, e.target.value)}
+          className="px-3 py-1.5 rounded text-sm w-32" style={inputStyle} />
+      </div>
+    )
   }
 
   const equityOption = result ? {
@@ -105,6 +203,8 @@ export default function PortfolioPanel() {
     annualized_volatility: '年化波动', n_rebalances: '换仓次数',
   }
 
+  const currentDesc = strategies.find(s => s.name === selected)?.description || ''
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex gap-2 mb-4">
@@ -123,16 +223,8 @@ export default function PortfolioPanel() {
                   {strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                 </select>
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>
-                <select value={factor} onChange={e => setFactor(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-                  {factors.map(f => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Top N</label>
-                <input type="number" value={topN} min={1} max={100} onChange={e => setTopN(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-16" style={inputStyle} />
-              </div>
+              {/* Dynamic strategy parameters from schema */}
+              {Object.entries(currentSchema).map(([key, schema]) => renderParamInput(key, schema))}
               <div className="flex flex-col gap-1">
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>换仓频率</label>
                 <select value={freq} onChange={e => setFreq(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
@@ -143,6 +235,9 @@ export default function PortfolioPanel() {
                 </select>
               </div>
             </div>
+            {currentDesc && (
+              <div className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>{currentDesc}</div>
+            )}
             <div className="flex flex-wrap gap-3 items-end mb-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始日期</label>

@@ -13,12 +13,12 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | FactorPanel | Factor IC evaluation + IC decay + distribution (V2.8.1: dynamic factor list from API) |
 | ExperimentPanel | Single Run / Param Search sub-tabs + runs table (filters research_) + gate detail + date range column (V2.8) |
 | CandidateSearch | Parameter grid/random search form + ranked results table (filters research_) |
-| CodeEditor | Monaco editor + "新建策略/因子" buttons + file-bound AI chat + grouped sidebar (strategies/factors) (V2.8) |
+| CodeEditor | Monaco editor + "新建策略/因子/组合策略/截面因子" buttons + file-bound AI chat + 4-group sidebar (V2.9.1) |
 | ChatPanel | AI assistant — SSE streaming, Chinese tool labels, file-bound conversations, multi-conversation + localStorage (V2.8) |
 | SettingsModal | LLM + Tushare config modal, writes to .env via API (V2.7) |
 | DocsPage | Comprehensive documentation — 12 sections, 1658 lines (V2.8) |
 | ResearchPanel | Autonomous research: goal form + date presets + SSE Chinese progress + task list + report + "注册到全局" promote button (V2.8) |
-| PortfolioPanel | Portfolio backtest: strategy selection + ETF pool + BacktestSettings + equity curve vs benchmark + metrics + trades + history (V2.9) |
+| PortfolioPanel | Portfolio backtest: dynamic strategy params from schema + ETF pool + BacktestSettings + equity curve vs benchmark + metrics + trades + history (V2.9.1) |
 | BacktestSettings | Shared cost/rules component: buy/sell commission, stamp tax, slippage, lot size, limit price (V2.9) |
 | Dashboard | Main page, orchestrates chart/backtest/factor components |
 

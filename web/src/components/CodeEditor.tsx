@@ -134,10 +134,13 @@ class RSIReversal(Strategy):
   )
 }
 
+type CodeKind = 'strategy' | 'factor' | 'portfolio_strategy' | 'cross_factor'
+
 interface FileInfo {
   filename: string
   class_name: string
-  size: number
+  size?: number
+  kind?: CodeKind
 }
 
 interface ValidationResult {
@@ -145,6 +148,19 @@ interface ValidationResult {
   errors: string[]
 }
 
+const KIND_LABELS: Record<CodeKind, string> = {
+  strategy: '策略',
+  factor: '因子',
+  portfolio_strategy: '组合策略',
+  cross_factor: '截面因子',
+}
+
+const KIND_COLORS: Record<CodeKind, string> = {
+  strategy: 'var(--color-accent)',
+  factor: '#7c3aed',
+  portfolio_strategy: '#0891b2',
+  cross_factor: '#d97706',
+}
 
 const api = (path: string, opts?: RequestInit) =>
   fetch(`/api/code${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
@@ -152,7 +168,10 @@ const api = (path: string, opts?: RequestInit) =>
 export default function CodeEditor() {
   const [code, setCode] = useState('')
   const [filename, setFilename] = useState('')
+  const [currentKind, setCurrentKind] = useState<CodeKind>('strategy')
   const [files, setFiles] = useState<FileInfo[]>([])
+  const [portfolioFiles, setPortfolioFiles] = useState<FileInfo[]>([])
+  const [crossFactorFiles, setCrossFactorFiles] = useState<FileInfo[]>([])
   const [status, setStatus] = useState<string>('')
   const [errors, setErrors] = useState<string[]>([])
   const [testOutput, setTestOutput] = useState('')
@@ -162,22 +181,34 @@ export default function CodeEditor() {
   const [showHelp, setShowHelp] = useState(false)
   const editorRef = useRef<any>(null)
 
-  useEffect(() => { loadFiles() }, [])
+  useEffect(() => { loadAllFiles() }, [])
 
-  const loadFiles = async () => {
+  const loadAllFiles = async () => {
+    // Load strategy/factor files (default)
     try {
       const res = await api('/files')
       if (res.ok) setFiles(await res.json())
     } catch {}
+    // Load portfolio strategy files
+    try {
+      const res = await api('/files?kind=portfolio_strategy')
+      if (res.ok) setPortfolioFiles(await res.json())
+    } catch {}
+    // Load cross factor files
+    try {
+      const res = await api('/files?kind=cross_factor')
+      if (res.ok) setCrossFactorFiles(await res.json())
+    } catch {}
   }
 
-  const loadFile = async (fname: string) => {
+  const loadFile = async (fname: string, kind: CodeKind = 'strategy') => {
     try {
-      const res = await api(`/files/${fname}`)
+      const res = await api(`/files/${fname}?kind=${kind}`)
       if (res.ok) {
         const data = await res.json()
         setCode(data.code)
         setFilename(fname)
+        setCurrentKind(kind)
         setStatus(`已加载 ${fname}`)
         setErrors([])
         setTestOutput('')
@@ -185,10 +216,14 @@ export default function CodeEditor() {
     } catch (e: any) { setStatus(`Error: ${e.message}`) }
   }
 
-  const newFile = async (kind: 'strategy' | 'factor') => {
-    // Auto-generate a unique name based on existing files
-    const prefix = kind === 'strategy' ? 'MyStrategy' : 'MyFactor'
-    const existing = files.map(f => f.filename)
+  const newFile = async (kind: CodeKind) => {
+    const prefixMap: Record<CodeKind, string> = {
+      strategy: 'MyStrategy', factor: 'MyFactor',
+      portfolio_strategy: 'MyPortfolioStrategy', cross_factor: 'MyCrossFactor',
+    }
+    const prefix = prefixMap[kind]
+    const allFiles = [...files, ...portfolioFiles, ...crossFactorFiles]
+    const existing = allFiles.map(f => f.filename)
     let name = prefix
     let n = 1
     while (existing.includes(name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py')) {
@@ -201,7 +236,8 @@ export default function CodeEditor() {
         setCode(data.code)
         const fn = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py'
         setFilename(fn)
-        setStatus(`新建${kind === 'strategy' ? '策略' : '因子'}: ${fn}`)
+        setCurrentKind(kind)
+        setStatus(`新建${KIND_LABELS[kind]}: ${fn}`)
         setErrors([])
         setTestOutput('')
       }
@@ -239,16 +275,15 @@ export default function CodeEditor() {
     try {
       const res = await api('/save', {
         method: 'POST',
-        body: JSON.stringify({ filename, code, overwrite }),
+        body: JSON.stringify({ filename, code, overwrite, kind: currentKind }),
       })
       const data = await res.json()
       if (res.ok) {
         setStatus(`已保存至 ${data.path} — 合约测试通过!`)
         setErrors([])
         setTestOutput(data.test_output || '')
-        loadFiles()
+        loadAllFiles()
       } else {
-        // 422 error from backend
         const detail = data.detail || data
         setStatus('保存失败')
         setErrors(detail.errors || [JSON.stringify(detail)])
@@ -258,17 +293,35 @@ export default function CodeEditor() {
     finally { setSaving(false) }
   }
 
-  const deleteFile = async (fname: string) => {
+  const deleteFile = async (fname: string, kind: CodeKind = 'strategy') => {
     if (!confirm(`确认删除 ${fname}?`)) return
     try {
-      const res = await api(`/files/${fname}`, { method: 'DELETE' })
+      const res = await api(`/files/${fname}?kind=${kind}`, { method: 'DELETE' })
       if (res.ok) {
-        loadFiles()
+        loadAllFiles()
         if (fname === filename) { setCode(''); setFilename('') }
         setStatus(`已删除 ${fname}`)
       }
     } catch {}
   }
+
+  // Sidebar file item renderer
+  const renderFileItem = (f: FileInfo, kind: CodeKind) => (
+    <div key={`${kind}:${f.filename}`}
+      className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
+      style={{ backgroundColor: f.filename === filename && currentKind === kind ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
+      onClick={() => loadFile(f.filename, kind)}>
+      <span className="truncate" title={f.class_name || f.filename}>{f.class_name || f.filename}</span>
+      <button onClick={e => { e.stopPropagation(); deleteFile(f.filename, kind) }}
+        className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
+    </div>
+  )
+
+  // Filter strategies: exclude research_ and factor files
+  const strategyFiles = files.filter(f => f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_'))
+  const factorFiles = files.filter(f => f.filename.includes('factor') && !f.filename.startsWith('research_'))
+  const otherFiles = files.filter(f => !f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_'))
+  const allEmpty = strategyFiles.length === 0 && factorFiles.length === 0 && portfolioFiles.length === 0 && crossFactorFiles.length === 0 && otherFiles.length === 0
 
   return (
     <div className="flex" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
@@ -284,66 +337,59 @@ export default function CodeEditor() {
 
       {/* File sidebar */}
       <div className="flex flex-col w-56 border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-        <div className="p-2 border-b flex gap-1" style={{ borderColor: 'var(--border)' }}>
+        <div className="p-2 border-b flex flex-wrap gap-1" style={{ borderColor: 'var(--border)' }}>
           <button onClick={() => newFile('strategy')}
-            className="flex-1 text-xs px-2 py-1.5 rounded font-medium"
-            style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
-            + 新建策略
+            className="flex-1 text-xs px-1 py-1.5 rounded font-medium" style={{ backgroundColor: KIND_COLORS.strategy, color: '#fff', minWidth: '45%' }}>
+            + 策略
           </button>
           <button onClick={() => newFile('factor')}
-            className="flex-1 text-xs px-2 py-1.5 rounded font-medium"
-            style={{ backgroundColor: '#7c3aed', color: '#fff' }}>
-            + 新建因子
+            className="flex-1 text-xs px-1 py-1.5 rounded font-medium" style={{ backgroundColor: KIND_COLORS.factor, color: '#fff', minWidth: '45%' }}>
+            + 因子
+          </button>
+          <button onClick={() => newFile('portfolio_strategy')}
+            className="flex-1 text-xs px-1 py-1.5 rounded font-medium" style={{ backgroundColor: KIND_COLORS.portfolio_strategy, color: '#fff', minWidth: '45%' }}>
+            + 组合策略
+          </button>
+          <button onClick={() => newFile('cross_factor')}
+            className="flex-1 text-xs px-1 py-1.5 rounded font-medium" style={{ backgroundColor: KIND_COLORS.cross_factor, color: '#fff', minWidth: '45%' }}>
+            + 截面因子
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {files.filter(f => !f.filename.startsWith('research_')).length === 0 && <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
-          {/* Strategies group (exclude research_) */}
-          {files.filter(f => f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).length > 0 && (
+          {allEmpty && <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
+          {/* Strategies */}
+          {strategyFiles.length > 0 && (
             <>
-              <div className="text-xs font-medium px-2 py-1 mt-1" style={{ color: 'var(--color-accent)' }}>策略</div>
-              {files.filter(f => f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).map(f => (
-                <div key={f.filename}
-                  className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
-                  style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
-                  onClick={() => loadFile(f.filename)}>
-                  <span className="truncate" title={f.class_name}>{f.class_name || f.filename}</span>
-                  <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
-                    className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
-                </div>
-              ))}
+              <div className="text-xs font-medium px-2 py-1 mt-1" style={{ color: KIND_COLORS.strategy }}>策略</div>
+              {strategyFiles.map(f => renderFileItem(f, 'strategy'))}
             </>
           )}
-          {/* Factors group (exclude research_) */}
-          {files.filter(f => f.filename.includes('factor') && !f.filename.startsWith('research_')).length > 0 && (
+          {/* Factors */}
+          {factorFiles.length > 0 && (
             <>
-              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: '#7c3aed' }}>因子</div>
-              {files.filter(f => f.filename.includes('factor') && !f.filename.startsWith('research_')).map(f => (
-                <div key={f.filename}
-                  className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
-                  style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
-                  onClick={() => loadFile(f.filename)}>
-                  <span className="truncate" title={f.class_name}>{f.class_name || f.filename}</span>
-                  <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
-                    className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
-                </div>
-              ))}
+              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: KIND_COLORS.factor }}>因子</div>
+              {factorFiles.map(f => renderFileItem(f, 'factor'))}
             </>
           )}
-          {/* Uncategorized (exclude research_) */}
-          {files.filter(f => !f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).length > 0 && (
+          {/* Portfolio Strategies */}
+          {portfolioFiles.length > 0 && (
+            <>
+              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: KIND_COLORS.portfolio_strategy }}>组合策略</div>
+              {portfolioFiles.map(f => renderFileItem(f, 'portfolio_strategy'))}
+            </>
+          )}
+          {/* Cross Factors */}
+          {crossFactorFiles.length > 0 && (
+            <>
+              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: KIND_COLORS.cross_factor }}>截面因子</div>
+              {crossFactorFiles.map(f => renderFileItem(f, 'cross_factor'))}
+            </>
+          )}
+          {/* Uncategorized */}
+          {otherFiles.length > 0 && (
             <>
               <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: 'var(--text-secondary)' }}>其他</div>
-              {files.filter(f => !f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_')).map(f => (
-                <div key={f.filename}
-                  className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
-                  style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
-                  onClick={() => loadFile(f.filename)}>
-                  <span className="truncate">{f.filename}</span>
-                  <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
-                    className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
-                </div>
-              ))}
+              {otherFiles.map(f => renderFileItem(f, 'strategy'))}
             </>
           )}
         </div>
@@ -353,10 +399,13 @@ export default function CodeEditor() {
       <div className="flex-1 flex flex-col">
         {/* Toolbar */}
         <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+          <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: KIND_COLORS[currentKind], color: '#fff' }}>
+            {KIND_LABELS[currentKind]}
+          </span>
           <input
             type="text" placeholder="filename.py" value={filename}
             onChange={e => setFilename(e.target.value)}
-            className="text-sm px-2 py-1 rounded w-48"
+            className="text-sm px-2 py-1 rounded w-44"
             style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
           />
           <button onClick={validate} disabled={validating || !code}

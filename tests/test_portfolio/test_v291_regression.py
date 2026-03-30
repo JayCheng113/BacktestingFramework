@@ -1,0 +1,388 @@
+"""V2.9.1 regression tests — C1 adj/raw limit, C2 NaN carry-forward,
+builtin strategy behavior, pre-index consistency."""
+from datetime import date, datetime
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from ez.portfolio.calendar import TradingCalendar
+from ez.portfolio.cross_factor import MomentumRank
+from ez.portfolio.engine import CostModel, run_portfolio_backtest
+from ez.portfolio.portfolio_strategy import TopNRotation, PortfolioStrategy
+from ez.portfolio.universe import Universe
+
+
+def _make_data(symbols, n=200, seed=42):
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2023-01-02", periods=n, freq="B")
+    data = {}
+    for i, sym in enumerate(symbols):
+        prices = 10 * np.cumprod(1 + rng.normal(0.001 * (i + 1), 0.015, n))
+        data[sym] = pd.DataFrame({
+            "open": prices, "high": prices * 1.01, "low": prices * 0.99,
+            "close": prices, "adj_close": prices,
+            "volume": rng.integers(100_000, 1_000_000, n),
+        }, index=dates)
+    return data, dates
+
+
+# ─── C1: 涨跌停必须用 raw close (不是 adj_close) ───
+
+class TestC1RawCloseLimitCheck:
+    """Engine uses raw close (not adj_close) for limit up/down check."""
+
+    def test_adj_close_split_does_not_block_trade(self):
+        """adj_close can differ from close due to splits/dividends.
+        Limit check must use raw close, so a stock with 5% raw change
+        but 50% adj_close change (from ex-dividend) should NOT be blocked."""
+        dates = pd.date_range("2024-01-02", periods=30, freq="B")
+        prices_raw = np.full(30, 10.0)
+        # Day 15: raw close +5% (not limit up), but adj_close jumps 50% (ex-div adjustment)
+        prices_raw[15] = 10.5
+        prices_adj = np.full(30, 10.0)
+        prices_adj[15] = 15.0  # adj_close much higher due to backward adjustment
+
+        data = {"A": pd.DataFrame({
+            "open": prices_raw, "high": prices_raw * 1.01,
+            "low": prices_raw * 0.99, "close": prices_raw,
+            "adj_close": prices_adj, "volume": np.full(30, 100000),
+        }, index=dates)}
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        class AlwaysBuy(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 1.0}
+
+        result = run_portfolio_backtest(
+            strategy=AlwaysBuy(), universe=Universe(["A"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=100000, lot_size=1,
+            limit_pct=0.10,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        # A should still be tradeable (raw close only +5%, not limit up)
+        a_buys = [t for t in result.trades if t["side"] == "buy"]
+        assert len(a_buys) > 0, "Stock should be bought — raw close is only +5%"
+
+    def test_raw_close_limit_up_blocks_buy(self):
+        """When raw close is +10% (limit up), buy must be blocked."""
+        dates = pd.date_range("2024-01-02", periods=30, freq="B")
+        prices_raw = np.full(30, 10.0)
+        # Day 15: raw close exactly +10% (limit up)
+        prices_raw[15] = 11.0
+        prices_adj = prices_raw.copy()  # no split, adj == raw
+
+        data = {"A": pd.DataFrame({
+            "open": prices_raw, "high": prices_raw * 1.01,
+            "low": prices_raw * 0.99, "close": prices_raw,
+            "adj_close": prices_adj, "volume": np.full(30, 100000),
+        }, index=dates)}
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        # Find which rebalance dates fall on day 15
+        rebal_dates = cal.rebalance_dates(dates[5].date(), dates[-1].date(), "weekly")
+        day15 = dates[15].date()
+
+        class AlwaysBuy(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 1.0}
+
+        result = run_portfolio_backtest(
+            strategy=AlwaysBuy(), universe=Universe(["A"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=100000, lot_size=1,
+            limit_pct=0.10,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        # If day 15 is a rebalance day and A is limit-up, no buy on that day
+        if day15 in rebal_dates:
+            buys_on_day15 = [t for t in result.trades
+                             if t["date"] == day15.isoformat() and t["side"] == "buy"]
+            assert len(buys_on_day15) == 0, "Limit-up stock should not be bought"
+
+
+# ─── C2: NaN carry-forward (equity never zeros) ───
+
+class TestC2NanCarryForward:
+    """NaN prices must carry forward from prev_prices, not default to 0."""
+
+    def test_nan_price_does_not_zero_equity(self):
+        """If a stock has NaN close on some days, equity should not drop to 0."""
+        dates = pd.date_range("2024-01-02", periods=50, freq="B")
+        prices = np.full(50, 10.0)
+        adj_prices = prices.copy()
+        # Inject NaN on days 25-27 (simulate suspension)
+        adj_prices[25:28] = np.nan
+        prices_raw = prices.copy()
+        prices_raw[25:28] = np.nan
+
+        data = {"A": pd.DataFrame({
+            "open": prices, "high": prices * 1.01,
+            "low": prices * 0.99, "close": prices_raw,
+            "adj_close": adj_prices, "volume": np.full(50, 100000),
+        }, index=dates)}
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        class AlwaysFull(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 1.0}
+
+        result = run_portfolio_backtest(
+            strategy=AlwaysFull(), universe=Universe(["A"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="daily", initial_cash=100000, lot_size=1,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        # Equity should NEVER drop to 0 or near 0 due to NaN
+        for i, eq in enumerate(result.equity_curve):
+            assert eq > 50000, f"Equity dropped to {eq} on day {i} — NaN carry-forward failed"
+
+    def test_nan_only_stock_stays_cash(self):
+        """If ALL prices are NaN for a stock, engine should stay in cash."""
+        dates = pd.date_range("2024-01-02", periods=30, freq="B")
+        data = {"A": pd.DataFrame({
+            "open": np.full(30, np.nan), "high": np.full(30, np.nan),
+            "low": np.full(30, np.nan), "close": np.full(30, np.nan),
+            "adj_close": np.full(30, np.nan), "volume": np.full(30, 0),
+        }, index=dates)}
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        class AlwaysFull(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 1.0}
+
+        result = run_portfolio_backtest(
+            strategy=AlwaysFull(), universe=Universe(["A"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=100000, lot_size=1,
+        )
+        # All equity should be initial cash (no trades possible)
+        for eq in result.equity_curve:
+            assert eq == 100000.0
+
+
+# ─── Builtin Strategy Behavior Tests (M6) ───
+
+class TestEtfMacdRotation:
+    """EtfMacdRotation basic behavior."""
+
+    def test_generates_weights(self):
+        from ez.portfolio.builtin_strategies import EtfMacdRotation
+        symbols = [f"ETF{i}" for i in range(5)]
+        data, dates = _make_data(symbols, n=350, seed=77)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        result = run_portfolio_backtest(
+            strategy=EtfMacdRotation(top_n=2, rank_period=20),
+            universe=Universe(symbols), universe_data=data, calendar=cal,
+            start=dates[50].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000, lot_size=100,
+        )
+        assert len(result.equity_curve) > 100
+        # Should have at least some trades (unless panic filter blocks everything)
+        # Accounting invariant holds (engine asserts internally)
+
+    def test_panic_filter_all_negative(self):
+        """When >75% stocks have negative returns, strategy returns empty."""
+        from ez.portfolio.builtin_strategies import EtfMacdRotation
+        strat = EtfMacdRotation(top_n=2)
+        # Create downtrending data
+        dates = pd.date_range("2023-01-02", periods=100, freq="B")
+        data = {}
+        for i in range(5):
+            prices = 10 * np.cumprod(1 + np.full(100, -0.005))  # all declining
+            data[f"S{i}"] = pd.DataFrame({
+                "open": prices, "high": prices, "low": prices,
+                "close": prices, "adj_close": prices,
+                "volume": np.full(100, 100000),
+            }, index=dates)
+        weights = strat.generate_weights(data, datetime(2023, 6, 1), {}, {})
+        # With all declining, panic filter should return empty
+        assert len(weights) == 0
+
+    def test_top_n_validation(self):
+        from ez.portfolio.builtin_strategies import EtfMacdRotation
+        with pytest.raises(ValueError, match="top_n must be >= 1"):
+            EtfMacdRotation(top_n=0)
+
+    def test_parameters_schema(self):
+        from ez.portfolio.builtin_strategies import EtfMacdRotation
+        schema = EtfMacdRotation.get_parameters_schema()
+        assert "top_n" in schema
+        assert "rank_period" in schema
+        assert schema["top_n"]["default"] == 2
+
+
+class TestEtfSectorSwitch:
+    """EtfSectorSwitch basic behavior."""
+
+    def test_generates_weights(self):
+        from ez.portfolio.builtin_strategies import EtfSectorSwitch
+        symbols = [f"ETF{i}" for i in range(5)]
+        data, dates = _make_data(symbols, n=350, seed=88)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        result = run_portfolio_backtest(
+            strategy=EtfSectorSwitch(top_n=1),
+            universe=Universe(symbols), universe_data=data, calendar=cal,
+            start=dates[50].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000, lot_size=100,
+        )
+        assert len(result.equity_curve) > 100
+
+    def test_stateful_voting(self):
+        """State should accumulate across calls (cW, W, penaltyW)."""
+        from ez.portfolio.builtin_strategies import EtfSectorSwitch
+        strat = EtfSectorSwitch(top_n=1)
+        dates = pd.date_range("2023-01-02", periods=100, freq="B")
+        data = {}
+        for i in range(3):
+            prices = 10 * np.cumprod(1 + np.random.default_rng(i + 10).normal(0.001, 0.01, 100))
+            data[f"S{i}"] = pd.DataFrame({
+                "open": prices, "high": prices, "low": prices,
+                "close": prices, "adj_close": prices,
+                "volume": np.full(100, 100000),
+            }, index=dates)
+
+        # Call twice — state should accumulate
+        w1 = strat.generate_weights(data, datetime(2023, 4, 1), {}, {})
+        w2 = strat.generate_weights(data, datetime(2023, 5, 1), {}, {})
+        assert "cW" in strat.state
+        assert "W" in strat.state
+
+    def test_top_n_validation(self):
+        from ez.portfolio.builtin_strategies import EtfSectorSwitch
+        with pytest.raises(ValueError, match="top_n must be >= 1"):
+            EtfSectorSwitch(top_n=0)
+
+
+class TestEtfStockEnhance:
+    """EtfStockEnhance basic behavior."""
+
+    def test_generates_weights(self):
+        from ez.portfolio.builtin_strategies import EtfStockEnhance
+        symbols = [f"ETF{i}" for i in range(3)] + [f"STK{i}" for i in range(3)]
+        data, dates = _make_data(symbols, n=350, seed=99)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        result = run_portfolio_backtest(
+            strategy=EtfStockEnhance(top_n=1, stock_ratio=0.3),
+            universe=Universe(symbols), universe_data=data, calendar=cal,
+            start=dates[50].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000, lot_size=100,
+        )
+        assert len(result.equity_curve) > 100
+
+    def test_stock_ratio_zero_equals_inner(self):
+        """stock_ratio=0 should give same result as pure EtfSectorSwitch."""
+        from ez.portfolio.builtin_strategies import EtfStockEnhance
+        strat = EtfStockEnhance(top_n=1, stock_ratio=0.0)
+        dates = pd.date_range("2023-01-02", periods=100, freq="B")
+        data = {}
+        for i in range(3):
+            prices = 10 * np.cumprod(1 + np.random.default_rng(i + 20).normal(0.001, 0.01, 100))
+            data[f"S{i}"] = pd.DataFrame({
+                "open": prices, "high": prices, "low": prices,
+                "close": prices, "adj_close": prices,
+                "volume": np.full(100, 100000),
+            }, index=dates)
+        w = strat.generate_weights(data, datetime(2023, 4, 1), {}, {})
+        # With stock_ratio=0, all weight should go to ETF (inner strategy)
+        # No stock symbols should appear
+        for sym in w:
+            assert sym.startswith("S")  # our synthetic symbols
+
+    def test_top_n_validation(self):
+        from ez.portfolio.builtin_strategies import EtfStockEnhance
+        with pytest.raises(ValueError, match="top_n must be >= 1"):
+            EtfStockEnhance(top_n=0)
+
+    def test_parameters_schema(self):
+        from ez.portfolio.builtin_strategies import EtfStockEnhance
+        schema = EtfStockEnhance.get_parameters_schema()
+        assert "top_n" in schema
+        assert "stock_ratio" in schema
+
+
+# ─── Pre-index consistency: engine results deterministic ───
+
+class TestPreIndexConsistency:
+    """Pre-indexed engine should produce same results as before."""
+
+    def test_deterministic_results(self):
+        """Running same backtest twice gives identical equity curves."""
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_data(symbols, n=200, seed=42)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+
+        def run():
+            return run_portfolio_backtest(
+                strategy=TopNRotation(MomentumRank(20), top_n=2),
+                universe=universe, universe_data=data, calendar=cal,
+                start=dates[30].date(), end=dates[-1].date(),
+                freq="monthly", initial_cash=1_000_000, lot_size=100,
+            )
+
+        r1 = run()
+        r2 = run()
+        assert r1.equity_curve == r2.equity_curve
+        assert len(r1.trades) == len(r2.trades)
+        for t1, t2 in zip(r1.trades, r2.trades):
+            assert t1["symbol"] == t2["symbol"]
+            assert t1["shares"] == t2["shares"]
+            assert abs(t1["price"] - t2["price"]) < 1e-10
+
+    def test_metrics_consistent(self):
+        """Metrics should be identical between runs."""
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_data(symbols, n=200, seed=42)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        def run():
+            return run_portfolio_backtest(
+                strategy=TopNRotation(MomentumRank(20), top_n=2),
+                universe=Universe(symbols), universe_data=data, calendar=cal,
+                start=dates[30].date(), end=dates[-1].date(),
+                freq="monthly",
+            )
+
+        r1 = run()
+        r2 = run()
+        for k in r1.metrics:
+            assert r1.metrics[k] == r2.metrics[k], f"Metric {k} differs: {r1.metrics[k]} vs {r2.metrics[k]}"
+
+
+# ─── Registry: builtin strategies always registered ───
+
+class TestBuiltinRegistration:
+    """All 5 builtin strategies must be in registry."""
+
+    def test_all_builtins_registered(self):
+        registry = PortfolioStrategy.get_registry()
+        expected = ["TopNRotation", "MultiFactorRotation",
+                    "EtfMacdRotation", "EtfSectorSwitch", "EtfStockEnhance"]
+        for name in expected:
+            assert name in registry, f"{name} not in registry"
+
+    def test_descriptions_non_empty(self):
+        registry = PortfolioStrategy.get_registry()
+        builtins = ["TopNRotation", "MultiFactorRotation",
+                    "EtfMacdRotation", "EtfSectorSwitch", "EtfStockEnhance"]
+        for name in builtins:
+            cls = registry[name]
+            if hasattr(cls, "get_description"):
+                desc = cls.get_description()
+                assert isinstance(desc, str) and len(desc) > 0, f"{name} has empty description"

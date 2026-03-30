@@ -76,3 +76,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 - V2.8: Research API (start/list/detail/cancel/stream), promote endpoint, asyncio.Lock serialization guard, register_task pre-registration for SSE, experiment list_runs加start_date/end_date
 - V2.8.1: SSE heartbeat (15s keepalive), get_start_lock() public accessor, promote regex precision (Research+uppercase only)
 - V2.9: Portfolio API (strategies/run/runs/detail/delete), buy/sell commission split, limit_pct, benchmark, cost validation ge=0, skipped symbols reporting, code save kind param (portfolio_strategy/cross_factor)
+- V2.9.1: Single-stock backtest MarketRules integration (stamp_tax_rate+lot_size+limit_pct → MarketRulesMatcher wrapper)

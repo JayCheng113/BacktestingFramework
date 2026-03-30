@@ -984,6 +984,15 @@ class MyRotation(PortfolioStrategy):
             <tr><td style={tds}>/api/portfolio/runs/{'<id>'}</td><td style={tds}>GET</td><td style={tds}>回测详情</td></tr>
             <tr><td style={tds}>/api/portfolio/runs/{'<id>'}</td><td style={tds}>DELETE</td><td style={tds}>删除回测</td></tr>
           </tbody></table>
+
+          <div style={h2s}>V2.9.1 增强</div>
+          <table style={tbl}><thead><tr><th style={ths}>改进</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>引擎性能优化</td><td style={tds}>价格查找从 O(n) DataFrame 遍历改为 O(log n) bisect 预索引，20 只标的 × 470 天: 3s → 0.26s</td></tr>
+            <tr><td style={tds}>单股回测 A 股规则</td><td style={tds}>看板的单股回测现在也支持印花税、整手、涨跌停（之前只有组合回测支持）</td></tr>
+            <tr><td style={tds}>策略参数动态渲染</td><td style={tds}>选择不同策略时，参数表单自动切换。例如 EtfMacdRotation 显示 top_n + rank_period，TopNRotation 显示 top_n + factor</td></tr>
+            <tr><td style={tds}>代码编辑器扩展</td><td style={tds}>新增"新建组合策略"和"新建截面因子"按钮，侧栏分 4 组显示（策略/因子/组合策略/截面因子）</td></tr>
+            <tr><td style={tds}>回归测试</td><td style={tds}>新增 19 项回归测试：涨跌停 raw close 验证、NaN carry-forward、内置策略行为、引擎确定性</td></tr>
+          </tbody></table>
         </>}
 
         {/* ================================================================ */}

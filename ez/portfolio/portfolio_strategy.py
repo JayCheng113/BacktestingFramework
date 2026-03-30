@@ -82,7 +82,14 @@ class TopNRotation(PortfolioStrategy):
 
     @classmethod
     def get_parameters_schema(cls) -> dict:
-        return {"top_n": {"type": "int", "default": 10, "min": 1, "max": 200}}
+        return {
+            "top_n": {"type": "int", "default": 10, "min": 1, "max": 200, "label": "持仓数"},
+            "factor": {"type": "select", "default": "momentum_rank_20", "label": "排名因子"},
+        }
+
+    @classmethod
+    def get_description(cls) -> str:
+        return "按截面因子排名选 Top-N 等权持仓"
 
     def generate_weights(self, universe_data, date, prev_weights, prev_returns):
         scores = self._factor.compute(universe_data, date)
@@ -104,6 +111,17 @@ class MultiFactorRotation(PortfolioStrategy):
             raise ValueError(f"top_n must be >= 1, got {top_n}")
         self._factors = factors
         self._top_n = top_n
+
+    @classmethod
+    def get_parameters_schema(cls) -> dict:
+        return {
+            "top_n": {"type": "int", "default": 10, "min": 1, "max": 200, "label": "持仓数"},
+            "factors": {"type": "multi_select", "default": ["momentum_rank_20"], "label": "因子组合"},
+        }
+
+    @classmethod
+    def get_description(cls) -> str:
+        return "多因子等权 Z-Score 合成排名选 Top-N"
 
     def generate_weights(self, universe_data, date, prev_weights, prev_returns):
         all_scores = []

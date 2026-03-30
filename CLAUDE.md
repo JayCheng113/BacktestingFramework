@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.9 | Tests: 1119 (1129 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.9.1 | Tests: 1142 (1152 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -84,7 +84,8 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.8.1**: Stability — get_start_lock()封装(消除私有名跨模块导入), SSE heartbeat(15s keepalive防代理断开), LLM计数文档化(近似值注释), 因子面板动态化(API获取9因子+中文标签), cleanup_finished_tasks时间戳排序, promote regex精确化(Research+大写), 参数面板bool/str支持, 1039 tests
 - **V2.8.1 post-release fixes**: 任务落库保障(save_task提前), promote失败前端alert, 策略列表严格任务隔离(移除全局fallback), LLM计数注释强化, 空因子禁用评估按钮
 - **V2.9**: Portfolio / Rotation — 多股组合回测 (TradingCalendar+PIT Universe+CrossSectionalFactor+PortfolioStrategy有状态+Allocator+PortfolioEngine离散股数记账+会计不变量+涨跌停+基准对比+Sortino/Alpha/Beta+组合API+DuckDB持久化+Agent工具4个+前端组合tab 6-tab架构), 1119 tests
-- **Next: V2.9.1** — Stability (引擎优化+WF/显著性+前端补全) → V2.10 Multi-Factor Research → V2.11 Fundamental + Risk → V3.0 Paper OMS
+- **V2.9.1**: Stability — 引擎价格预索引(bisect O(log n), 10x加速), 单股回测接入MarketRules(stamp_tax+lot_size+limit_pct), 策略参数动态渲染(schema驱动), CodeEditor组合代码类型(4组侧栏+新建组合策略/截面因子), TopNRotation/MultiFactorRotation description+schema补全, 19项回归测试(C1 raw close涨跌停+C2 NaN carry-forward+内置策略行为+引擎确定性), 1152 tests
+- **Next: V2.10** — Multi-Factor Research → V2.11 Fundamental + Risk → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
@@ -93,9 +94,7 @@ No version tag without review pass. No push without critical issues resolved.
 - 配对交易空腿、市场中性 — A 股不可行，推迟到 V3.x 有期货基础设施后考虑
 
 ## Known Limitations (后续版本跟进)
-- 单股回测 API 未接 MarketRulesMatcher — 前端 BacktestSettings 显示印花税/整手/涨跌停，但后端只透传 commission_rate 给 SimpleMatcher (V2.9.1 修)
-- 单股引擎无印花税 — SimpleMatcher 不支持卖出额外扣税 (V2.9.1 修)
-- 组合引擎价格查找 O(days×symbols) 性能 — 大 universe 可能慢 (V2.9.1 优化)
+- 单股引擎印花税近似 — stamp_tax 加到 commission_rate 两侧扣，A 股应该只卖方扣 (V2.10 精确化)
 - 研究任务不支持进程恢复 (crash recovery)
 - 研究任务串行 (同时只跑 1 个)
 - 数据源链扁平去重而非按市场独立路由

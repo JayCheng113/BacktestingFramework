@@ -44,3 +44,4 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 
 ## Status
 - V2.9: Full implementation, 5 built-in strategies, 70+ tests
+- V2.9.1: Bisect pre-indexing (10x speedup), regression tests (19 new), TopNRotation/MultiFactorRotation schema + description
