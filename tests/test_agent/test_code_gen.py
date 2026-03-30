@@ -61,12 +61,32 @@ class TestGenerateStrategyCode:
             assert "2次重试" in e
 
     @pytest.mark.asyncio
-    async def test_exception(self):
+    async def test_exception_retries(self):
+        """P1-7: Exceptions should be retried, not immediately returned."""
         p = MagicMock()
-        with patch("ez.agent.code_gen.chat_sync", side_effect=Exception("LLM down")):
-            f, c, e = await generate_strategy_code(p, "test")
+        call_count = 0
+
+        def counting_chat(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise Exception("LLM down")
+            return LLMResponse(content="done")
+
+        with patch("ez.agent.code_gen.chat_sync", side_effect=counting_chat), \
+             patch("ez.agent.code_gen._find_latest_strategy", return_value=("s.py", "S")):
+            f, c, e = await generate_strategy_code(p, "test", max_retries=3)
+            assert f == "s.py"  # Recovered on second attempt
+            assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_all_exceptions_exhaust_retries(self):
+        """All attempts throw → returns error after all retries."""
+        p = MagicMock()
+        with patch("ez.agent.code_gen.chat_sync", side_effect=Exception("persistent")):
+            f, c, e = await generate_strategy_code(p, "test", max_retries=2)
             assert f is None
-            assert "LLM down" in e
+            assert "persistent" in e
 
     @pytest.mark.asyncio
     async def test_max_retries_one(self):

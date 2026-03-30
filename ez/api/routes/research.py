@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
@@ -13,7 +14,10 @@ from pydantic import BaseModel, Field
 from ez.agent.hypothesis import ResearchGoal
 from ez.agent.loop_controller import LoopConfig
 from ez.agent.gates import GateConfig
-from ez.agent.research_runner import run_research_task, cancel_task, get_task_events, is_any_task_running
+from ez.agent.research_runner import (
+    run_research_task, cancel_task, get_task_events,
+    is_any_task_running, register_task, _start_lock,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,12 +57,14 @@ async def start_research(req: ResearchRequest):
         min_sharpe=req.gate_min_sharpe, max_drawdown=req.gate_max_drawdown,
     )
 
-    # Serialization: only one research task at a time
-    if is_any_task_running():
-        raise HTTPException(status_code=409, detail="已有研究任务运行中，请等待完成或取消后重试")
+    # P0-2: Atomic check-and-start via lock (prevents concurrent starts)
+    async with _start_lock:
+        if is_any_task_running():
+            raise HTTPException(status_code=409, detail="已有研究任务运行中，请等待完成或取消后重试")
+        task_id = uuid.uuid4().hex[:12]
+        # P1-9: Pre-register so SSE stream is immediately available
+        register_task(task_id)
 
-    import uuid
-    task_id = uuid.uuid4().hex[:12]
     asyncio.create_task(run_research_task(goal, loop_config, gate_config, task_id=task_id))
     return {"task_id": task_id, "status": "started"}
 
@@ -68,14 +74,12 @@ def list_research_tasks(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    """List research tasks."""
     from ez.agent.data_access import get_research_store
     return get_research_store().list_tasks(limit=limit, offset=offset)
 
 
 @router.get("/tasks/{task_id}")
 def get_research_task(task_id: str):
-    """Get research task detail with iterations."""
     from ez.agent.data_access import get_research_store
     store = get_research_store()
     task = store.get_task(task_id)
@@ -87,7 +91,6 @@ def get_research_task(task_id: str):
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_research_task(task_id: str):
-    """Cancel a running research task."""
     if cancel_task(task_id):
         return {"status": "cancelling", "task_id": task_id}
     raise HTTPException(status_code=404, detail="Task not found or already finished")
@@ -95,7 +98,6 @@ def cancel_research_task(task_id: str):
 
 @router.get("/tasks/{task_id}/stream")
 async def stream_research_task(task_id: str):
-    """SSE stream of research task progress."""
     events_data = get_task_events(task_id)
     if events_data is None:
         raise HTTPException(status_code=404, detail="Task not found or not running")

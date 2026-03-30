@@ -107,4 +107,10 @@ class ResearchStore:
         return [dict(zip(cols, r)) for r in rows]
 
     def close(self) -> None:
-        pass  # Connection owned externally
+        """Close the DuckDB connection."""
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None

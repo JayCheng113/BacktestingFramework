@@ -112,3 +112,14 @@ class TestStoreEdgeCases:
         task = store.get_task("t1")
         assert task["status"] == "running"
         assert task["completed_at"] is None
+
+    def test_close_actually_closes_connection(self):
+        """P0-4: close() must actually close the DuckDB connection."""
+        conn = duckdb.connect(":memory:")
+        s = ResearchStore(conn)
+        s.save_task({"task_id": "t1", "goal": "test", "config": "{}",
+                     "status": "running", "created_at": datetime.now().isoformat()})
+        s.close()
+        # After close, connection should be unusable
+        with pytest.raises(Exception):
+            conn.execute("SELECT 1")

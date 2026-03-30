@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 # In-memory event queues for SSE streaming
 _running_tasks: dict[str, dict] = {}
+# Serialization lock — ensures check-and-start is atomic
+_start_lock = asyncio.Lock()
 
 
 def _emit(task_id: str, event: str, data: dict) -> None:
@@ -53,13 +55,9 @@ def _run_batch_for_strategies(
     """Create RunSpecs and run batch. Returns (batch_result, spec_ids)."""
     specs = [
         RunSpec(
-            strategy_name=name,
-            strategy_params={},
-            symbol=goal.symbol,
-            market=goal.market,
-            period=goal.period,
-            start_date=goal.start_date,
-            end_date=goal.end_date,
+            strategy_name=name, strategy_params={},
+            symbol=goal.symbol, market=goal.market, period=goal.period,
+            start_date=goal.start_date, end_date=goal.end_date,
         )
         for name in strategy_names
     ]
@@ -72,38 +70,44 @@ def _run_batch_for_strategies(
     return run_batch(specs, data, config=config, store=store), spec_ids
 
 
+def register_task(task_id: str) -> None:
+    """Pre-register task in memory BEFORE background work starts (prevents SSE 404)."""
+    _running_tasks[task_id] = {"events": [], "done": False, "state": LoopState()}
+
+
 async def run_research_task(
     goal: ResearchGoal,
     loop_config: LoopConfig = LoopConfig(),
     gate_config: GateConfig = GateConfig(),
     task_id: str = "",
 ) -> str:
-    """Main orchestrator. Returns task_id; runs loop in-place (caller wraps in create_task)."""
+    """Main orchestrator. task_id must be pre-registered via register_task()."""
     if not task_id:
         task_id = uuid.uuid4().hex[:12]
-    _running_tasks[task_id] = {"events": [], "done": False, "state": LoopState()}
+        register_task(task_id)
 
-    provider = create_provider()
-    research_store = get_research_store()
-    controller = LoopController(loop_config)
-    state = LoopState()
-    start_time = datetime.now()
-
-    research_store.save_task({
-        "task_id": task_id,
-        "goal": goal.description,
-        "config": json.dumps({
-            "max_iterations": loop_config.max_iterations,
-            "max_specs": loop_config.max_specs,
-            "max_llm_calls": loop_config.max_llm_calls,
-            "symbol": goal.symbol, "market": goal.market,
-            "start_date": str(goal.start_date), "end_date": str(goal.end_date),
-        }),
-        "status": "running",
-    })
-
+    # Everything inside try/finally so done=True is always set
     stop_reason = ""
     try:
+        provider = create_provider()
+        research_store = get_research_store()
+        controller = LoopController(loop_config)
+        state = LoopState()
+        start_time = datetime.now()
+
+        research_store.save_task({
+            "task_id": task_id,
+            "goal": goal.description,
+            "config": json.dumps({
+                "max_iterations": loop_config.max_iterations,
+                "max_specs": loop_config.max_specs,
+                "max_llm_calls": loop_config.max_llm_calls,
+                "symbol": goal.symbol, "market": goal.market,
+                "start_date": str(goal.start_date), "end_date": str(goal.end_date),
+            }),
+            "status": "running",
+        })
+
         data = await asyncio.to_thread(_fetch_data, goal)
         previous_analysis = ""
 
@@ -126,11 +130,11 @@ async def run_research_task(
             for i, h in enumerate(hypotheses):
                 _emit(task_id, "hypothesis", {"index": i, "total": len(hypotheses), "text": h})
 
-            # E2: Code generation
+            # E2: Code generation — count each hypothesis as 2 LLM calls (conservative)
             strategy_names: list[str] = []
             for i, hypothesis in enumerate(hypotheses):
                 filename, class_name, error = await generate_strategy_code(provider, hypothesis)
-                llm_calls += 1
+                llm_calls += 2  # chat_sync does >=1 round + tool execution
                 if class_name:
                     strategy_names.append(class_name)
                     _emit(task_id, "code_success", {
@@ -138,6 +142,22 @@ async def run_research_task(
                 else:
                     _emit(task_id, "code_failed", {
                         "index": i, "hypothesis": hypothesis[:100], "error": error or "unknown"})
+
+            # Budget check before batch (P1-5: prevent overshooting)
+            state_preview = LoopState(
+                iteration=state.iteration,
+                specs_executed=state.specs_executed + len(strategy_names),
+                llm_calls=state.llm_calls + llm_calls,
+                cancelled=state.cancelled,
+            )
+            ok2, reason2 = controller.should_continue(state_preview)
+            if not ok2 and not state.cancelled:
+                # Budget would be exceeded — skip batch, exit
+                stop_reason = reason2
+                _emit(task_id, "iteration_end", {
+                    "iteration": state.iteration, "cumulative_passed": state.gate_passed_total,
+                    "cumulative_specs": state.specs_executed, "skipped": "budget"})
+                break
 
             # E3: Batch execution
             _emit(task_id, "batch_start", {"total_specs": len(strategy_names)})
@@ -176,22 +196,34 @@ async def run_research_task(
                 "cumulative_passed": state.gate_passed_total,
                 "cumulative_specs": state.specs_executed})
 
+        # Determine final status (P0-3: cancelled → "cancelled", not "completed")
+        if state.cancelled:
+            final_status = "cancelled"
+        else:
+            final_status = "completed"
+
         # E6: Report
-        report = await build_report(provider, research_store, task_id, stop_reason)
+        exp_store = get_experiment_store()
+        report = await build_report(provider, research_store, task_id, stop_reason, exp_store=exp_store)
         report.duration_sec = (datetime.now() - start_time).total_seconds()
         research_store.update_task_status(
-            task_id, "completed", stop_reason=stop_reason, summary=report.summary)
-        _emit(task_id, "task_complete", {
+            task_id, final_status, stop_reason=stop_reason, summary=report.summary)
+        _emit(task_id, "task_complete" if final_status == "completed" else "task_cancelled", {
             "total_passed": state.gate_passed_total,
             "best_sharpe": round(state.best_sharpe, 4) if state.best_sharpe > float("-inf") else 0,
             "stop_reason": stop_reason})
 
     except Exception as e:
         logger.error("Research task %s failed: %s", task_id, e)
-        research_store.update_task_status(task_id, "failed", error=str(e))
+        try:
+            research_store = get_research_store()
+            research_store.update_task_status(task_id, "failed", error=str(e))
+        except Exception:
+            pass  # store might not be initialized
         _emit(task_id, "task_failed", {"error": str(e)})
 
     finally:
+        # P0-1: ALWAYS mark done, even if init failed
         if task_id in _running_tasks:
             _running_tasks[task_id]["done"] = True
         cleanup_finished_tasks()

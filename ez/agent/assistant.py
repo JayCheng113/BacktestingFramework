@@ -77,14 +77,23 @@ def chat_sync(
     provider: LLMProvider,
     messages: list[LLMMessage],
     editor_code: str = "",
+    allowed_tools: list[str] | None = None,
 ) -> LLMResponse:
     """Synchronous chat with tool-calling loop.
+
+    Args:
+        allowed_tools: If set, only these tool names are exposed to the LLM.
+            None = all tools (default, backward compatible).
 
     Returns the final LLMResponse after all tool calls are resolved.
     """
     system = LLMMessage(role="system", content=_build_system_prompt(editor_code))
     full_messages = [system] + messages
-    tools = get_all_tool_schemas()
+    all_tools = get_all_tool_schemas()
+    if allowed_tools is not None:
+        tools = [t for t in all_tools if t.get("function", {}).get("name") in allowed_tools]
+    else:
+        tools = all_tools
 
     for _round in range(MAX_TOOL_ROUNDS):
         response = provider.chat(full_messages, tools=tools)

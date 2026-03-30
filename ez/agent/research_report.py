@@ -42,6 +42,7 @@ async def build_report(
     store: ResearchStore,
     task_id: str,
     stop_reason: str,
+    exp_store=None,
 ) -> ResearchReport:
     """Build report from stored iterations."""
     task = store.get_task(task_id) or {}
@@ -56,7 +57,7 @@ async def build_report(
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Collect best strategies from iterations' spec_ids
+    # P1-8: Collect best strategies from experiment_runs via spec_ids
     best_strategies: list[dict] = []
     all_spec_ids: list[str] = []
     for it in iterations:
@@ -65,6 +66,27 @@ async def build_report(
             all_spec_ids.extend(sids)
         except (json.JSONDecodeError, TypeError):
             pass
+
+    if all_spec_ids and exp_store is not None:
+        try:
+            for sid in all_spec_ids:
+                run = exp_store.get_completed_run_id(sid)
+                if run:
+                    run_data = exp_store.get_run(run)
+                    if run_data and run_data.get("gate_passed"):
+                        best_strategies.append({
+                            "run_id": run_data.get("run_id", ""),
+                            "strategy_name": run_data.get("strategy_name", ""),
+                            "sharpe_ratio": run_data.get("sharpe_ratio"),
+                            "max_drawdown": run_data.get("max_drawdown"),
+                            "trade_count": run_data.get("trade_count", 0),
+                            "gate_passed": True,
+                        })
+            # Sort by sharpe descending, take top 5
+            best_strategies.sort(key=lambda x: x.get("sharpe_ratio") or 0, reverse=True)
+            best_strategies = best_strategies[:5]
+        except Exception as e:
+            logger.warning("Failed to populate best_strategies: %s", e)
 
     report = ResearchReport(
         task_id=task_id,

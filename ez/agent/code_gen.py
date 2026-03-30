@@ -103,17 +103,25 @@ async def generate_strategy_code(
         LLMMessage(role="user", content=f"请根据以下假设创建策略:\n{hypothesis}"),
     ]
 
+    last_error = ""
     for attempt in range(max_retries):
         try:
-            await asyncio.to_thread(chat_sync, provider, messages)
+            await asyncio.to_thread(
+                chat_sync, provider, messages,
+                allowed_tools=["create_strategy", "read_source", "list_factors"])
             filename, class_name = _find_latest_strategy(before)
             if filename and class_name:
                 logger.info("Code gen success: %s (%s)", filename, class_name)
                 return filename, class_name, None
+            last_error = "策略文件未创建"
             messages.append(LLMMessage(role="user",
                 content="策略文件未创建成功。请使用 create_strategy 工具重新尝试。"))
         except Exception as e:
             logger.warning("Code gen attempt %d failed: %s", attempt + 1, e)
-            return None, None, str(e)
+            last_error = str(e)
+            # Continue retrying on exception (P1-7)
+            if attempt < max_retries - 1:
+                messages.append(LLMMessage(role="user",
+                    content=f"出错了: {e}。请重试。"))
 
-    return None, None, f"经过{max_retries}次重试仍未成功创建策略"
+    return None, None, f"经过{max_retries}次重试仍未成功: {last_error}"

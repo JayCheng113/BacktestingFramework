@@ -10,10 +10,10 @@ import pandas as pd
 import pytest
 
 from ez.agent.hypothesis import ResearchGoal
-from ez.agent.loop_controller import LoopConfig
+from ez.agent.loop_controller import LoopConfig, LoopController
 from ez.agent.research_runner import (
     run_research_task, cancel_task, get_task_events, _running_tasks,
-    _emit, is_any_task_running, cleanup_finished_tasks,
+    _emit, is_any_task_running, cleanup_finished_tasks, register_task,
 )
 from ez.agent.research_store import ResearchStore
 from ez.llm.provider import LLMResponse
@@ -383,6 +383,65 @@ class TestRunResearchTask:
             elif e["event"] == "task_complete":
                 assert isinstance(e["data"]["total_passed"], int)
                 assert "stop_reason" in e["data"]
+        conn.close()
+
+    @pytest.mark.asyncio
+    async def test_init_failure_marks_done(self):
+        """P0-1: If create_provider fails, task must still be marked done."""
+        register_task("stuck_task")
+        with patch("ez.agent.research_runner.create_provider", side_effect=RuntimeError("no provider")), \
+             patch("ez.agent.research_runner.get_research_store") as mock_store:
+            mock_store.return_value = MagicMock()
+            mock_store.return_value.save_task = MagicMock(side_effect=RuntimeError("no store"))
+            await run_research_task(ResearchGoal(description="test"), task_id="stuck_task")
+
+        # Must be done=True (not stuck forever)
+        assert _running_tasks["stuck_task"]["done"] is True
+        # is_any_task_running should be False
+        assert is_any_task_running() is False
+
+    @pytest.mark.asyncio
+    async def test_cancel_sets_cancelled_status(self):
+        """P0-3: Cancelled task should have status='cancelled', not 'completed'."""
+        mock_provider = MagicMock()
+        mock_provider.achat = AsyncMock(side_effect=[
+            LLMResponse(content='["策略"]'),  # E1 iter 0
+            LLMResponse(content='{"direction": "ok"}'),  # E4 iter 0
+            LLMResponse(content='["策略2"]'),  # E1 iter 1 — cancel flag already set
+            LLMResponse(content='{}'),  # E4 won't reach
+            LLMResponse(content="总结"),  # E6
+        ])
+        conn = duckdb.connect(":memory:")
+        rs = ResearchStore(conn)
+
+        with patch.multiple("ez.agent.research_runner",
+                            create_provider=MagicMock(return_value=mock_provider),
+                            get_research_store=MagicMock(return_value=rs),
+                            get_experiment_store=MagicMock(),
+                            _fetch_data=MagicMock(return_value=_make_test_data()),
+                            generate_strategy_code=AsyncMock(return_value=(None, None, "skip")),
+                            _run_batch_for_strategies=MagicMock(
+                                return_value=(_mock_batch(), []))):
+            task_id = "cancel_test"
+            register_task(task_id)
+            # Set cancel after first iteration completes
+            original_update = LoopController.update
+            def cancel_on_first_update(self, state, batch, llm):
+                new_state = original_update(self, state, batch, llm)
+                # After first iteration, set cancel
+                if new_state.iteration == 1:
+                    cancel_task(task_id)
+                return new_state
+            with patch.object(LoopController, "update", cancel_on_first_update):
+                await run_research_task(
+                    ResearchGoal(description="test", n_hypotheses=1),
+                    LoopConfig(max_iterations=100),
+                    task_id=task_id,
+                )
+
+        task = rs.get_task(task_id)
+        assert task["status"] == "cancelled"
+        assert "取消" in task["stop_reason"]
         conn.close()
 
     @pytest.mark.asyncio

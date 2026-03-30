@@ -99,9 +99,8 @@ class TestSerializationGuard:
     def test_allows_start_when_all_done(self):
         """Can start when previous tasks are all done."""
         _running_tasks["old"] = {"events": [], "done": True}
-        # This will try to actually run, which needs mocked dependencies
-        # Just verify 409 is NOT raised
-        with patch("ez.api.routes.research.run_research_task", new_callable=AsyncMock, return_value="t1"):
+        with patch("ez.api.routes.research.run_research_task", new_callable=AsyncMock, return_value="t1"), \
+             patch("ez.api.routes.research.register_task"):
             resp = client.post("/api/research/start", json={"goal": "test"})
         assert resp.status_code != 409
 
