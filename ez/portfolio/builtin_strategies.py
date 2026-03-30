@@ -112,14 +112,15 @@ class EtfMacdRotation(PortfolioStrategy):
             return {}
 
         # Exponential weighting
+        # H5 fix: use pure return-space (no mixing with absolute price)
         exp_rets = {}
         total_exp = 0
         lessthan_zero = sum(1 for v in cur_returns.values() if v < 0)
         for sym, hr in history_returns.items():
             if not hr:
                 continue
-            c = cur_close_prices.get(sym, 1)
-            exp_rets[sym] = math.exp((max(hr) - c) * 1.02) if c > 0 else 1
+            # max historical return as confidence signal (dimensionless)
+            exp_rets[sym] = math.exp(max(hr) * 10)  # scale for differentiation
             total_exp += exp_rets[sym]
 
         # Market panic check: >75% negative → stay cash

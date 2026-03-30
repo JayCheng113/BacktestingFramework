@@ -165,6 +165,10 @@ def run_portfolio(req: PortfolioRunRequest):
         slippage_rate=req.slippage_rate,
     )
 
+    # H4: count fetched symbols BEFORE adding benchmark
+    fetched_count = len(universe_data)
+    skipped = [s for s in req.symbols if s not in universe_data]
+
     # If benchmark not in symbols, fetch it separately
     if req.benchmark_symbol and req.benchmark_symbol not in universe_data:
         try:
@@ -220,10 +224,6 @@ def run_portfolio(req: PortfolioRunRequest):
         "rebalance_count": len(result.rebalance_dates),
     })
 
-    # Report which symbols were skipped (no data available)
-    fetched = set(universe_data.keys())
-    skipped = [s for s in req.symbols if s not in fetched]
-
     return {
         "run_id": run_id,
         "metrics": metrics,
@@ -232,7 +232,7 @@ def run_portfolio(req: PortfolioRunRequest):
         "dates": [d.isoformat() for d in result.dates],
         "trades": result.trades[:100],
         "rebalance_dates": [d.isoformat() for d in result.rebalance_dates],
-        "symbols_fetched": len(fetched),
+        "symbols_fetched": fetched_count,
         "symbols_skipped": skipped,
     }
 

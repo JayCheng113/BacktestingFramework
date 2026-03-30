@@ -126,12 +126,14 @@ def run_portfolio_backtest(
 
     result = PortfolioResult()
     prev_prices: dict[str, float] = {}
+    prev_raw_close: dict[str, float] = {}  # C1: raw close for limit price check
 
     for day in trading_days:
         tradeable = set(universe.tradeable_at(day))
 
-        # Get current prices + track which symbols have a bar TODAY (tradeable check)
+        # Get current prices + raw close + tradeable check
         prices: dict[str, float] = {}
+        raw_close_today: dict[str, float] = {}  # C1: unadjusted close for limit check
         has_bar_today: set[str] = set()
         for sym in set(list(holdings.keys()) + list(tradeable)):
             if sym in universe_data:
@@ -144,13 +146,21 @@ def run_portfolio_backtest(
                     today_mask = df.index == day
                 valid = df.loc[mask]
                 if not valid.empty:
+                    # Valuation price: prefer adj_close
                     price_col = "adj_close" if "adj_close" in valid.columns else "close"
                     p = valid[price_col].iloc[-1]
-                    # C2 fix: fallback to close if adj_close is NaN (High #1)
                     if isinstance(p, float) and np.isnan(p) and price_col == "adj_close" and "close" in valid.columns:
                         p = valid["close"].iloc[-1]
                     if not (np.isnan(p) if isinstance(p, float) else False):
                         prices[sym] = float(p)
+                    elif sym in prev_prices:
+                        # C2: NaN price → carry forward prev price for valuation (not 0)
+                        prices[sym] = prev_prices[sym]
+                    # C1: raw close for limit price (not adj_close)
+                    if "close" in valid.columns:
+                        rc = valid["close"].iloc[-1]
+                        if not (isinstance(rc, float) and np.isnan(rc)):
+                            raw_close_today[sym] = float(rc)
                 # Track if symbol has actual data for today
                 if df.loc[today_mask].shape[0] > 0:
                     has_bar_today.add(sym)
@@ -210,12 +220,12 @@ def run_portfolio_backtest(
                 if sym not in has_bar_today:
                     continue
 
-                # A-share 涨跌停检查
-                if limit_pct > 0:
-                    lim_up, lim_down = _check_limit_price(sym, day, universe_data, prev_prices, limit_pct)
-                    if delta > 0 and lim_up:
+                # A-share 涨跌停检查 (C1: use raw close, not adj_close)
+                if limit_pct > 0 and sym in raw_close_today and sym in prev_raw_close:
+                    change = (raw_close_today[sym] - prev_raw_close[sym]) / prev_raw_close[sym] if prev_raw_close[sym] > 0 else 0
+                    if delta > 0 and change >= limit_pct - 0.001:
                         continue  # 涨停不可买
-                    if delta < 0 and lim_down:
+                    if delta < 0 and change <= -limit_pct + 0.001:
                         continue  # 跌停不可卖
 
                 price = prices[sym]
@@ -297,6 +307,7 @@ def run_portfolio_backtest(
         result.weights_history.append(dict(prev_weights))
 
         prev_prices = dict(prices)
+        prev_raw_close = dict(raw_close_today)
 
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
     # C3 fix: first_price must be at backtest start, not data start (which includes lookback)
