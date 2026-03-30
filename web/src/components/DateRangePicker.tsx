@@ -33,7 +33,13 @@ interface Props {
 }
 
 const toDate = (s: string) => new Date(s + 'T00:00:00')
-const toStr = (d: Date) => d.toISOString().slice(0, 10)
+const toStr = (d: Date) => {
+  // Use local date components to avoid UTC timezone offset
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 
 export default function DateRangePicker({ startDate, endDate, onStartChange, onEndChange, showPresets = true }: Props) {
   const start = toDate(startDate)

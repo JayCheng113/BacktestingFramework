@@ -70,8 +70,9 @@ def evaluate_factor(req: FactorEvalRequest):
         "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
     } for b in bars]).set_index("time")
 
+    original_cols = set(df.columns)
     computed = factor.compute(df)
-    factor_cols = [c for c in computed.columns if c not in df.columns]
+    factor_cols = [c for c in computed.columns if c not in original_cols]
     if not factor_cols:
         raise HTTPException(status_code=500, detail="Factor produced no new columns")
 

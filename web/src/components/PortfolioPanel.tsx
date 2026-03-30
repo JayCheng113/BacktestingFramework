@@ -110,8 +110,11 @@ export default function PortfolioPanel() {
         })
       )
       setCompareData(data)
-    } catch (e: any) { alert('加载失败: ' + (e?.message || '')) }
-    finally { setComparing(false) }
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e?.message || '未知错误'
+      alert('对比加载失败: ' + msg + '\n记录可能已删除，请刷新页面重试')
+      loadHistory()
+    } finally { setComparing(false) }
   }
 
   const handleEvaluateFactors = async () => {

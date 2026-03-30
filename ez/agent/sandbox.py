@@ -487,9 +487,21 @@ def save_and_validate_code(
         errors = check_syntax(code)
         if errors:
             return {"success": False, "errors": errors}
-        # Validate code contains a Factor subclass
-        if "Factor" not in code:
-            return {"success": False, "errors": ["Code must contain a class inheriting from Factor"]}
+        # Validate code contains a class inheriting from Factor (AST check)
+        import ast as _ast
+        try:
+            _tree = _ast.parse(code)
+            _has_factor_class = any(
+                isinstance(node, _ast.ClassDef) and
+                any((isinstance(b, _ast.Name) and b.id == "Factor") or
+                    (isinstance(b, _ast.Attribute) and b.attr == "Factor")
+                    for b in node.bases)
+                for node in _ast.walk(_tree)
+            )
+        except SyntaxError:
+            _has_factor_class = False
+        if not _has_factor_class:
+            return {"success": False, "errors": ["Code must contain a class inheriting from Factor (AST check)"]}
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / safe_name
         if target.exists() and not overwrite:
@@ -499,9 +511,12 @@ def save_and_validate_code(
         if target.exists():
             backup = target.read_text(encoding="utf-8")
         target.write_text(code, encoding="utf-8")
-        # Hot-reload with validation
+        # Hot-reload with timeout (prevent blocking from user code)
+        import concurrent.futures
         try:
-            _reload_factor_code(safe_name, target_dir)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_reload_factor_code, safe_name, target_dir)
+                future.result(timeout=10)  # 10s max
             # Verify at least one Factor subclass was registered
             from ez.factor.base import Factor
             stem = safe_name.replace(".py", "")
