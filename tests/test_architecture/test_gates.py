@@ -69,8 +69,8 @@ def _get_layer(module_name: str) -> int | None:
 
 def _extract_ez_imports(filepath: Path) -> list[str]:
     try:
-        tree = ast.parse(filepath.read_text())
-    except SyntaxError:
+        tree = ast.parse(filepath.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError):
         return []
     imports = []
     for node in ast.walk(tree):

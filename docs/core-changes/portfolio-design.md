@@ -1,6 +1,7 @@
 # Portfolio / Rotation Strategy Design
 
-> **状态**: 设计文档（未实施，已通过自审）
+> **状态**: 设计文档（未实施，已通过自审 + Codex 审计修正）
+> **Codex 审计修正**: 接口冻结为 compute(data, date)→Series（#6）; 会计不变量 cash+pos=equity（#4）; PIT 动态成分股提升为必做（#3）; 交易日历模块（#8）; 防前瞻改为引擎切片（#2）
 > **目标版本**: V2.9
 > **依赖**: V2.5 (BatchRunner)。V2.6 (MarketRules) 可选集成。
 > **前置条件**: 单股回测正确性已验证 (V2.3)，Agent Loop 已就位 (V2.4)
@@ -123,10 +124,12 @@ class CrossSectionalFactor(ABC):
     def warmup_period(self) -> int: ...
 
     @abstractmethod
-    def compute(self, universe_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
         """
-        Input: {symbol: OHLCV DataFrame}
-        Output: DataFrame, index=dates, columns=symbols, values=factor scores
+        Input: {symbol: OHLCV DataFrame (已切片至 date-1)}, 当前调仓日
+        Output: Series[symbol → factor score] (单日截面)
+        NOTE: universe_data 由引擎切片，策略看不到 date 及之后的数据。
+        NOTE: 全矩阵版本已废弃 — 改为逐日调用，与 roadmap 接口一致。
         """
         ...
 
