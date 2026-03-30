@@ -442,7 +442,7 @@ export default function CodeEditor() {
           </div>
           {showChat && (
             <div className="border-l" style={{ flex: '0 0 40%', borderColor: 'var(--border)', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-              <ChatPanel editorCode={code} onCodeUpdate={(c, f) => { setCode(c); if (f) setFilename(f) }} />
+              <ChatPanel editorCode={code} fileKey={filename} onCodeUpdate={(c, f) => { setCode(c); if (f) setFilename(f) }} />
             </div>
           )}
         </div>

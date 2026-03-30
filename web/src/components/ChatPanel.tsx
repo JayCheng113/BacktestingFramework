@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 interface Props {
   editorCode?: string
   onCodeUpdate?: (code: string, filename?: string) => void
+  fileKey?: string  // Bound to a file — auto-switch/create conversation per file
 }
 
 interface ChatMsg {
@@ -31,6 +32,7 @@ interface Conversation {
   messages: ChatMsg[]
   createdAt: number
   updatedAt: number
+  fileKey?: string  // Bound to a specific file (filename)
 }
 
 const STORAGE_KEY = 'ez-chat-conversations'
@@ -72,7 +74,7 @@ function titleFromMsg(msg: string): string {
   return clean.length > 24 ? clean.slice(0, 24) + '...' : clean
 }
 
-export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
+export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeId, setActiveId] = useState<string>(() => localStorage.getItem(ACTIVE_KEY) || '')
   const [input, setInput] = useState('')
@@ -101,13 +103,37 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const createConversation = () => {
+  // Auto-switch/create conversation when fileKey changes
+  useEffect(() => {
+    if (!fileKey) return
+    // Find existing conversation for this file
+    const existing = conversations.find(c => c.fileKey === fileKey)
+    if (existing) {
+      if (activeId !== existing.id) setActiveId(existing.id)
+    } else {
+      // Create new conversation bound to this file
+      const label = fileKey.replace('.py', '')
+      const conv: Conversation = {
+        id: newId(),
+        title: label,
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        fileKey,
+      }
+      setConversations(prev => [conv, ...prev])
+      setActiveId(conv.id)
+    }
+  }, [fileKey])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const createConversation = (boundFileKey?: string) => {
     const conv: Conversation = {
       id: newId(),
-      title: '新对话',
+      title: boundFileKey ? boundFileKey.replace('.py', '') : '新对话',
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      fileKey: boundFileKey,
     }
     setConversations(prev => [conv, ...prev])
     setActiveId(conv.id)
@@ -297,7 +323,7 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
               {llmStatus.available ? `${llmStatus.provider}` : '未配置'}
             </span>
           )}
-          <button onClick={createConversation}
+          <button onClick={() => createConversation(fileKey)}
             className="text-xs px-1.5 py-0.5 rounded"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             title="新建对话">+</button>
@@ -316,9 +342,12 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate }: Props) {
               style={{ backgroundColor: c.id === activeId ? 'var(--bg-primary)' : 'transparent', borderBottom: '1px solid var(--border)' }}
               onClick={() => switchConversation(c.id)}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>{c.title}</div>
+                <div className="text-xs truncate flex items-center gap-1" style={{ color: 'var(--text-primary)' }}>
+                  {c.fileKey && <span style={{ color: 'var(--color-accent)', fontSize: '9px' }}>📎</span>}
+                  {c.title}
+                </div>
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  {c.messages.length} 条消息 · {new Date(c.updatedAt).toLocaleDateString()}
+                  {c.messages.length} 条 · {c.fileKey || '未绑定文件'}
                 </div>
               </div>
               <button onClick={e => deleteConversation(c.id, e)}
