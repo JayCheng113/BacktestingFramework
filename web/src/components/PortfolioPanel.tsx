@@ -15,6 +15,7 @@ interface PortfolioMetrics {
 interface PortfolioRunResult {
   run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
   benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
+  symbols_fetched?: number; symbols_skipped?: string[]
 }
 
 interface HistoryRun {
@@ -166,6 +167,12 @@ export default function PortfolioPanel() {
 
           {result && (
             <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+              {result.symbols_skipped && result.symbols_skipped.length > 0 && (
+                <div className="mb-3 px-3 py-2 rounded text-xs" style={{ backgroundColor: '#3b2a1a', border: '1px solid #6b4c2a', color: '#f59e0b' }}>
+                  {result.symbols_skipped.length} 只标的无数据被跳过: {result.symbols_skipped.join(', ')}
+                  （可能未上市或 Tushare 无覆盖）
+                </div>
+              )}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 {Object.entries(result.metrics).filter(([k]) => k in metricLabels).map(([k, v]) => (
                   <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>

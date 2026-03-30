@@ -19,7 +19,7 @@ from ez.portfolio.portfolio_strategy import PortfolioStrategy
 def _weekly_macd_signal(close: pd.Series) -> bool:
     """Weekly MACD filter: True = bullish (MACD bar increasing)."""
     weekly = close.resample("W").last().dropna()
-    if len(weekly) < 27:
+    if len(weekly) < 15:  # relaxed: 15 weeks minimum (was 27), shorter history still useful
         return False
     ema12 = weekly.ewm(span=12, adjust=False).mean()
     ema26 = weekly.ewm(span=26, adjust=False).mean()
@@ -54,7 +54,7 @@ class EtfMacdRotation(PortfolioStrategy):
 
     @property
     def lookback_days(self) -> int:
-        return 600
+        return 300  # ~27 weeks MACD + 20 day rank + buffer
 
     @classmethod
     def get_description(cls) -> str:
@@ -90,12 +90,13 @@ class EtfMacdRotation(PortfolioStrategy):
                 ratio = ratio / close_ma.iloc[-2]
             returns[sym] = ratio
 
-            # Historical returns for exponential weighting
+            # Historical returns for exponential weighting (adaptive: use available data)
             hr = []
-            for i in range(20):
+            max_periods = min(20, (len(close_ma) - 2) // (self.rank_period + 1))
+            for i in range(max_periods):
                 idx_end = -2 - i
-                idx_start = -21 - i
-                if abs(idx_start) > len(close_ma) or abs(idx_end) > len(close_ma):
+                idx_start = -2 - i - self.rank_period
+                if abs(idx_start) > len(close_ma):
                     break
                 v = close_ma.iloc[idx_start]
                 if v != 0:
@@ -164,7 +165,7 @@ class EtfSectorSwitch(PortfolioStrategy):
 
     @property
     def lookback_days(self) -> int:
-        return 600
+        return 300
 
     @classmethod
     def get_description(cls) -> str:
@@ -308,7 +309,7 @@ class EtfStockEnhance(PortfolioStrategy):
 
     @property
     def lookback_days(self) -> int:
-        return 600
+        return 300
 
     @classmethod
     def get_description(cls) -> str:

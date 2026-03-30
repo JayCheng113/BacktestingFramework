@@ -220,6 +220,10 @@ def run_portfolio(req: PortfolioRunRequest):
         "rebalance_count": len(result.rebalance_dates),
     })
 
+    # Report which symbols were skipped (no data available)
+    fetched = set(universe_data.keys())
+    skipped = [s for s in req.symbols if s not in fetched]
+
     return {
         "run_id": run_id,
         "metrics": metrics,
@@ -228,6 +232,8 @@ def run_portfolio(req: PortfolioRunRequest):
         "dates": [d.isoformat() for d in result.dates],
         "trades": result.trades[:100],
         "rebalance_dates": [d.isoformat() for d in result.rebalance_dates],
+        "symbols_fetched": len(fetched),
+        "symbols_skipped": skipped,
     }
 
 
