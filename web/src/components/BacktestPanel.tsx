@@ -214,7 +214,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         })}
       </div>
       <div className="mb-3">
-        <BacktestSettings value={costSettings} onChange={setCostSettings} showBenchmark={false} showInitialCash={false} />
+        <BacktestSettings value={costSettings} onChange={setCostSettings}
+          showBenchmark={false} showInitialCash={false}
+          showSellCommission={false} showStampTax={false} showLotSize={false} showLimitPct={false} />
       </div>
       <div className="flex flex-wrap gap-3 items-end mb-4">
         {mode === 'walk-forward' && (

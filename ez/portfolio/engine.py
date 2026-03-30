@@ -130,21 +130,30 @@ def run_portfolio_backtest(
     for day in trading_days:
         tradeable = set(universe.tradeable_at(day))
 
-        # Get current prices (prefer adj_close for split-adjusted equity tracking)
+        # Get current prices + track which symbols have a bar TODAY (tradeable check)
         prices: dict[str, float] = {}
+        has_bar_today: set[str] = set()
         for sym in set(list(holdings.keys()) + list(tradeable)):
             if sym in universe_data:
                 df = universe_data[sym]
                 if isinstance(df.index, pd.DatetimeIndex):
                     mask = df.index.date <= day
+                    today_mask = df.index.date == day
                 else:
                     mask = df.index <= day
+                    today_mask = df.index == day
                 valid = df.loc[mask]
                 if not valid.empty:
                     price_col = "adj_close" if "adj_close" in valid.columns else "close"
                     p = valid[price_col].iloc[-1]
+                    # C2 fix: fallback to close if adj_close is NaN (High #1)
+                    if isinstance(p, float) and np.isnan(p) and price_col == "adj_close" and "close" in valid.columns:
+                        p = valid["close"].iloc[-1]
                     if not (np.isnan(p) if isinstance(p, float) else False):
                         prices[sym] = float(p)
+                # Track if symbol has actual data for today
+                if df.loc[today_mask].shape[0] > 0:
+                    has_bar_today.add(sym)
 
         # Compute equity BEFORE rebalance
         position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)
@@ -184,10 +193,11 @@ def run_portfolio_backtest(
                 raw_shares = target_amount / prices[sym]
                 target_shares[sym] = _lot_round(raw_shares, lot_size)
 
-            # Execute trades
-            # Deterministic order: sells first (free cash), then buys (alphabetical)
+            # Execute trades: TWO passes — sells first (free cash), then buys
             all_syms = sorted(set(list(holdings.keys()) + list(target_shares.keys())))
-            for sym in all_syms:
+            sell_syms = [s for s in all_syms if target_shares.get(s, 0) < holdings.get(s, 0)]
+            buy_syms = [s for s in all_syms if target_shares.get(s, 0) > holdings.get(s, 0)]
+            for sym in sell_syms + buy_syms:  # sells first, then buys
                 cur = holdings.get(sym, 0)
                 tgt = target_shares.get(sym, 0)
                 delta = tgt - cur
@@ -195,6 +205,9 @@ def run_portfolio_backtest(
                 if delta == 0:
                     continue
                 if sym not in prices:
+                    continue
+                # C2: require today's bar to trade (no stale-price trading)
+                if sym not in has_bar_today:
                     continue
 
                 # A-share 涨跌停检查
@@ -286,21 +299,26 @@ def run_portfolio_backtest(
         prev_prices = dict(prices)
 
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
-    if benchmark_symbol and benchmark_symbol in universe_data:
+    # C3 fix: first_price must be at backtest start, not data start (which includes lookback)
+    if benchmark_symbol and benchmark_symbol in universe_data and result.dates:
         bench_df = universe_data[benchmark_symbol]
         price_col = "adj_close" if "adj_close" in bench_df.columns else "close"
+        # Find benchmark price at backtest start date
+        first_day = result.dates[0]
+        if isinstance(bench_df.index, pd.DatetimeIndex):
+            start_mask = bench_df.index.date <= first_day
+        else:
+            start_mask = bench_df.index <= first_day
+        start_data = bench_df.loc[start_mask]
+        first_price = float(start_data[price_col].iloc[-1]) if not start_data.empty else 0
         for day in result.dates:
             if isinstance(bench_df.index, pd.DatetimeIndex):
                 mask = bench_df.index.date <= day
             else:
                 mask = bench_df.index <= day
             valid = bench_df.loc[mask]
-            if not valid.empty:
-                first_price = bench_df.loc[bench_df.index >= bench_df.index[0], price_col].iloc[0]
-                if first_price > 0:
-                    result.benchmark_curve.append(float(initial_cash * valid[price_col].iloc[-1] / first_price))
-                else:
-                    result.benchmark_curve.append(initial_cash)
+            if not valid.empty and first_price > 0:
+                result.benchmark_curve.append(float(initial_cash * valid[price_col].iloc[-1] / first_price))
             else:
                 result.benchmark_curve.append(initial_cash)
     else:

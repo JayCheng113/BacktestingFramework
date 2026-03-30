@@ -148,6 +148,106 @@ class TestLimitPrice:
         assert len(a_buys) >= len(b_buys)
 
 
+class TestC1SellBeforeBuy:
+    """C1: sells must execute before buys to free cash."""
+
+    def test_sell_before_buy_order(self):
+        """Track execution order: all sells should come before buys."""
+        trade_sides = []
+
+        class SwapStrategy(PortfolioStrategy):
+            """Alternates between A and B each rebalance."""
+            def generate_weights(self, universe_data, dt, prev_w, prev_r):
+                self.state["toggle"] = not self.state.get("toggle", False)
+                if self.state["toggle"]:
+                    return {"A": 1.0}
+                return {"B": 1.0}
+
+        data, dates = _make_data(["A", "B"], n=100)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        result = run_portfolio_backtest(
+            strategy=SwapStrategy(), universe=Universe(["A", "B"]),
+            universe_data=data, calendar=cal,
+            start=dates[25].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=100000, lot_size=1,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        # On each rebalance after the first, there should be a sell then a buy
+        for i in range(0, len(result.trades) - 1):
+            if result.trades[i]["date"] == result.trades[i + 1]["date"]:
+                # Same day: sell should come before buy
+                if result.trades[i]["side"] == "buy" and result.trades[i + 1]["side"] == "sell":
+                    pytest.fail(f"Buy before sell on {result.trades[i]['date']}")
+
+
+class TestC2SuspensionNoTrade:
+    """C2: cannot trade a stock that has no bar today."""
+
+    def test_missing_bar_blocks_trade(self):
+        dates = pd.date_range("2024-01-02", periods=30, freq="B")
+        data = {}
+        # A: normal, B: missing data on day 15
+        for sym in ["A", "B"]:
+            p = np.full(30, 10.0)
+            data[sym] = pd.DataFrame({
+                "open": p, "high": p, "low": p, "close": p,
+                "adj_close": p, "volume": np.full(30, 100000),
+            }, index=dates)
+        # Remove B's data for day 15
+        data["B"] = data["B"].drop(dates[15])
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        class BuyBoth(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 0.5, "B": 0.5}
+
+        result = run_portfolio_backtest(
+            strategy=BuyBoth(), universe=Universe(["A", "B"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=100000, lot_size=1,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        # B should not be traded on the day it's missing
+        b_trades_on_missing = [t for t in result.trades
+                               if t["symbol"] == "B" and t["date"] == dates[15].date().isoformat()]
+        assert len(b_trades_on_missing) == 0
+
+
+class TestC3BenchmarkStartAlignment:
+    """C3: benchmark curve must start at backtest start, not data start."""
+
+    def test_benchmark_starts_at_initial_cash(self):
+        data, dates = _make_data(["A", "BENCH"], n=200)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=1),
+            universe=Universe(["A"]), universe_data=data, calendar=cal,
+            start=dates[50].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=100000,
+            benchmark_symbol="BENCH",
+        )
+        # Benchmark first value should be close to initial_cash
+        assert abs(result.benchmark_curve[0] - 100000) < 100
+
+
+class TestC4NegativeCostValidation:
+    """C4: negative cost params must be rejected by API."""
+
+    def test_negative_slippage_422(self):
+        from fastapi.testclient import TestClient
+        from ez.api.app import app
+        client = TestClient(app)
+        resp = client.post("/api/portfolio/run", json={
+            "strategy_name": "TopNRotation", "symbols": ["A"],
+            "slippage_rate": -0.05,
+        })
+        assert resp.status_code == 422
+
+
 class TestC1LoaderRegistration:
     """C1: portfolio_strategies/ files must be loadable."""
 

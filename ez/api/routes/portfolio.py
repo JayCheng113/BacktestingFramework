@@ -39,12 +39,12 @@ class PortfolioRunRequest(BaseModel):
     freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly|quarterly)$")
     strategy_params: dict = {}
     initial_cash: float = Field(default=1_000_000, ge=10_000)
-    buy_commission_rate: float = 0.0003
-    sell_commission_rate: float = 0.0003
+    buy_commission_rate: float = Field(default=0.0003, ge=0)
+    sell_commission_rate: float = Field(default=0.0003, ge=0)
     commission_rate: float | None = None  # backward compat: if set, overrides both buy/sell
-    min_commission: float = 5.0
-    stamp_tax_rate: float = 0.0005
-    slippage_rate: float = 0.0
+    min_commission: float = Field(default=5.0, ge=0)
+    stamp_tax_rate: float = Field(default=0.0005, ge=0)
+    slippage_rate: float = Field(default=0.0, ge=0)
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)  # 涨跌停比例 (10%=0.10, 科创板20%=0.20)
     benchmark_symbol: str = ""  # e.g. "510300.SH"
@@ -147,7 +147,10 @@ def run_portfolio(req: PortfolioRunRequest):
     end = req.end_date or date.today()
     start = req.start_date or (end - timedelta(days=365 * 3))
 
-    strategy = _create_strategy(req.strategy_name, req.strategy_params)
+    try:
+        strategy = _create_strategy(req.strategy_name, req.strategy_params)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     universe = Universe(req.symbols)
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy.lookback_days)
 
@@ -195,7 +198,16 @@ def run_portfolio(req: PortfolioRunRequest):
     store = _get_store()
     run_id = store.save_run({
         "strategy_name": req.strategy_name,
-        "strategy_params": req.strategy_params,
+        "strategy_params": {
+            **req.strategy_params,
+            "_cost": {
+                "buy_commission_rate": buy_rate, "sell_commission_rate": sell_rate,
+                "min_commission": req.min_commission, "stamp_tax_rate": req.stamp_tax_rate,
+                "slippage_rate": req.slippage_rate, "lot_size": req.lot_size,
+                "limit_pct": req.limit_pct, "benchmark": req.benchmark_symbol,
+                "market": req.market,
+            },
+        },
         "symbols": req.symbols,
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
