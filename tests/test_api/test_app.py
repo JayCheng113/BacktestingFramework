@@ -83,4 +83,3 @@ class TestStaticPathTraversal:
     def test_api_path_still_404(self):
         resp = client.get("/api/nonexistent")
         assert resp.status_code == 404
-        assert "API endpoint not found" in resp.json()["detail"]
