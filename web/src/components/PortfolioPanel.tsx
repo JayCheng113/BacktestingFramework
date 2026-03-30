@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
+import DateRangePicker from './DateRangePicker'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -334,30 +335,8 @@ export default function PortfolioPanel() {
             {currentDesc && (
               <div className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>{currentDesc}</div>
             )}
-            <div className="flex flex-wrap gap-3 items-end mb-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始日期</label>
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束日期</label>
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
-              </div>
-              <div className="flex gap-1 items-end">
-                {[
-                  { label: '近1年', years: 1 }, { label: '近3年', years: 3 },
-                  { label: '近5年', years: 5 }, { label: '近10年', years: 10 },
-                ].map(p => (
-                  <button key={p.label} onClick={() => {
-                    const end = new Date(); const start = new Date()
-                    start.setFullYear(end.getFullYear() - p.years)
-                    setStartDate(start.toISOString().slice(0, 10))
-                    setEndDate(end.toISOString().slice(0, 10))
-                  }} className="text-xs px-2 py-1.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
+            <div className="mb-3">
+              <DateRangePicker startDate={startDate} endDate={endDate} onStartChange={setStartDate} onEndChange={setEndDate} />
             </div>
             <div className="mb-3">
               <BacktestSettings value={settings} onChange={setSettings} />
@@ -471,15 +450,8 @@ export default function PortfolioPanel() {
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-3 items-end mb-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始日期</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束日期</label>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
-            </div>
+          <div className="mb-3">
+            <DateRangePicker startDate={startDate} endDate={endDate} onStartChange={setStartDate} onEndChange={setEndDate} />
           </div>
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-1">

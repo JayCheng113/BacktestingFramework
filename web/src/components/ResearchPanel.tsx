@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import DateRangePicker from './DateRangePicker'
 
 interface ResearchTask {
   task_id: string; goal: string; config: string; status: string
@@ -43,12 +44,6 @@ function formatEvent(e: SSEEvent): { icon: string; text: string; color: string }
   }
 }
 
-// Date quick-select buttons
-const DATE_PRESETS = [
-  { label: '近1年', years: 1 }, { label: '近3年', years: 3 },
-  { label: '近5年', years: 5 }, { label: '近10年', years: 10 },
-]
-
 export default function ResearchPanel() {
   const [tasks, setTasks] = useState<ResearchTask[]>([])
   const [selectedTask, setSelectedTask] = useState<ResearchTask | null>(null)
@@ -81,13 +76,6 @@ export default function ResearchPanel() {
   }, [])
 
   useEffect(() => { loadTasks() }, [loadTasks])
-
-  const setDatePreset = (years: number) => {
-    const end = new Date()
-    const start = new Date(); start.setFullYear(start.getFullYear() - years)
-    setStartDate(start.toISOString().split('T')[0])
-    setEndDate(end.toISOString().split('T')[0])
-  }
 
   const startResearch = async () => {
     if (!goal.trim()) return
@@ -244,24 +232,7 @@ export default function ResearchPanel() {
             </div>
             <div>
               <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>日期范围</label>
-              <div className="flex items-center gap-1">
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                  className="px-2 py-1.5 rounded text-sm"
-                  style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>至</span>
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                  className="px-2 py-1.5 rounded text-sm"
-                  style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-              </div>
-            </div>
-            <div className="flex gap-1">
-              {DATE_PRESETS.map(p => (
-                <button key={p.label} onClick={() => setDatePreset(p.years)}
-                  className="text-xs px-2 py-1.5 rounded"
-                  style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-                  {p.label}
-                </button>
-              ))}
+              <DateRangePicker startDate={startDate} endDate={endDate} onStartChange={setStartDate} onEndChange={setEndDate} />
             </div>
             <button onClick={() => setShowAdvanced(!showAdvanced)}
               className="px-3 py-1.5 rounded text-sm"
