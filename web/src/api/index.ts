@@ -61,5 +61,10 @@ export const listPortfolioRuns = (limit = 50, offset = 0) =>
   api.get('/portfolio/runs', { params: { limit, offset } })
 export const getPortfolioRun = (runId: string) => api.get(`/portfolio/runs/${runId}`)
 export const deletePortfolioRun = (runId: string) => api.delete(`/portfolio/runs/${runId}`)
+export const portfolioWalkForward = (data: any) => api.post('/portfolio/walk-forward', data)
+
+// Factor evaluation (V2.10)
+export const evaluateFactors = (data: any) => api.post('/portfolio/evaluate-factors', data)
+export const factorCorrelation = (data: any) => api.post('/portfolio/factor-correlation', data)
 
 export default api

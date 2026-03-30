@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun } from '../api'
+import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
@@ -42,7 +42,12 @@ export default function PortfolioPanel() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
-  const [tab, setTab] = useState<'run' | 'history'>('run')
+  const [tab, setTab] = useState<'run' | 'factor-research' | 'history'>('run')
+  // Factor research state
+  const [evalFactors, setEvalFactors] = useState<string[]>(['momentum_rank_20'])
+  const [evalResult, setEvalResult] = useState<any>(null)
+  const [corrResult, setCorrResult] = useState<any>(null)
+  const [evalLoading, setEvalLoading] = useState(false)
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
@@ -103,6 +108,24 @@ export default function PortfolioPanel() {
       setCompareData(data)
     } catch (e: any) { alert('加载失败: ' + (e?.message || '')) }
     finally { setComparing(false) }
+  }
+
+  const handleEvaluateFactors = async () => {
+    const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+    if (symbolList.length < 5) { alert('因子评估需要至少 5 个标的'); return }
+    if (evalFactors.length === 0) { alert('请选择至少 1 个因子'); return }
+    setEvalLoading(true); setEvalResult(null); setCorrResult(null)
+    try {
+      const [evalRes, corrRes] = await Promise.all([
+        evaluateFactors({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors, forward_days: 5, eval_freq: 'weekly' }),
+        evalFactors.length >= 2
+          ? factorCorrelation({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors })
+          : Promise.resolve(null),
+      ])
+      setEvalResult(evalRes.data)
+      if (corrRes) setCorrResult(corrRes.data)
+    } catch (e: any) { alert(e?.response?.data?.detail || e?.message || '评估失败') }
+    finally { setEvalLoading(false) }
   }
 
   const downloadCSV = (filename: string, content: string) => {
@@ -279,6 +302,7 @@ export default function PortfolioPanel() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex gap-2 mb-4">
         <button onClick={() => setTab('run')} className={`px-4 py-1.5 rounded text-sm ${tab === 'run' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'run' ? inputStyle : {}}>组合回测</button>
+        <button onClick={() => setTab('factor-research')} className={`px-4 py-1.5 rounded text-sm ${tab === 'factor-research' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'factor-research' ? inputStyle : {}}>因子研究</button>
         <button onClick={() => setTab('history')} className={`px-4 py-1.5 rounded text-sm ${tab === 'history' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'history' ? inputStyle : {}}>历史记录 ({history.length})</button>
       </div>
 
@@ -411,6 +435,151 @@ export default function PortfolioPanel() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'factor-research' && (
+        <div className="p-4 rounded mb-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+          <h3 className="text-sm font-medium mb-3">截面因子评估</h3>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
+            选择因子和标的池，计算截面 IC / Rank IC / ICIR / IC 衰减 / 分位数收益。
+          </p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子 (多选):</label>
+            {factors.map(f => (
+              <button key={f} onClick={() => setEvalFactors(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])}
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ backgroundColor: evalFactors.includes(f) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                         color: evalFactors.includes(f) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                {f}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-3 items-end mb-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>开始日期</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束日期</label>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
+            </div>
+          </div>
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-1">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>标的池</label>
+              <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH,513880.SH,513260.SH,159985.SZ')}
+                className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>宽基ETF</button>
+            </div>
+            <textarea value={symbols} onChange={e => setSymbols(e.target.value)} rows={2} className="w-full px-3 py-1.5 rounded text-sm font-mono" style={inputStyle} />
+          </div>
+          <button onClick={handleEvaluateFactors} disabled={evalLoading}
+            className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: evalLoading ? '#30363d' : '#0891b2' }}>
+            {evalLoading ? '评估中...' : '评估因子'}
+          </button>
+
+          {/* Evaluation results */}
+          {evalResult && evalResult.results && (
+            <div className="mt-4">
+              {/* IC summary table */}
+              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子 IC 汇总</h4>
+              <div className="overflow-x-auto mb-4" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+                <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
+                    {['因子', 'IC均值', 'RankIC均值', 'ICIR', 'RankICIR', '评估日数', '平均覆盖'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>{evalResult.results.map((r: any) => (
+                    <tr key={r.factor_name} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td className="px-3 py-1.5 font-mono">{r.factor_name}</td>
+                      <td className="px-3 py-1.5" style={{ color: (r.mean_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_ic)}</td>
+                      <td className="px-3 py-1.5" style={{ color: (r.mean_rank_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_rank_ic)}</td>
+                      <td className="px-3 py-1.5">{fmt(r.icir)}</td>
+                      <td className="px-3 py-1.5">{fmt(r.rank_icir)}</td>
+                      <td className="px-3 py-1.5">{r.n_eval_dates}</td>
+                      <td className="px-3 py-1.5">{r.avg_stocks_per_date?.toFixed(0) ?? '-'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+
+              {/* IC time series chart */}
+              {evalResult.results[0]?.ic_series?.length > 0 && (
+                <ReactECharts option={{
+                  backgroundColor: '#0d1117',
+                  title: { text: 'Rank IC 时序', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                  tooltip: { trigger: 'axis' as const },
+                  legend: { data: evalResult.results.map((r: any) => r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+                  grid: { left: 60, right: 20, top: 50, bottom: 30 },
+                  xAxis: { type: 'category' as const, data: evalResult.results[0].eval_dates.map((d: string) => d.slice(0, 10)), axisLabel: { color: '#8b949e', rotate: 30, fontSize: 9 } },
+                  yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+                  color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
+                  series: evalResult.results.map((r: any) => ({
+                    name: r.factor_name, type: 'line' as const,
+                    data: r.rank_ic_series, showSymbol: false,
+                  })),
+                }} style={{ height: 250 }} />
+              )}
+
+              {/* IC decay + Quintile returns side by side */}
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                {/* IC Decay */}
+                {evalResult.results[0]?.ic_decay && (
+                  <ReactECharts option={{
+                    backgroundColor: '#0d1117',
+                    title: { text: 'IC 衰减', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                    tooltip: { trigger: 'axis' as const },
+                    legend: { data: evalResult.results.map((r: any) => r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+                    grid: { left: 60, right: 20, top: 50, bottom: 30 },
+                    xAxis: { type: 'category' as const, data: ['1天', '5天', '10天', '20天'], axisLabel: { color: '#8b949e' } },
+                    yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+                    color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
+                    series: evalResult.results.map((r: any) => ({
+                      name: r.factor_name, type: 'line' as const,
+                      data: [r.ic_decay['1'], r.ic_decay['5'], r.ic_decay['10'], r.ic_decay['20']],
+                    })),
+                  }} style={{ height: 220 }} />
+                )}
+                {/* Quintile returns */}
+                {evalResult.results[0]?.quintile_returns && (
+                  <ReactECharts option={{
+                    backgroundColor: '#0d1117',
+                    title: { text: '分位数收益 (前向5天)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                    tooltip: { trigger: 'axis' as const },
+                    grid: { left: 60, right: 20, top: 50, bottom: 30 },
+                    xAxis: { type: 'category' as const, data: ['Q1(低)', 'Q2', 'Q3', 'Q4', 'Q5(高)'], axisLabel: { color: '#8b949e' } },
+                    yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e', formatter: (v: number) => (v * 100).toFixed(2) + '%' } },
+                    color: ['#2563eb', '#ef4444', '#22c55e'],
+                    series: evalResult.results.map((r: any) => ({
+                      name: r.factor_name, type: 'bar' as const,
+                      data: [1, 2, 3, 4, 5].map(q => r.quintile_returns[String(q)] ?? 0),
+                    })),
+                  }} style={{ height: 220 }} />
+                )}
+              </div>
+
+              {/* Correlation heatmap */}
+              {corrResult && corrResult.factor_names?.length >= 2 && (
+                <div className="mt-3">
+                  <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子相关性矩阵</h4>
+                  <ReactECharts option={{
+                    backgroundColor: '#0d1117',
+                    tooltip: { formatter: (p: any) => `${corrResult.factor_names[p.data[1]]} × ${corrResult.factor_names[p.data[0]]}: ${p.data[2].toFixed(3)}` },
+                    grid: { left: 120, right: 40, top: 10, bottom: 40 },
+                    xAxis: { type: 'category' as const, data: corrResult.factor_names, axisLabel: { color: '#8b949e', fontSize: 9, rotate: 30 } },
+                    yAxis: { type: 'category' as const, data: corrResult.factor_names, axisLabel: { color: '#8b949e', fontSize: 9 } },
+                    visualMap: { min: -1, max: 1, calculable: true, orient: 'vertical' as const, right: 0, top: 'center', inRange: { color: ['#2563eb', '#0d1117', '#ef4444'] }, textStyle: { color: '#8b949e' } },
+                    series: [{
+                      type: 'heatmap', data: corrResult.correlation_matrix.flatMap((row: number[], i: number) =>
+                        row.map((v: number, j: number) => [j, i, Math.round(v * 1000) / 1000])),
+                      label: { show: true, color: '#e6edf3', fontSize: 10, formatter: (p: any) => p.data[2].toFixed(2) },
+                    }],
+                  }} style={{ height: Math.max(200, corrResult.factor_names.length * 40 + 60) }} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {tab === 'history' && (
