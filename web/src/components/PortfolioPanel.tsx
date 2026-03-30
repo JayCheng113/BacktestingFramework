@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns } from '../api'
+import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
@@ -70,6 +70,14 @@ export default function PortfolioPanel() {
 
   const loadHistory = () => {
     listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch(() => {})
+  }
+
+  const handleDeleteRun = async (runId: string) => {
+    if (!confirm('确认删除此回测记录?')) return
+    try {
+      await deletePortfolioRun(runId)
+      loadHistory()
+    } catch {}
   }
 
   const updateParam = (key: string, value: any) => {
@@ -316,7 +324,7 @@ export default function PortfolioPanel() {
             <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
               <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                 <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  {['策略', '区间', '频率', '夏普', '总收益', '最大回撤', '交易数', '时间'].map(h => (
+                  {['策略', '区间', '频率', '夏普', '总收益', '最大回撤', '交易数', '时间', ''].map(h => (
                     <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr></thead>
@@ -330,6 +338,10 @@ export default function PortfolioPanel() {
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{fmt(r.metrics?.max_drawdown, true)}</td>
                     <td className="px-3 py-1.5">{r.trade_count}</td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{r.created_at?.slice(0, 16)}</td>
+                    <td className="px-3 py-1.5">
+                      <button onClick={() => handleDeleteRun(r.run_id)} className="text-xs px-1.5 py-0.5 rounded hover:opacity-80"
+                        style={{ color: '#ef4444', border: '1px solid #7f1d1d' }}>删除</button>
+                    </td>
                   </tr>
                 ))}</tbody>
               </table>
