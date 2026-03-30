@@ -7,6 +7,7 @@ const sections = [
   { id: 'signals', label: '信号与引擎' },
   { id: 'market-rules', label: 'A股规则' },
   { id: 'experiment', label: '实验流水线' },
+  { id: 'research', label: '研究助手' },
   { id: 'data', label: '数据源' },
   { id: 'api', label: 'API 参考' },
   { id: 'ai', label: 'AI 助手' },
@@ -55,27 +56,35 @@ export default function DocsPage() {
           <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>快速开始</h1>
           <p style={ps}>本文档涵盖 ez-trading 平台的所有功能。按照以下步骤，你可以在 5 分钟内创建并运行第一个交易策略。</p>
 
-          <div style={h2s}>完整工作流程</div>
-          <pre style={code}>{`1. 创建策略  ──→  2. 保存并测试  ──→  3. 运行回测  ──→  4. 查看结果
-      │                   │                   │                │
-  代码编辑器         Contract Test        看板 或 实验面板    权益曲线/指标
-  AI 助手            自动校验接口          单次 或 批量       Gate 评分`}</pre>
+          <div style={h2s}>平台功能一览</div>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>Tab</th><th style={ths}>功能</th><th style={ths}>用途</th></tr></thead>
+            <tbody>
+              <tr><td style={{...tds, fontWeight: 600}}>看板</td><td style={tds}>K 线图 + 单次回测 + 因子 IC</td><td style={tds}>快速验证想法，查看行情</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>实验</td><td style={tds}>完整实验 + 参数搜索 + Gate 评分</td><td style={tds}>严格评估策略，批量搜参</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>代码编辑器</td><td style={tds}>Monaco 编辑器 + AI 对话 + 保存测试</td><td style={tds}>编写/修改策略代码</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>研究助手</td><td style={tds}>自主研究 Agent（目标驱动）</td><td style={tds}>全自动策略发现与验证</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>开发文档</td><td style={tds}>本页面 — 11 章参考文档</td><td style={tds}>查阅 API、因子、规则</td></tr>
+            </tbody>
+          </table>
+
+          <div style={h2s}>两条研究路径</div>
+          <pre style={code}>{`路径 A：手动研究（你主导）
+  代码编辑器 写策略 → 看板 快速回测 → 实验 完整评估 + 参数搜索
+
+路径 B：自动研究（Agent 主导）
+  研究助手 输入研究目标 → Agent 自动生成策略 + 回测 + 迭代优化 → 查看报告 → 推广策略`}</pre>
+          <p style={ps}>两条路径可以混合使用：手动写完策略后交给实验跑参数搜索，或者研究助手生成的策略推广后在看板上手动微调。</p>
 
           <div style={h2s}>第一步：创建策略</div>
-          <p style={ps}>有 3 种方式创建策略：</p>
+          <p style={ps}>进入 <b>代码编辑器</b> Tab，点击左上角 <b>"+ 新建策略"</b> 按钮，输入类名（如 <code>RSIReversal</code>），系统会生成包含所有必要方法的策略骨架。你只需修改 <code>generate_signals()</code> 的逻辑。</p>
 
-          <div style={h3s}>方式 A：模板生成（推荐新手）</div>
-          <p style={ps}>进入 <b>代码编辑器</b> Tab，选择 "策略" → 输入类名（如 <code>RSIReversal</code>） → 点击 "生成模板"。系统会生成一个包含所有必要方法的策略骨架，你只需修改 <code>generate_signals()</code> 的逻辑。</p>
-
-          <div style={h3s}>方式 B：手动编写</div>
-          <p style={ps}>在代码编辑器中直接编写完整策略代码。需要继承 <code>Strategy</code> 基类，并实现 3 个方法。详见 "策略开发" 章节。</p>
-
-          <div style={h3s}>方式 C：AI 助手</div>
-          <p style={ps}>在代码编辑器中点击 "AI助手" 按钮，用自然语言描述策略，AI 会自动生成完整代码到编辑器中。</p>
+          <div style={h3s}>AI 辅助编写</div>
+          <p style={ps}>在代码编辑器右侧打开 <b>AI 对话面板</b>，用自然语言描述策略。AI 会自动生成完整代码到编辑器中。对话会自动绑定当前编辑器中的文件，AI 能看到你正在编辑的代码。</p>
           <pre style={code}>{`示例提示词:
 "帮我写一个 RSI 超卖反转策略，RSI < 30 买入，> 70 卖出"
 "写一个双均线交叉策略，5日线和20日线"
-"把 MA 周期改成参数化的，默认20，范围5到60"`}</pre>
+"在当前代码基础上加一个 ATR 止损"`}</pre>
 
           <div style={h2s}>第二步：保存并测试</div>
           <p style={ps}>点击 "保存并测试" 按钮，系统会执行以下操作：</p>
@@ -93,6 +102,9 @@ export default function DocsPage() {
 
           <p style={ps}><b>方式 B：完整实验（推荐）</b></p>
           <p style={ps}>切换到 <b>实验</b> Tab → 运行完整实验，包含：回测 + 前推验证 + 显著性检验 + Research Gate 自动评分。实验结果会自动保存，可以随时查看和对比。</p>
+
+          <p style={ps}><b>方式 C：参数搜索</b></p>
+          <p style={ps}>在实验 Tab 中切换到 <b>"参数搜索"</b> 子标签 → 设置参数范围和步长 → 选择 Grid 或 Random 模式 → 系统会批量搜索并按 Sharpe 排名，同时做 FDR 校正。</p>
 
           <div style={h2s}>常见问题排查</div>
           <div style={h3s}>策略保存失败怎么办？</div>
@@ -796,6 +808,104 @@ OOS = Out-of-Sample (样本外) — 真正衡量预测能力
         </>}
 
         {/* ================================================================ */}
+        {/*  6.5 研究助手                                                     */}
+        {/* ================================================================ */}
+        {active === 'research' && <>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>研究助手</h1>
+
+          <div style={h2s}>什么是研究助手</div>
+          <p style={ps}>研究助手是一个 <b>自主研究 Agent</b>：你给它一个研究目标（自然语言），它会自动生成策略代码、运行回测、分析结果、迭代优化，最终输出一份研究报告。整个过程无需人工干预。</p>
+          <pre style={code}>{`研究目标 (自然语言)
+    ↓
+Agent 循环:
+    生成/改进策略代码 → Contract Test → 回测评估 → 分析结果 → 决定下一步
+    ↓ (重复 N 次迭代)
+研究报告 (策略列表 + 指标 + 推荐)`}</pre>
+
+          <div style={h2s}>什么时候用研究助手 vs 手动</div>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>场景</th><th style={ths}>推荐方式</th><th style={ths}>原因</th></tr></thead>
+            <tbody>
+              <tr><td style={tds}>有明确策略想法，想快速验证</td><td style={tds}>手动（代码编辑器 + 看板）</td><td style={tds}>手动更直接，改一行跑一次</td></tr>
+              <tr><td style={tds}>想探索某个方向，不确定具体逻辑</td><td style={tds}>研究助手</td><td style={tds}>Agent 会自动尝试多种变体</td></tr>
+              <tr><td style={tds}>已有策略，想找最优参数</td><td style={tds}>参数搜索（实验 Tab）</td><td style={tds}>网格/随机搜索更高效</td></tr>
+              <tr><td style={tds}>想同时探索多个研究方向</td><td style={tds}>研究助手（多任务并行）</td><td style={tds}>每个任务独立运行，互不干扰</td></tr>
+            </tbody>
+          </table>
+
+          <div style={h2s}>如何启动研究</div>
+          <p style={ps}>切换到 <b>研究助手</b> Tab，填写以下表单：</p>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>字段</th><th style={ths}>说明</th><th style={ths}>示例</th></tr></thead>
+            <tbody>
+              <tr><td style={{...tds, fontWeight: 600}}>研究目标</td><td style={tds}>自然语言描述你想研究的方向</td><td style={tds}>"探索 RSI 相关的超卖反转策略"</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>股票代码</td><td style={tds}>回测用的标的</td><td style={tds}>000001.SZ</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>开始日期 / 结束日期</td><td style={tds}>回测日期范围</td><td style={tds}>2020-01-01 ~ 2024-12-31</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>预算设置</td><td style={tds}>控制 Agent 运行规模（见下方）</td><td style={tds}>最大迭代 10，最大策略 5</td></tr>
+            </tbody>
+          </table>
+          <p style={ps}>点击 <b>"开始研究"</b> 按钮后，任务进入后台运行。你可以在同一页面查看进度，也可以离开页面稍后再回来查看。</p>
+
+          <div style={h2s}>进度追踪</div>
+          <p style={ps}>研究启动后，进度面板会实时显示 Agent 的工作状态。后台通过 SSE (Server-Sent Events) 推送以下事件：</p>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>事件类型</th><th style={ths}>含义</th><th style={ths}>显示内容</th></tr></thead>
+            <tbody>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>thinking</td><td style={tds}>Agent 正在推理</td><td style={tds}>当前思考内容</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>strategy_created</td><td style={tds}>新策略已生成并通过测试</td><td style={tds}>策略名 + 代码摘要</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>backtest_result</td><td style={tds}>回测完成</td><td style={tds}>Sharpe / 收益 / 回撤</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>iteration_done</td><td style={tds}>一轮迭代完成</td><td style={tds}>迭代编号 + 本轮结果</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>completed</td><td style={tds}>研究任务结束</td><td style={tds}>最终报告摘要</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>error</td><td style={tds}>发生错误</td><td style={tds}>错误信息</td></tr>
+            </tbody>
+          </table>
+
+          <div style={h2s}>研究报告</div>
+          <p style={ps}>研究完成后，报告页面展示以下内容：</p>
+          <ol style={{ paddingLeft: '20px', margin: '6px 0', lineHeight: '1.8' }}>
+            <li><b>迭代历史</b> — 每轮迭代的策略名称、回测指标、Agent 的思考过程</li>
+            <li><b>策略列表</b> — 所有生成的策略，按 Sharpe 排序，标注 Gate 通过状态</li>
+            <li><b>推广按钮</b> — 对满意的策略点击 "推广"，将其从研究隔离区复制到正式 <code>strategies/</code> 目录，之后可在看板和实验中使用</li>
+          </ol>
+
+          <div style={h2s}>预算控制</div>
+          <p style={ps}>为防止 Agent 无限运行，研究助手提供 4 个预算参数：</p>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>说明</th></tr></thead>
+            <tbody>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>max_iterations</td><td style={tds}>10</td><td style={tds}>最大迭代轮数（每轮 = 生成/改进 + 回测 + 分析）</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>max_strategies</td><td style={tds}>5</td><td style={tds}>最多生成策略数量</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>max_backtest_runs</td><td style={tds}>20</td><td style={tds}>最多回测执行次数</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>timeout_minutes</td><td style={tds}>30</td><td style={tds}>总超时时间（分钟）</td></tr>
+            </tbody>
+          </table>
+          <div style={note}>任一预算耗尽即停止研究，已完成的结果仍然保留在报告中。</div>
+
+          <div style={h2s}>隔离机制</div>
+          <p style={ps}>研究助手生成的策略文件名以 <code>research_</code> 前缀命名（如 <code>research_rsi_reversal.py</code>），存储在 <code>strategies/</code> 目录但不会出现在看板和实验的策略下拉列表中。这样做是为了：</p>
+          <ol style={{ paddingLeft: '20px', margin: '6px 0', lineHeight: '1.8' }}>
+            <li>避免实验性策略污染正式策略列表</li>
+            <li>研究助手可以自由创建/修改而不影响其他 Tab</li>
+            <li>只有通过 "推广" 操作的策略才会进入正式列表</li>
+          </ol>
+          <div style={warn}>推广操作会重命名文件（去掉 <code>research_</code> 前缀），之后该策略在所有 Tab 可见。此操作不可撤销。</div>
+
+          <div style={h2s}>研究目标示例</div>
+          <pre style={code}>{`# 探索型（宽泛）
+"探索基于动量和均线的趋势跟踪策略"
+"研究 RSI 和 MACD 组合的交易信号"
+
+# 指向型（明确）
+"写一个 BOLL 突破策略，价格突破上轨买入、跌破中轨卖出"
+"用 VWAP 和 OBV 构建量价策略，RSI 做过滤"
+
+# 改进型（基于已有策略）
+"在 MACrossStrategy 基础上增加 ATR 止损和趋势过滤"
+"改进 RSI 策略，加入多时间框架确认"`}</pre>
+          <div style={note}>目标描述越具体，Agent 的搜索方向越聚焦，生成质量越高。建议至少提到想用的因子或策略类型。</div>
+        </>}
+
+        {/* ================================================================ */}
         {/*  7. 数据源                                                        */}
         {/* ================================================================ */}
         {active === 'data' && <>
@@ -1076,6 +1186,29 @@ FMP_API_KEY=your_key_here`}</pre>
             </div>
           ))}
 
+          {/* Research */}
+          <div style={h2s}>研究助手 API</div>
+          {[
+            { method: 'POST', path: '/api/research/start', desc: '启动研究任务', body: '{ goal, symbol, start_date, end_date, market?, max_iterations?, max_strategies?, max_backtest_runs?, timeout_minutes? }', resp: '{ task_id: string, status: "running" }' },
+            { method: 'GET', path: '/api/research/tasks', desc: '研究任务列表', body: '(无)', resp: '[{ task_id, goal, status, created_at, ... }]' },
+            { method: 'GET', path: '/api/research/tasks/{task_id}', desc: '任务详情 + 报告', body: '(无)', resp: '{ task_id, goal, status, report: { iterations, strategies, ... } }' },
+            { method: 'POST', path: '/api/research/tasks/{task_id}/cancel', desc: '取消运行中的任务', body: '(无)', resp: '{ status: "cancelled" }' },
+            { method: 'GET', path: '/api/research/tasks/{task_id}/stream', desc: '实时进度 (SSE)', body: '(无)', resp: 'SSE: event:thinking|strategy_created|backtest_result|iteration_done|completed|error' },
+            { method: 'POST', path: '/api/code/promote', desc: '推广研究策略到正式目录', body: '{ filename: string }', resp: '{ success: boolean, new_filename: string, path: string }' },
+          ].map(a => (
+            <div key={a.path + a.method} style={{ marginBottom: '10px', padding: '8px 12px', borderRadius: '6px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '1px 6px', borderRadius: '3px', backgroundColor: a.method === 'GET' ? '#166534' : a.method === 'DELETE' ? '#7f1d1d' : '#1e40af', color: '#fff' }}>{a.method}</span>
+                <code style={{ fontSize: '12px', color: 'var(--color-accent)' }}>{a.path}</code>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>— {a.desc}</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                <div><b>请求:</b> <code>{a.body}</code></div>
+                <div><b>响应:</b> <code>{a.resp}</code></div>
+              </div>
+            </div>
+          ))}
+
           <div style={h2s}>错误码</div>
           <table style={tbl}>
             <thead><tr><th style={ths}>HTTP 状态码</th><th style={ths}>含义</th><th style={ths}>常见原因</th></tr></thead>
@@ -1185,6 +1318,22 @@ llm:
             <li>然后对 AI 说 "在当前代码的基础上加一个 ATR 止损"</li>
             <li>AI 会基于编辑器中的代码进行修改</li>
           </ol>
+
+          <div style={h2s}>对话绑定文件</div>
+          <p style={ps}>AI 对话会自动绑定当前编辑器中打开的文件。当你切换文件时，对话上下文也随之切换。这确保 AI 始终了解你正在编辑的代码，不需要手动复制粘贴。</p>
+          <div style={note}>每次发送消息时，编辑器中的当前代码会作为 <code>editor_code</code> 字段自动附带到请求中，AI 能直接引用和修改其中的内容。</div>
+
+          <div style={h2s}>研究助手工具过滤</div>
+          <p style={ps}>研究助手使用的 Agent 与代码编辑器中的 AI 助手共享 LLM 后端，但工具权限不同。研究助手仅暴露 3 个工具，以确保其行为聚焦且安全：</p>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>工具名</th><th style={ths}>说明</th><th style={ths}>原因</th></tr></thead>
+            <tbody>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>create_strategy</td><td style={tds}>创建策略文件 + Contract Test</td><td style={tds}>研究的核心能力 — 生成代码</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>read_source</td><td style={tds}>读取已有策略/因子源码</td><td style={tds}>Agent 需要参考已有代码来改进</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>list_factors</td><td style={tds}>列出可用因子及参数</td><td style={tds}>Agent 需要知道有哪些因子可以用</td></tr>
+            </tbody>
+          </table>
+          <p style={ps}>回测由研究框架直接调用 API，不通过 LLM 工具，避免 Agent 绕过预算控制。</p>
         </>}
 
         {/* ================================================================ */}
@@ -1482,6 +1631,18 @@ class DynamicMomentumStrategy(Strategy):
             {
               q: '后端启动失败',
               a: '常见排查步骤：\n1. 检查端口占用 — lsof -i :8000\n2. 先停止旧进程 — ./scripts/stop.sh\n3. 检查 Python 版本 — 需要 3.12+\n4. 重装依赖 — pip install -e . --no-build-isolation\n5. 查看日志 — 终端输出的错误信息',
+            },
+            {
+              q: '研究助手没有反应 / 启动失败',
+              a: '研究助手依赖 LLM 后端：\n1. 确认 LLM 已配置 — 检查 http://localhost:8000/api/chat/status 返回 available: true\n2. 检查 API Key — DEEPSEEK_API_KEY 或 QWEN_API_KEY 是否在 .env 中配置\n3. 点击右上角设置图标检查 LLM 配置\n4. 重启后端 — ./scripts/stop.sh && ./scripts/start.sh\n5. 查看浏览器控制台是否有 SSE 连接错误',
+            },
+            {
+              q: '研究助手生成的策略在哪里',
+              a: '研究策略存储在 strategies/ 目录下，文件名以 research_ 前缀命名（如 research_rsi_reversal.py）。\n这些策略默认不出现在看板和实验的策略下拉列表中，只在研究助手的报告页面可见。\n如果想在文件系统中查看：ls strategies/research_*.py',
+            },
+            {
+              q: '怎么把研究策略用到看板 / 实验',
+              a: '在研究报告页面，找到满意的策略 → 点击 "推广" 按钮。\n推广操作会将策略文件从 research_xxx.py 重命名为 xxx.py，去掉 research_ 前缀。\n之后该策略会出现在看板和实验的策略下拉列表中。\n注意：推广操作不可撤销。如果想保留研究版本，建议先记录原始文件名。',
             },
           ].map((item, idx) => (
             <div key={idx} style={{ marginBottom: '20px' }}>
