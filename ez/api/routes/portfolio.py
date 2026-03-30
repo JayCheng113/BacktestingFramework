@@ -35,12 +35,15 @@ def _get_factor_map() -> dict:
     """Build factor map: builtins + dynamically registered CrossSectionalFactor subclasses."""
     from ez.portfolio.cross_factor import CrossSectionalFactor
     result = dict(_BUILTIN_FACTOR_MAP)
+    # Collect builtin class names to skip duplicates
+    builtin_classes = {type(f()).__name__ if callable(f) else "" for f in _BUILTIN_FACTOR_MAP.values()}
     for name, cls in CrossSectionalFactor.get_registry().items():
-        # Skip builtins already in map (avoid duplicates)
-        if any(name in k for k in result):
+        # Skip builtin classes (already mapped with parameterized keys)
+        if name in builtin_classes:
             continue
-        # Register user factors as zero-arg constructors
-        result[name] = cls
+        # User factors: register by class name (only if not already present)
+        if name not in result:
+            result[name] = cls
     return result
 
 
@@ -380,7 +383,10 @@ def _resolve_factors(names: list[str]):
         factory = _get_factor_map().get(name)
         if not factory:
             raise HTTPException(400, f"Unknown factor: {name}. Available: {list(_get_factor_map().keys())}")
-        resolved.append(factory())
+        try:
+            resolved.append(factory())
+        except TypeError as e:
+            raise HTTPException(400, f"Factor '{name}' requires constructor arguments: {e}") from e
     return resolved
 
 

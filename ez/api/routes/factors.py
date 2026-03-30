@@ -55,7 +55,10 @@ def evaluate_factor(req: FactorEvalRequest):
     if not factory:
         raise HTTPException(status_code=404, detail=f"Factor '{req.factor_name}' not found")
 
-    factor = factory(**req.factor_params) if req.factor_params else factory()
+    try:
+        factor = factory(**req.factor_params) if req.factor_params else factory()
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Factor '{req.factor_name}' constructor error: {e}")
 
     chain = get_chain()
     bars = chain.get_kline(req.symbol, req.market, "daily", req.start_date, req.end_date)

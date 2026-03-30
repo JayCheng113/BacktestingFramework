@@ -481,24 +481,43 @@ def save_and_validate_code(
     if kind == "strategy":
         return save_and_validate_strategy(filename, code, overwrite=overwrite)
     if kind == "factor":
-        # Save to factors/ directory with syntax check (no strategy contract test)
         safe_name = _safe_filename(filename)
         if not safe_name:
             return {"success": False, "errors": [f"Invalid filename: {filename}"]}
         errors = check_syntax(code)
         if errors:
             return {"success": False, "errors": errors}
+        # Validate code contains a Factor subclass
+        if "Factor" not in code:
+            return {"success": False, "errors": ["Code must contain a class inheriting from Factor"]}
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / safe_name
         if target.exists() and not overwrite:
             return {"success": False, "errors": [f"File already exists: {safe_name}. Use overwrite=true."]}
+        # Backup old file for rollback
+        backup = None
+        if target.exists():
+            backup = target.read_text(encoding="utf-8")
         target.write_text(code, encoding="utf-8")
-        # Hot-reload: import to trigger __init_subclass__ registration
+        # Hot-reload with validation
         try:
             _reload_factor_code(safe_name, target_dir)
+            # Verify at least one Factor subclass was registered
+            from ez.factor.base import Factor
+            stem = safe_name.replace(".py", "")
+            module_name = f"{target_dir.name}.{stem}"
+            registered = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+            if not registered:
+                raise ValueError("No Factor subclass found in code")
         except Exception as e:
-            return {"success": False, "errors": [f"Import error: {e}"]}
-        return {"success": True, "path": str(target), "test_output": "Factor saved and registered."}
+            # Rollback: restore old file or delete new one
+            if backup is not None:
+                target.write_text(backup, encoding="utf-8")
+                _reload_factor_code(safe_name, target_dir)  # re-register old version
+            else:
+                target.unlink(missing_ok=True)
+            return {"success": False, "errors": [f"Factor validation failed: {e}"]}
+        return {"success": True, "path": str(target), "test_output": f"Factor saved. Registered: {registered}"}
 
 
     safe_name = _safe_filename(filename)
@@ -652,7 +671,13 @@ def _reload_factor_code(filename: str, target_dir: Path) -> None:
         if module_name in sys.modules:
             del sys.modules[module_name]
 
+        # Clear pycache to prevent stale bytecode
+        pycache = target_dir / "__pycache__"
+        if pycache.exists():
+            for pyc in pycache.glob(f"{stem}*.pyc"):
+                pyc.unlink(missing_ok=True)
         importlib.invalidate_caches()
+
         py_file = target_dir / filename
         if not py_file.exists():
             return

@@ -228,7 +228,7 @@ export default function CodeEditor() {
       portfolio_strategy: 'MyPortfolioStrategy', cross_factor: 'MyCrossFactor',
     }
     const prefix = prefixMap[kind]
-    const allFiles = [...files, ...portfolioFiles, ...crossFactorFiles]
+    const allFiles = [...files, ...factorFiles, ...portfolioFiles, ...crossFactorFiles]
     const existing = allFiles.map(f => f.filename)
     let name = prefix
     let n = 1

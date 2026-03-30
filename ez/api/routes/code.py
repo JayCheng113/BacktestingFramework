@@ -108,19 +108,27 @@ def delete_file(filename: str, kind: str = Query(default="strategy")):
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     target.unlink()
-    # Clean up registry
+    # Clean up registry based on kind
     try:
         import sys
         stem = safe_name.replace(".py", "")
-        if kind in ("portfolio_strategy", "cross_factor"):
-            module_name = f"{target_dir.name}.{stem}"
-            if kind == "portfolio_strategy":
-                from ez.portfolio.portfolio_strategy import PortfolioStrategy
-                old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
-                for k in old_keys:
-                    del PortfolioStrategy._registry[k]
-        else:
-            module_name = f"strategies.{stem}"
+        module_name = f"{target_dir.name}.{stem}"
+        if kind == "portfolio_strategy":
+            from ez.portfolio.portfolio_strategy import PortfolioStrategy
+            old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                del PortfolioStrategy._registry[k]
+        elif kind == "cross_factor":
+            from ez.portfolio.cross_factor import CrossSectionalFactor
+            old_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                del CrossSectionalFactor._registry[k]
+        elif kind == "factor":
+            from ez.factor.base import Factor
+            old_keys = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                del Factor._registry[k]
+        elif kind == "strategy":
             from ez.strategy.base import Strategy
             old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
             for k in old_keys:
