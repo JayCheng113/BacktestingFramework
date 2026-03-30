@@ -83,6 +83,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **Next: V2.8.1** — Stability
 
 ## Known Limitations (V2.8.1 跟进)
+- 因子评估面板不支持自定义因子 (下拉框硬编码 _FACTOR_MAP，自定义因子只能在策略代码中引用)
 - _start_lock 私有名跨模块导入 (应封装为函数)
 - LLM 调用计数近似 (chat_sync 内部多轮不精确计入)
 - SSE 流无 heartbeat (长迭代时代理可能断开)
