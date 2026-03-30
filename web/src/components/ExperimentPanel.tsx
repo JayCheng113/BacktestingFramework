@@ -232,6 +232,7 @@ export default function ExperimentPanel() {
                 <th className="px-3 py-2 text-left">时间</th>
                 <th className="px-3 py-2 text-left">策略</th>
                 <th className="px-3 py-2 text-left">股票</th>
+                <th className="px-3 py-2 text-left">回测区间</th>
                 <th className="px-3 py-2 text-right">Sharpe</th>
                 <th className="px-3 py-2 text-right">收益</th>
                 <th className="px-3 py-2 text-right">回撤</th>
@@ -243,7 +244,7 @@ export default function ExperimentPanel() {
             </thead>
             <tbody>
               {runs.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
+                <tr><td colSpan={11} className="px-3 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
                   暂无实验记录
                 </td></tr>
               )}
@@ -253,6 +254,9 @@ export default function ExperimentPanel() {
                   <td className="px-3 py-2 text-xs">{r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                   <td className="px-3 py-2">{r.strategy_name}</td>
                   <td className="px-3 py-2">{r.symbol}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {(r as any).start_date?.slice(0, 10) || '?'} ~ {(r as any).end_date?.slice(0, 10) || '?'}
+                  </td>
                   <td className="px-3 py-2 text-right">{r.sharpe_ratio?.toFixed(2) ?? '-'}</td>
                   <td className="px-3 py-2 text-right" style={{ color: (r.total_return ?? 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
                     {r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}

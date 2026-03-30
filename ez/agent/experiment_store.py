@@ -257,7 +257,7 @@ class ExperimentStore:
 
     def list_runs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT r.*, s.strategy_name, s.symbol, s.market, s.strategy_params "
+            "SELECT r.*, s.strategy_name, s.symbol, s.market, s.strategy_params, s.start_date, s.end_date "
             "FROM experiment_runs r "
             "JOIN experiment_specs s ON r.spec_id = s.spec_id "
             "ORDER BY r.created_at DESC LIMIT ? OFFSET ?",
@@ -267,7 +267,7 @@ class ExperimentStore:
 
     def get_run(self, run_id: str) -> dict | None:
         rows = self._conn.execute(
-            "SELECT r.*, s.strategy_name, s.symbol, s.market, s.strategy_params "
+            "SELECT r.*, s.strategy_name, s.symbol, s.market, s.strategy_params, s.start_date, s.end_date "
             "FROM experiment_runs r "
             "JOIN experiment_specs s ON r.spec_id = s.spec_id "
             "WHERE r.run_id = ?",
