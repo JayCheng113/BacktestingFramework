@@ -187,6 +187,29 @@ export default function CodeEditor() {
     } catch (e: any) { setStatus(`Error: ${e.message}`) }
   }
 
+  const newFile = async (kind: 'strategy' | 'factor') => {
+    // Auto-generate a unique name based on existing files
+    const prefix = kind === 'strategy' ? 'MyStrategy' : 'MyFactor'
+    const existing = files.map(f => f.filename)
+    let name = prefix
+    let n = 1
+    while (existing.includes(name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py')) {
+      name = `${prefix}${++n}`
+    }
+    try {
+      const res = await api('/template', { method: 'POST', body: JSON.stringify({ kind, class_name: name }) })
+      if (res.ok) {
+        const data = await res.json()
+        setCode(data.code)
+        const fn = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py'
+        setFilename(fn)
+        setStatus(`新建${kind === 'strategy' ? '策略' : '因子'}: ${fn}`)
+        setErrors([])
+        setTestOutput('')
+      }
+    } catch {}
+  }
+
   const generateTemplate = async () => {
     try {
       const res = await api('/template', {
@@ -285,45 +308,68 @@ export default function CodeEditor() {
 
       {/* File sidebar */}
       <div className="flex flex-col w-56 border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-        <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>新建文件</div>
-          <div className="flex gap-1 mb-2">
-            <button onClick={() => setTemplateKind('strategy')}
-              className="text-xs px-2 py-1 rounded"
-              style={{ backgroundColor: templateKind === 'strategy' ? 'var(--color-accent)' : 'var(--bg-primary)', color: templateKind === 'strategy' ? '#fff' : 'var(--text-secondary)' }}>
-              策略
-            </button>
-            <button onClick={() => setTemplateKind('factor')}
-              className="text-xs px-2 py-1 rounded"
-              style={{ backgroundColor: templateKind === 'factor' ? 'var(--color-accent)' : 'var(--bg-primary)', color: templateKind === 'factor' ? '#fff' : 'var(--text-secondary)' }}>
-              因子
-            </button>
-          </div>
-          <input
-            type="text" placeholder="ClassName" value={className}
-            onChange={e => setClassName(e.target.value)}
-            className="w-full text-xs px-2 py-1 rounded mb-2"
-            style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-          />
-          <button onClick={generateTemplate}
-            className="w-full text-xs px-2 py-1 rounded"
+        <div className="p-2 border-b flex gap-1" style={{ borderColor: 'var(--border)' }}>
+          <button onClick={() => newFile('strategy')}
+            className="flex-1 text-xs px-2 py-1.5 rounded font-medium"
             style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
-            生成模板
+            + 新建策略
+          </button>
+          <button onClick={() => newFile('factor')}
+            className="flex-1 text-xs px-2 py-1.5 rounded font-medium"
+            style={{ backgroundColor: '#7c3aed', color: '#fff' }}>
+            + 新建因子
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>strategies/ 文件列表</div>
-          {files.length === 0 && <div className="text-xs px-2" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
-          {files.map(f => (
-            <div key={f.filename}
-              className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
-              style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
-              onClick={() => loadFile(f.filename)}>
-              <span className="truncate">{f.filename}</span>
-              <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
-                className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
-            </div>
-          ))}
+          {files.length === 0 && <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
+          {/* Strategies group */}
+          {files.filter(f => f.class_name && !f.filename.includes('factor')).length > 0 && (
+            <>
+              <div className="text-xs font-medium px-2 py-1 mt-1" style={{ color: 'var(--color-accent)' }}>策略</div>
+              {files.filter(f => f.class_name && !f.filename.includes('factor')).map(f => (
+                <div key={f.filename}
+                  className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
+                  style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
+                  onClick={() => loadFile(f.filename)}>
+                  <span className="truncate" title={f.class_name}>{f.class_name || f.filename}</span>
+                  <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
+                </div>
+              ))}
+            </>
+          )}
+          {/* Factors group */}
+          {files.filter(f => f.filename.includes('factor')).length > 0 && (
+            <>
+              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: '#7c3aed' }}>因子</div>
+              {files.filter(f => f.filename.includes('factor')).map(f => (
+                <div key={f.filename}
+                  className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
+                  style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
+                  onClick={() => loadFile(f.filename)}>
+                  <span className="truncate" title={f.class_name}>{f.class_name || f.filename}</span>
+                  <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
+                </div>
+              ))}
+            </>
+          )}
+          {/* Uncategorized */}
+          {files.filter(f => !f.class_name && !f.filename.includes('factor')).length > 0 && (
+            <>
+              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: 'var(--text-secondary)' }}>其他</div>
+              {files.filter(f => !f.class_name && !f.filename.includes('factor')).map(f => (
+                <div key={f.filename}
+                  className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
+                  style={{ backgroundColor: f.filename === filename ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
+                  onClick={() => loadFile(f.filename)}>
+                  <span className="truncate">{f.filename}</span>
+                  <button onClick={e => { e.stopPropagation(); deleteFile(f.filename) }}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 ml-1">x</button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
