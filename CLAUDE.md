@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.9.1 | Tests: 1146 (1156 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.10 | Tests: 1172 (1182 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -22,7 +22,7 @@ Version: 0.2.9.1 | Tests: 1146 (1156 collected, 10 skip) | C++ acceleration: up 
 - `web/` — React frontend dashboard [CLAUDE.md](web/CLAUDE.md)
 - `ez/llm/` — LLM provider abstraction: DeepSeek/Qwen/Local/OpenAI (V2.7) [CLAUDE.md](ez/llm/CLAUDE.md)
 - `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter, Tools, Assistant, Sandbox, FDR + V2.8 Research Agent [CLAUDE.md](ez/agent/CLAUDE.md)
-- `ez/portfolio/` — Portfolio backtesting: Universe, CrossSectionalFactor, PortfolioStrategy, Allocator, Engine, 5 built-in strategies (V2.9) [CLAUDE.md](ez/portfolio/CLAUDE.md)
+- `ez/portfolio/` — Portfolio backtesting: Universe, CrossSectionalFactor, PortfolioStrategy, Allocator, Engine, 5 built-in strategies, CrossSectionalEvaluator, PortfolioWalkForward (V2.9+V2.10) [CLAUDE.md](ez/portfolio/CLAUDE.md)
 - `ez/live/` — Deploy Gate, OMS, Broker (V2.6+, planned)
 - `ez/ops/` — Scheduling, monitoring, audit (V3.2+, planned)
 
@@ -55,7 +55,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (1129 collected, 1119 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (1182 collected, 1172 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -85,7 +85,8 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.8.1 post-release fixes**: 任务落库保障(save_task提前), promote失败前端alert, 策略列表严格任务隔离(移除全局fallback), LLM计数注释强化, 空因子禁用评估按钮
 - **V2.9**: Portfolio / Rotation — 多股组合回测 (TradingCalendar+PIT Universe+CrossSectionalFactor+PortfolioStrategy有状态+Allocator+PortfolioEngine离散股数记账+会计不变量+涨跌停+基准对比+Sortino/Alpha/Beta+组合API+DuckDB持久化+Agent工具4个+前端组合tab 6-tab架构), 1119 tests
 - **V2.9.1**: Stability — 引擎价格预索引(bisect O(log n), 10x加速), 单股回测接入MarketRules(stamp_tax+lot_size+limit_pct), 策略参数动态渲染(schema驱动), CodeEditor组合代码类型(4组侧栏+新建组合策略/截面因子), TopNRotation/MultiFactorRotation description+schema补全, 23项回归测试(C1 raw close涨跌停+C2 NaN carry-forward+内置策略行为+引擎确定性+印花税+容差+排序), 1156 tests
-- **Next: V2.10** — 因子研究深化(截面IC/衰减/分层/WF/对比/导出) → V2.11 基本面数据层 → V2.11.1 Alpha组合+中性化 → V2.12 优化器+归因+风控 → V2.13 ML Alpha+多策略 → V3.0 Paper OMS
+- **V2.10**: Factor Research + Research Efficiency — CrossSectionalEvaluator(截面IC/RankIC/ICIR/IC衰减/分位数收益), FactorCorrelationMatrix(Spearman秩相关热力图), PortfolioWalkForward(组合WF验证), PortfolioSignificance(Bootstrap CI+Monte Carlo), 多回测对比(checkbox选择+叠加曲线+指标表), CSV导出(净值曲线+交易记录), 预设标的池(宽基ETF/ETF轮动池/行业+宽基22只), 持仓饼图(latest_weights), 因子研究sub-tab(IC表+时序+衰减+分位数+相关性热力图), 3个新API端点, 1172 tests
+- **Next: V2.10.1** — Stability → V2.11 基本面数据层 → V2.11.1 Alpha组合+中性化 → V2.12 优化器+归因+风控 → V2.13 ML Alpha+多策略 → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)

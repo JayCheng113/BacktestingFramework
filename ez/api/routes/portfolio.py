@@ -382,6 +382,11 @@ def evaluate_factors(req: FactorEvalRequest):
 
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
 
+    def _safe(v):
+        if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+            return None
+        return v
+
     results = []
     for factor in factors:
         result = evaluate_cross_sectional_factor(
@@ -393,11 +398,6 @@ def evaluate_factors(req: FactorEvalRequest):
             factor=factor, universe_data=universe_data, calendar=calendar,
             start=start, end=end, lags=[1, 5, 10, 20], eval_freq=req.eval_freq,
         )
-        def _safe(v):
-            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
-                return None
-            return v
-
         results.append({
             "factor_name": result.factor_name,
             "mean_ic": _safe(result.mean_ic),

@@ -910,11 +910,11 @@ Agent 循环:
         {/*  6.8 组合回测 (V2.9)                                              */}
         {/* ================================================================ */}
         {active === 'portfolio' && <>
-          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>组合回测 (V2.9)</h1>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>组合回测 (V2.9+V2.10)</h1>
 
           <div style={h2s}>概述</div>
-          <p style={ps}>从"单股票单策略"升级到"多股票组合/轮动"回测。支持 ETF、个股、混合标的池。</p>
-          <div style={note}>导航栏 → "组合" tab → 选策略 → 填标的池 → 运行 → 查看净值曲线与指标</div>
+          <p style={ps}>从"单股票单策略"升级到"多股票组合/轮动"回测。支持 ETF、个股、混合标的池。V2.10 新增因子研究 sub-tab，支持截面 IC 评估、Walk-Forward 验证、多回测对比和 CSV 导出。</p>
+          <div style={note}>导航栏 → "组合" tab → 三个子页签：组合回测 | 因子研究 | 历史记录</div>
 
           <div style={h2s}>内置策略</div>
           <table style={tbl}><thead><tr><th style={ths}>策略</th><th style={ths}>说明</th><th style={ths}>关键参数</th></tr></thead><tbody>
@@ -992,6 +992,46 @@ class MyRotation(PortfolioStrategy):
             <tr><td style={tds}>策略参数动态渲染</td><td style={tds}>选择不同策略时，参数表单自动切换。例如 EtfMacdRotation 显示 top_n + rank_period，TopNRotation 显示 top_n + factor</td></tr>
             <tr><td style={tds}>代码编辑器扩展</td><td style={tds}>新增"新建组合策略"和"新建截面因子"按钮，侧栏分 4 组显示（策略/因子/组合策略/截面因子）</td></tr>
             <tr><td style={tds}>回归测试</td><td style={tds}>新增 19 项回归测试：涨跌停 raw close 验证、NaN carry-forward、内置策略行为、引擎确定性</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>V2.10 因子研究 + 研究效率</div>
+
+          <div style={h3s}>因子研究 sub-tab</div>
+          <p style={ps}>组合 tab 新增"因子研究"子页签，无需运行回测即可评估因子质量。</p>
+          <table style={tbl}><thead><tr><th style={ths}>功能</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>截面 IC / Rank IC</td><td style={tds}>每日对全 universe 股票计算因子值与未来收益的截面相关性（Pearson IC + Spearman Rank IC）</td></tr>
+            <tr><td style={tds}>ICIR</td><td style={tds}>IC 均值 / IC 标准差，衡量因子稳定性。ICIR &gt; 0.5 为可用因子</td></tr>
+            <tr><td style={tds}>IC 衰减曲线</td><td style={tds}>lag 1/5/10/20 天的 IC 变化，观察因子有效期。好因子的 IC 随 lag 递减</td></tr>
+            <tr><td style={tds}>分位数收益</td><td style={tds}>按因子值分 5 组（quintile），比较 Top 和 Bottom 组收益差。有效因子 Top &gt; Bottom</td></tr>
+            <tr><td style={tds}>因子相关性热力图</td><td style={tds}>多因子之间的 Spearman 秩相关矩阵，高相关（&gt;0.7）表示因子冗余</td></tr>
+            <tr><td style={tds}>IC 时序图</td><td style={tds}>IC 随时间变化的折线图，观察因子在不同市场环境下的表现</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>Walk-Forward 验证</div>
+          <p style={ps}>PortfolioWalkForward 将回测区间分为 N 折训练集和测试集，验证策略在样本外的稳定性。PortfolioSignificance 提供 Bootstrap 置信区间和 Monte Carlo 信号置换检验。</p>
+
+          <div style={h3s}>多回测对比</div>
+          <p style={ps}>在历史记录中勾选多个回测（checkbox），叠加净值曲线（不同颜色）并生成指标对比表，方便横向比较不同策略或参数。</p>
+
+          <div style={h3s}>CSV 导出</div>
+          <p style={ps}>回测结果支持一键导出：净值曲线 CSV + 交易记录 CSV。可直接用 Excel 打开分析。</p>
+
+          <div style={h3s}>预设标的池</div>
+          <p style={ps}>三组快捷标的池按钮，点击即填入：</p>
+          <table style={tbl}><thead><tr><th style={ths}>预设</th><th style={ths}>内容</th></tr></thead><tbody>
+            <tr><td style={tds}>宽基 ETF</td><td style={tds}>沪深300/中证500/创业板等宽基 ETF</td></tr>
+            <tr><td style={tds}>ETF 轮动池</td><td style={tds}>10 只 ETF（含跨境、商品）</td></tr>
+            <tr><td style={tds}>行业+宽基 22 只</td><td style={tds}>行业 ETF + 宽基 ETF 组合，适合行业轮动策略</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>持仓饼图</div>
+          <p style={ps}>回测完成后显示最新持仓权重（latest_weights）饼图，直观展示当前组合配置。</p>
+
+          <div style={h3s}>新增 API 端点 (V2.10)</div>
+          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>/api/portfolio/evaluate-factors</td><td style={tds}>POST</td><td style={tds}>截面因子评估（IC/RankIC/ICIR/衰减/分位数）</td></tr>
+            <tr><td style={tds}>/api/portfolio/factor-correlation</td><td style={tds}>POST</td><td style={tds}>因子相关性矩阵（Spearman 秩相关）</td></tr>
+            <tr><td style={tds}>/api/portfolio/walk-forward</td><td style={tds}>POST</td><td style={tds}>组合 Walk-Forward 验证 + 显著性检验</td></tr>
           </tbody></table>
         </>}
 

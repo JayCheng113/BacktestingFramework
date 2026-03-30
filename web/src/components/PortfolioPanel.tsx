@@ -92,6 +92,7 @@ export default function PortfolioPanel() {
 
   const handleCompare = async () => {
     if (selectedRuns.size < 2) { alert('请至少选择 2 条记录'); return }
+    if (selectedRuns.size > 10) { alert('最多对比 10 条记录'); return }
     setComparing(true)
     setCompareData([])
     try {
@@ -101,7 +102,8 @@ export default function PortfolioPanel() {
           const d = res.data
           return {
             id, name: `${d.strategy_name} (${d.start_date?.slice(0, 10)}~${d.end_date?.slice(0, 10)})`,
-            equity: d.equity_curve || [], dates: [], metrics: d.metrics || {},
+            equity: (d.equity_curve || []).map((v: number) => v / (d.equity_curve?.[0] || 1)),  // normalize to 1.0
+            dates: [], metrics: d.metrics || {},
           }
         })
       )
@@ -634,8 +636,8 @@ export default function PortfolioPanel() {
                 tooltip: { trigger: 'axis' as const },
                 legend: { data: compareData.map(d => d.name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 5, type: 'scroll' as const },
                 grid: { left: 70, right: 20, top: 40, bottom: 30 },
-                xAxis: { type: 'value' as const, name: '交易日', axisLabel: { color: '#8b949e' } },
-                yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+                xAxis: { type: 'value' as const, name: '交易日序号', axisLabel: { color: '#8b949e' } },
+                yAxis: { type: 'value' as const, name: '归一化净值', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
                 color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#f97316'],
                 series: compareData.map(d => ({
                   name: d.name, type: 'line' as const,

@@ -6,7 +6,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 ## Components
 | Component | Role |
 |-----------|------|
-| Navbar | Top navigation: 看板 / 组合 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.9) |
+| Navbar | Top navigation: 看板 / 组合 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.10) |
 | SearchBar | Symbol + market + period + date range (calendar dropdown + stock search) |
 | KlineChart | ECharts candlestick + volume + MA5/10/20/60 + BOLL bands + buy/sell markers |
 | BacktestPanel | Strategy dropdown (filters research_) + params (number/bool/str) + costs + results + trade table + CSV (V2.8.1: multi-type params) |
@@ -18,7 +18,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | SettingsModal | LLM + Tushare config modal, writes to .env via API (V2.7) |
 | DocsPage | Comprehensive documentation — 12 sections, 1658 lines (V2.8) |
 | ResearchPanel | Autonomous research: goal form + date presets + SSE Chinese progress + task list + report + "注册到全局" promote button (V2.8) |
-| PortfolioPanel | Portfolio backtest: dynamic strategy params from schema + ETF pool + BacktestSettings + equity curve vs benchmark + metrics + trades + history (V2.9.1) |
+| PortfolioPanel | Portfolio backtest: 3-tab layout (组合回测|因子研究|历史记录). 组合回测: dynamic strategy params + preset pools (宽基ETF/ETF轮动池/行业+宽基22只) + BacktestSettings + equity curve vs benchmark + metrics + trades + holdings pie chart + CSV export + multi-backtest comparison (checkbox + overlay curves + metrics table). 因子研究: IC table + time series + decay chart + quintile returns + correlation heatmap. Walk-Forward + significance (V2.10) |
 | BacktestSettings | Shared cost/rules component: buy/sell commission, stamp tax, slippage, lot size, limit price (V2.9) |
 | Dashboard | Main page, orchestrates chart/backtest/factor components |
 
@@ -52,4 +52,4 @@ API proxied to http://localhost:8000
 | components/ChatPanel.tsx | AI chat: file-bound conversations + Chinese tool labels (V2.7+V2.8) |
 | components/SettingsModal.tsx | Settings modal for API keys (V2.7) |
 | components/ResearchPanel.tsx | Research: goal form + SSE progress + report + promote (V2.8) |
-| pages/DocsPage.tsx | Documentation: 12 sections, 1658 lines (V2.8) |
+| pages/DocsPage.tsx | Documentation: 12 sections (V2.10: 因子研究 sub-tab, IC/ICIR, Walk-Forward, CSV export, preset pools, pie chart) |

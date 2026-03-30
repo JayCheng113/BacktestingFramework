@@ -39,6 +39,9 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 - `POST /api/research/tasks/{task_id}/cancel` — Cancel running research task (V2.8)
 - `GET /api/research/tasks/{task_id}/stream` — SSE progress stream (V2.8)
 - `POST /api/code/promote` — Promote research strategy to user strategy (V2.8)
+- `POST /api/portfolio/evaluate-factors` — Cross-sectional factor evaluation (IC/RankIC/ICIR/decay/quintile) (V2.10)
+- `POST /api/portfolio/factor-correlation` — Factor pairwise Spearman correlation matrix (V2.10)
+- `POST /api/portfolio/walk-forward` — Portfolio walk-forward validation + significance (V2.10)
 
 ## Files
 | File | Role |
@@ -77,3 +80,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 - V2.8.1: SSE heartbeat (15s keepalive), get_start_lock() public accessor, promote regex precision (Research+uppercase only)
 - V2.9: Portfolio API (strategies/run/runs/detail/delete), buy/sell commission split, limit_pct, benchmark, cost validation ge=0, skipped symbols reporting, code save kind param (portfolio_strategy/cross_factor)
 - V2.9.1: Single-stock backtest MarketRules integration (stamp_tax_rate+lot_size+limit_pct → MarketRulesMatcher wrapper)
+- V2.10: Portfolio factor research API (evaluate-factors, factor-correlation, walk-forward) — cross-sectional IC/ICIR/decay/quintile, Spearman correlation matrix, walk-forward + Bootstrap/Monte Carlo significance
