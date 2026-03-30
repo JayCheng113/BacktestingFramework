@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from ez.agent.sandbox import (
     _safe_filename,
     _get_dir,
+    _VALID_KINDS,
     check_syntax,
     get_template,
     list_user_strategies,
@@ -16,6 +17,11 @@ from ez.agent.sandbox import (
     save_and_validate_strategy,
     save_and_validate_code,
 )
+
+
+def _validate_kind(kind: str) -> None:
+    if kind not in _VALID_KINDS:
+        raise HTTPException(status_code=422, detail=f"Invalid kind: {kind}. Must be one of: {sorted(_VALID_KINDS)}")
 
 router = APIRouter()
 
@@ -77,6 +83,7 @@ def list_files(kind: str = Query(default="")):
 @router.get("/files/{filename}")
 def read_file(filename: str, kind: str = Query(default="strategy")):
     """Read a code file. kind determines which directory to look in."""
+    _validate_kind(kind)
     safe_name = _safe_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail=f"Invalid filename: {filename}")
@@ -90,6 +97,7 @@ def read_file(filename: str, kind: str = Query(default="strategy")):
 @router.delete("/files/{filename}")
 def delete_file(filename: str, kind: str = Query(default="strategy")):
     """Delete a code file and unregister from registry."""
+    _validate_kind(kind)
     safe_name = _safe_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail=f"Invalid filename: {filename}")

@@ -1,7 +1,7 @@
-"""V2.7: Code validation sandbox for user/AI-generated strategies and factors.
+"""V2.7+V2.9: Code validation sandbox for user/AI-generated code.
 
 Security:
-  - Only writes to strategies/ directory
+  - Only writes to whitelisted directories: strategies/, portfolio_strategies/, cross_factors/
   - Validates Python syntax before saving
   - Runs contract test in subprocess with timeout
   - AST check for dangerous imports (os, subprocess, socket, etc.)
@@ -33,9 +33,14 @@ _KIND_DIR_MAP = {
 }
 
 
+_VALID_KINDS = frozenset(_KIND_DIR_MAP.keys())
+
+
 def _get_dir(kind: str) -> Path:
-    """Resolve directory for a given code kind."""
-    return _KIND_DIR_MAP.get(kind, _STRATEGIES_DIR)
+    """Resolve directory for a given code kind. Raises ValueError for unknown kinds."""
+    if kind not in _KIND_DIR_MAP:
+        raise ValueError(f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_KINDS)}")
+    return _KIND_DIR_MAP[kind]
 
 # Modules that user code MUST NOT import
 _FORBIDDEN_MODULES = frozenset({
@@ -468,6 +473,8 @@ def save_and_validate_code(
 
     kind: "strategy" | "factor" | "portfolio_strategy" | "cross_factor"
     """
+    if kind not in _VALID_KINDS:
+        return {"success": False, "errors": [f"Invalid kind: {kind}. Must be one of: {sorted(_VALID_KINDS)}"]}
     target_dir = _get_dir(kind)
     if kind in ("strategy", "factor"):
         return save_and_validate_strategy(filename, code, overwrite=overwrite)
@@ -578,6 +585,7 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
             old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
             for k in old_keys:
                 del PortfolioStrategy._registry[k]
+        # cross_factor: no registry to clean up (CrossSectionalFactor has no _registry)
 
         if module_name in sys.modules:
             del sys.modules[module_name]
