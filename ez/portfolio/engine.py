@@ -304,18 +304,21 @@ def run_portfolio_backtest(
         prev_raw_close = dict(raw_close_today)
 
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
-    # O(n) single-pass via pre-indexed prices (was O(n²) df.loc per day)
+    # O(n) single-pass via pre-indexed prices
     if benchmark_symbol and benchmark_symbol in _sym_data and result.dates:
         bench_dates, bench_adj, bench_raw, _ = _sym_data[benchmark_symbol]
-        # Find first_price at backtest start
+        # Pick price series: prefer adj_close, fallback to raw close
+        bench_prices = bench_adj
+        if all(np.isnan(v) for v in bench_adj[:min(10, len(bench_adj))]):
+            bench_prices = bench_raw  # adj_close all NaN, use raw close
         first_day = result.dates[0]
         idx0 = bisect.bisect_right(bench_dates, first_day) - 1
-        first_price = bench_adj[idx0] if idx0 >= 0 and not np.isnan(bench_adj[idx0]) else 0
+        first_price = bench_prices[idx0] if idx0 >= 0 and not np.isnan(bench_prices[idx0]) else 0
         if first_price > 0:
             for day in result.dates:
                 idx = bisect.bisect_right(bench_dates, day) - 1
-                if idx >= 0 and not np.isnan(bench_adj[idx]):
-                    result.benchmark_curve.append(float(initial_cash * bench_adj[idx] / first_price))
+                if idx >= 0 and not np.isnan(bench_prices[idx]):
+                    result.benchmark_curve.append(float(initial_cash * bench_prices[idx] / first_price))
                 else:
                     result.benchmark_curve.append(result.benchmark_curve[-1] if result.benchmark_curve else initial_cash)
         else:

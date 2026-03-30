@@ -343,6 +343,21 @@ export default function PortfolioPanel() {
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>结束日期</label>
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
               </div>
+              <div className="flex gap-1 items-end">
+                {[
+                  { label: '近1年', years: 1 }, { label: '近3年', years: 3 },
+                  { label: '近5年', years: 5 }, { label: '近10年', years: 10 },
+                ].map(p => (
+                  <button key={p.label} onClick={() => {
+                    const end = new Date(); const start = new Date()
+                    start.setFullYear(end.getFullYear() - p.years)
+                    setStartDate(start.toISOString().slice(0, 10))
+                    setEndDate(end.toISOString().slice(0, 10))
+                  }} className="text-xs px-2 py-1.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="mb-3">
               <BacktestSettings value={settings} onChange={setSettings} />
