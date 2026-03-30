@@ -55,7 +55,7 @@ class TestAccountingInvariant:
         cal = TradingCalendar.from_dates([d.date() for d in dates])
         universe = Universe(symbols)
 
-        cost = CostModel(commission_rate=0.001, min_commission=5, stamp_tax_rate=0.001, slippage_rate=0.002)
+        cost = CostModel(buy_commission_rate=0.001, min_commission=5, stamp_tax_rate=0.001, slippage_rate=0.002)
         result = run_portfolio_backtest(
             strategy=TopNRotation(MomentumRank(20), top_n=2),
             universe=universe, universe_data=data, calendar=cal,
@@ -181,7 +181,7 @@ class TestDegradation:
         result = run_portfolio_backtest(
             strategy=AlwaysFull(), universe=universe, universe_data=data,
             calendar=cal, start=dates[1].date(), end=dates[-1].date(),
-            freq="daily", cost_model=CostModel(commission_rate=0, min_commission=0,
+            freq="daily", cost_model=CostModel(buy_commission_rate=0, min_commission=0,
                                                 stamp_tax_rate=0, slippage_rate=0),
             lot_size=1,  # no lot rounding for degradation test
         )

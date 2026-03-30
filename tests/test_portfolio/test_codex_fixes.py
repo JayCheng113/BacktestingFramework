@@ -45,7 +45,7 @@ class TestC2MinCommissionBudget:
             def generate_weights(self, universe_data, dt, prev_w, prev_r):
                 return {"A": 1.0}
 
-        cost = CostModel(commission_rate=0.001, min_commission=5.0, stamp_tax_rate=0, slippage_rate=0)
+        cost = CostModel(buy_commission_rate=0.001, min_commission=5.0, stamp_tax_rate=0, slippage_rate=0)
         # Should NOT raise AssertionError
         result = run_portfolio_backtest(
             strategy=AlwaysFull(), universe=Universe(["A"]),
@@ -138,7 +138,7 @@ class TestLimitPrice:
             start=dates[5].date(), end=dates[-1].date(),
             freq="weekly", initial_cash=100000, lot_size=1,
             limit_pct=0.10,
-            cost_model=CostModel(commission_rate=0, min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+            cost_model=CostModel(buy_commission_rate=0, min_commission=0, stamp_tax_rate=0, slippage_rate=0),
         )
         # On the rebalance day when B is limit up, B should not be bought
         b_buys = [t for t in result.trades if t["symbol"] == "B" and t["side"] == "buy"]
