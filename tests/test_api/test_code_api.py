@@ -70,7 +70,7 @@ class TestHealthVersion:
     def test_version_updated(self):
         resp = client.get("/api/health")
         assert resp.status_code == 200
-        assert resp.json()["version"] == "0.2.8.1"
+        assert resp.json()["version"] == "0.2.9"
 
 
 class TestPromote:
