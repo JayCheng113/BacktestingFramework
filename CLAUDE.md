@@ -84,7 +84,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.8.1**: Stability — get_start_lock()封装(消除私有名跨模块导入), SSE heartbeat(15s keepalive防代理断开), LLM计数文档化(近似值注释), 因子面板动态化(API获取9因子+中文标签), cleanup_finished_tasks时间戳排序, promote regex精确化(Research+大写), 参数面板bool/str支持, 1039 tests
 - **V2.8.1 post-release fixes**: 任务落库保障(save_task提前), promote失败前端alert, 策略列表严格任务隔离(移除全局fallback), LLM计数注释强化, 空因子禁用评估按钮
 - **V2.9**: Portfolio / Rotation — 多股组合回测 (TradingCalendar+PIT Universe+CrossSectionalFactor+PortfolioStrategy有状态+Allocator+PortfolioEngine离散股数记账+会计不变量+涨跌停+基准对比+Sortino/Alpha/Beta+组合API+DuckDB持久化+Agent工具4个+前端组合tab 6-tab架构), 1119 tests
-- **V2.9.1**: Stability — 引擎价格预索引(bisect O(log n), 10x加速), 单股回测接入MarketRules(stamp_tax+lot_size+limit_pct), 策略参数动态渲染(schema驱动), CodeEditor组合代码类型(4组侧栏+新建组合策略/截面因子), TopNRotation/MultiFactorRotation description+schema补全, 19项回归测试(C1 raw close涨跌停+C2 NaN carry-forward+内置策略行为+引擎确定性), 1152 tests
+- **V2.9.1**: Stability — 引擎价格预索引(bisect O(log n), 10x加速), 单股回测接入MarketRules(stamp_tax+lot_size+limit_pct), 策略参数动态渲染(schema驱动), CodeEditor组合代码类型(4组侧栏+新建组合策略/截面因子), TopNRotation/MultiFactorRotation description+schema补全, 23项回归测试(C1 raw close涨跌停+C2 NaN carry-forward+内置策略行为+引擎确定性+印花税+容差+排序), 1156 tests
 - **Next: V2.10** — Multi-Factor Research → V2.11 Fundamental + Risk → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)

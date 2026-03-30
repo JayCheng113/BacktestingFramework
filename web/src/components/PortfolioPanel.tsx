@@ -25,6 +25,7 @@ interface HistoryRun {
 
 interface ParamSchema {
   type: string; default: any; min?: number; max?: number; label?: string
+  options?: string[]  // for select / multi_select types
 }
 
 export default function PortfolioPanel() {
@@ -112,8 +113,7 @@ export default function PortfolioPanel() {
 
     if (schema.type === 'select') {
       // Use schema.options if provided, otherwise fall back to available_factors
-      const options: string[] = Array.isArray((schema as any).options) ? (schema as any).options
-        : factors.length > 0 ? factors : [String(schema.default)]
+      const options: string[] = schema.options ?? (factors.length > 0 ? factors : [String(schema.default)])
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
@@ -126,8 +126,7 @@ export default function PortfolioPanel() {
 
     if (schema.type === 'multi_select') {
       // Use schema.options if provided, otherwise fall back to available_factors
-      const options: string[] = Array.isArray((schema as any).options) ? (schema as any).options
-        : factors.length > 0 ? factors : []
+      const options: string[] = schema.options ?? (factors.length > 0 ? factors : [])
       const selected_vals: string[] = Array.isArray(value) ? value : [String(value)]
       return (
         <div key={key} className="flex flex-col gap-1">

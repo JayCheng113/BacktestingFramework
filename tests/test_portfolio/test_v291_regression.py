@@ -436,7 +436,8 @@ class TestLimitTolerancePrecision:
     """Limit check should not block trades at 9.9% (old 0.001 tolerance)."""
 
     def test_995_pct_not_blocked(self):
-        """A +9.95% change should NOT be treated as limit up (10%)."""
+        """A +9.95% change should NOT be treated as limit up (10%).
+        Start from day 10 so first rebalance must buy → verifies not blocked."""
         dates = pd.date_range("2024-01-02", periods=20, freq="B")
         prices = np.full(20, 10.0)
         # Day 10: +9.95% — NOT limit up
@@ -454,20 +455,21 @@ class TestLimitTolerancePrecision:
             def generate_weights(self, universe_data, dt, pw, pr):
                 return {"A": 1.0}
 
+        # Start on day 10 — first rebalance MUST buy (going from cash to holding)
+        day10 = dates[10].date()
         result = run_portfolio_backtest(
             strategy=AlwaysBuy(), universe=Universe(["A"]),
             universe_data=data, calendar=cal,
-            start=dates[5].date(), end=dates[-1].date(),
+            start=day10, end=dates[-1].date(),
             freq="daily", initial_cash=100000, lot_size=1,
             limit_pct=0.10,
             cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
                                   min_commission=0, stamp_tax_rate=0, slippage_rate=0),
         )
-        day10 = dates[10].date()
         buys_on_day10 = [t for t in result.trades
                          if t["date"] == day10.isoformat() and t["side"] == "buy"]
-        # +9.95% is NOT limit up, trade should be allowed
-        assert len(buys_on_day10) >= 0  # should not be blocked (may already hold)
+        # +9.95% is NOT limit up → buy MUST succeed on first rebalance
+        assert len(buys_on_day10) > 0, "+9.95% was wrongly blocked as limit up"
 
 
 # ─── Issue 3 fix: unsorted input doesn't break engine ───
