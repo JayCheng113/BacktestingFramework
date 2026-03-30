@@ -1,4 +1,4 @@
-"""V2.9 P7: Portfolio API — run, list, detail, delete portfolio backtests."""
+"""V2.9+V2.10: Portfolio API — run, list, detail, delete + factor evaluation."""
 from __future__ import annotations
 
 import json
@@ -258,3 +258,99 @@ def delete_portfolio_run(run_id: str):
     if _get_store().delete_run(run_id):
         return {"deleted": run_id}
     raise HTTPException(404, f"Run '{run_id}' not found")
+
+
+# ─── V2.10: Factor Evaluation API ───
+
+class FactorEvalRequest(BaseModel):
+    symbols: list[str]
+    market: str = "cn_stock"
+    start_date: date | None = None
+    end_date: date | None = None
+    factor_names: list[str] = ["momentum_rank_20"]
+    forward_days: int = Field(default=5, ge=1, le=60)
+    eval_freq: str = Field(default="weekly", pattern="^(daily|weekly|monthly)$")
+    n_quantiles: int = Field(default=5, ge=2, le=10)
+
+
+class FactorCorrelationRequest(BaseModel):
+    symbols: list[str]
+    market: str = "cn_stock"
+    start_date: date | None = None
+    end_date: date | None = None
+    factor_names: list[str] = ["momentum_rank_20", "volume_rank_20"]
+    eval_freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly)$")
+
+
+def _resolve_factors(names: list[str]):
+    """Resolve factor names to CrossSectionalFactor instances."""
+    resolved = []
+    for name in names:
+        factory = _FACTOR_MAP.get(name)
+        if not factory:
+            raise HTTPException(400, f"Unknown factor: {name}. Available: {list(_FACTOR_MAP.keys())}")
+        resolved.append(factory())
+    return resolved
+
+
+@router.post("/evaluate-factors")
+def evaluate_factors(req: FactorEvalRequest):
+    """Evaluate cross-sectional factors: IC, Rank IC, ICIR, IC decay, quintile returns."""
+    from ez.portfolio.cross_evaluator import evaluate_cross_sectional_factor, evaluate_ic_decay
+
+    end = req.end_date or date.today()
+    start = req.start_date or (end - timedelta(days=365 * 3))
+    factors = _resolve_factors(req.factor_names)
+
+    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+
+    results = []
+    for factor in factors:
+        result = evaluate_cross_sectional_factor(
+            factor=factor, universe_data=universe_data, calendar=calendar,
+            start=start, end=end, forward_days=req.forward_days,
+            eval_freq=req.eval_freq, n_quantiles=req.n_quantiles,
+        )
+        decay = evaluate_ic_decay(
+            factor=factor, universe_data=universe_data, calendar=calendar,
+            start=start, end=end, lags=[1, 5, 10, 20], eval_freq=req.eval_freq,
+        )
+        results.append({
+            "factor_name": result.factor_name,
+            "mean_ic": result.mean_ic,
+            "mean_rank_ic": result.mean_rank_ic,
+            "ic_std": result.ic_std,
+            "icir": result.icir,
+            "rank_icir": result.rank_icir,
+            "n_eval_dates": result.n_eval_dates,
+            "avg_stocks_per_date": result.avg_stocks_per_date,
+            "ic_series": result.ic_series,
+            "rank_ic_series": result.rank_ic_series,
+            "eval_dates": result.eval_dates,
+            "quintile_returns": result.quintile_returns,
+            "ic_decay": decay,
+        })
+
+    return {"results": results, "symbols_count": len(universe_data)}
+
+
+@router.post("/factor-correlation")
+def factor_correlation(req: FactorCorrelationRequest):
+    """Compute pairwise Spearman rank correlation between factors."""
+    from ez.portfolio.cross_evaluator import compute_factor_correlation
+
+    end = req.end_date or date.today()
+    start = req.start_date or (end - timedelta(days=365 * 3))
+    factors = _resolve_factors(req.factor_names)
+
+    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+
+    corr_df = compute_factor_correlation(
+        factors=factors, universe_data=universe_data, calendar=calendar,
+        start=start, end=end, eval_freq=req.eval_freq,
+    )
+
+    return {
+        "factor_names": list(corr_df.index),
+        "correlation_matrix": corr_df.values.tolist(),
+    }
