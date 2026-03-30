@@ -41,7 +41,7 @@ jobs:
       - name: Install Python dependencies
         shell: bash
         run: |
-          pip install pyinstaller
+          pip install pyinstaller scikit-build-core nanobind
           pip install -e ".[dev]" --no-build-isolation
 
       - name: Run tests before build
