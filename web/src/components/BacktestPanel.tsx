@@ -48,6 +48,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         commission_rate: costSettings.buy_commission_rate,
         min_commission: costSettings.min_commission,
         slippage_rate: costSettings.slippage_rate,
+        stamp_tax_rate: costSettings.stamp_tax_rate,
+        lot_size: costSettings.lot_size,
+        limit_pct: costSettings.limit_pct,
       }
       if (mode === 'backtest') {
         const res = await runBacktest({
@@ -215,8 +218,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
       </div>
       <div className="mb-3">
         <BacktestSettings value={costSettings} onChange={setCostSettings}
-          showBenchmark={false} showInitialCash={false}
-          showSellCommission={false} showStampTax={false} showLotSize={false} showLimitPct={false} />
+          showBenchmark={false} showInitialCash={false} showSellCommission={false} />
       </div>
       <div className="flex flex-wrap gap-3 items-end mb-4">
         {mode === 'walk-forward' && (

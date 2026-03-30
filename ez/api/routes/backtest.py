@@ -11,6 +11,7 @@ from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
 from ez.config import load_config
 from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
+from ez.core.market_rules import MarketRulesMatcher
 from ez.backtest.walk_forward import WalkForwardValidator
 from ez.strategy.base import Strategy
 
@@ -29,6 +30,9 @@ class BacktestRequest(BaseModel):
     commission_rate: float | None = Field(default=None, ge=0, description="Commission rate; None = use config default")
     min_commission: float | None = Field(default=None, ge=0, description="Min commission per trade; None = use config default")
     slippage_rate: float = Field(default=0.0, ge=0, le=0.1, description="Slippage rate (e.g., 0.001 = 0.1%)")
+    stamp_tax_rate: float = Field(default=0.0, ge=0, description="Sell-side stamp tax (A-share: 0.0005)")
+    lot_size: int = Field(default=0, ge=0, description="Lot size (A-share: 100, 0=disabled)")
+    limit_pct: float = Field(default=0.0, ge=0, le=0.3, description="Limit up/down pct (A-share: 0.10, 0=disabled)")
 
 
 class WalkForwardRequest(BacktestRequest):
@@ -62,13 +66,24 @@ def _build_matcher(req: BacktestRequest) -> Matcher:
     config = load_config()
     comm_rate = req.commission_rate if req.commission_rate is not None else config.backtest.default_commission_rate
     min_comm = req.min_commission if req.min_commission is not None else config.backtest.default_min_commission
+    # Stamp tax: add to commission rate as approximation (SimpleMatcher has single rate)
+    effective_rate = comm_rate + req.stamp_tax_rate
     if req.slippage_rate > 0:
-        return SlippageMatcher(
+        inner: Matcher = SlippageMatcher(
             slippage_rate=req.slippage_rate,
-            commission_rate=comm_rate,
+            commission_rate=effective_rate,
             min_commission=min_comm,
         )
-    return SimpleMatcher(commission_rate=comm_rate, min_commission=min_comm)
+    else:
+        inner = SimpleMatcher(commission_rate=effective_rate, min_commission=min_comm)
+    # Wrap with MarketRulesMatcher if A-share rules requested
+    if req.lot_size > 0 or req.limit_pct > 0:
+        inner = MarketRulesMatcher(
+            inner=inner,
+            lot_size=req.lot_size if req.lot_size > 0 else 0,
+            price_limit_pct=req.limit_pct if req.limit_pct > 0 else 0,
+        )
+    return inner
 
 
 @router.post("/run")

@@ -92,44 +92,52 @@ def run_portfolio_backtest(
 
     result = PortfolioResult()
     prev_prices: dict[str, float] = {}
-    prev_raw_close: dict[str, float] = {}  # C1: raw close for limit price check
+    prev_raw_close: dict[str, float] = {}
+
+    # V2.9.1 PERF: Pre-build price arrays for O(1) lookup by date index
+    # {sym: (sorted_dates, adj_prices, raw_prices, date_set)}
+    import bisect
+    _sym_data: dict[str, tuple[list[date], list[float], list[float], set[date]]] = {}
+    for sym, df in universe_data.items():
+        has_adj = "adj_close" in df.columns
+        dates_list = []
+        adj_list = []
+        raw_list = []
+        for i in range(len(df)):
+            d = df.index[i].date() if isinstance(df.index, pd.DatetimeIndex) else df.index[i]
+            dates_list.append(d)
+            adj_list.append(float(df.iloc[i]["adj_close"]) if has_adj else float(df.iloc[i]["close"]))
+            raw_list.append(float(df.iloc[i]["close"]))
+        _sym_data[sym] = (dates_list, adj_list, raw_list, set(dates_list))
 
     for day in trading_days:
         tradeable = set(universe.tradeable_at(day))
 
-        # Get current prices + raw close + tradeable check
+        # O(log n) price lookup via bisect on pre-sorted date arrays
         prices: dict[str, float] = {}
-        raw_close_today: dict[str, float] = {}  # C1: unadjusted close for limit check
+        raw_close_today: dict[str, float] = {}
         has_bar_today: set[str] = set()
         for sym in set(list(holdings.keys()) + list(tradeable)):
-            if sym in universe_data:
-                df = universe_data[sym]
-                if isinstance(df.index, pd.DatetimeIndex):
-                    mask = df.index.date <= day
-                    today_mask = df.index.date == day
-                else:
-                    mask = df.index <= day
-                    today_mask = df.index == day
-                valid = df.loc[mask]
-                if not valid.empty:
-                    # Valuation price: prefer adj_close
-                    price_col = "adj_close" if "adj_close" in valid.columns else "close"
-                    p = valid[price_col].iloc[-1]
-                    if isinstance(p, float) and np.isnan(p) and price_col == "adj_close" and "close" in valid.columns:
-                        p = valid["close"].iloc[-1]
-                    if not (np.isnan(p) if isinstance(p, float) else False):
-                        prices[sym] = float(p)
-                    elif sym in prev_prices:
-                        # C2: NaN price → carry forward prev price for valuation (not 0)
-                        prices[sym] = prev_prices[sym]
-                    # C1: raw close for limit price (not adj_close)
-                    if "close" in valid.columns:
-                        rc = valid["close"].iloc[-1]
-                        if not (isinstance(rc, float) and np.isnan(rc)):
-                            raw_close_today[sym] = float(rc)
-                # Track if symbol has actual data for today
-                if df.loc[today_mask].shape[0] > 0:
-                    has_bar_today.add(sym)
+            if sym not in _sym_data:
+                continue
+            sdates, adj_arr, raw_arr, date_set = _sym_data[sym]
+            # bisect: find rightmost index where date <= day
+            idx = bisect.bisect_right(sdates, day) - 1
+            if idx >= 0:
+                adj_val = adj_arr[idx]
+                raw_val = raw_arr[idx]
+                if not np.isnan(adj_val):
+                    prices[sym] = adj_val
+                elif not np.isnan(raw_val):
+                    prices[sym] = raw_val
+                elif sym in prev_prices:
+                    prices[sym] = prev_prices[sym]
+                if not np.isnan(raw_val):
+                    raw_close_today[sym] = raw_val
+            elif sym in prev_prices:
+                prices[sym] = prev_prices[sym]
+            if day in date_set:
+                has_bar_today.add(sym)
 
         # Compute equity BEFORE rebalance
         position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)
