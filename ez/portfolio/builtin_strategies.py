@@ -71,7 +71,6 @@ class EtfMacdRotation(PortfolioStrategy):
         returns = {}
         macd_ok = {}
         history_returns = {}
-        cur_close_prices = {}
         cur_returns = {}
 
         for sym, df in universe_data.items():
@@ -102,7 +101,6 @@ class EtfMacdRotation(PortfolioStrategy):
                 if v != 0:
                     hr.append((close_ma.iloc[idx_end] - v) / v)
             history_returns[sym] = hr
-            cur_close_prices[sym] = float(close_ma.iloc[-2])
             cur_returns[sym] = float(close_ma.iloc[-2] - close_ma.iloc[-3]) if len(close_ma) > 3 else 0
 
             # Weekly MACD filter
@@ -120,7 +118,8 @@ class EtfMacdRotation(PortfolioStrategy):
             if not hr:
                 continue
             # max historical return as confidence signal (dimensionless)
-            exp_rets[sym] = math.exp(max(hr) * 10)  # scale for differentiation
+            _EXP_SCALE = 10  # tuning: higher = more aggressive differentiation between assets
+            exp_rets[sym] = math.exp(max(hr) * _EXP_SCALE)
             total_exp += exp_rets[sym]
 
         # Market panic check: >75% negative → stay cash
