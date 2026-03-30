@@ -41,7 +41,7 @@ class PortfolioRunRequest(BaseModel):
     initial_cash: float = Field(default=1_000_000, ge=10_000)
     buy_commission_rate: float = Field(default=0.0003, ge=0)
     sell_commission_rate: float = Field(default=0.0003, ge=0)
-    commission_rate: float | None = None  # backward compat: if set, overrides both buy/sell
+    commission_rate: float | None = Field(default=None, ge=0)  # backward compat: if set, overrides both
     min_commission: float = Field(default=5.0, ge=0)
     stamp_tax_rate: float = Field(default=0.0005, ge=0)
     slippage_rate: float = Field(default=0.0, ge=0)
