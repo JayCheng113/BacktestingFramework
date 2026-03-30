@@ -106,6 +106,12 @@ pending → running → completed
 - research_tasks: task_id(PK), goal, config, status, stop_reason, summary
 - research_iterations: (task_id, iteration)(PK), hypotheses, tried/passed, best_sharpe, analysis, spec_ids
 
+### Research Isolation (V2.8 post-release)
+- Research strategies use `research_` filename prefix + `Research` class name prefix
+- Frontend filters: BacktestPanel/ExperimentPanel/CandidateSearch use `key.includes('research_')`
+- CodeEditor sidebar hides `research_` files
+- Promote workflow: POST /api/code/promote copies research_ file → removes prefix → renames class → contract test → registers globally
+
 ## Sandbox Security (V2.7)
 - **Forbidden imports**: os, sys, subprocess, socket, shutil, pathlib, importlib, ctypes, multiprocessing, threading, signal, pickle, http, urllib, requests, httpx, duckdb, etc.
 - **File writes**: Only to strategies/ directory

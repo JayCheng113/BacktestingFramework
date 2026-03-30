@@ -3,14 +3,14 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.8 | Tests: 980 | C++ acceleration: up to 7.9x
+Version: 0.2.8 | Tests: 1050 | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
 - [Engineering Governance](docs/architecture/governance.md) — thin core, lifecycle labels, version discipline
 - [V2.3+ Roadmap](docs/core-changes/v2.3-roadmap.md) — detailed per-version plan with exit gates
 
-**Note**: ResearchGate implemented in V2.4 (ez/agent/gates.py). MarketRules in V2.6 (ez/core/market_rules.py). LLM + Web Coding Assistant in V2.7 (ez/llm/, ez/agent/assistant.py). Deploy/Runtime gates planned for V2.8+.
+**Note**: ResearchGate implemented in V2.4 (ez/agent/gates.py). MarketRules in V2.6 (ez/core/market_rules.py). LLM + Web Coding Assistant in V2.7 (ez/llm/, ez/agent/assistant.py). Autonomous Research Agent in V2.8 (ez/agent/research_runner.py). Deploy/Runtime gates planned for V2.9+.
 
 ## Module Map
 - `ez/core/` — Computational primitives: matcher, ts_ops (C++ accelerated) [CLAUDE.md](ez/core/CLAUDE.md)
@@ -21,7 +21,7 @@ Version: 0.2.8 | Tests: 980 | C++ acceleration: up to 7.9x
 - `ez/api/` — FastAPI REST endpoints [CLAUDE.md](ez/api/CLAUDE.md)
 - `web/` — React frontend dashboard [CLAUDE.md](web/CLAUDE.md)
 - `ez/llm/` — LLM provider abstraction: DeepSeek/Qwen/Local/OpenAI (V2.7) [CLAUDE.md](ez/llm/CLAUDE.md)
-- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter, Tools, Assistant, Sandbox, FDR [CLAUDE.md](ez/agent/CLAUDE.md)
+- `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter, Tools, Assistant, Sandbox, FDR + V2.8 Research Agent (Hypothesis, CodeGen, Analyzer, LoopController, ResearchRunner, ResearchStore, ResearchReport) [CLAUDE.md](ez/agent/CLAUDE.md)
 - `ez/live/` — Deploy Gate, OMS, Broker (V2.6+, planned)
 - `ez/ops/` — Scheduling, monitoring, audit (V3.2+, planned)
 
@@ -78,8 +78,8 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.7**: LLM + Web Coding Assistant — Monaco Editor, AI Chat (DeepSeek/Qwen/Local), Tool框架 (9 tools), 代码沙箱 (AST禁危险import/builtins/dunders), FDR 多重检验 (Bonferroni/BH), 全站中文化, 开发文档 (11章1497行), 设置面板 (LLM/Tushare), 多会话 Chat (localStorage持久化), 897 tests
 - **V2.7 post-release fixes**: 整手买入超预算修复, read_source 前缀校验, FDR None 容错, WF 参数校验, 热重载 pyc 清理, SPA API 404, bool 字符串解析, 凭证清空接口, 因子列名修正 (macd_line/boll_upper_20), 设置 YAML 持久化
 - **V2.7.1**: Stability — Chat async 化, Provider 连接池, ExperimentStore 合并, 多列因子评估, 路径穿越修复, 921 tests
-- **V2.8**: Autonomous Research Agent — 全自治策略探索 (E1假设生成+E2代码生成+E3批量回测+E4结果分析+E5循环控制+E6报告), ResearchStore持久化 (2张新表), SSE进度流, 研究助手前端, asyncio.Lock串行保护, cancel→cancelled状态机, 预算预检查, allowed_tools工具过滤, 1026 tests
-- **V2.8 post-release fixes**: 任务卡死(try/finally全包裹), 串行竞态(asyncio.Lock), 取消语义(cancelled≠completed), store连接泄漏(close实现), 预算硬约束(批前检查), LLM计数(保守估计), code_gen异常重试, best_strategies查询, SSE预注册, E2工具最小权限
+- **V2.8**: Autonomous Research Agent — 全自治策略探索 (E1假设生成+E2代码生成+E3批量回测+E4结果分析+E5循环控制+E6报告), ResearchStore持久化 (2张新表), SSE进度流+中文格式化, 研究助手前端 (目标表单+日期快捷+进度面板+报告), asyncio.Lock串行保护, cancel→cancelled状态机, 预算预检查, allowed_tools工具过滤, research_前缀隔离+注册到全局, 代码编辑器(一键新建+文件绑定对话+分组侧栏), 实验列表回测区间列, 开发文档大更新(12章1658行), 1050 tests
+- **V2.8 post-release fixes**: 任务卡死(try/finally全包裹), 串行竞态(asyncio.Lock原子), 取消语义(cancelled≠completed), store连接泄漏(close实现), 预算硬约束(批前检查), LLM计数(保守估计), code_gen异常重试, best_strategies查询Top5, SSE预注册, E2工具最小权限, TS构建修复(删未用变量), 默认策略取过滤后数组, promote文件名校验+422错误码, 隔离改用key.includes('research_'), promote测试4条, 开发文档+161行
 - **Next: V2.8.1** — Stability
 
 ## Known Limitations (V2.8.1 跟进)
