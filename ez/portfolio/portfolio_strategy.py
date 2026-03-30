@@ -16,7 +16,17 @@ from ez.portfolio.cross_factor import CrossSectionalFactor
 
 
 class PortfolioStrategy(ABC):
-    """Base class for portfolio strategies."""
+    """Base class for portfolio strategies.
+
+    Subclasses auto-register via __init_subclass__. Access registry via _registry.
+    """
+
+    _registry: dict[str, type] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if not getattr(cls, '__abstractmethods__', None):
+            PortfolioStrategy._registry[cls.__name__] = cls
 
     def __init__(self, **params):
         self.state: dict = {}
