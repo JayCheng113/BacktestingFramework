@@ -28,6 +28,35 @@ class TestBuildSummary:
         summary = _build_summary(batch, [])
         assert "0" in summary
 
+    def test_with_failure_reasons(self):
+        """Extracts gate_reasons from failed candidates."""
+        c = MagicMock()
+        c.gate_passed = False
+        c.report = MagicMock()
+        c.report.gate_reasons = [
+            {"rule": "min_sharpe", "passed": False, "message": "Sharpe=0.1 < 0.5"},
+        ]
+        batch = MagicMock(passed=[], executed=1, candidates=[c])
+        summary = _build_summary(batch, ["h1"])
+        assert "Sharpe=0.1" in summary
+
+    def test_candidate_no_report(self):
+        """Candidate with report=None should not crash."""
+        c = MagicMock()
+        c.gate_passed = False
+        c.report = None
+        batch = MagicMock(passed=[], executed=1, candidates=[c])
+        summary = _build_summary(batch, [])
+        assert "0" in summary  # no crash
+
+    def test_truncates_hypotheses(self):
+        """Long hypothesis texts are truncated to 60 chars."""
+        batch = MagicMock(passed=[], executed=0, candidates=[])
+        long_h = "a" * 100
+        summary = _build_summary(batch, [long_h])
+        assert "a" * 60 in summary
+        assert "a" * 100 not in summary
+
 
 class TestAnalyzeResults:
     @pytest.mark.asyncio

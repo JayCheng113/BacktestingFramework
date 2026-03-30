@@ -100,3 +100,40 @@ class TestUpdate:
         new = ctrl.update(state, self._mock_batch(1, 4, 1.2), llm_calls_this_round=6)
         assert new.no_improve_streak == 0
         assert new.best_sharpe == 1.2
+
+    def test_update_preserves_cancelled(self):
+        ctrl = LoopController(LoopConfig())
+        state = LoopState(cancelled=True)
+        new = ctrl.update(state, self._mock_batch(0, 1), llm_calls_this_round=1)
+        assert new.cancelled is True
+
+    def test_update_accumulates_across_iterations(self):
+        ctrl = LoopController(LoopConfig())
+        s = LoopState()
+        s = ctrl.update(s, self._mock_batch(1, 5, 1.0), llm_calls_this_round=3)
+        s = ctrl.update(s, self._mock_batch(2, 3, 1.5), llm_calls_this_round=4)
+        assert s.iteration == 2
+        assert s.specs_executed == 8
+        assert s.llm_calls == 7
+        assert s.gate_passed_total == 3
+        assert s.best_sharpe == 1.5
+
+
+class TestStopPrecedence:
+    """Cancel takes precedence over all other stop conditions."""
+
+    def test_cancel_over_budget(self):
+        ctrl = LoopController(LoopConfig(max_iterations=1))
+        state = LoopState(cancelled=True, iteration=5)
+        ok, reason = ctrl.should_continue(state)
+        assert "取消" in reason
+
+    def test_boundary_just_under_limit(self):
+        ctrl = LoopController(LoopConfig(max_iterations=10))
+        ok, _ = ctrl.should_continue(LoopState(iteration=9))
+        assert ok is True
+
+    def test_boundary_at_limit(self):
+        ctrl = LoopController(LoopConfig(max_iterations=10))
+        ok, _ = ctrl.should_continue(LoopState(iteration=10))
+        assert ok is False

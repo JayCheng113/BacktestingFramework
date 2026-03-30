@@ -86,3 +86,29 @@ class TestIterations:
         assert len(iters) == 3
         assert iters[0]["iteration"] == 0
         assert iters[2]["iteration"] == 2
+
+    def test_get_iterations_nonexistent_task(self, store):
+        assert store.get_iterations("nope") == []
+
+
+class TestStoreEdgeCases:
+    def test_update_nonexistent_task(self, store):
+        """Updating non-existent task is a silent no-op (no error)."""
+        store.update_task_status("nope", "completed")
+        assert store.get_task("nope") is None
+
+    def test_duplicate_task_id_raises(self, store):
+        """Duplicate task_id should raise."""
+        store.save_task({"task_id": "t1", "goal": "a", "config": "{}", "status": "running",
+                         "created_at": datetime.now().isoformat()})
+        with pytest.raises(Exception):
+            store.save_task({"task_id": "t1", "goal": "b", "config": "{}", "status": "running",
+                             "created_at": datetime.now().isoformat()})
+
+    def test_update_to_running_no_completed_at(self, store):
+        store.save_task({"task_id": "t1", "goal": "test", "config": "{}",
+                         "status": "pending", "created_at": datetime.now().isoformat()})
+        store.update_task_status("t1", "running")
+        task = store.get_task("t1")
+        assert task["status"] == "running"
+        assert task["completed_at"] is None
