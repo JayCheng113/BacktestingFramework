@@ -513,12 +513,13 @@ export default function PortfolioPanel() {
                   tooltip: { trigger: 'axis' as const },
                   legend: { data: evalResult.results.map((r: any) => r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
                   grid: { left: 60, right: 20, top: 50, bottom: 30 },
-                  xAxis: { type: 'category' as const, data: evalResult.results[0].eval_dates.map((d: string) => d.slice(0, 10)), axisLabel: { color: '#8b949e', rotate: 30, fontSize: 9 } },
+                  xAxis: { type: 'time' as const, axisLabel: { color: '#8b949e', fontSize: 9 } },
                   yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
                   color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
                   series: evalResult.results.map((r: any) => ({
                     name: r.factor_name, type: 'line' as const,
-                    data: r.rank_ic_series, showSymbol: false,
+                    data: (r.eval_dates || []).map((d: string, i: number) => [d, r.rank_ic_series?.[i] ?? 0]),
+                    showSymbol: false,
                   })),
                 }} style={{ height: 250 }} />
               )}

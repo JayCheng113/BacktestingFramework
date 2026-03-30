@@ -268,8 +268,9 @@ def compute_factor_correlation(
         return pd.DataFrame(np.eye(len(factors)), index=names, columns=names)
 
 
-    # Collect factor scores across dates
-    all_scores: dict[str, list[pd.Series]] = {f.name: [] for f in factors}
+    # Collect factor scores keyed by (eval_date, factor_name) → aligned Series
+    # Only store dates where ALL factors have data on common symbols
+    date_aligned: list[dict[str, pd.Series]] = []
 
     for eval_date in eval_dates:
         sliced = slice_universe_data(universe_data, eval_date, lookback_days)
@@ -285,16 +286,16 @@ def compute_factor_correlation(
         if len(date_scores) < 2:
             continue
 
-        # Align all factors to common symbols
+        # Align all available factors to common symbols
         common = set.intersection(*[set(s.index) for s in date_scores.values()])
         if len(common) < 5:
             continue
 
         common_sorted = sorted(common)
-        for fname, s in date_scores.items():
-            all_scores[fname].append(s[common_sorted])
+        aligned = {fname: s[common_sorted] for fname, s in date_scores.items()}
+        date_aligned.append(aligned)
 
-    # Compute pairwise rank correlations
+    # Compute pairwise rank correlations using date-aligned data
     names = [f.name for f in factors]
     n = len(names)
     corr_matrix = np.eye(n)
@@ -302,13 +303,15 @@ def compute_factor_correlation(
     for i in range(n):
         for j in range(i + 1, n):
             corrs = []
-            si_list = all_scores[names[i]]
-            sj_list = all_scores[names[j]]
-            for si, sj in zip(si_list, sj_list):
-                if len(si) >= 5:
-                    c = stats.spearmanr(si.values, sj.values).statistic
-                    if not np.isnan(c):
-                        corrs.append(c)
+            for aligned in date_aligned:
+                # Only use dates where BOTH factors i and j have data
+                if names[i] in aligned and names[j] in aligned:
+                    si = aligned[names[i]]
+                    sj = aligned[names[j]]
+                    if len(si) >= 5:
+                        c = stats.spearmanr(si.values, sj.values).statistic
+                        if not np.isnan(c):
+                            corrs.append(c)
             avg_corr = float(np.mean(corrs)) if corrs else 0.0
             corr_matrix[i, j] = avg_corr
             corr_matrix[j, i] = avg_corr

@@ -92,8 +92,8 @@ def portfolio_walk_forward(
         )
 
     result = PortfolioWFResult(n_splits=n_splits)
-    all_oos_equity: list[float] = []
-    all_oos_dates: list[str] = []
+    # Chain OOS equity: each fold continues from where the previous ended
+    chain_value = initial_cash
 
     for i in range(n_splits):
         win_start = i * window_size
@@ -139,11 +139,14 @@ def portfolio_walk_forward(
         result.is_returns.append(is_ret)
         result.oos_returns.append(oos_ret)
 
-        all_oos_equity.extend(oos_result.equity_curve)
-        all_oos_dates.extend(d.isoformat() for d in oos_result.dates)
-
-    result.oos_equity_curve = all_oos_equity
-    result.oos_dates = all_oos_dates
+        # Chain OOS equity curve: normalize fold equity to continue from chain_value
+        if oos_result.equity_curve:
+            fold_start = oos_result.equity_curve[0]
+            if fold_start > 0:
+                for eq in oos_result.equity_curve:
+                    result.oos_equity_curve.append(chain_value * eq / fold_start)
+                chain_value = result.oos_equity_curve[-1]  # next fold starts here
+            result.oos_dates.extend(d.isoformat() for d in oos_result.dates)
 
     # Aggregate
     if result.is_sharpes:
@@ -151,9 +154,13 @@ def portfolio_walk_forward(
         oos_mean = np.mean(result.oos_sharpes)
         result.degradation = float((is_mean - oos_mean) / abs(is_mean)) if abs(is_mean) > 1e-10 else 0.0
         result.overfitting_score = max(0.0, result.degradation)
+        # Compound OOS total return: product of (1 + fold_return) - 1
+        compound_ret = 1.0
+        for r in result.oos_returns:
+            compound_ret *= (1 + r)
         result.oos_metrics = {
             "sharpe_ratio": float(oos_mean),
-            "total_return": float(np.mean(result.oos_returns)),
+            "total_return": float(compound_ret - 1),
         }
 
     return result
@@ -166,10 +173,10 @@ def portfolio_significance(
     n_permutations: int = 1000,
     seed: int | None = None,
 ) -> PortfolioSignificanceResult:
-    """Bootstrap CI + Monte Carlo permutation test for portfolio equity curve.
+    """Bootstrap CI + Monte Carlo hypothesis test for portfolio equity curve.
 
-    Tests whether the portfolio's Sharpe ratio is statistically significant
-    by comparing against randomly shuffled daily returns.
+    Null hypothesis: strategy has no alpha (expected excess return = 0).
+    Method: Bootstrap resampling from mean-centered excess returns.
     """
     eq = np.array(equity_curve)
     if len(eq) < 20:
@@ -184,7 +191,7 @@ def portfolio_significance(
     observed = _sharpe(returns, daily_rf)
     rng = np.random.default_rng(seed)
 
-    # Bootstrap CI
+    # Bootstrap CI (resample WITH replacement — changes mean/std)
     boot = np.array([
         _sharpe(rng.choice(returns, size=len(returns), replace=True), daily_rf)
         for _ in range(n_bootstrap)
@@ -192,12 +199,14 @@ def portfolio_significance(
     ci_lower = float(np.percentile(boot, 2.5))
     ci_upper = float(np.percentile(boot, 97.5))
 
-    # Monte Carlo: permute returns
-    perm = np.array([
-        _sharpe(rng.permutation(returns), daily_rf)
+    # Monte Carlo under null: excess returns centered at 0 (no alpha)
+    excess = returns - daily_rf
+    centered = excess - np.mean(excess)  # mean = 0 under null
+    null_sharpes = np.array([
+        _sharpe_raw(rng.choice(centered, size=len(centered), replace=True))
         for _ in range(n_permutations)
     ])
-    p_value = float(np.mean(perm >= observed))
+    p_value = float(np.mean(null_sharpes >= observed))
 
     return PortfolioSignificanceResult(
         sharpe_ci_lower=ci_lower,
@@ -206,3 +215,11 @@ def portfolio_significance(
         is_significant=p_value < 0.05,
         observed_sharpe=observed,
     )
+
+
+def _sharpe_raw(excess_returns: np.ndarray) -> float:
+    """Sharpe from already-excess returns (no rf subtraction)."""
+    std = float(np.std(excess_returns))
+    if std < 1e-10:
+        return 0.0
+    return float(np.mean(excess_returns) / std * np.sqrt(252))
