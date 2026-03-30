@@ -148,13 +148,14 @@ class MomentumRank(CrossSectionalFactor):
     def warmup_period(self) -> int:
         return self._period
 
-    def compute(self, universe_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-        returns = pd.DataFrame({
-            sym: df["adj_close"].pct_change(self._period)
-            for sym, df in universe_data.items()
-        })
-        # 横截面排名：每天对所有股票排名 (0=最差, 1=最好)
-        return returns.rank(axis=1, pct=True)
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        # universe_data 已切片至 date-1，取每只证券最后 _period 天的收益率
+        scores = {}
+        for sym, df in universe_data.items():
+            if len(df) < self._period:
+                continue
+            scores[sym] = (df["adj_close"].iloc[-1] - df["adj_close"].iloc[-self._period]) / df["adj_close"].iloc[-self._period]
+        return pd.Series(scores).rank(pct=True)
 
 
 class VolumeRank(CrossSectionalFactor):
@@ -171,12 +172,13 @@ class VolumeRank(CrossSectionalFactor):
     def warmup_period(self) -> int:
         return self._period
 
-    def compute(self, universe_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-        avg_vol = pd.DataFrame({
-            sym: df["volume"].rolling(self._period).mean()
-            for sym, df in universe_data.items()
-        })
-        return avg_vol.rank(axis=1, pct=True)
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        scores = {}
+        for sym, df in universe_data.items():
+            if len(df) < self._period:
+                continue
+            scores[sym] = df["volume"].iloc[-self._period:].mean()
+        return pd.Series(scores).rank(pct=True)
 
 
 class ReverseVolatilityRank(CrossSectionalFactor):
@@ -193,13 +195,14 @@ class ReverseVolatilityRank(CrossSectionalFactor):
     def warmup_period(self) -> int:
         return self._period + 1
 
-    def compute(self, universe_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-        vol = pd.DataFrame({
-            sym: df["adj_close"].pct_change().rolling(self._period).std()
-            for sym, df in universe_data.items()
-        })
-        # 波动率越低排名越高
-        return (-vol).rank(axis=1, pct=True)
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        scores = {}
+        for sym, df in universe_data.items():
+            if len(df) < self._period + 1:
+                continue
+            vol = df["adj_close"].pct_change().iloc[-self._period:].std()
+            scores[sym] = -vol  # 低波动 → 高分
+        return pd.Series(scores).rank(pct=True)
 ```
 
 ### 3.3 PortfolioStrategy — 组合策略
@@ -223,16 +226,17 @@ class PortfolioStrategy(ABC):
     @abstractmethod
     def generate_weights(
         self,
-        universe_data: dict[str, pd.DataFrame],
-        factor_scores: dict[str, pd.DataFrame],
-    ) -> pd.DataFrame:
+        universe_data: dict[str, pd.DataFrame],  # 已切片至 [date-lookback, date-1]
+        date: datetime,                           # 当前调仓日
+        prev_weights: dict[str, float],           # 上期实际权重（引擎回传）
+        prev_returns: dict[str, float],           # 上期各资产收益（引擎回传）
+    ) -> dict[str, float]:
         """
-        Input:
-          universe_data: {symbol: OHLCV DataFrame}
-          factor_scores: {factor_name: DataFrame(dates × symbols)}
-        Output:
-          DataFrame, index=dates, columns=symbols, values=target weights
-          每行权重和 <= 1.0（剩余为现金）
+        返回目标权重 {symbol: weight}。
+        - universe_data 由引擎切片，最后一行 ≤ date-1（策略看不到当日及未来数据）
+        - self.state 可自由维护跨周期状态
+        - 权重 >= 0（long-only），和 <= 1.0（剩余为现金）
+        NOTE: 旧版全矩阵接口已废弃，改为逐调仓日调用（与 v2.3-roadmap.md 一致）。
         """
         ...
 
@@ -244,24 +248,21 @@ class TopNRotation(PortfolioStrategy):
     """
 
     def __init__(self, factor: CrossSectionalFactor, top_n: int = 10):
+        super().__init__()
         self._factor = factor
         self._top_n = top_n
 
     def required_cross_factors(self) -> list[CrossSectionalFactor]:
         return [self._factor]
 
-    def generate_weights(self, universe_data, factor_scores) -> pd.DataFrame:
-        scores = factor_scores[self._factor.name]
-        weights = pd.DataFrame(0.0, index=scores.index, columns=scores.columns)
-
-        for date in scores.index:
-            row = scores.loc[date].dropna()
-            if len(row) < self._top_n:
-                continue
-            top = row.nlargest(self._top_n).index
-            weights.loc[date, top] = 1.0 / self._top_n
-
-        return weights
+    def generate_weights(self, universe_data, date, prev_weights, prev_returns) -> dict[str, float]:
+        scores = self._factor.compute(universe_data, date)
+        valid = scores.dropna()
+        if len(valid) < self._top_n:
+            return {}
+        top = valid.nlargest(self._top_n).index
+        w = 1.0 / self._top_n
+        return {sym: w for sym in top}
 ```
 
 ### 3.4 Allocator — 权重分配器
@@ -399,8 +400,10 @@ class PortfolioEngine:
 
             # 3. 换仓日：调整到目标权重
             if day in rebalance_dates:
-                # 前瞻偏差防护：使用 day-1 的因子/权重做决策
-                target = weights.shift(1).loc[day]  # ← shift(1) 防前瞻
+                # 前瞻偏差防护：引擎切片 universe_data 至 [day-lookback, day-1]
+                # 策略函数物理上看不到 day 及之后数据（不依赖 shift(1)）
+                sliced = slice_data(universe_data, day, strategy.lookback_days)
+                target = strategy.generate_weights(sliced, day, actual_weights, prev_returns)
                 turnover = sum(|target[s] - actual_weights[s]|) / 2
                 cost = turnover * portfolio_value * commission_rate
                 actual_weights = target
@@ -411,7 +414,7 @@ class PortfolioEngine:
             portfolio_value *= (1 + daily_return)
 
         关键设计点:
-        - shift(1) 确保换仓日使用前一日信号（防前瞻偏差，与单股引擎一致）
+        - 引擎切片 universe_data 至 day-1（防前瞻偏差，不依赖 shift(1)）
         - 非换仓日权重随价格漂移（涨的股占比自然增大）
         - 停牌股 NaN 收益 → 0（价格不变，权重保持）
         - 换仓时跳过无数据/停牌股票
@@ -667,7 +670,7 @@ Layer 1: ez/core/ (不动)
 - P2. CrossSectionalFactor ABC + MomentumRank, VolumeRank, ReverseVolatilityRank
 - P3. PortfolioStrategy ABC + TopNRotation（接收因子实例）+ MultiFactorRotation
 - P4. Allocator — EqualWeight, MaxWeight, RiskParity
-- P5. PortfolioEngine — 逐日模拟（权重漂移 + shift(1) 防前瞻 + 换仓成本）
+- P5. PortfolioEngine — 逐日模拟（权重漂移 + 引擎切片防前瞻 + 离散股数记账 + 换仓成本）
 - P6. 组合级指标（换手率 / 集中度 / 归因 / vs 基准）
 - P7. 组合 API (`/api/portfolio/`) + 持久化（新 DuckDB 表）
 - P8. 前端 Portfolio 页面（股票池 + 策略配置 + 净值曲线 + 持仓分析）
@@ -713,7 +716,7 @@ Layer 1: ez/core/ (不动)
 
 | # | 问题 | 严重度 | 修复 |
 |---|------|--------|------|
-| 1 | generate_weights 接收全量数据，无前瞻偏差防护 | P0 | PortfolioEngine 在换仓日对 weights 做 shift(1)，与单股引擎一致 |
+| 1 | generate_weights 接收全量数据，无前瞻偏差防护 | P0 | 引擎切片 universe_data 至 date-1（Codex 审计 #2 修正，不依赖 shift(1)） |
 | 2 | Phase 1 没有截面因子无法做轮动 | P1 | 合并 Phase 1+2 为单次交付 |
 | 3 | "加权聚合"描述模糊，缺逐日模拟伪代码 | P1 | 补充完整伪代码，区分目标权重/实际权重/漂移 |
 | 4 | 静态股票池 + NaN 处理未定义 | P1 | 新增"已知局限"章节，定义 NaN→0 规则 |
