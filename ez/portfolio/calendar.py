@@ -78,16 +78,23 @@ class TradingCalendar:
 
     # ── Rebalance dates ────────────────────────────────────────────────
 
+    _VALID_FREQS = {"daily", "weekly", "monthly", "quarterly"}
+
     def rebalance_dates(
         self, start: date, end: date, freq: RebalanceFreq,
     ) -> list[date]:
         """Compute rebalance dates within [start, end].
+
+        Raises ValueError for unrecognized freq.
 
         - daily: every trading day
         - weekly: last trading day of each calendar week
         - monthly: last trading day of each calendar month
         - quarterly: last trading day of each calendar quarter
         """
+        if freq not in self._VALID_FREQS:
+            raise ValueError(f"Invalid freq '{freq}'. Must be one of: {sorted(self._VALID_FREQS)}")
+
         days = self.trading_days_between(start, end)
         if not days:
             return []

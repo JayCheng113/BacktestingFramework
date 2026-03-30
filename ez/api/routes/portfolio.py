@@ -73,11 +73,11 @@ def _create_strategy(name: str, params: dict) -> PortfolioStrategy:
         raise HTTPException(404, f"Strategy '{name}' not found")
 
 
-def _fetch_data(symbols: list[str], market: str, start: date, end: date):
+def _fetch_data(symbols: list[str], market: str, start: date, end: date, lookback_days: int = 252):
     """Fetch kline data for all symbols, build calendar from actual trading days."""
     chain = get_chain()
-    # Add lookback buffer
-    fetch_start = start - timedelta(days=400)
+    # Add lookback buffer (1.6x to account for weekends/holidays)
+    fetch_start = start - timedelta(days=int(lookback_days * 1.6))
 
     universe_data = {}
     all_dates = set()
@@ -145,7 +145,7 @@ def run_portfolio(req: PortfolioRunRequest):
 
     strategy = _create_strategy(req.strategy_name, req.strategy_params)
     universe = Universe(req.symbols)
-    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end)
+    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy.lookback_days)
 
     cost_model = CostModel(
         commission_rate=req.commission_rate,

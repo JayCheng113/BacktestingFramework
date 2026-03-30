@@ -170,9 +170,11 @@ def run_portfolio_backtest(
                     # Buy: need cash
                     total_buy = amount + total_cost
                     if total_buy > cash:
-                        # Reduce shares to fit budget (estimate per-share cost)
-                        per_share_cost = price * (cost_model.commission_rate + cost_model.slippage_rate)
-                        affordable = cash / (price + per_share_cost) if price > 0 else 0
+                        # Reduce shares to fit budget (include min_commission in estimate)
+                        min_cost = max(cost_model.min_commission, 0)
+                        affordable = (cash - min_cost) / (price * (1 + cost_model.commission_rate + cost_model.slippage_rate)) if price > 0 else 0
+                        if affordable <= 0:
+                            continue  # can't even afford min_commission
                         tgt = cur + _lot_round(affordable, lot_size)
                         delta = tgt - cur
                         if delta <= 0:
@@ -182,8 +184,10 @@ def run_portfolio_backtest(
                         total_cost = comm + amount * cost_model.slippage_rate
                         total_buy = amount + total_cost
 
+                    # Final guard: skip if still over budget (min_commission rounding)
+                    if total_buy > cash + EPS_FUND:
+                        continue
                     cash -= total_buy
-                    assert cash >= -EPS_FUND, f"Cash went negative: {cash}"
                     holdings[sym] = tgt
                 else:
                     # Sell: receive cash minus costs

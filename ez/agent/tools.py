@@ -460,6 +460,10 @@ def run_portfolio_backtest_tool(
     start_date: str, end_date: str,
     freq: str = "monthly", strategy_params: dict | None = None,
 ) -> dict:
+    valid_freqs = {"daily", "weekly", "monthly", "quarterly"}
+    if freq not in valid_freqs:
+        return {"error": f"Invalid freq '{freq}'. Must be one of: {sorted(valid_freqs)}"}
+
     from datetime import date, timedelta
     import numpy as np
     import pandas as pd
@@ -500,7 +504,7 @@ def run_portfolio_backtest_tool(
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
     chain = get_chain()
-    fetch_start = start - timedelta(days=400)
+    fetch_start = start - timedelta(days=int(strategy.lookback_days * 1.6))
 
     universe_data = {}
     all_dates = set()

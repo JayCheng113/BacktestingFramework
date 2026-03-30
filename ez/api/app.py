@@ -20,6 +20,10 @@ from ez.strategy.loader import load_all_strategies
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     load_all_strategies()
+    # V2.9: load user portfolio strategies + cross factors
+    from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
+    load_portfolio_strategies()
+    load_cross_factors()
     # Pre-warm symbol cache in background (don't block startup)
     tushare = get_tushare_provider()
     if tushare:

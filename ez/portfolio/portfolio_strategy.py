@@ -75,6 +75,8 @@ class TopNRotation(PortfolioStrategy):
 
     def __init__(self, factor: CrossSectionalFactor, top_n: int = 10, **params):
         super().__init__(**params)
+        if top_n < 1:
+            raise ValueError(f"top_n must be >= 1, got {top_n}")
         self._factor = factor
         self._top_n = top_n
 
@@ -98,6 +100,8 @@ class MultiFactorRotation(PortfolioStrategy):
 
     def __init__(self, factors: list[CrossSectionalFactor], top_n: int = 10, **params):
         super().__init__(**params)
+        if top_n < 1:
+            raise ValueError(f"top_n must be >= 1, got {top_n}")
         self._factors = factors
         self._top_n = top_n
 
