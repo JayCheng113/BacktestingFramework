@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.9.1 | Tests: 1142 (1152 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.9.1 | Tests: 1146 (1156 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -94,7 +94,7 @@ No version tag without review pass. No push without critical issues resolved.
 - 配对交易空腿、市场中性 — A 股不可行，推迟到 V3.x 有期货基础设施后考虑
 
 ## Known Limitations (后续版本跟进)
-- 单股引擎印花税近似 — stamp_tax 加到 commission_rate 两侧扣，A 股应该只卖方扣 (V2.10 精确化)
+- 单股引擎印花税 — 已改为 _SellSideTaxMatcher 卖方 only (V2.9.1 修复)
 - 研究任务不支持进程恢复 (crash recovery)
 - 研究任务串行 (同时只跑 1 个)
 - 数据源链扁平去重而非按市场独立路由

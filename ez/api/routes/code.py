@@ -74,9 +74,11 @@ def save_code(req: SaveRequest):
 
 @router.get("/files")
 def list_files(kind: str = Query(default="")):
-    """List user code files. kind: empty=strategies, portfolio_strategy, cross_factor."""
+    """List user code files. kind: empty/strategy/factor=strategies, portfolio_strategy, cross_factor."""
     if kind in ("portfolio_strategy", "cross_factor"):
         return list_portfolio_files(kind)
+    if kind and kind not in ("", "strategy", "factor"):
+        raise HTTPException(status_code=422, detail=f"Invalid kind: {kind}. Must be one of: strategy, factor, portfolio_strategy, cross_factor")
     return list_user_strategies()
 
 

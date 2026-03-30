@@ -108,6 +108,12 @@ def run_portfolio_backtest(
             dates_list.append(d)
             adj_list.append(float(df.iloc[i]["adj_close"]) if has_adj else float(df.iloc[i]["close"]))
             raw_list.append(float(df.iloc[i]["close"]))
+        # Ensure sorted for bisect correctness (guard against unsorted input)
+        if dates_list != sorted(dates_list):
+            order = sorted(range(len(dates_list)), key=lambda i: dates_list[i])
+            dates_list = [dates_list[i] for i in order]
+            adj_list = [adj_list[i] for i in order]
+            raw_list = [raw_list[i] for i in order]
         _sym_data[sym] = (dates_list, adj_list, raw_list, set(dates_list))
 
     for day in trading_days:
@@ -197,9 +203,9 @@ def run_portfolio_backtest(
                 # A-share 涨跌停检查 (C1: use raw close, not adj_close)
                 if limit_pct > 0 and sym in raw_close_today and sym in prev_raw_close:
                     change = (raw_close_today[sym] - prev_raw_close[sym]) / prev_raw_close[sym] if prev_raw_close[sym] > 0 else 0
-                    if delta > 0 and change >= limit_pct - 0.001:
+                    if delta > 0 and change >= limit_pct - 1e-6:
                         continue  # 涨停不可买
-                    if delta < 0 and change <= -limit_pct + 0.001:
+                    if delta < 0 and change <= -limit_pct + 1e-6:
                         continue  # 跌停不可卖
 
                 price = prices[sym]

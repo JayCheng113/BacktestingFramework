@@ -111,8 +111,9 @@ export default function PortfolioPanel() {
     const value = strategyParams[key] ?? schema.default
 
     if (schema.type === 'select') {
-      // Use available_factors as options
-      const options = factors.length > 0 ? factors : [String(schema.default)]
+      // Use schema.options if provided, otherwise fall back to available_factors
+      const options: string[] = Array.isArray((schema as any).options) ? (schema as any).options
+        : factors.length > 0 ? factors : [String(schema.default)]
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
@@ -124,8 +125,9 @@ export default function PortfolioPanel() {
     }
 
     if (schema.type === 'multi_select') {
-      // Render as comma-separated input (simple for now)
-      const options = factors.length > 0 ? factors : []
+      // Use schema.options if provided, otherwise fall back to available_factors
+      const options: string[] = Array.isArray((schema as any).options) ? (schema as any).options
+        : factors.length > 0 ? factors : []
       const selected_vals: string[] = Array.isArray(value) ? value : [String(value)]
       return (
         <div key={key} className="flex flex-col gap-1">
@@ -154,7 +156,7 @@ export default function PortfolioPanel() {
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
           <input type="number" value={value} min={schema.min} max={schema.max}
-            onChange={e => updateParam(key, parseInt(e.target.value) || schema.default)}
+            onChange={e => { const v = parseInt(e.target.value); updateParam(key, isNaN(v) ? schema.default : v) }}
             className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
         </div>
       )
@@ -165,7 +167,7 @@ export default function PortfolioPanel() {
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
           <input type="number" value={value} min={schema.min} max={schema.max} step={0.01}
-            onChange={e => updateParam(key, parseFloat(e.target.value) || schema.default)}
+            onChange={e => { const v = parseFloat(e.target.value); updateParam(key, isNaN(v) ? schema.default : v) }}
             className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
         </div>
       )

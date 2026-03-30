@@ -10,12 +10,38 @@ from pydantic import BaseModel, Field
 from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
 from ez.config import load_config
-from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
+from ez.core.matcher import FillResult, Matcher, SimpleMatcher, SlippageMatcher
 from ez.core.market_rules import MarketRulesMatcher
 from ez.backtest.walk_forward import WalkForwardValidator
 from ez.strategy.base import Strategy
 
 router = APIRouter()
+
+
+class _SellSideTaxMatcher(Matcher):
+    """Wrapper: adds sell-side stamp tax without modifying core Matcher.
+
+    A-share stamp tax is charged only on sells (0.05%).
+    """
+
+    def __init__(self, inner: Matcher, stamp_tax_rate: float):
+        self._inner = inner
+        self._tax = stamp_tax_rate
+
+    def fill_buy(self, price: float, amount: float) -> FillResult:
+        return self._inner.fill_buy(price, amount)
+
+    def fill_sell(self, price: float, shares: float) -> FillResult:
+        result = self._inner.fill_sell(price, shares)
+        if result.shares <= 0:
+            return result
+        tax = result.shares * result.fill_price * self._tax
+        return FillResult(
+            shares=result.shares,
+            fill_price=result.fill_price,
+            commission=result.commission + tax,
+            net_amount=result.net_amount - tax,
+        )
 
 
 class BacktestRequest(BaseModel):
@@ -66,16 +92,17 @@ def _build_matcher(req: BacktestRequest) -> Matcher:
     config = load_config()
     comm_rate = req.commission_rate if req.commission_rate is not None else config.backtest.default_commission_rate
     min_comm = req.min_commission if req.min_commission is not None else config.backtest.default_min_commission
-    # Stamp tax: add to commission rate as approximation (SimpleMatcher has single rate)
-    effective_rate = comm_rate + req.stamp_tax_rate
     if req.slippage_rate > 0:
         inner: Matcher = SlippageMatcher(
             slippage_rate=req.slippage_rate,
-            commission_rate=effective_rate,
+            commission_rate=comm_rate,
             min_commission=min_comm,
         )
     else:
-        inner = SimpleMatcher(commission_rate=effective_rate, min_commission=min_comm)
+        inner = SimpleMatcher(commission_rate=comm_rate, min_commission=min_comm)
+    # Sell-side stamp tax wrapper (A-share: 0.05%)
+    if req.stamp_tax_rate > 0:
+        inner = _SellSideTaxMatcher(inner, stamp_tax_rate=req.stamp_tax_rate)
     # Wrap with MarketRulesMatcher if A-share rules requested
     if req.lot_size > 0 or req.limit_pct > 0:
         inner = MarketRulesMatcher(
