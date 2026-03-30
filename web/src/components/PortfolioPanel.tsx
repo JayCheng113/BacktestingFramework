@@ -12,7 +12,7 @@ interface PortfolioMetrics {
 
 interface PortfolioRunResult {
   run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
-  dates: string[]; trades: any[]; rebalance_dates: string[]
+  benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
 }
 
 interface HistoryRun {
@@ -31,6 +31,7 @@ export default function PortfolioPanel() {
   const [topN, setTopN] = useState(3)
   const [factor, setFactor] = useState('momentum_rank_20')
   const [commission, setCommission] = useState(0.0003)
+  const [benchmark, setBenchmark] = useState('510300.SH')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
@@ -59,6 +60,7 @@ export default function PortfolioPanel() {
         start_date: startDate, end_date: endDate, freq,
         strategy_params: { top_n: topN, factor },
         commission_rate: commission, stamp_tax_rate: 0.0005,
+        benchmark_symbol: benchmark,
       })
       setResult(res.data)
       loadHistory()
@@ -76,15 +78,21 @@ export default function PortfolioPanel() {
     backgroundColor: '#0d1117',
     title: { text: '组合净值曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' as const },
-    grid: { left: 70, right: 20, top: 40, bottom: 30 },
+    legend: { data: ['组合', benchmark ? `基准(${benchmark})` : '基准(现金)'], textStyle: { color: '#8b949e' }, top: 25 },
+    grid: { left: 70, right: 20, top: 55, bottom: 30 },
     xAxis: { type: 'category' as const, data: result.dates.map(d => d.slice(0, 10)), axisLabel: { color: '#8b949e', rotate: 30, fontSize: 9 } },
     yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-    series: [{ type: 'line' as const, data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false }],
+    series: [
+      { name: '组合', type: 'line' as const, data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
+      { name: benchmark ? `基准(${benchmark})` : '基准(现金)', type: 'line' as const, data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' as const }, showSymbol: false },
+    ],
   } : null
 
   const metricLabels: Record<string, string> = {
     total_return: '总收益', annualized_return: '年化收益', sharpe_ratio: '夏普比率',
-    max_drawdown: '最大回撤', trade_count: '交易次数', turnover_per_rebalance: '换手率/次',
+    sortino_ratio: 'Sortino', max_drawdown: '最大回撤', max_drawdown_duration: '回撤持续(天)',
+    benchmark_return: '基准收益', alpha: 'Alpha', beta: 'Beta',
+    trade_count: '交易次数', turnover_per_rebalance: '换手率/次',
     annualized_volatility: '年化波动', n_rebalances: '换仓次数',
   }
 
@@ -138,6 +146,10 @@ export default function PortfolioPanel() {
               <div className="flex flex-col gap-1">
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>手续费率</label>
                 <input type="number" value={commission} step={0.0001} min={0} onChange={e => setCommission(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>基准 (留空=现金)</label>
+                <input type="text" value={benchmark} onChange={e => setBenchmark(e.target.value)} placeholder="510300.SH" className="px-3 py-1.5 rounded text-sm w-28" style={inputStyle} />
               </div>
             </div>
             <div className="mb-3">

@@ -36,6 +36,7 @@ class CostModel:
 class PortfolioResult:
     """Output of a portfolio backtest."""
     equity_curve: list[float] = field(default_factory=list)
+    benchmark_curve: list[float] = field(default_factory=list)
     dates: list[date] = field(default_factory=list)
     weights_history: list[dict[str, float]] = field(default_factory=list)
     trades: list[dict] = field(default_factory=list)
@@ -100,6 +101,7 @@ def run_portfolio_backtest(
     allocator: Allocator | None = None,
     lot_size: int = 100,
     limit_pct: float = 0.10,  # A-share 涨跌停 10% (科创板/创业板 20%)
+    benchmark_symbol: str = "",  # e.g. "510300.SH" for CSI300 ETF benchmark
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -127,7 +129,7 @@ def run_portfolio_backtest(
     for day in trading_days:
         tradeable = set(universe.tradeable_at(day))
 
-        # Get current prices (use last available close)
+        # Get current prices (prefer adj_close for split-adjusted equity tracking)
         prices: dict[str, float] = {}
         for sym in set(list(holdings.keys()) + list(tradeable)):
             if sym in universe_data:
@@ -137,8 +139,9 @@ def run_portfolio_backtest(
                 else:
                     mask = df.index <= day
                 valid = df.loc[mask]
-                if not valid.empty and "close" in valid.columns:
-                    p = valid["close"].iloc[-1]
+                if not valid.empty:
+                    price_col = "adj_close" if "adj_close" in valid.columns else "close"
+                    p = valid[price_col].iloc[-1]
                     if not (np.isnan(p) if isinstance(p, float) else False):
                         prices[sym] = float(p)
 
@@ -280,6 +283,27 @@ def run_portfolio_backtest(
 
         prev_prices = dict(prices)
 
+    # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
+    if benchmark_symbol and benchmark_symbol in universe_data:
+        bench_df = universe_data[benchmark_symbol]
+        price_col = "adj_close" if "adj_close" in bench_df.columns else "close"
+        for day in result.dates:
+            if isinstance(bench_df.index, pd.DatetimeIndex):
+                mask = bench_df.index.date <= day
+            else:
+                mask = bench_df.index <= day
+            valid = bench_df.loc[mask]
+            if not valid.empty:
+                first_price = bench_df.loc[bench_df.index >= bench_df.index[0], price_col].iloc[0]
+                if first_price > 0:
+                    result.benchmark_curve.append(float(initial_cash * valid[price_col].iloc[-1] / first_price))
+                else:
+                    result.benchmark_curve.append(initial_cash)
+            else:
+                result.benchmark_curve.append(initial_cash)
+    else:
+        result.benchmark_curve = [initial_cash] * len(result.dates)
+
     # Compute metrics
     if len(result.equity_curve) > 1:
         eq = np.array(result.equity_curve)
@@ -292,6 +316,36 @@ def run_portfolio_backtest(
         drawdown = (eq / np.maximum.accumulate(eq)) - 1
         max_dd = float(np.min(drawdown))
 
+        # Max drawdown duration
+        dd_dur = 0
+        max_dd_dur = 0
+        for dd_val in drawdown:
+            if dd_val < 0:
+                dd_dur += 1
+                max_dd_dur = max(max_dd_dur, dd_dur)
+            else:
+                dd_dur = 0
+
+        # Sortino ratio (downside deviation)
+        downside = returns[returns < 0]
+        downside_std = np.std(downside) * np.sqrt(252) if len(downside) > 1 else 0
+        sortino = ann_ret / downside_std if downside_std > 0 else 0
+
+        # Benchmark metrics
+        bench_ret = 0.0
+        alpha = 0.0
+        beta = 0.0
+        if len(result.benchmark_curve) == len(eq):
+            bench = np.array(result.benchmark_curve)
+            bench_returns = np.diff(bench) / bench[:-1]
+            bench_ret = bench[-1] / bench[0] - 1 if bench[0] > 0 else 0
+
+            # Alpha / Beta (CAPM)
+            if len(bench_returns) > 1 and np.std(bench_returns) > 0:
+                cov = np.cov(returns, bench_returns)
+                beta = float(cov[0, 1] / cov[1, 1]) if cov[1, 1] > 0 else 0
+                alpha = float(ann_ret - beta * (bench_ret / max(n_years, 0.01)))
+
         # Turnover (average per rebalance)
         total_trade_value = sum(t["shares"] * t["price"] for t in result.trades)
         avg_equity = np.mean(eq)
@@ -303,7 +357,12 @@ def run_portfolio_backtest(
             "annualized_return": ann_ret,
             "annualized_volatility": vol,
             "sharpe_ratio": sharpe,
+            "sortino_ratio": sortino,
             "max_drawdown": max_dd,
+            "max_drawdown_duration": max_dd_dur,
+            "benchmark_return": bench_ret,
+            "alpha": alpha,
+            "beta": beta,
             "trade_count": len(result.trades),
             "turnover_per_rebalance": turnover,
             "n_rebalances": n_rebal,

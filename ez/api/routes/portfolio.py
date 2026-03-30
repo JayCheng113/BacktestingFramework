@@ -44,6 +44,7 @@ class PortfolioRunRequest(BaseModel):
     stamp_tax_rate: float = 0.0005
     slippage_rate: float = 0.0
     lot_size: int = Field(default=100, ge=1)
+    benchmark_symbol: str = ""  # e.g. "510300.SH"
 
 
 def _create_strategy(name: str, params: dict) -> PortfolioStrategy:
@@ -154,11 +155,25 @@ def run_portfolio(req: PortfolioRunRequest):
         slippage_rate=req.slippage_rate,
     )
 
+    # If benchmark not in symbols, fetch it separately
+    if req.benchmark_symbol and req.benchmark_symbol not in universe_data:
+        try:
+            chain = get_chain()
+            fetch_start = start - timedelta(days=int(strategy.lookback_days * 1.6))
+            bars = chain.get_kline(req.benchmark_symbol, req.market, "daily", fetch_start, end)
+            if bars:
+                universe_data[req.benchmark_symbol] = pd.DataFrame([{
+                    "open": b.open, "high": b.high, "low": b.low,
+                    "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
+                } for b in bars], index=pd.DatetimeIndex([b.time for b in bars]))
+        except Exception:
+            pass
+
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,
         calendar=calendar, start=start, end=end, freq=req.freq,
         initial_cash=req.initial_cash, cost_model=cost_model,
-        lot_size=req.lot_size,
+        lot_size=req.lot_size, benchmark_symbol=req.benchmark_symbol,
     )
 
     # Sanitize NaN/Inf in metrics
@@ -189,8 +204,9 @@ def run_portfolio(req: PortfolioRunRequest):
         "run_id": run_id,
         "metrics": metrics,
         "equity_curve": [round(v, 2) for v in result.equity_curve],
+        "benchmark_curve": [round(v, 2) for v in result.benchmark_curve],
         "dates": [d.isoformat() for d in result.dates],
-        "trades": result.trades[:100],  # limit response size
+        "trades": result.trades[:100],
         "rebalance_dates": [d.isoformat() for d in result.rebalance_dates],
     }
 
