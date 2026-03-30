@@ -404,7 +404,11 @@ export default function CodeEditor() {
         {/* Test output panel */}
         {testOutput && (
           <div className="border-t overflow-auto" style={{ borderColor: 'var(--border)', maxHeight: '200px', backgroundColor: 'var(--bg-primary)' }}>
-            <div className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>合约测试输出</div>
+            <div className="flex justify-between items-center px-3 py-1">
+              <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>合约测试输出</span>
+              <button onClick={() => setTestOutput('')} className="text-xs px-1.5 rounded hover:opacity-80"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>✕</button>
+            </div>
             <pre className="px-3 pb-2 text-xs whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{testOutput}</pre>
           </div>
         )}
