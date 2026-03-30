@@ -24,7 +24,10 @@ class PortfolioStrategy(ABC):
 
     @property
     def lookback_days(self) -> int:
-        """How many trading days of history the engine should provide. Override for longer."""
+        """How many trading days of history the engine should provide.
+
+        Override for longer history. Must be >= warmup_period of all factors used.
+        """
         return 252
 
     @abstractmethod

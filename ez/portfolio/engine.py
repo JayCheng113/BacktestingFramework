@@ -61,7 +61,7 @@ def run_portfolio_backtest(
     end: date,
     freq: RebalanceFreq = "monthly",
     initial_cash: float = 1_000_000.0,
-    cost_model: CostModel = CostModel(),
+    cost_model: CostModel | None = None,
     allocator: Allocator | None = None,
     lot_size: int = 100,
 ) -> PortfolioResult:
@@ -73,6 +73,9 @@ def run_portfolio_backtest(
     3. Converts weights → shares (lot-size rounded), executes trades with costs
     4. Daily: updates equity = cash + Σ(shares × close), checks accounting invariant
     """
+    if cost_model is None:
+        cost_model = CostModel()
+
     trading_days = calendar.trading_days_between(start, end)
     rebal_dates = set(calendar.rebalance_dates(start, end, freq))
 
@@ -142,7 +145,8 @@ def run_portfolio_backtest(
                 target_shares[sym] = _lot_round(raw_shares, lot_size)
 
             # Execute trades
-            all_syms = set(list(holdings.keys()) + list(target_shares.keys()))
+            # Deterministic order: sells first (free cash), then buys (alphabetical)
+            all_syms = sorted(set(list(holdings.keys()) + list(target_shares.keys())))
             for sym in all_syms:
                 cur = holdings.get(sym, 0)
                 tgt = target_shares.get(sym, 0)
@@ -166,8 +170,9 @@ def run_portfolio_backtest(
                     # Buy: need cash
                     total_buy = amount + total_cost
                     if total_buy > cash:
-                        # Reduce shares to fit budget
-                        affordable = (cash - total_cost) / price if price > 0 else 0
+                        # Reduce shares to fit budget (estimate per-share cost)
+                        per_share_cost = price * (cost_model.commission_rate + cost_model.slippage_rate)
+                        affordable = cash / (price + per_share_cost) if price > 0 else 0
                         tgt = cur + _lot_round(affordable, lot_size)
                         delta = tgt - cur
                         if delta <= 0:
@@ -178,6 +183,7 @@ def run_portfolio_backtest(
                         total_buy = amount + total_cost
 
                     cash -= total_buy
+                    assert cash >= -EPS_FUND, f"Cash went negative: {cash}"
                     holdings[sym] = tgt
                 else:
                     # Sell: receive cash minus costs

@@ -6,8 +6,6 @@ excludes delisted stocks after delist date, excludes IPOs < N days old.
 from __future__ import annotations
 
 from datetime import date
-from typing import Protocol
-
 import pandas as pd
 
 from ez.portfolio.calendar import TradingCalendar

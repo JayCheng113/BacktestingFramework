@@ -271,52 +271,54 @@ class TopNRotation(PortfolioStrategy):
 # ez/portfolio/allocator.py
 
 class Allocator(ABC):
-    """权重分配器：将原始信号转化为最终持仓权重。"""
+    """权重分配器：将原始信号转化为最终持仓权重。
+    NOTE: 接口已从 DataFrame 改为 dict（逐调仓日调用，非全矩阵）。
+    """
 
     @abstractmethod
-    def allocate(self, raw_weights: pd.DataFrame) -> pd.DataFrame:
+    def allocate(self, raw_weights: dict[str, float]) -> dict[str, float]:
         """
-        Input: raw_weights (dates × symbols)
-        Output: final_weights, 满足约束（权重和<=1, 单股上限等）
+        Input: raw_weights {symbol: weight} (单日)
+        Output: final_weights, 满足约束（权重 >= 0, 和 <= 1.0）
         """
         ...
 
 
 class EqualWeightAllocator(Allocator):
-    """等权分配。"""
-    def allocate(self, raw_weights: pd.DataFrame) -> pd.DataFrame:
-        nonzero = raw_weights > 0
-        counts = nonzero.sum(axis=1).replace(0, 1)
-        return nonzero.div(counts, axis=0)
+    """等权分配：所有正权重标的等权。"""
+    def allocate(self, raw_weights: dict[str, float]) -> dict[str, float]:
+        selected = {k: v for k, v in raw_weights.items() if v > 0}
+        if not selected:
+            return {}
+        w = 1.0 / len(selected)
+        return {k: w for k in selected}
 
 
 class MaxWeightAllocator(Allocator):
-    """限制单股最大权重。"""
+    """限制单股最大权重（迭代裁剪+重分配）。"""
 
-    def __init__(self, max_weight: float = 0.1):
+    def __init__(self, max_weight: float = 0.05):
         self._max_weight = max_weight
 
-    def allocate(self, raw_weights: pd.DataFrame) -> pd.DataFrame:
-        clipped = raw_weights.clip(upper=self._max_weight)
-        row_sum = clipped.sum(axis=1).replace(0, 1)
-        return clipped.div(row_sum, axis=0)
+    def allocate(self, raw_weights: dict[str, float]) -> dict[str, float]:
+        # 见 ez/portfolio/allocator.py 实现（迭代裁剪算法）
+        ...
 
 
 class RiskParityAllocator(Allocator):
-    """风险平价：按波动率倒数分配权重。"""
+    """风险平价：按波动率倒数分配权重。
+    NOTE: 必须在调用 allocate 前通过 set_volatilities() 设置波动率。
+    """
 
-    def __init__(self, lookback: int = 60):
-        self._lookback = lookback
+    def __init__(self):
+        self._vols: dict[str, float] = {}
 
-    def allocate(self, raw_weights: pd.DataFrame,
-                 returns: pd.DataFrame | None = None) -> pd.DataFrame:
-        if returns is None:
-            return EqualWeightAllocator().allocate(raw_weights)
-        vol = returns.rolling(self._lookback).std()
-        inv_vol = (1 / vol).replace([float('inf'), float('nan')], 0)
-        weighted = raw_weights * inv_vol
-        row_sum = weighted.sum(axis=1).replace(0, 1)
-        return weighted.div(row_sum, axis=0)
+    def set_volatilities(self, vols: dict[str, float]) -> None:
+        self._vols = vols
+
+    def allocate(self, raw_weights: dict[str, float]) -> dict[str, float]:
+        # 见 ez/portfolio/allocator.py 实现
+        ...
 ```
 
 ### 3.5 PortfolioEngine — 组合回测引擎

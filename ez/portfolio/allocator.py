@@ -63,7 +63,11 @@ class MaxWeightAllocator(Allocator):
 
 
 class RiskParityAllocator(Allocator):
-    """Inverse-volatility weighting (simplified risk parity)."""
+    """Inverse-volatility weighting (simplified risk parity).
+
+    Must call set_volatilities() before allocate() for meaningful results.
+    Symbols without volatility data default to 20% (effectively equal-weight for unknowns).
+    """
 
     def __init__(self, volatilities: dict[str, float] | None = None):
         self._vols = volatilities or {}
