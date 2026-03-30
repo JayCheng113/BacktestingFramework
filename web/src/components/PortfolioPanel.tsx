@@ -31,6 +31,11 @@ export default function PortfolioPanel() {
   const [topN, setTopN] = useState(3)
   const [factor, setFactor] = useState('momentum_rank_20')
   const [commission, setCommission] = useState(0.0003)
+  const [minCommission, setMinCommission] = useState(5)
+  const [stampTax, setStampTax] = useState(0.0005)
+  const [slippage, setSlippage] = useState(0)
+  const [lotSize, setLotSize] = useState(100)
+  const [limitPct, setLimitPct] = useState(0.10)
   const [benchmark, setBenchmark] = useState('510300.SH')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
@@ -59,8 +64,9 @@ export default function PortfolioPanel() {
         strategy_name: selected, symbols: symbolList,
         start_date: startDate, end_date: endDate, freq,
         strategy_params: { top_n: topN, factor },
-        commission_rate: commission, stamp_tax_rate: 0.0005,
-        benchmark_symbol: benchmark,
+        commission_rate: commission, min_commission: minCommission,
+        stamp_tax_rate: stampTax, slippage_rate: slippage,
+        lot_size: lotSize, benchmark_symbol: benchmark,
       })
       setResult(res.data)
       loadHistory()
@@ -144,12 +150,35 @@ export default function PortfolioPanel() {
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle} />
               </div>
               <div className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>基准 (留空=现金)</label>
+                <input type="text" value={benchmark} onChange={e => setBenchmark(e.target.value)} placeholder="510300.SH" className="px-3 py-1.5 rounded text-sm w-28" style={inputStyle} />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 items-end mb-3">
+              <span className="text-xs font-medium self-end pb-2" style={{ color: 'var(--text-secondary)' }}>交易成本 &amp; A股规则:</span>
+              <div className="flex flex-col gap-1">
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>手续费率</label>
                 <input type="number" value={commission} step={0.0001} min={0} onChange={e => setCommission(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>基准 (留空=现金)</label>
-                <input type="text" value={benchmark} onChange={e => setBenchmark(e.target.value)} placeholder="510300.SH" className="px-3 py-1.5 rounded text-sm w-28" style={inputStyle} />
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>最低手续费</label>
+                <input type="number" value={minCommission} step={1} min={0} onChange={e => setMinCommission(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>印花税(卖)</label>
+                <input type="number" value={stampTax} step={0.0001} min={0} onChange={e => setStampTax(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>滑点率</label>
+                <input type="number" value={slippage} step={0.001} min={0} max={0.1} onChange={e => setSlippage(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>整手</label>
+                <input type="number" value={lotSize} step={100} min={1} onChange={e => setLotSize(Number(e.target.value))} className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>涨跌停%</label>
+                <input type="number" value={limitPct * 100} step={1} min={0} max={30} onChange={e => setLimitPct(Number(e.target.value) / 100)} className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
               </div>
             </div>
             <div className="mb-3">

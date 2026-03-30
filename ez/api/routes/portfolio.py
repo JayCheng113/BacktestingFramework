@@ -44,6 +44,7 @@ class PortfolioRunRequest(BaseModel):
     stamp_tax_rate: float = 0.0005
     slippage_rate: float = 0.0
     lot_size: int = Field(default=100, ge=1)
+    limit_pct: float = Field(default=0.10, ge=0, le=0.30)  # 涨跌停比例 (10%=0.10, 科创板20%=0.20)
     benchmark_symbol: str = ""  # e.g. "510300.SH"
 
 
@@ -173,7 +174,8 @@ def run_portfolio(req: PortfolioRunRequest):
         strategy=strategy, universe=universe, universe_data=universe_data,
         calendar=calendar, start=start, end=end, freq=req.freq,
         initial_cash=req.initial_cash, cost_model=cost_model,
-        lot_size=req.lot_size, benchmark_symbol=req.benchmark_symbol,
+        lot_size=req.lot_size, limit_pct=req.limit_pct,
+        benchmark_symbol=req.benchmark_symbol,
     )
 
     # Sanitize NaN/Inf in metrics
