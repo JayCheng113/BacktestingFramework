@@ -45,9 +45,12 @@ export default function ExperimentPanel() {
   const loadRuns = () => {
     setLoading(true)
     listExperiments().then(r => {
-      // Filter out research agent experiments (strategy names with Research prefix from research_ files)
-      const userRuns = r.data.filter((run: ExperimentRun) => !run.strategy_name?.startsWith('Research')
-        && !run.spec_id?.startsWith('research'))
+      // Filter out research agent experiments — match by strategy_name containing research_ module path
+      const userRuns = r.data.filter((run: ExperimentRun) => {
+        const name = run.strategy_name || ''
+        // Research strategies have module path like "strategies.research_xxx.ResearchXxx"
+        return !name.includes('research_') && !name.startsWith('Research')
+      })
       setRuns(userRuns)
     }).catch(() => {}).finally(() => setLoading(false))
   }
