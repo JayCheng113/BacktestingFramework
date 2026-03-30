@@ -1,17 +1,20 @@
-"""V2.7: Code editor API — template, validate, save, list strategies."""
+"""V2.7+V2.9: Code editor API — template, validate, save, list strategies + portfolio."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ez.agent.sandbox import (
     _safe_filename,
+    _get_dir,
     check_syntax,
     get_template,
     list_user_strategies,
+    list_portfolio_files,
     save_and_validate_strategy,
+    save_and_validate_code,
 )
 
 router = APIRouter()
@@ -21,7 +24,7 @@ _STRATEGIES_DIR = _PROJECT_ROOT / "strategies"
 
 
 class TemplateRequest(BaseModel):
-    kind: str = "strategy"  # "strategy" | "factor"
+    kind: str = "strategy"  # "strategy" | "factor" | "portfolio_strategy" | "cross_factor"
     class_name: str = ""
     description: str = ""
 
@@ -34,13 +37,15 @@ class SaveRequest(BaseModel):
     filename: str
     code: str
     overwrite: bool = False
+    kind: str = "strategy"
 
 
 @router.post("/template")
 def generate_template(req: TemplateRequest):
     """Generate a Python template for a strategy or factor."""
-    if req.kind not in ("strategy", "factor"):
-        raise HTTPException(status_code=422, detail="kind must be 'strategy' or 'factor'")
+    valid_kinds = ("strategy", "factor", "portfolio_strategy", "cross_factor")
+    if req.kind not in valid_kinds:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {valid_kinds}")
     code = get_template(kind=req.kind, class_name=req.class_name, description=req.description)
     return {"code": code, "kind": req.kind}
 
@@ -54,50 +59,62 @@ def validate_code(req: ValidateRequest):
 
 @router.post("/save")
 def save_code(req: SaveRequest):
-    """Save code to strategies/ and run contract test."""
-    result = save_and_validate_strategy(req.filename, req.code, overwrite=req.overwrite)
+    """Save code and run contract test. kind determines target directory."""
+    result = save_and_validate_code(req.filename, req.code, kind=req.kind, overwrite=req.overwrite)
     if not result["success"]:
         raise HTTPException(status_code=422, detail=result)
     return result
 
 
 @router.get("/files")
-def list_files():
-    """List user strategy files."""
+def list_files(kind: str = Query(default="")):
+    """List user code files. kind: empty=strategies, portfolio_strategy, cross_factor."""
+    if kind in ("portfolio_strategy", "cross_factor"):
+        return list_portfolio_files(kind)
     return list_user_strategies()
 
 
 @router.get("/files/{filename}")
-def read_file(filename: str):
-    """Read a strategy file."""
+def read_file(filename: str, kind: str = Query(default="strategy")):
+    """Read a code file. kind determines which directory to look in."""
     safe_name = _safe_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail=f"Invalid filename: {filename}")
-    target = _STRATEGIES_DIR / safe_name
+    target_dir = _get_dir(kind)
+    target = target_dir / safe_name
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-    return {"filename": safe_name, "code": target.read_text(encoding="utf-8")}
+    return {"filename": safe_name, "code": target.read_text(encoding="utf-8"), "kind": kind}
 
 
 @router.delete("/files/{filename}")
-def delete_file(filename: str):
-    """Delete a user strategy file and unregister from Strategy._registry."""
+def delete_file(filename: str, kind: str = Query(default="strategy")):
+    """Delete a code file and unregister from registry."""
     safe_name = _safe_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail=f"Invalid filename: {filename}")
-    target = _STRATEGIES_DIR / safe_name
+    target_dir = _get_dir(kind)
+    target = target_dir / safe_name
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     target.unlink()
-    # Clean up registry so deleted strategy doesn't appear in lists
+    # Clean up registry
     try:
         import sys
-        from ez.strategy.base import Strategy
         stem = safe_name.replace(".py", "")
-        module_name = f"strategies.{stem}"
-        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
-        for k in old_keys:
-            del Strategy._registry[k]
+        if kind in ("portfolio_strategy", "cross_factor"):
+            module_name = f"{target_dir.name}.{stem}"
+            if kind == "portfolio_strategy":
+                from ez.portfolio.portfolio_strategy import PortfolioStrategy
+                old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
+                for k in old_keys:
+                    del PortfolioStrategy._registry[k]
+        else:
+            module_name = f"strategies.{stem}"
+            from ez.strategy.base import Strategy
+            old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                del Strategy._registry[k]
         if module_name in sys.modules:
             del sys.modules[module_name]
     except Exception:

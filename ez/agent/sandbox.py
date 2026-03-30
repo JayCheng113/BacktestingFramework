@@ -22,6 +22,20 @@ logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _STRATEGIES_DIR = _PROJECT_ROOT / "strategies"
+_PORTFOLIO_STRATEGIES_DIR = _PROJECT_ROOT / "portfolio_strategies"
+_CROSS_FACTORS_DIR = _PROJECT_ROOT / "cross_factors"
+
+_KIND_DIR_MAP = {
+    "strategy": _STRATEGIES_DIR,
+    "factor": _STRATEGIES_DIR,
+    "portfolio_strategy": _PORTFOLIO_STRATEGIES_DIR,
+    "cross_factor": _CROSS_FACTORS_DIR,
+}
+
+
+def _get_dir(kind: str) -> Path:
+    """Resolve directory for a given code kind."""
+    return _KIND_DIR_MAP.get(kind, _STRATEGIES_DIR)
 
 # Modules that user code MUST NOT import
 _FORBIDDEN_MODULES = frozenset({
@@ -96,20 +110,103 @@ class {class_name}(Factor):
 '''
 
 
+_PORTFOLIO_STRATEGY_TEMPLATE = '''"""Portfolio strategy: {class_name}"""
+from __future__ import annotations
+
+from datetime import datetime
+
+import pandas as pd
+
+from ez.portfolio.portfolio_strategy import PortfolioStrategy
+from ez.portfolio.cross_factor import MomentumRank
+
+
+class {class_name}(PortfolioStrategy):
+    """{description}"""
+
+    def __init__(self, top_n: int = 10, **params):
+        super().__init__(**params)
+        self.top_n = top_n
+        self._factor = MomentumRank(period=20)
+
+    @classmethod
+    def get_description(cls) -> str:
+        return "{description}"
+
+    @classmethod
+    def get_parameters_schema(cls) -> dict[str, dict]:
+        return {{
+            "top_n": {{"type": "int", "default": 10, "min": 1, "max": 100}},
+        }}
+
+    def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        scores = self._factor.compute(universe_data, date)
+        valid = scores.dropna()
+        if len(valid) < 1:
+            return {{}}
+        n = min(self.top_n, len(valid))
+        top = valid.nlargest(n).index
+        w = 1.0 / n
+        return {{sym: w for sym in top}}
+'''
+
+_CROSS_FACTOR_TEMPLATE = '''"""Cross-sectional factor: {class_name}"""
+from __future__ import annotations
+
+from datetime import datetime
+
+import pandas as pd
+
+from ez.portfolio.cross_factor import CrossSectionalFactor
+
+
+class {class_name}(CrossSectionalFactor):
+    """{description}"""
+
+    def __init__(self, period: int = 20):
+        self._period = period
+
+    @property
+    def name(self) -> str:
+        return "{factor_name}"
+
+    @property
+    def warmup_period(self) -> int:
+        return self._period
+
+    def compute(self, universe_data, date):
+        scores = {{}}
+        for sym, df in universe_data.items():
+            if len(df) < self._period or "adj_close" not in df.columns:
+                continue
+            close = df["adj_close"]
+            scores[sym] = (close.iloc[-1] - close.iloc[-self._period]) / close.iloc[-self._period]
+        return pd.Series(scores).rank(pct=True) if scores else pd.Series(dtype=float)
+'''
+
+
 def get_template(kind: str = "strategy", class_name: str = "", description: str = "") -> str:
     """Generate a template for a new strategy or factor."""
+    defaults = {
+        "strategy": ("MyStrategy", "Custom trading strategy"),
+        "factor": ("MyFactor", "Custom factor"),
+        "portfolio_strategy": ("MyPortfolioStrategy", "Custom portfolio strategy"),
+        "cross_factor": ("MyCrossFactor", "Custom cross-sectional factor"),
+    }
+    default_name, default_desc = defaults.get(kind, ("MyStrategy", "Custom strategy"))
     if not class_name:
-        class_name = "MyStrategy" if kind == "strategy" else "MyFactor"
+        class_name = default_name
     if not description:
-        description = "Custom trading strategy" if kind == "strategy" else "Custom factor"
+        description = default_desc
 
     if kind == "factor":
         factor_name = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
-        return _FACTOR_TEMPLATE.format(
-            class_name=class_name,
-            description=description,
-            factor_name=factor_name,
-        )
+        return _FACTOR_TEMPLATE.format(class_name=class_name, description=description, factor_name=factor_name)
+    if kind == "portfolio_strategy":
+        return _PORTFOLIO_STRATEGY_TEMPLATE.format(class_name=class_name, description=description)
+    if kind == "cross_factor":
+        factor_name = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
+        return _CROSS_FACTOR_TEMPLATE.format(class_name=class_name, description=description, factor_name=factor_name)
     return _STRATEGY_TEMPLATE.format(class_name=class_name, description=description)
 
 
@@ -364,6 +461,147 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
         return {"passed": False, "output": f"Failed to run test: {e}"}
 
 
+def save_and_validate_code(
+    filename: str, code: str, kind: str = "strategy", overwrite: bool = False,
+) -> dict:
+    """Save code to the appropriate directory and run contract test.
+
+    kind: "strategy" | "factor" | "portfolio_strategy" | "cross_factor"
+    """
+    target_dir = _get_dir(kind)
+    if kind in ("strategy", "factor"):
+        return save_and_validate_strategy(filename, code, overwrite=overwrite)
+
+    safe_name = _safe_filename(filename)
+    if not safe_name:
+        return {"success": False, "errors": [f"Invalid filename: {filename}"]}
+
+    errors = check_syntax(code)
+    if errors:
+        return {"success": False, "errors": errors}
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / safe_name
+    if target.exists() and not overwrite:
+        return {"success": False, "errors": [f"File already exists: {safe_name}"]}
+
+    original_code = target.read_text(encoding="utf-8") if target.exists() else ""
+    target.write_text(code, encoding="utf-8")
+
+    # Contract test: import and validate
+    test_result = _run_portfolio_contract_test(safe_name, kind, target_dir)
+    if not test_result["passed"]:
+        if original_code:
+            target.write_text(original_code, encoding="utf-8")
+        else:
+            target.unlink(missing_ok=True)
+        return {"success": False, "errors": [f"Contract test failed: {test_result['output']}"],
+                "test_output": test_result["output"]}
+
+    # Hot-reload: register in main process
+    _reload_portfolio_code(safe_name, kind, target_dir)
+
+    return {"success": True, "errors": [], "path": f"{target_dir.name}/{safe_name}",
+            "test_output": test_result["output"]}
+
+
+def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> dict:
+    """Contract test for portfolio strategies and cross-sectional factors."""
+    if kind == "portfolio_strategy":
+        test_code = f"""
+import importlib.util, sys, numpy as np, pandas as pd
+from datetime import datetime
+spec = importlib.util.spec_from_file_location('_check', '{target_dir / filename}')
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+from ez.portfolio.portfolio_strategy import PortfolioStrategy
+classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, PortfolioStrategy) and v is not PortfolioStrategy]
+assert classes, 'No PortfolioStrategy subclass found'
+cls = classes[0]
+inst = cls()
+# Mock data: 3 stocks, 50 days
+rng = np.random.default_rng(42)
+dates = pd.date_range('2024-01-01', periods=50, freq='B')
+data = {{}}
+for s in ['T001', 'T002', 'T003']:
+    p = 10 * np.cumprod(1 + rng.normal(0, 0.02, 50))
+    data[s] = pd.DataFrame({{'open': p, 'high': p*1.01, 'low': p*0.99, 'close': p, 'adj_close': p, 'volume': rng.integers(1000, 9999, 50)}}, index=dates)
+w = inst.generate_weights(data, datetime(2024, 3, 15), {{}}, {{}})
+assert isinstance(w, dict), f'generate_weights must return dict, got {{type(w)}}'
+for k, v in w.items():
+    assert v >= 0, f'Weight for {{k}} is {{v}} < 0 (long-only)'
+assert sum(w.values()) <= 1.001, f'Weights sum {{sum(w.values())}} > 1.0'
+print(f'OK: {{cls.__name__}} weights={{w}}')
+"""
+    else:  # cross_factor
+        test_code = f"""
+import importlib.util, numpy as np, pandas as pd
+from datetime import datetime
+spec = importlib.util.spec_from_file_location('_check', '{target_dir / filename}')
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+from ez.portfolio.cross_factor import CrossSectionalFactor
+classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, CrossSectionalFactor) and v is not CrossSectionalFactor]
+assert classes, 'No CrossSectionalFactor subclass found'
+cls = classes[0]
+inst = cls()
+rng = np.random.default_rng(42)
+dates = pd.date_range('2024-01-01', periods=50, freq='B')
+data = {{}}
+for s in ['T001', 'T002', 'T003']:
+    p = 10 * np.cumprod(1 + rng.normal(0, 0.02, 50))
+    data[s] = pd.DataFrame({{'open': p, 'high': p*1.01, 'low': p*0.99, 'close': p, 'adj_close': p, 'volume': rng.integers(1000, 9999, 50)}}, index=dates)
+result = inst.compute(data, datetime(2024, 3, 15))
+assert isinstance(result, pd.Series), f'compute must return Series, got {{type(result)}}'
+assert not result.isna().all(), 'compute returned all NaN'
+print(f'OK: {{cls.__name__}} scores={{result.to_dict()}}')
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", test_code],
+            capture_output=True, text=True, timeout=30, cwd=str(_PROJECT_ROOT),
+        )
+        return {"passed": result.returncode == 0,
+                "output": (result.stdout + result.stderr)[-2000:]}
+    except subprocess.TimeoutExpired:
+        return {"passed": False, "output": "Contract test timed out (30s)"}
+    except Exception as e:
+        return {"passed": False, "output": f"Failed: {e}"}
+
+
+def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
+    """Hot-reload portfolio strategy or cross-factor in main process."""
+    stem = filename.replace(".py", "")
+    module_name = f"{target_dir.name}.{stem}"
+
+    with _reload_lock:
+        if kind == "portfolio_strategy":
+            from ez.portfolio.portfolio_strategy import PortfolioStrategy
+            old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                del PortfolioStrategy._registry[k]
+
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+
+        pycache = target_dir / "__pycache__"
+        if pycache.exists():
+            for pyc in pycache.glob(f"{stem}*.pyc"):
+                pyc.unlink(missing_ok=True)
+        importlib.invalidate_caches()
+
+        py_file = target_dir / filename
+        if not py_file.exists():
+            return
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+                logger.info("Hot-reloaded %s: %s", kind, filename)
+        except Exception as e:
+            logger.warning("Failed to hot-reload %s %s: %s", kind, filename, e)
+
+
 def list_user_strategies() -> list[dict]:
     """List user strategy files in strategies/ directory."""
     if not _STRATEGIES_DIR.exists():
@@ -395,4 +633,32 @@ def list_user_strategies() -> list[dict]:
             "class_name": class_name,
             "size": len(code),
         })
+    return results
+
+
+def list_portfolio_files(kind: str = "portfolio_strategy") -> list[dict]:
+    """List files in portfolio_strategies/ or cross_factors/."""
+    target_dir = _get_dir(kind)
+    if not target_dir.exists():
+        return []
+    base_classes = {"portfolio_strategy": "PortfolioStrategy", "cross_factor": "CrossSectionalFactor"}
+    target_base = base_classes.get(kind, "PortfolioStrategy")
+    results = []
+    for py_file in sorted(target_dir.glob("*.py")):
+        if py_file.name.startswith("_") or py_file.name.startswith("."):
+            continue
+        code = py_file.read_text(encoding="utf-8")
+        class_name = ""
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    for base in node.bases:
+                        base_name = base.id if isinstance(base, ast.Name) else (base.attr if isinstance(base, ast.Attribute) else "")
+                        if base_name == target_base:
+                            class_name = node.name
+                            break
+        except SyntaxError:
+            pass
+        results.append({"filename": py_file.name, "class_name": class_name, "kind": kind})
     return results
