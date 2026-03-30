@@ -304,7 +304,7 @@ export default function PortfolioPanel() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex gap-2 mb-4">
         <button onClick={() => setTab('run')} className={`px-4 py-1.5 rounded text-sm ${tab === 'run' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'run' ? inputStyle : {}}>组合回测</button>
-        <button onClick={() => setTab('factor-research')} className={`px-4 py-1.5 rounded text-sm ${tab === 'factor-research' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'factor-research' ? inputStyle : {}}>因子研究</button>
+        <button onClick={() => setTab('factor-research')} className={`px-4 py-1.5 rounded text-sm ${tab === 'factor-research' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'factor-research' ? inputStyle : {}}>截面因子研究</button>
         <button onClick={() => setTab('history')} className={`px-4 py-1.5 rounded text-sm ${tab === 'history' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'history' ? inputStyle : {}}>历史记录 ({history.length})</button>
       </div>
 
@@ -441,9 +441,9 @@ export default function PortfolioPanel() {
 
       {tab === 'factor-research' && (
         <div className="p-4 rounded mb-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <h3 className="text-sm font-medium mb-3">截面因子评估</h3>
+          <h3 className="text-sm font-medium mb-3">截面因子评估 (多股排名)</h3>
           <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-            选择因子和标的池，计算截面 IC / Rank IC / ICIR / IC 衰减 / 分位数收益。
+            对全池股票按因子值排名，计算因子排名与未来收益的截面相关性。区别于看板的"时序因子"(单股指标如RSI)。
           </p>
           <div className="flex flex-wrap gap-2 mb-3">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子 (多选):</label>

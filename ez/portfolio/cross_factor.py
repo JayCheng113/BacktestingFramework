@@ -14,7 +14,21 @@ import pandas as pd
 
 
 class CrossSectionalFactor(ABC):
-    """Base class for cross-sectional factors."""
+    """Base class for cross-sectional factors.
+
+    Subclasses auto-register via __init_subclass__. Access registry via get_registry().
+    """
+
+    _registry: dict[str, type] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if not getattr(cls, '__abstractmethods__', None):
+            CrossSectionalFactor._registry[cls.__name__] = cls
+
+    @classmethod
+    def get_registry(cls) -> dict[str, type]:
+        return dict(cls._registry)
 
     @property
     @abstractmethod

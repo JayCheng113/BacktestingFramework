@@ -12,7 +12,7 @@ class TestGetDir:
     def test_known_kinds(self):
         for kind in _VALID_KINDS:
             d = _get_dir(kind)
-            assert d.name in ("strategies", "portfolio_strategies", "cross_factors")
+            assert d.name in ("strategies", "factors", "portfolio_strategies", "cross_factors")
 
     def test_unknown_kind_raises(self):
         with pytest.raises(ValueError, match="Invalid kind"):

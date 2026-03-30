@@ -97,7 +97,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-medium mb-3">因子分析</h3>
+      <h3 className="text-sm font-medium mb-3">时序因子分析 (单股技术指标)</h3>
       <div className="flex gap-3 items-end mb-4">
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>

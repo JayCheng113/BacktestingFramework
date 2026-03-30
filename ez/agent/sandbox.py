@@ -25,9 +25,11 @@ _STRATEGIES_DIR = _PROJECT_ROOT / "strategies"
 _PORTFOLIO_STRATEGIES_DIR = _PROJECT_ROOT / "portfolio_strategies"
 _CROSS_FACTORS_DIR = _PROJECT_ROOT / "cross_factors"
 
+_FACTORS_DIR = _PROJECT_ROOT / "factors"
+
 _KIND_DIR_MAP = {
     "strategy": _STRATEGIES_DIR,
-    "factor": _STRATEGIES_DIR,
+    "factor": _FACTORS_DIR,
     "portfolio_strategy": _PORTFOLIO_STRATEGIES_DIR,
     "cross_factor": _CROSS_FACTORS_DIR,
 }
@@ -476,8 +478,28 @@ def save_and_validate_code(
     if kind not in _VALID_KINDS:
         return {"success": False, "errors": [f"Invalid kind: {kind}. Must be one of: {sorted(_VALID_KINDS)}"]}
     target_dir = _get_dir(kind)
-    if kind in ("strategy", "factor"):
+    if kind == "strategy":
         return save_and_validate_strategy(filename, code, overwrite=overwrite)
+    if kind == "factor":
+        # Save to factors/ directory with syntax check (no strategy contract test)
+        safe_name = _safe_filename(filename)
+        if not safe_name:
+            return {"success": False, "errors": [f"Invalid filename: {filename}"]}
+        errors = check_syntax(code)
+        if errors:
+            return {"success": False, "errors": errors}
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / safe_name
+        if target.exists() and not overwrite:
+            return {"success": False, "errors": [f"File already exists: {safe_name}. Use overwrite=true."]}
+        target.write_text(code, encoding="utf-8")
+        # Hot-reload: import to trigger __init_subclass__ registration
+        try:
+            _reload_factor_code(safe_name, target_dir)
+        except Exception as e:
+            return {"success": False, "errors": [f"Import error: {e}"]}
+        return {"success": True, "path": str(target), "test_output": "Factor saved and registered."}
+
 
     safe_name = _safe_filename(filename)
     if not safe_name:
@@ -587,7 +609,11 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
             old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
             for k in old_keys:
                 del PortfolioStrategy._registry[k]
-        # cross_factor: no registry to clean up (CrossSectionalFactor has no _registry)
+        elif kind == "cross_factor":
+            from ez.portfolio.cross_factor import CrossSectionalFactor
+            old_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                del CrossSectionalFactor._registry[k]
 
         if module_name in sys.modules:
             del sys.modules[module_name]
@@ -610,6 +636,32 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
                 logger.info("Hot-reloaded %s: %s", kind, filename)
         except Exception as e:
             logger.warning("Failed to hot-reload %s %s: %s", kind, filename, e)
+
+
+def _reload_factor_code(filename: str, target_dir: Path) -> None:
+    """Hot-reload user factor in main process (trigger __init_subclass__)."""
+    stem = filename.replace(".py", "")
+    module_name = f"{target_dir.name}.{stem}"
+
+    with _reload_lock:
+        from ez.factor.base import Factor
+        old_keys = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+        for k in old_keys:
+            del Factor._registry[k]
+
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+
+        importlib.invalidate_caches()
+        py_file = target_dir / filename
+        if not py_file.exists():
+            return
+        spec = importlib.util.spec_from_file_location(module_name, py_file)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = mod
+            spec.loader.exec_module(mod)
+            logger.info("Hot-reloaded factor: %s", filename)
 
 
 def list_user_strategies() -> list[dict]:
@@ -651,7 +703,7 @@ def list_portfolio_files(kind: str = "portfolio_strategy") -> list[dict]:
     target_dir = _get_dir(kind)
     if not target_dir.exists():
         return []
-    base_classes = {"portfolio_strategy": "PortfolioStrategy", "cross_factor": "CrossSectionalFactor"}
+    base_classes = {"portfolio_strategy": "PortfolioStrategy", "cross_factor": "CrossSectionalFactor", "factor": "Factor"}
     target_base = base_classes.get(kind, "PortfolioStrategy")
     results = []
     for py_file in sorted(target_dir.glob("*.py")):

@@ -13,10 +13,21 @@ from ez.factor.evaluator import FactorEvaluator
 
 router = APIRouter()
 
-_FACTOR_MAP = {
+_BUILTIN_FACTOR_MAP = {
     "ma": MA, "ema": EMA, "rsi": RSI, "macd": MACD, "boll": BOLL, "momentum": Momentum,
     "vwap": VWAP, "obv": OBV, "atr": ATR,
 }
+
+
+def _get_factor_map() -> dict:
+    """Build factor map: builtins + dynamically registered Factor subclasses."""
+    from ez.factor.base import Factor
+    result = dict(_BUILTIN_FACTOR_MAP)
+    for name, cls in Factor.get_registry().items():
+        lower = name.lower()
+        if lower not in result:
+            result[lower] = cls
+    return result
 
 
 class FactorEvalRequest(BaseModel):
@@ -34,13 +45,13 @@ class FactorEvalRequest(BaseModel):
 def list_factors():
     return [
         {"name": name, "class": cls.__name__}
-        for name, cls in _FACTOR_MAP.items()
+        for name, cls in _get_factor_map().items()
     ]
 
 
 @router.post("/evaluate")
 def evaluate_factor(req: FactorEvalRequest):
-    factory = _FACTOR_MAP.get(req.factor_name.lower())
+    factory = _get_factor_map().get(req.factor_name.lower())
     if not factory:
         raise HTTPException(status_code=404, detail=f"Factor '{req.factor_name}' not found")
 

@@ -170,6 +170,7 @@ export default function CodeEditor() {
   const [filename, setFilename] = useState('')
   const [currentKind, setCurrentKind] = useState<CodeKind>('strategy')
   const [files, setFiles] = useState<FileInfo[]>([])
+  const [factorFiles, setFactorFiles] = useState<FileInfo[]>([])
   const [portfolioFiles, setPortfolioFiles] = useState<FileInfo[]>([])
   const [crossFactorFiles, setCrossFactorFiles] = useState<FileInfo[]>([])
   const [status, setStatus] = useState<string>('')
@@ -188,6 +189,11 @@ export default function CodeEditor() {
     try {
       const res = await api('/files')
       if (res.ok) setFiles(await res.json())
+    } catch {}
+    // Load user factor files
+    try {
+      const res = await api('/files?kind=factor')
+      if (res.ok) setFactorFiles(await res.json())
     } catch {}
     // Load portfolio strategy files
     try {
@@ -317,10 +323,9 @@ export default function CodeEditor() {
     </div>
   )
 
-  // Filter strategies: exclude research_ and factor files
-  const strategyFiles = files.filter(f => f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_'))
-  const factorFiles = files.filter(f => f.filename.includes('factor') && !f.filename.startsWith('research_'))
-  const otherFiles = files.filter(f => !f.class_name && !f.filename.includes('factor') && !f.filename.startsWith('research_'))
+  // Filter strategy files (exclude research_), factor files come from separate state
+  const strategyFiles = files.filter(f => f.class_name && !f.filename.startsWith('research_'))
+  const otherFiles = files.filter(f => !f.class_name && !f.filename.startsWith('research_'))
   const allEmpty = strategyFiles.length === 0 && factorFiles.length === 0 && portfolioFiles.length === 0 && crossFactorFiles.length === 0 && otherFiles.length === 0
 
   return (

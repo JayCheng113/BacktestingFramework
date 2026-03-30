@@ -10,7 +10,21 @@ import pandas as pd
 
 
 class Factor(ABC):
-    """Base class for all factors (technical indicators, alpha factors, etc.)."""
+    """Base class for all factors (technical indicators, alpha factors, etc.).
+
+    Subclasses auto-register via __init_subclass__. Access via get_registry().
+    """
+
+    _registry: dict[str, type] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if not getattr(cls, '__abstractmethods__', None):
+            Factor._registry[cls.__name__] = cls
+
+    @classmethod
+    def get_registry(cls) -> dict[str, type]:
+        return dict(cls._registry)
 
     @property
     @abstractmethod

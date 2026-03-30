@@ -21,14 +21,27 @@ from ez.portfolio.universe import Universe
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Factor name → factory
-_FACTOR_MAP = {
+# Factor name → factory (builtin defaults + dynamic from registry)
+_BUILTIN_FACTOR_MAP = {
     "momentum_rank_20": lambda: MomentumRank(20),
     "momentum_rank_10": lambda: MomentumRank(10),
     "momentum_rank_60": lambda: MomentumRank(60),
     "volume_rank_20": lambda: VolumeRank(20),
     "reverse_vol_rank_20": lambda: ReverseVolatilityRank(20),
 }
+
+
+def _get_factor_map() -> dict:
+    """Build factor map: builtins + dynamically registered CrossSectionalFactor subclasses."""
+    from ez.portfolio.cross_factor import CrossSectionalFactor
+    result = dict(_BUILTIN_FACTOR_MAP)
+    for name, cls in CrossSectionalFactor.get_registry().items():
+        # Skip builtins already in map (avoid duplicates)
+        if any(name in k for k in result):
+            continue
+        # Register user factors as zero-arg constructors
+        result[name] = cls
+    return result
 
 
 class PortfolioRunRequest(BaseModel):
@@ -56,16 +69,16 @@ def _create_strategy(name: str, params: dict) -> PortfolioStrategy:
     p = dict(params)  # don't mutate input
     if name == "TopNRotation":
         factor_name = p.pop("factor", "momentum_rank_20")
-        factory = _FACTOR_MAP.get(factor_name)
+        factory = _get_factor_map().get(factor_name)
         if not factory:
-            raise HTTPException(400, f"Unknown factor: {factor_name}. Available: {list(_FACTOR_MAP.keys())}")
+            raise HTTPException(400, f"Unknown factor: {factor_name}. Available: {list(_get_factor_map().keys())}")
         top_n = p.pop("top_n", 10)
         return TopNRotation(factor=factory(), top_n=top_n, **p)
     elif name == "MultiFactorRotation":
         factor_names = p.pop("factors", ["momentum_rank_20"])
         factors = []
         for fn in factor_names:
-            factory = _FACTOR_MAP.get(fn)
+            factory = _get_factor_map().get(fn)
             if not factory:
                 raise HTTPException(400, f"Unknown factor: {fn}")
             factors.append(factory())
@@ -139,7 +152,7 @@ def list_portfolio_strategies():
             "parameters": cls.get_parameters_schema() if hasattr(cls, 'get_parameters_schema') else {},
         })
     # Add factor list for reference
-    return {"strategies": result, "available_factors": list(_FACTOR_MAP.keys())}
+    return {"strategies": result, "available_factors": list(_get_factor_map().keys())}
 
 
 @router.post("/run")
@@ -364,9 +377,9 @@ def _resolve_factors(names: list[str]):
     """Resolve factor names to CrossSectionalFactor instances."""
     resolved = []
     for name in names:
-        factory = _FACTOR_MAP.get(name)
+        factory = _get_factor_map().get(name)
         if not factory:
-            raise HTTPException(400, f"Unknown factor: {name}. Available: {list(_FACTOR_MAP.keys())}")
+            raise HTTPException(400, f"Unknown factor: {name}. Available: {list(_get_factor_map().keys())}")
         resolved.append(factory())
     return resolved
 

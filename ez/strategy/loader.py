@@ -67,3 +67,26 @@ def load_all_strategies() -> None:
                         logger.debug("Loaded user strategy: %s", py_file.name)
                 except Exception as e:
                     logger.warning("Failed to load user strategy %s: %s", py_file, e)
+
+
+def load_user_factors() -> None:
+    """Import all factor modules from factors/ directory (user-created)."""
+    import sys
+    factors_dir = _PROJECT_ROOT / "factors"
+    if not factors_dir.exists():
+        return
+    for py_file in sorted(factors_dir.glob("*.py")):
+        if py_file.name.startswith("_"):
+            continue
+        module_name = f"factors.{py_file.stem}"
+        if module_name in sys.modules:
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+                logger.debug("Loaded user factor: %s", py_file.name)
+        except Exception as e:
+            logger.warning("Failed to load user factor %s: %s", py_file, e)

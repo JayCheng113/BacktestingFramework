@@ -13,13 +13,14 @@ from fastapi.staticfiles import StaticFiles
 
 from ez.api.deps import close_resources, get_tushare_provider
 from ez.config import load_config
-from ez.strategy.loader import load_all_strategies
+from ez.strategy.loader import load_all_strategies, load_user_factors
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     load_all_strategies()
+    load_user_factors()
     # V2.9: load user portfolio strategies + cross factors
     from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
     load_portfolio_strategies()
