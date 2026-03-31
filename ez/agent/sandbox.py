@@ -369,7 +369,16 @@ def save_and_validate_strategy(
         }
 
     # Hot-reload: make the strategy available immediately
-    _reload_user_strategy(safe_name)
+    try:
+        _reload_user_strategy(safe_name)
+    except Exception as e:
+        logger.warning("Strategy saved but hot-reload failed: %s", e)
+        # File saved + contract test passed, but reload failed — still report success with warning
+        return {
+            "success": True, "errors": [],
+            "path": f"strategies/{safe_name}",
+            "test_output": f"Contract test passed. Hot-reload warning: {e}",
+        }
 
     return {
         "success": True,
@@ -584,7 +593,13 @@ def save_and_validate_code(
                 "test_output": test_result["output"]}
 
     # Hot-reload: register in main process
-    _reload_portfolio_code(safe_name, kind, target_dir)
+    try:
+        _reload_portfolio_code(safe_name, kind, target_dir)
+    except Exception as e:
+        logger.warning("Portfolio code saved but hot-reload failed: %s", e)
+        return {"success": True, "errors": [],
+                "path": f"{target_dir.name}/{safe_name}",
+                "test_output": f"Contract test passed. Hot-reload warning: {e}"}
 
     return {"success": True, "errors": [], "path": f"{target_dir.name}/{safe_name}",
             "test_output": test_result["output"]}
