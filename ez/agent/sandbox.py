@@ -498,15 +498,14 @@ def save_and_validate_code(
         if errors:
             return {"success": False, "errors": errors}
         # Validate code contains a class inheriting from Factor (AST check)
-        import ast as _ast
         try:
-            _tree = _ast.parse(code)
+            _tree = ast.parse(code)
             _has_factor_class = any(
-                isinstance(node, _ast.ClassDef) and
-                any((isinstance(b, _ast.Name) and b.id == "Factor") or
-                    (isinstance(b, _ast.Attribute) and b.attr == "Factor")
+                isinstance(node, ast.ClassDef) and
+                any((isinstance(b, ast.Name) and b.id == "Factor") or
+                    (isinstance(b, ast.Attribute) and b.attr == "Factor")
                     for b in node.bases)
-                for node in _ast.walk(_tree)
+                for node in ast.walk(_tree)
             )
         except SyntaxError:
             _has_factor_class = False

@@ -69,13 +69,15 @@ class RSI(Factor):
         delta = ts_ops.diff(data["adj_close"])
         gain = ts_ops.rolling_mean(delta.clip(lower=0), self._period)
         loss = ts_ops.rolling_mean((-delta.clip(upper=0)), self._period)
-        # When loss=0 (pure uptrend), RSI=100; when gain=0, RSI=0
+        # Edge cases: loss=0 (pure up)→RSI=100, gain=0 (pure down)→RSI=0, flat→RSI=50
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
-        # Handle edge cases: loss=0 → RSI=100, gain=0 → RSI=0
-        rsi = rsi.fillna(100.0).where(loss.notna(), other=float('nan'))  # preserve warmup NaN
-        rsi[loss == 0] = 100.0
-        rsi[(gain == 0) & (loss > 0)] = 0.0
+        # Preserve warmup NaN, then handle 0/0 and 0/x cases
+        warmup_mask = gain.isna() | loss.isna()
+        rsi[loss == 0] = 100.0                    # pure uptrend
+        rsi[(gain == 0) & (loss == 0)] = 50.0     # flat price = neutral
+        rsi[(gain == 0) & (loss > 0)] = 0.0       # pure downtrend
+        rsi[warmup_mask] = float('nan')            # restore warmup NaN
         data[self.name] = rsi
         return data
 
@@ -168,7 +170,7 @@ class VWAP(Factor):
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
         # Use adj_close for split-adjusted consistency; scale high/low by adj ratio
-        adj_ratio = data["adj_close"] / data["close"] if "adj_close" in data.columns and (data["close"] != 0).all() else 1
+        adj_ratio = data["adj_close"] / data["close"].replace(0, float('nan')) if "adj_close" in data.columns else 1
         adj_high = data["high"] * adj_ratio
         adj_low = data["low"] * adj_ratio
         typical_price = (adj_high + adj_low + data["adj_close"]) / 3
@@ -220,7 +222,7 @@ class ATR(Factor):
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
         # Use split-adjusted OHLC for consistency
-        adj_ratio = data["adj_close"] / data["close"] if "adj_close" in data.columns and (data["close"] != 0).all() else 1
+        adj_ratio = data["adj_close"] / data["close"].replace(0, float('nan')) if "adj_close" in data.columns else 1
         adj_high = data["high"] * adj_ratio
         adj_low = data["low"] * adj_ratio
         prev_close = data["adj_close"].shift(1)
