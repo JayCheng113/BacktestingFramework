@@ -37,7 +37,7 @@ function computeBOLL(data: KlineBar[], period: number = 20, mult: number = 2): {
 }
 
 export default function KlineChart({ data, symbol, trades = [] }: Props) {
-  if (!data.length) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Search a symbol to view K-line data</div>
+  if (!data.length) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>搜索股票代码查看 K 线图</div>
 
   const dates = data.map(d => d.date)
   const ohlc = data.map(d => [d.open, d.close, d.low, d.high])

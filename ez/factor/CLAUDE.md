@@ -30,7 +30,13 @@ Compute technical indicators and evaluate their predictive power via IC analysis
 - **VWAP**: adj_ratio scaling (`adj_close / close`) applied to high/low for split-adjusted consistency
 - **ATR**: adj_ratio scaling applied to OHLC for split-adjusted consistency
 
+## Files (V2.11 additions)
+| File | Role | Core/Extension |
+|------|------|---------------|
+| builtin/fundamental.py | 18 FundamentalCrossFactor subclasses: Value(EP/BP/SP/DP), Quality(ROE/ROA/GrossMargin/NetProfitMargin), Growth(RevenueGrowthYoY/ProfitGrowthYoY/ROEChange), Size(LnMarketCap/LnCircMV), Liquidity(TurnoverRate/AmihudIlliquidity), Leverage(DebtToAssets/CurrentRatio), Industry(IndustryMomentum) | EXTENSION |
+
 ## Status
 - Implemented: MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR, FactorEvaluator (time-series IC)
 - V2.10: Factor __init_subclass__ auto-registration, factors/ user directory for custom factors, RSI/VWAP/ATR correctness fixes
+- V2.11: 18 fundamental CrossSectionalFactors (FundamentalCrossFactor base), data from FundamentalStore (daily_basic + fina_indicator), all output percentile rank with "高分=好" convention, PIT-aligned via ann_date
 - Known limitation: V1 IC is time-series (single stock); cross-sectional IC available via ez/portfolio/CrossSectionalEvaluator (V2.10)

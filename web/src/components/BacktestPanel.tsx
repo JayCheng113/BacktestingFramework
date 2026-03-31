@@ -257,7 +257,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
               {result.significance.is_significant ? '显著' : '不显著'}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              p={result.significance.p_value.toFixed(3)} | Sharpe CI [{result.significance.sharpe_ci_lower.toFixed(2)}, {result.significance.sharpe_ci_upper.toFixed(2)}]
+              显著性 p={result.significance.p_value.toFixed(3)} | 夏普置信区间 [{result.significance.sharpe_ci_lower.toFixed(2)}, {result.significance.sharpe_ci_upper.toFixed(2)}]
             </span>
           </div>
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
@@ -307,7 +307,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         <div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS 夏普比率</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>样本外夏普比率</div>
               <div className="text-sm font-medium">{(wfResult.oos_metrics.sharpe_ratio ?? 0).toFixed(4)}</div>
             </div>
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>

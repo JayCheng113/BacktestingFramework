@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.10 | Tests: 1207 (1217 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.11 | Tests: 1242 (1252 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -14,8 +14,8 @@ Version: 0.2.10 | Tests: 1207 (1217 collected, 10 skip) | C++ acceleration: up t
 
 ## Module Map
 - `ez/core/` — Computational primitives: matcher, ts_ops (C++ accelerated) [CLAUDE.md](ez/core/CLAUDE.md)
-- `ez/data/` — Data ingestion, validation, caching [CLAUDE.md](ez/data/CLAUDE.md)
-- `ez/factor/` — Factor computation + IC evaluation [CLAUDE.md](ez/factor/CLAUDE.md)
+- `ez/data/` — Data ingestion, validation, caching, fundamental data store (V2.11) [CLAUDE.md](ez/data/CLAUDE.md)
+- `ez/factor/` — Factor computation + IC evaluation + fundamental factors (V2.11) [CLAUDE.md](ez/factor/CLAUDE.md)
 - `ez/strategy/` — Strategy framework, auto-registration [CLAUDE.md](ez/strategy/CLAUDE.md)
 - `ez/backtest/` — Backtest engine, Walk-Forward, significance [CLAUDE.md](ez/backtest/CLAUDE.md)
 - `ez/api/` — FastAPI REST endpoints [CLAUDE.md](ez/api/CLAUDE.md)
@@ -87,7 +87,8 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.9.1**: Stability — 引擎价格预索引(bisect O(log n), 10x加速), 单股回测接入MarketRules(stamp_tax+lot_size+limit_pct), 策略参数动态渲染(schema驱动), CodeEditor组合代码类型(4组侧栏+新建组合策略/截面因子), TopNRotation/MultiFactorRotation description+schema补全, 23项回归测试(C1 raw close涨跌停+C2 NaN carry-forward+内置策略行为+引擎确定性+印花税+容差+排序), 1156 tests
 - **V2.10**: Factor Research + Research Efficiency — CrossSectionalEvaluator(截面IC/RankIC/ICIR/IC衰减/分位数收益), FactorCorrelationMatrix(Spearman秩相关热力图), PortfolioWalkForward(组合WF验证), PortfolioSignificance(Bootstrap CI+Monte Carlo), 多回测对比(checkbox选择+叠加曲线+指标表), CSV导出(净值曲线+交易记录), 预设标的池(宽基ETF/ETF轮动池/行业+宽基22只), 持仓饼图(latest_weights), 因子研究sub-tab(IC表+时序+衰减+分位数+相关性热力图), 3个新API端点, 1172 tests
 - **V2.10 post-release fixes**: Sandbox安全加固(dict-style dunder access拦截: `vars()["__import__"]`), RSI修正(flat=50/uptrend=100/downtrend=0), VWAP/ATR adj_ratio缩放(split-adjusted一致性), 组合引擎T+1(sold_today集合+当日卖出股禁买), 方向性滑点(买推高/卖推低), DateRangePicker共享组件(react-datepicker), ExperimentPanel 3 sub-tabs(单次运行/参数搜索/组合实验), Factor/CrossSectionalFactor __init_subclass__自动注册, factors/用户因子目录, WalkForward参数校验(n_splits>=2, 0<train_ratio<1), fetch_kline_df共享到deps.py, sandbox根本加固(factor主进程不exec_module+gc禁用+stub注册), 1207 tests
-- **Next: V2.10.1** — Stability → V2.11 基本面数据层 → V2.11.1 Alpha组合+中性化 → V2.12 优化器+归因+风控 → V2.13 ML Alpha+多策略 → V3.0 Paper OMS
+- **V2.11**: 基本面数据层 — FundamentalStore(DuckDB fundamental_daily+fina_indicator表, PIT ann_date对齐, preload内存缓存), TushareProvider扩展(get_fina_indicator+dv_ratio), 18个FundamentalCrossFactor(Value: EP/BP/SP/DP, Quality: ROE/ROA/GrossMargin/NetProfitMargin, Growth: RevenueGrowthYoY/ProfitGrowthYoY/ROEChange, Size: LnMarketCap/LnCircMV反转, Liquidity: TurnoverRate/AmihudIlliquidity, Leverage: DebtToAssets反转/CurrentRatio, Industry: IndustryMomentum), 行业分类(复用symbols.industry), Fundamental API(fetch/quality/factors 3端点), 前端因子分类(optgroup+按类别分组+付费标注), 数据质量仪表板(覆盖率+财报期数), Tushare权限分层降级(daily_basic免费/fina_indicator付费), 1242 tests
+- **Next: V2.11.1** — Alpha组合+中性化 → V2.12 优化器+归因+风控 → V2.13 ML Alpha+多策略 → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)

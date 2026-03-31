@@ -65,7 +65,7 @@ export default function DocsPage() {
               <tr><td style={{...tds, fontWeight: 600}}>实验</td><td style={tds}>完整实验 + 参数搜索 + Gate 评分</td><td style={tds}>严格评估策略，批量搜参</td></tr>
               <tr><td style={{...tds, fontWeight: 600}}>代码编辑器</td><td style={tds}>Monaco 编辑器 + AI 对话 + 保存测试</td><td style={tds}>编写/修改策略代码</td></tr>
               <tr><td style={{...tds, fontWeight: 600}}>研究助手</td><td style={tds}>自主研究 Agent（目标驱动）</td><td style={tds}>全自动策略发现与验证</td></tr>
-              <tr><td style={{...tds, fontWeight: 600}}>开发文档</td><td style={tds}>本页面 — 11 章参考文档</td><td style={tds}>查阅 API、因子、规则</td></tr>
+              <tr><td style={{...tds, fontWeight: 600}}>开发文档</td><td style={tds}>本页面 — 13 章参考文档</td><td style={tds}>查阅 API、因子、规则</td></tr>
             </tbody>
           </table>
 
@@ -613,12 +613,12 @@ IS  = In-Sample (样本内) — 用于评估训练集表现
 OOS = Out-of-Sample (样本外) — 真正衡量预测能力
 注意: 每个 Split 之间的数据严格不重叠，避免数据泄露`}</pre>
 
-          <div style={h3s}>Walk-Forward 输出指标</div>
+          <div style={h3s}>前推验证输出指标</div>
           <table style={tbl}>
             <thead><tr><th style={ths}>指标</th><th style={ths}>含义</th><th style={ths}>怎么看</th></tr></thead>
             <tbody>
-              <tr><td style={tds}>OOS Sharpe</td><td style={tds}>所有 Split 样本外 Sharpe 的平均值，代表策略的真实预测能力</td><td style={{...tds, fontFamily:'monospace'}}>{'>'} 0.5 较好</td></tr>
-              <tr><td style={tds}>过拟合评分 (Overfitting Score)</td><td style={tds}>IS Sharpe 与 OOS Sharpe 的衰减程度。越高说明策略在训练集表现好但测试集表现差（过拟合）</td><td style={{...tds, fontFamily:'monospace'}}>{'<'} 0.3 稳健</td></tr>
+              <tr><td style={tds}>样本外夏普</td><td style={tds}>所有 Split 样本外 Sharpe 的平均值，代表策略的真实预测能力</td><td style={{...tds, fontFamily:'monospace'}}>{'>'} 0.5 较好</td></tr>
+              <tr><td style={tds}>过拟合评分 (Overfitting Score)</td><td style={tds}>IS Sharpe 与 样本外夏普 的衰减程度。越高说明策略在训练集表现好但测试集表现差（过拟合）</td><td style={{...tds, fontFamily:'monospace'}}>{'<'} 0.3 稳健</td></tr>
               <tr><td style={tds}>IS/OOS 衰减</td><td style={tds}>(IS均值 - OOS均值) / |IS均值| 的百分比</td><td style={{...tds, fontFamily:'monospace'}}>{'<'} 30% 较好</td></tr>
             </tbody>
           </table>
@@ -733,7 +733,7 @@ OOS = Out-of-Sample (样本外) — 真正衡量预测能力
 3. 回测执行          → VectorizedBacktestEngine.run()
       ↓                     因子计算 → 信号生成 → 逐 bar 模拟
 4. 前推验证 (可选)   → WalkForwardValidator.validate()
-      ↓                     N 折交叉验证，计算 OOS Sharpe 和过拟合评分
+      ↓                     N 折交叉验证，计算 样本外夏普 和过拟合评分
 5. 显著性检验        → compute_significance()
       ↓                     Monte Carlo 排列检验 + Bootstrap CI
 6. Research Gate     → ResearchGate.evaluate()
@@ -913,7 +913,7 @@ Agent 循环:
           <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>组合回测 (V2.9+V2.10)</h1>
 
           <div style={h2s}>概述</div>
-          <p style={ps}>从"单股票单策略"升级到"多股票组合/轮动"回测。支持 ETF、个股、混合标的池。V2.10 新增因子研究 sub-tab，支持截面 IC 评估、Walk-Forward 验证、多回测对比和 CSV 导出。</p>
+          <p style={ps}>从"单股票单策略"升级到"多股票组合/轮动"回测。支持 ETF、个股、混合股票池。V2.10 新增因子研究 sub-tab，支持截面 IC 评估、Walk-Forward 验证、多回测对比和 CSV 导出。</p>
           <div style={note}>导航栏 → "组合" tab → 三个子页签：组合回测 | 因子研究 | 历史记录</div>
 
           <div style={h2s}>内置策略</div>
@@ -925,7 +925,7 @@ Agent 循环:
             <tr><td style={tds}>EtfStockEnhance</td><td style={tds}>ETF 轮动底仓 + 个股增强</td><td style={tds}>top_n, stock_ratio</td></tr>
           </tbody></table>
 
-          <div style={h2s}>标的池示例</div>
+          <div style={h2s}>股票池示例</div>
           <div style={h3s}>策略 1 (EtfMacdRotation) — 10 只 ETF</div>
           <pre style={code}>510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ</pre>
           <div style={h3s}>策略 2/3 (SectorSwitch/StockEnhance) — 22 只 ETF</div>
@@ -999,15 +999,15 @@ class MyRotation(PortfolioStrategy):
           <div style={h3s}>因子研究 sub-tab</div>
           <p style={ps}>组合 tab 新增"因子研究"子页签，无需运行回测即可评估因子质量。</p>
           <table style={tbl}><thead><tr><th style={ths}>功能</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>截面 IC / Rank IC</td><td style={tds}>每日对全 universe 股票计算因子值与未来收益的截面相关性（Pearson IC + Spearman Rank IC）</td></tr>
+            <tr><td style={tds}>选股能力 (IC / Rank IC)</td><td style={tds}>每日对全 universe 股票计算因子值与未来收益的截面相关性（Pearson IC + Spearman Rank IC）</td></tr>
             <tr><td style={tds}>ICIR</td><td style={tds}>IC 均值 / IC 标准差，衡量因子稳定性。ICIR &gt; 0.5 为可用因子</td></tr>
-            <tr><td style={tds}>IC 衰减曲线</td><td style={tds}>lag 1/5/10/20 天的 IC 变化，观察因子有效期。好因子的 IC 随 lag 递减</td></tr>
-            <tr><td style={tds}>分位数收益</td><td style={tds}>按因子值分 5 组（quintile），比较 Top 和 Bottom 组收益差。有效因子 Top &gt; Bottom</td></tr>
+            <tr><td style={tds}>信号持续性 (IC 衰减)</td><td style={tds}>lag 1/5/10/20 天的 IC 变化，观察因子有效期。好因子的 IC 随 lag 递减</td></tr>
+            <tr><td style={tds}>分档收益</td><td style={tds}>按因子值分 5 组（quintile），比较 Top 和 Bottom 组收益差。有效因子 Top &gt; Bottom</td></tr>
             <tr><td style={tds}>因子相关性热力图</td><td style={tds}>多因子之间的 Spearman 秩相关矩阵，高相关（&gt;0.7）表示因子冗余</td></tr>
             <tr><td style={tds}>IC 时序图</td><td style={tds}>IC 随时间变化的折线图，观察因子在不同市场环境下的表现</td></tr>
           </tbody></table>
 
-          <div style={h3s}>Walk-Forward 验证</div>
+          <div style={h3s}>前推验证</div>
           <p style={ps}>PortfolioWalkForward 将回测区间分为 N 折训练集和测试集，验证策略在样本外的稳定性。PortfolioSignificance 提供 Bootstrap 置信区间和 Monte Carlo 信号置换检验。</p>
 
           <div style={h3s}>多回测对比</div>
@@ -1016,8 +1016,8 @@ class MyRotation(PortfolioStrategy):
           <div style={h3s}>CSV 导出</div>
           <p style={ps}>回测结果支持一键导出：净值曲线 CSV + 交易记录 CSV。可直接用 Excel 打开分析。</p>
 
-          <div style={h3s}>预设标的池</div>
-          <p style={ps}>三组快捷标的池按钮，点击即填入：</p>
+          <div style={h3s}>预设股票池</div>
+          <p style={ps}>三组快捷股票池按钮，点击即填入：</p>
           <table style={tbl}><thead><tr><th style={ths}>预设</th><th style={ths}>内容</th></tr></thead><tbody>
             <tr><td style={tds}>宽基 ETF</td><td style={tds}>沪深300/中证500/创业板等宽基 ETF</td></tr>
             <tr><td style={tds}>ETF 轮动池</td><td style={tds}>10 只 ETF（含跨境、商品）</td></tr>
@@ -1032,6 +1032,82 @@ class MyRotation(PortfolioStrategy):
             <tr><td style={tds}>/api/portfolio/evaluate-factors</td><td style={tds}>POST</td><td style={tds}>截面因子评估（IC/RankIC/ICIR/衰减/分位数）</td></tr>
             <tr><td style={tds}>/api/portfolio/factor-correlation</td><td style={tds}>POST</td><td style={tds}>因子相关性矩阵（Spearman 秩相关）</td></tr>
             <tr><td style={tds}>/api/portfolio/walk-forward</td><td style={tds}>POST</td><td style={tds}>组合 Walk-Forward 验证 + 显著性检验</td></tr>
+          </tbody></table>
+
+          {/* ── V2.11 基本面数据 ── */}
+          <div style={h2s}>V2.11 基本面数据层</div>
+
+          <div style={h3s}>什么是基本面因子？</div>
+          <p style={ps}>之前的因子（动量、波动率、成交量）都是从<strong>价格和成交量</strong>推算的，叫"量价因子"。基本面因子来自<strong>财务报表</strong>（PE、ROE、营收增速等），是价值投资和多因子选股的核心数据源。</p>
+          <div style={note}>
+            简单理解：量价因子看"股价怎么走"，基本面因子看"公司赚不赚钱"。两类因子互补，组合使用效果更好。
+          </div>
+
+          <div style={h3s}>选股因子研究怎么用？</div>
+          <p style={ps}>选股因子研究回答一个核心问题：<strong>"这个因子能不能帮我选出好股票？"</strong></p>
+          <p style={ps}>操作步骤：</p>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th><th style={ths}>看什么</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>组合 tab → 因子研究 → 选因子（多选）</td><td style={tds}>按类别分组：量价、估值、质量、成长等</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>填股票池 + 日期范围</td><td style={tds}>建议 20+ 只股票、2 年以上</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>如用基本面因子 → 先点"获取基本面数据"</td><td style={tds}>首次获取较慢（Tushare API），之后有缓存</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>点"评估因子"</td><td style={tds}>IC/ICIR 表 + IC 时序 + 分档收益</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>怎么看评估结果？</div>
+          <table style={tbl}><thead><tr><th style={ths}>指标</th><th style={ths}>含义</th><th style={ths}>好的标准</th></tr></thead><tbody>
+            <tr><td style={tds}>IC 均值</td><td style={tds}>因子值与未来收益的相关性</td><td style={tds}>|IC| &gt; 0.03 有信号</td></tr>
+            <tr><td style={tds}>ICIR</td><td style={tds}>IC 的稳定性（均值/标准差）</td><td style={tds}>|ICIR| &gt; 0.5 可用</td></tr>
+            <tr><td style={tds}>分档收益</td><td style={tds}>按因子排名分 5 组的收益</td><td style={tds}>Top 组 &gt; Bottom 组</td></tr>
+            <tr><td style={tds}>IC 衰减</td><td style={tds}>信号随时间变弱的速度</td><td style={tds}>lag 1 最高，逐渐递减</td></tr>
+            <tr><td style={tds}>因子相关性</td><td style={tds}>两因子之间的排名相关</td><td style={tds}>&lt; 0.7 说明不冗余</td></tr>
+          </tbody></table>
+          <div style={note}>
+            实际案例：如果 EP（盈利收益率）的 IC 均值 = 0.05, ICIR = 0.8, 分位数 Top &gt; Bottom，说明"买便宜股票"在历史上持续有效。可以把 EP 用在 TopNRotation 策略里。
+          </div>
+
+          <div style={h3s}>18 个基本面因子</div>
+          <p style={ps}>按类别分组，全部输出百分位排名（0~1），<strong>分数越高越好</strong>：</p>
+          <table style={tbl}><thead><tr><th style={ths}>类别</th><th style={ths}>因子</th><th style={ths}>含义</th><th style={ths}>数据源</th></tr></thead><tbody>
+            <tr><td style={{...tds, fontWeight:600}} rowSpan={4}>估值 (Value)</td><td style={tds}>EP</td><td style={tds}>1/PE_TTM，越高越便宜</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={tds}>BP</td><td style={tds}>1/PB，越高越便宜</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={tds}>SP</td><td style={tds}>1/PS_TTM，越高越便宜</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={tds}>DP</td><td style={tds}>股息率，越高越好</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={{...tds, fontWeight:600}} rowSpan={4}>质量 (Quality)</td><td style={tds}>ROE</td><td style={tds}>净资产收益率</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={tds}>ROA</td><td style={tds}>总资产收益率</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={tds}>GrossMargin</td><td style={tds}>毛利率</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={tds}>NetProfitMargin</td><td style={tds}>净利率</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={{...tds, fontWeight:600}} rowSpan={3}>成长 (Growth)</td><td style={tds}>RevenueGrowthYoY</td><td style={tds}>营收同比增速</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={tds}>ProfitGrowthYoY</td><td style={tds}>净利润同比增速</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={tds}>ROEChange</td><td style={tds}>ROE 同比变化</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={{...tds, fontWeight:600}} rowSpan={2}>规模 (Size)</td><td style={tds}>LnMarketCap</td><td style={tds}>总市值对数（反转：小盘高分）</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={tds}>LnCircMV</td><td style={tds}>流通市值对数（反转：小盘高分）</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={{...tds, fontWeight:600}} rowSpan={2}>流动性 (Liquidity)</td><td style={tds}>TurnoverRate</td><td style={tds}>换手率</td><td style={tds}>daily_basic</td></tr>
+            <tr><td style={tds}>AmihudIlliquidity</td><td style={tds}>Amihud 非流动性（反转）</td><td style={tds}>价格数据</td></tr>
+            <tr><td style={{...tds, fontWeight:600}} rowSpan={2}>杠杆 (Leverage)</td><td style={tds}>DebtToAssets</td><td style={tds}>资产负债率（反转：低杠杆高分）</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={tds}>CurrentRatio</td><td style={tds}>流动比率</td><td style={tds}>fina_indicator *</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>行业 (Industry)</td><td style={tds}>IndustryMomentum</td><td style={tds}>所属行业平均涨幅</td><td style={tds}>价格+行业</td></tr>
+          </tbody></table>
+          <div style={warn}>* 标记因子需要 Tushare 付费接口（fina_indicator）。免费用户可用估值、规模、流动性共 7 个因子。</div>
+
+          <div style={h3s}>PIT (Point-in-Time) 对齐</div>
+          <p style={ps}>财报数据有"公告日"和"报告期"两个日期。例如 2024Q1 报告期是 3/31，但公告日可能是 4/28。</p>
+          <div style={warn}>
+            系统使用<strong>公告日（ann_date）</strong>对齐，不使用报告期。确保回测时不会"偷看未来"。例如：在 4/15 做决策时，只能用到已公告的 2023Q4 报告，不能用尚未公告的 2024Q1。
+          </div>
+
+          <div style={h3s}>数据获取流程</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>1. 获取数据</td><td style={tds}>因子研究 tab → 点"获取基本面数据" → 从 Tushare 拉取并缓存到本地 DuckDB</td></tr>
+            <tr><td style={tds}>2. 查看质量</td><td style={tds}>自动显示数据质量报告：每只股票的日度覆盖率、财报期数、行业</td></tr>
+            <tr><td style={tds}>3. 评估因子</td><td style={tds}>选择基本面因子 → 点"评估因子" → 查看 IC/ICIR/分位数</td></tr>
+            <tr><td style={tds}>4. 用于回测</td><td style={tds}>组合回测 tab → TopNRotation 策略 → factor 下拉选 ep/roe 等 → 运行回测</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>新增 API 端点 (V2.11)</div>
+          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>/api/fundamental/fetch</td><td style={tds}>POST</td><td style={tds}>获取并缓存基本面数据（daily_basic + fina_indicator）</td></tr>
+            <tr><td style={tds}>/api/fundamental/quality</td><td style={tds}>POST</td><td style={tds}>数据质量报告（覆盖率、财报期数）</td></tr>
+            <tr><td style={tds}>/api/fundamental/factors</td><td style={tds}>GET</td><td style={tds}>列出全部基本面因子（含分类、描述、付费标注）</td></tr>
           </tbody></table>
         </>}
 

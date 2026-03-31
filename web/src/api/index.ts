@@ -67,4 +67,9 @@ export const portfolioWalkForward = (data: any) => api.post('/portfolio/walk-for
 export const evaluateFactors = (data: any) => api.post('/portfolio/evaluate-factors', data)
 export const factorCorrelation = (data: any) => api.post('/portfolio/factor-correlation', data)
 
+// Fundamental data (V2.11)
+export const fetchFundamentalData = (data: any) => api.post('/fundamental/fetch', data)
+export const fundamentalDataQuality = (data: any) => api.post('/fundamental/quality', data)
+export const listFundamentalFactors = () => api.get('/fundamental/factors')
+
 export default api

@@ -42,6 +42,12 @@ Fetch, validate, cache, and serve market data (K-line) from multiple sources wit
 - **Error handling:** Checks response `code` field; code 2002 = auth error, other non-zero = API error.
 - **No SDK:** Uses direct HTTP via httpx (no tushare pip package needed).
 
+## Files (V2.11 additions)
+| File | Role | Core/Extension |
+|------|------|---------------|
+| fundamental.py | FundamentalStore: DuckDB tables (fundamental_daily, fina_indicator), PIT query, preload cache, data quality report | EXTENSION |
+
 ## Status
 - Implemented: DuckDBStore, TencentProvider, FMPProvider, TushareProvider, DataValidator, DataProviderChain
+- V2.11: FundamentalStore (DuckDB fundamental_daily + fina_indicator tables, PIT ann_date alignment, in-memory preload cache, data quality report), TushareProvider extended (get_fina_indicator, dv_ratio in daily_basic)
 - Not implemented: AKShare

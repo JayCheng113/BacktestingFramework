@@ -224,9 +224,9 @@ export default function CandidateSearch() {
                       className="px-2 py-1 rounded text-sm w-full" style={pr.step <= 0 ? errStyle : inputStyle} />
                     <span className="text-xs truncate"
                       style={{ color: hasError ? '#ef4444' : 'var(--text-secondary)' }}
-                      title={hasError ? (pr.min > pr.max ? 'Min > Max' : 'Step must be > 0') : preview.join(', ')}>
+                      title={hasError ? (pr.min > pr.max ? '最小值 > 最大值' : '步长必须 > 0') : preview.join(', ')}>
                       {hasError
-                        ? (pr.min > pr.max ? 'Min > Max' : 'Step > 0')
+                        ? (pr.min > pr.max ? '最小值 > 最大值' : '步长 > 0')
                         : `[${count}] ${preview.join(', ')}${count > 6 ? '...' : ''}`}
                     </span>
                   </div>
@@ -276,12 +276,12 @@ export default function CandidateSearch() {
                   <tr style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
                     <th className="px-3 py-2 text-left w-10">#</th>
                     <th className="px-3 py-2 text-left">参数</th>
-                    <th className="px-3 py-2 text-right">Sharpe</th>
+                    <th className="px-3 py-2 text-right">夏普</th>
                     <th className="px-3 py-2 text-right">收益</th>
                     <th className="px-3 py-2 text-right">回撤</th>
                     <th className="px-3 py-2 text-right">交易数</th>
-                    <th className="px-3 py-2 text-right">FDR-p</th>
-                    <th className="px-3 py-2 text-center">Gate</th>
+                    <th className="px-3 py-2 text-right">显著性</th>
+                    <th className="px-3 py-2 text-center">门控</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -307,7 +307,7 @@ export default function CandidateSearch() {
                         <span className="px-2 py-0.5 rounded text-xs font-medium"
                           style={{ backgroundColor: c.gate_passed ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
                                    color: c.gate_passed ? '#22c55e' : '#ef4444' }}>
-                          {c.gate_passed ? 'PASS' : 'FAIL'}
+                          {c.gate_passed ? '通过' : '未通过'}
                         </span>
                       </td>
                     </tr>

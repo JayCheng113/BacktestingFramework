@@ -284,16 +284,16 @@ export default function ExperimentPanel() {
           <table className="w-full text-sm" style={{ color: 'var(--text-primary)' }}>
             <thead>
               <tr style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-                <th className="px-3 py-2 text-left">时间</th>
+                <th className="px-3 py-2 text-left">创建时间</th>
                 <th className="px-3 py-2 text-left">策略</th>
                 <th className="px-3 py-2 text-left">股票</th>
                 <th className="px-3 py-2 text-left">回测区间</th>
-                <th className="px-3 py-2 text-right">Sharpe</th>
+                <th className="px-3 py-2 text-right">夏普</th>
                 <th className="px-3 py-2 text-right">收益</th>
                 <th className="px-3 py-2 text-right">回撤</th>
                 <th className="px-3 py-2 text-right">交易数</th>
-                <th className="px-3 py-2 text-center">Gate</th>
-                <th className="px-3 py-2 text-right">耗时</th>
+                <th className="px-3 py-2 text-center">门控</th>
+                <th className="px-3 py-2 text-right">用时</th>
                 <th className="px-3 py-2 w-8"></th>
               </tr>
             </thead>
@@ -322,7 +322,7 @@ export default function ExperimentPanel() {
                     <span className="px-2 py-0.5 rounded text-xs font-medium"
                       style={{ backgroundColor: r.gate_passed ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
                                color: r.gate_passed ? '#22c55e' : '#ef4444' }}>
-                      {r.gate_passed ? 'PASS' : 'FAIL'}
+                      {r.gate_passed ? '通过' : '未通过'}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -347,7 +347,7 @@ export default function ExperimentPanel() {
         <div className="rounded-lg p-4 space-y-3" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
           <div className="flex justify-between items-center">
             <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {detail.strategy_name} / {detail.symbol} — Gate {detail.gate_passed ? 'PASS' : 'FAIL'}
+              {detail.strategy_name} / {detail.symbol} — 门控 {detail.gate_passed ? '通过' : '未通过'}
             </h3>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
               run_id: {detail.run_id} | commit: {detail.code_commit}
@@ -367,15 +367,15 @@ export default function ExperimentPanel() {
           {/* Metrics Grid */}
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-sm">
             {[
-              { label: 'Sharpe', value: detail.sharpe_ratio?.toFixed(2) },
-              { label: '收益率', value: detail.total_return != null ? (detail.total_return * 100).toFixed(1) + '%' : '-' },
+              { label: '夏普比率', value: detail.sharpe_ratio?.toFixed(2) },
+              { label: '总收益率', value: detail.total_return != null ? (detail.total_return * 100).toFixed(1) + '%' : '-' },
               { label: '最大回撤', value: detail.max_drawdown != null ? (detail.max_drawdown * 100).toFixed(1) + '%' : '-' },
-              { label: '交易数', value: String(detail.trade_count) },
+              { label: '交易次数', value: String(detail.trade_count) },
               { label: '胜率', value: detail.win_rate != null ? (detail.win_rate * 100).toFixed(0) + '%' : '-' },
-              { label: 'p-value', value: detail.p_value?.toFixed(3) },
-              { label: 'OOS Sharpe', value: detail.oos_sharpe?.toFixed(2) ?? '-' },
-              { label: '过拟合分', value: detail.overfitting_score?.toFixed(2) ?? '-' },
-              { label: '显著性', value: detail.is_significant ? '是' : '否' },
+              { label: '显著性(p)', value: detail.p_value?.toFixed(3) },
+              { label: '样本外夏普', value: detail.oos_sharpe?.toFixed(2) ?? '-' },
+              { label: '过拟合评分', value: detail.overfitting_score?.toFixed(2) ?? '-' },
+              { label: '统计显著', value: detail.is_significant ? '是' : '否' },
             ].map(m => (
               <div key={m.label} className="rounded p-2" style={{ backgroundColor: 'var(--bg-primary)' }}>
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{m.label}</div>

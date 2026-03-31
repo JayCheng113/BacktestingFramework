@@ -47,7 +47,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   const icStd = result && icN > 1 ? Math.sqrt(result.ic_series.reduce((s: number, v: number) => s + (v - icMean) ** 2, 0) / (icN - 1)) : 0
   const icTimeSeriesOption = result ? {
     backgroundColor: '#0d1117',
-    title: { text: 'IC 时间序列', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: '预测能力随时间变化', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
     xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
@@ -63,7 +63,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   // IC Decay curve
   const icDecayOption = result && result.ic_decay ? {
     backgroundColor: '#0d1117',
-    title: { text: 'IC 衰减', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    title: { text: '信号持续性 (天数越长衰减越多)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
     xAxis: { type: 'category', data: Object.keys(result.ic_decay).map(k => `${k}d`), axisLabel: { color: '#8b949e' } },
@@ -86,7 +86,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     const labels = Array.from({ length: bins }, (_, i) => (min + step * (i + 0.5)).toFixed(3))
     return {
       backgroundColor: '#0d1117',
-      title: { text: 'IC 分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+      title: { text: '预测能力分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
       tooltip: { trigger: 'axis' },
       grid: { left: 60, right: 20, top: 40, bottom: 30 },
       xAxis: { type: 'category', data: labels, axisLabel: { color: '#8b949e', rotate: 45, fontSize: 10 } },
@@ -97,7 +97,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-medium mb-3">时序因子分析 (单股技术指标)</h3>
+      <h3 className="text-sm font-medium mb-3">技术指标评估 (单股)</h3>
       <div className="flex gap-3 items-end mb-4">
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>
@@ -116,8 +116,8 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
           {/* Metric cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             {[
-              ['IC 均值', result.ic_mean], ['Rank IC', result.rank_ic_mean],
-              ['ICIR', result.icir], ['Rank ICIR', result.rank_icir], ['换手率', result.turnover],
+              ['预测能力(IC)', result.ic_mean], ['排名IC', result.rank_ic_mean],
+              ['稳定性(ICIR)', result.icir], ['排名ICIR', result.rank_icir], ['换手率', result.turnover],
             ].map(([label, val]) => (
               <div key={label as string} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
                 <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{label as string}</div>

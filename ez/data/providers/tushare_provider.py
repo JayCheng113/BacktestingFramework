@@ -240,7 +240,7 @@ class TushareDataProvider(DataProvider):
 
         Returns list of dicts with keys:
         ts_code, trade_date, close, turnover_rate, turnover_rate_f,
-        volume_ratio, pe, pe_ttm, pb, ps, ps_ttm,
+        volume_ratio, pe, pe_ttm, pb, ps, ps_ttm, dv_ratio,
         total_share, float_share, total_mv, circ_mv
         """
         if not self._token:
@@ -254,7 +254,7 @@ class TushareDataProvider(DataProvider):
                 "end_date": _date_to_tushare(end_date),
             },
             fields="ts_code,trade_date,close,turnover_rate,turnover_rate_f,"
-                   "volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,"
+                   "volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,"
                    "total_share,float_share,total_mv,circ_mv",
         )
         if not data:
@@ -264,12 +264,56 @@ class TushareDataProvider(DataProvider):
         results = []
         for row in data["items"]:
             record = dict(zip(fields, row))
-            # Convert trade_date string to date object
             if "trade_date" in record and record["trade_date"]:
                 record["trade_date"] = _tushare_to_date(record["trade_date"])
             results.append(record)
 
         results.sort(key=lambda r: r.get("trade_date", date.min))
+        return results
+
+    def get_fina_indicator(
+        self, symbol: str, start_date: date, end_date: date,
+    ) -> list[dict]:
+        """Fetch pre-computed financial indicators with ann_date for PIT alignment.
+
+        Returns list of dicts with keys including:
+        ts_code, ann_date, end_date, roe, roe_waa, roa, grossprofit_margin,
+        netprofit_margin, debt_to_assets, current_ratio, quick_ratio,
+        q_revenue_yoy, q_profit_yoy, roe_yoy, eps, dt_eps
+
+        Note: This API may require Tushare paid subscription (2000+ points).
+        """
+        if not self._token:
+            raise ProviderError("TUSHARE_TOKEN not set")
+
+        data = self._call_api(
+            api_name="fina_indicator",
+            params={
+                "ts_code": symbol,
+                "start_date": _date_to_tushare(start_date),
+                "end_date": _date_to_tushare(end_date),
+            },
+            fields="ts_code,ann_date,end_date,"
+                   "roe,roe_waa,roa,grossprofit_margin,netprofit_margin,"
+                   "debt_to_assets,current_ratio,quick_ratio,"
+                   "q_revenue_yoy,q_profit_yoy,roe_yoy,eps,dt_eps",
+        )
+        if not data:
+            return []
+
+        fields = data["fields"]
+        results = []
+        for row in data["items"]:
+            record = dict(zip(fields, row))
+            for date_field in ("ann_date", "end_date"):
+                if date_field in record and record[date_field]:
+                    record[date_field] = _tushare_to_date(record[date_field])
+            # Normalize field names for FundamentalStore
+            record["revenue_yoy"] = record.pop("q_revenue_yoy", None)
+            record["profit_yoy"] = record.pop("q_profit_yoy", None)
+            results.append(record)
+
+        results.sort(key=lambda r: r.get("end_date", date.min))
         return results
 
     def get_index_kline(

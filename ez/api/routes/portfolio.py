@@ -1,4 +1,4 @@
-"""V2.9+V2.10: Portfolio API — run, list, detail, delete + factor evaluation."""
+"""V2.9+V2.10+V2.11: Portfolio API — run, list, detail, delete + factor evaluation + fundamental."""
 from __future__ import annotations
 
 import json
@@ -34,9 +34,67 @@ _BUILTIN_FACTOR_MAP = {
 _BUILTIN_CLASS_NAMES = {"MomentumRank", "VolumeRank", "ReverseVolatilityRank"}
 
 
+def _is_fundamental_factor(cls_or_factory) -> bool:
+    """Check if a factor class/factory is a FundamentalCrossFactor."""
+    from ez.factor.builtin.fundamental import FundamentalCrossFactor
+    if isinstance(cls_or_factory, type):
+        return issubclass(cls_or_factory, FundamentalCrossFactor)
+    return False
+
+
+def _inject_fundamental_store(factor):
+    """If factor is a FundamentalCrossFactor, inject the singleton store."""
+    from ez.factor.builtin.fundamental import FundamentalCrossFactor
+    if isinstance(factor, FundamentalCrossFactor) and factor._store is None:
+        from ez.api.deps import get_fundamental_store
+        factor.set_store(get_fundamental_store())
+    return factor
+
+
+def _ensure_fundamental_data(symbols: list[str], start: date, end: date, need_fina: bool) -> list[str]:
+    """Pre-fetch fundamental data if a fundamental factor is being used.
+
+    Returns list of warning messages (empty if all OK).
+    Raises HTTPException 400 if Tushare provider unavailable.
+    """
+    from ez.api.deps import get_fundamental_store, get_tushare_provider
+    store = get_fundamental_store()
+    provider = get_tushare_provider()
+    warnings = []
+
+    if provider is None:
+        raise HTTPException(400, "基本面因子需要 Tushare Token，请在设置中配置")
+
+    # Extend fina fetch window: need reports announced BEFORE backtest start
+    fina_start = start - timedelta(days=540)  # 18 months lookback for PIT
+    status = store.ensure_data(symbols, fina_start, end, provider, need_fina=need_fina)
+
+    if status["errors"]:
+        err_count = len(status["errors"])
+        warnings.append(f"基本面数据获取部分失败 ({err_count} 个错误): {status['errors'][:3]}")
+        logger.warning("Fundamental data fetch errors: %s", status["errors"])
+
+    if status["daily_fetched"] == 0 and not any(
+        store.has_daily_basic(s, start, end) for s in symbols[:3]
+    ):
+        warnings.append("警告: 未获取到日度基本面数据, 基本面因子可能返回空信号")
+
+    store.preload(symbols, start, end)
+    return warnings
+
+
 def _get_factor_map() -> dict:
-    """Build factor map: builtins + dynamically registered CrossSectionalFactor subclasses."""
+    """Build factor map: builtins + dynamically registered CrossSectionalFactor subclasses.
+
+    Fundamental factors are registered by BOTH class name (EP) and instance.name (ep),
+    ensuring frontend can resolve using either convention.
+    """
     from ez.portfolio.cross_factor import CrossSectionalFactor
+    # Ensure fundamental factors are imported (triggers auto-registration)
+    try:
+        import ez.factor.builtin.fundamental  # noqa: F401
+    except ImportError:
+        pass
     result = dict(_BUILTIN_FACTOR_MAP)
     for name, cls in CrossSectionalFactor.get_registry().items():
         # Skip builtin classes (already mapped with parameterized keys)
@@ -44,6 +102,14 @@ def _get_factor_map() -> dict:
             continue
         if name not in result:
             result[name] = cls
+        # Also register by instance.name (e.g., "ep" for EP) to match frontend convention
+        try:
+            inst = cls()
+            iname = inst.name
+            if iname and iname != name and iname not in result:
+                result[iname] = cls
+        except (TypeError, Exception):
+            pass
     return result
 
 
@@ -67,29 +133,49 @@ class PortfolioRunRequest(BaseModel):
     benchmark_symbol: str = ""  # e.g. "510300.SH"
 
 
-def _create_strategy(name: str, params: dict) -> PortfolioStrategy:
-    """Instantiate strategy by name + params."""
+def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
+                     start: date | None = None, end: date | None = None) -> tuple[PortfolioStrategy, list[str]]:
+    """Instantiate strategy by name + params. Auto-injects FundamentalStore if needed.
+
+    Returns (strategy, warnings) tuple. Warnings are non-fatal messages about data availability.
+    """
+    from ez.factor.builtin.fundamental import NEEDS_FINA
+    warnings: list[str] = []
     p = dict(params)  # don't mutate input
     if name == "TopNRotation":
         factor_name = p.pop("factor", "momentum_rank_20")
         factory = _get_factor_map().get(factor_name)
         if not factory:
             raise HTTPException(400, f"Unknown factor: {factor_name}. Available: {list(_get_factor_map().keys())}")
+        factor = factory()
+        factor = _inject_fundamental_store(factor)
+        if _is_fundamental_factor(type(factor)) and symbols and start and end:
+            warnings = _ensure_fundamental_data(symbols, start, end, need_fina=type(factor).__name__ in NEEDS_FINA)
         top_n = p.pop("top_n", 10)
-        return TopNRotation(factor=factory(), top_n=top_n, **p)
+        return TopNRotation(factor=factor, top_n=top_n, **p), warnings
     elif name == "MultiFactorRotation":
         factor_names = p.pop("factors", ["momentum_rank_20"])
         factors = []
+        has_fundamental = False
+        need_fina = False
         for fn in factor_names:
             factory = _get_factor_map().get(fn)
             if not factory:
                 raise HTTPException(400, f"Unknown factor: {fn}")
-            factors.append(factory())
+            f = factory()
+            f = _inject_fundamental_store(f)
+            if _is_fundamental_factor(type(f)):
+                has_fundamental = True
+                if type(f).__name__ in NEEDS_FINA:
+                    need_fina = True
+            factors.append(f)
+        if has_fundamental and symbols and start and end:
+            warnings = _ensure_fundamental_data(symbols, start, end, need_fina=need_fina)
         top_n = p.pop("top_n", 10)
-        return MultiFactorRotation(factors=factors, top_n=top_n, **p)
+        return MultiFactorRotation(factors=factors, top_n=top_n, **p), warnings
     elif name in PortfolioStrategy.get_registry():
         cls = PortfolioStrategy.get_registry()[name]
-        return cls(**p)
+        return cls(**p), []
     else:
         raise HTTPException(404, f"Strategy '{name}' not found")
 
@@ -146,7 +232,7 @@ def reset_portfolio_store() -> None:
 
 @router.get("/strategies")
 def list_portfolio_strategies():
-    """List available portfolio strategies."""
+    """List available portfolio strategies with factor categories."""
     result = []
     for name, cls in PortfolioStrategy.get_registry().items():
         result.append({
@@ -154,8 +240,55 @@ def list_portfolio_strategies():
             "description": cls.get_description().strip()[:200] if hasattr(cls, 'get_description') else "",
             "parameters": cls.get_parameters_schema() if hasattr(cls, 'get_parameters_schema') else {},
         })
-    # Add factor list for reference
-    return {"strategies": result, "available_factors": list(_get_factor_map().keys())}
+
+    # Build categorized factor list
+    factor_map = _get_factor_map()
+    factor_list = list(factor_map.keys())
+
+    # Factor categories for frontend grouping
+    try:
+        from ez.factor.builtin.fundamental import FACTOR_CATEGORIES, CATEGORY_LABELS, NEEDS_FINA, get_fundamental_factors
+        categories = []
+        categorized_keys: set[str] = set()
+
+        # Technical factors (built-in, not fundamental)
+        tech_factors = [f for f in factor_list if f in _BUILTIN_FACTOR_MAP]
+        if tech_factors:
+            categories.append({"key": "technical", "label": "量价 (Technical)", "factors": tech_factors})
+            categorized_keys.update(tech_factors)
+
+        # Fundamental factor categories — use instance.name as key (matches factor_map dual registration)
+        fundamental_names = {cls.__name__ for cls in get_fundamental_factors().values()}
+        for cat_key, class_names in FACTOR_CATEGORIES.items():
+            cat_factors = []
+            for cname in class_names:
+                cls = factor_map.get(cname)
+                if cls and isinstance(cls, type):
+                    try:
+                        instance = cls()
+                    except (TypeError, Exception):
+                        continue
+                    fkey = instance.name  # e.g., "ep" — matches factor_map dual registration
+                    cat_factors.append({
+                        "key": fkey,
+                        "class_name": cname,
+                        "description": getattr(instance, 'description', ''),
+                        "needs_fina": cname in NEEDS_FINA,
+                    })
+                    categorized_keys.add(fkey)
+                    categorized_keys.add(cname)  # also mark class name as categorized
+            if cat_factors:
+                categories.append({"key": cat_key, "label": CATEGORY_LABELS.get(cat_key, cat_key), "factors": cat_factors})
+
+        # "Other" category: user-registered factors not in any category above
+        other_factors = [f for f in factor_list if f not in categorized_keys]
+        if other_factors:
+            categories.append({"key": "other", "label": "其他 (Other)", "factors": other_factors})
+
+    except ImportError:
+        categories = [{"key": "technical", "label": "量价 (Technical)", "factors": factor_list}]
+
+    return {"strategies": result, "available_factors": factor_list, "factor_categories": categories}
 
 
 @router.post("/run")
@@ -165,7 +298,8 @@ def run_portfolio(req: PortfolioRunRequest):
     start = req.start_date or (end - timedelta(days=365 * 3))
 
     try:
-        strategy = _create_strategy(req.strategy_name, req.strategy_params)
+        strategy, fund_warnings = _create_strategy(req.strategy_name, req.strategy_params,
+                                                   symbols=req.symbols, start=start, end=end)
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     universe = Universe(req.symbols)
@@ -257,6 +391,7 @@ def run_portfolio(req: PortfolioRunRequest):
             for i in range(max(0, len(result.weights_history) - 20), len(result.weights_history))
             if result.weights_history[i]  # skip empty weight entries (non-rebalance days)
         ] if result.weights_history else [],
+        "warnings": fund_warnings if fund_warnings else None,
     }
 
 
@@ -290,7 +425,9 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     start = req.start_date or (end - timedelta(days=365 * 3))
 
     def strategy_factory():
-        return _create_strategy(req.strategy_name, req.strategy_params)
+        s, _w = _create_strategy(req.strategy_name, req.strategy_params,
+                                 symbols=req.symbols, start=start, end=end)
+        return s
 
     universe = Universe(req.symbols)
     strategy_tmp = strategy_factory()
@@ -382,17 +519,30 @@ class FactorCorrelationRequest(BaseModel):
     eval_freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly)$")
 
 
-def _resolve_factors(names: list[str]):
-    """Resolve factor names to CrossSectionalFactor instances."""
+def _resolve_factors(names: list[str], symbols: list[str] | None = None,
+                     start: date | None = None, end: date | None = None):
+    """Resolve factor names to CrossSectionalFactor instances. Injects store for fundamental factors."""
+    from ez.factor.builtin.fundamental import NEEDS_FINA
     resolved = []
+    has_fundamental = False
+    need_fina = False
     for name in names:
         factory = _get_factor_map().get(name)
         if not factory:
             raise HTTPException(400, f"Unknown factor: {name}. Available: {list(_get_factor_map().keys())}")
         try:
-            resolved.append(factory())
+            f = factory()
         except TypeError as e:
             raise HTTPException(400, f"Factor '{name}' requires constructor arguments: {e}") from e
+        f = _inject_fundamental_store(f)
+        if _is_fundamental_factor(type(f)):
+            has_fundamental = True
+            if type(f).__name__ in NEEDS_FINA:
+                need_fina = True
+        resolved.append(f)
+    # Pre-fetch fundamental data if any fundamental factor is used
+    if has_fundamental and symbols and start and end:
+        _ensure_fundamental_data(symbols, start, end, need_fina=need_fina)
     return resolved
 
 
@@ -403,7 +553,7 @@ def evaluate_factors(req: FactorEvalRequest):
 
     end = req.end_date or date.today()
     start = req.start_date or (end - timedelta(days=365 * 3))
-    factors = _resolve_factors(req.factor_names)
+    factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
 
@@ -449,7 +599,7 @@ def factor_correlation(req: FactorCorrelationRequest):
 
     end = req.end_date or date.today()
     start = req.start_date or (end - timedelta(days=365 * 3))
-    factors = _resolve_factors(req.factor_names)
+    factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
 

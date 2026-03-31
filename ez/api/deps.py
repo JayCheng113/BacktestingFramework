@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 _store: DuckDBStore | None = None
 _chain: DataProviderChain | None = None
 _tushare_provider = None
+_fundamental_store = None
 
 
 def get_store() -> DuckDBStore:
@@ -106,6 +107,16 @@ def _rebuild_chain() -> None:
     get_chain()  # rebuild
 
 
+def get_fundamental_store():
+    """Lazy singleton for FundamentalStore. Shares DuckDB connection with DuckDBStore."""
+    global _fundamental_store
+    if _fundamental_store is None:
+        from ez.data.fundamental import FundamentalStore
+        _fundamental_store = FundamentalStore(get_store()._conn)
+        logger.info("FundamentalStore singleton created")
+    return _fundamental_store
+
+
 def fetch_kline_df(symbol: str, market: str, period: str, start, end):
     """Shared single-stock kline fetch → DataFrame. Used by backtest + experiments."""
     import pandas as pd
@@ -121,7 +132,8 @@ def fetch_kline_df(symbol: str, market: str, period: str, start, end):
 
 
 def close_resources() -> None:
-    global _store, _chain, _tushare_provider
+    global _store, _chain, _tushare_provider, _fundamental_store
+    _fundamental_store = None
     _close_chain_providers()
     if _store is not None:
         _store.close()

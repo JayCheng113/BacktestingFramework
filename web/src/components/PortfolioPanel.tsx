@@ -1,11 +1,38 @@
 import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward } from '../api'
+import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward, fetchFundamentalData, fundamentalDataQuality } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
+// Category display names
+const CATEGORY_LABELS: Record<string, string> = {
+  technical: '量价', value: '估值', quality: '质量', growth: '成长',
+  size: '规模', liquidity: '流动性', leverage: '杠杆', industry: '行业', other: '其他',
+}
+
+// Factor display names: raw key → Chinese label
+const FACTOR_LABELS: Record<string, string> = {
+  // 量价
+  momentum_rank_20: '20日动量', momentum_rank_10: '10日动量', momentum_rank_60: '60日动量',
+  volume_rank_20: '成交量排名', reverse_vol_rank_20: '低波动',
+  // 估值
+  ep: '盈利收益率(EP)', bp: '市净率倒数(BP)', sp: '市销率倒数(SP)', dp: '股息率',
+  // 质量
+  roe: 'ROE', roa: 'ROA', gross_margin: '毛利率', net_profit_margin: '净利率',
+  // 成长
+  revenue_growth_yoy: '营收增速', profit_growth_yoy: '利润增速', roe_change: 'ROE变化',
+  // 规模
+  ln_market_cap: '总市值(小盘优先)', ln_circ_mv: '流通市值(小盘优先)',
+  // 流动性
+  turnover_rate: '换手率', amihud_illiquidity: '流动性',
+  // 杠杆
+  debt_to_assets: '低负债率', current_ratio: '流动比率',
+  // 行业
+  industry_momentum: '行业动量',
+}
 
 interface PortfolioMetrics {
   total_return?: number; annualized_return?: number; sharpe_ratio?: number
@@ -37,6 +64,7 @@ interface ParamSchema {
 export default function PortfolioPanel() {
   const [strategies, setStrategies] = useState<{ name: string; description: string; parameters: Record<string, ParamSchema> }[]>([])
   const [factors, setFactors] = useState<string[]>([])
+  const [factorCategories, setFactorCategories] = useState<{ key: string; label: string; factors: any[] }[]>([])
   const [selected, setSelected] = useState('')
   const [symbols, setSymbols] = useState('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH')
   const [startDate, setStartDate] = useState('2020-01-01')
@@ -57,6 +85,11 @@ export default function PortfolioPanel() {
   const [evalResult, setEvalResult] = useState<any>(null)
   const [corrResult, setCorrResult] = useState<any>(null)
   const [evalLoading, setEvalLoading] = useState(false)
+  const [fetchingFunda, setFetchingFunda] = useState(false)
+  const [fundaStatus, setFundaStatus] = useState<string>('')
+  const [qualityReport, setQualityReport] = useState<any[]>([])
+  // Clear stale quality report when inputs change
+  useEffect(() => { setQualityReport([]); setFundaStatus('') }, [symbols, startDate, endDate])
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
@@ -81,6 +114,7 @@ export default function PortfolioPanel() {
       const data = r.data
       setStrategies(data.strategies || [])
       setFactors(data.available_factors || [])
+      setFactorCategories(data.factor_categories || [])
       if (data.strategies?.length > 0 && !selected) setSelected(data.strategies[0].name)
     }).catch(() => {})
     loadHistory()
@@ -225,7 +259,7 @@ export default function PortfolioPanel() {
       })
       setWfResult(res.data)
     } catch (e: any) {
-      alert('Walk-Forward 失败: ' + (e?.response?.data?.detail || e?.message || ''))
+      alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
     } finally { setWfLoading(false) }
   }
 
@@ -240,40 +274,78 @@ export default function PortfolioPanel() {
     const value = strategyParams[key] ?? schema.default
 
     if (schema.type === 'select') {
-      // Use schema.options if provided, otherwise fall back to available_factors
+      // Use schema.options if provided, otherwise fall back to available_factors (grouped by category)
       const options: string[] = schema.options ?? (factors.length > 0 ? factors : [String(schema.default)])
+      const useCategories = !schema.options && factorCategories.length > 0
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
           <select value={value} onChange={e => updateParam(key, e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            {options.map(o => <option key={o} value={o}>{o}</option>)}
+            {useCategories ? factorCategories.map(cat => {
+              const catLabel = CATEGORY_LABELS
+              return (
+              <optgroup key={cat.key} label={catLabel[cat.key] || cat.label}>
+                {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
+                  const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
+                  const needsFina = typeof f === 'object' && f.needs_fina
+                  return <option key={fKey} value={fKey}>{FACTOR_LABELS[fKey] || fKey}{needsFina ? ' *' : ''}</option>
+                })}
+              </optgroup>
+            )}) : options.map(o => <option key={o} value={o}>{FACTOR_LABELS[o] || o}</option>)}
           </select>
         </div>
       )
     }
 
     if (schema.type === 'multi_select') {
-      // Use schema.options if provided, otherwise fall back to available_factors
+      // Use schema.options if provided, otherwise fall back to available_factors (grouped by category)
       const options: string[] = schema.options ?? (factors.length > 0 ? factors : [])
       const selected_vals: string[] = Array.isArray(value) ? value : [String(value)]
+      const useCategories = !schema.options && factorCategories.length > 0
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-          <div className="flex flex-wrap gap-1">
-            {options.map(o => (
-              <button key={o} onClick={() => {
-                const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
-                if (cur.includes(o)) updateParam(key, cur.filter(x => x !== o))
-                else updateParam(key, [...cur, o])
-              }}
-                className="text-xs px-2 py-0.5 rounded"
-                style={{ backgroundColor: selected_vals.includes(o) ? 'var(--color-accent)' : 'var(--bg-primary)',
-                         color: selected_vals.includes(o) ? '#fff' : 'var(--text-secondary)',
-                         border: '1px solid var(--border)' }}>
-                {o}
-              </button>
-            ))}
-          </div>
+          {useCategories ? factorCategories.map(cat => {
+            return (
+            <div key={cat.key} className="mb-1">
+              <span className="text-xs mr-1" style={{ color: 'var(--text-muted)' }}>{CATEGORY_LABELS[cat.key] || cat.label}:</span>
+              <div className="flex flex-wrap gap-1 mt-0.5">
+                {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
+                  const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
+                  const needsFina = typeof f === 'object' && f.needs_fina
+                  return (
+                    <button key={fKey} onClick={() => {
+                      const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
+                      if (cur.includes(fKey)) updateParam(key, cur.filter(x => x !== fKey))
+                      else updateParam(key, [...cur, fKey])
+                    }}
+                      className="text-xs px-2 py-0.5 rounded"
+                      style={{ backgroundColor: selected_vals.includes(fKey) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                               color: selected_vals.includes(fKey) ? '#fff' : 'var(--text-secondary)',
+                               border: '1px solid var(--border)' }}>
+                      {FACTOR_LABELS[fKey] || fKey}{needsFina ? ' *' : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}) : (
+            <div className="flex flex-wrap gap-1">
+              {options.map(o => (
+                <button key={o} onClick={() => {
+                  const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
+                  if (cur.includes(o)) updateParam(key, cur.filter(x => x !== o))
+                  else updateParam(key, [...cur, o])
+                }}
+                  className="text-xs px-2 py-0.5 rounded"
+                  style={{ backgroundColor: selected_vals.includes(o) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                           color: selected_vals.includes(o) ? '#fff' : 'var(--text-secondary)',
+                           border: '1px solid var(--border)' }}>
+                  {FACTOR_LABELS[o] || o}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )
     }
@@ -325,12 +397,12 @@ export default function PortfolioPanel() {
   } : null
 
   const metricLabels: Record<string, string> = {
-    total_return: '总收益', annualized_return: '年化收益', sharpe_ratio: '夏普比率',
-    sortino_ratio: 'Sortino', max_drawdown: '最大回撤', max_drawdown_duration: '回撤持续(天)',
-    benchmark_return: '基准收益', alpha: 'Alpha', beta: 'Beta',
-    trade_count: '交易次数', turnover_per_rebalance: '换手率/次',
-    annualized_volatility: '年化波动', n_rebalances: '换仓次数',
-    concentration_hhi: '集中度(HHI)',
+    total_return: '总收益率', annualized_return: '年化收益率', sharpe_ratio: '夏普比率',
+    sortino_ratio: '索提诺比率', max_drawdown: '最大回撤', max_drawdown_duration: '回撤持续(天)',
+    benchmark_return: '基准收益率', alpha: '超额收益(Alpha)', beta: '市场敏感度(Beta)',
+    trade_count: '交易次数', turnover_per_rebalance: '每次调仓换手率',
+    annualized_volatility: '年化波动率', n_rebalances: '调仓次数',
+    concentration_hhi: '持仓集中度',
   }
 
   const currentDesc = strategies.find(s => s.name === selected)?.description || ''
@@ -339,7 +411,7 @@ export default function PortfolioPanel() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex gap-2 mb-4">
         <button onClick={() => setTab('run')} className={`px-4 py-1.5 rounded text-sm ${tab === 'run' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'run' ? inputStyle : {}}>组合回测</button>
-        <button onClick={() => setTab('factor-research')} className={`px-4 py-1.5 rounded text-sm ${tab === 'factor-research' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'factor-research' ? inputStyle : {}}>截面因子研究</button>
+        <button onClick={() => setTab('factor-research')} className={`px-4 py-1.5 rounded text-sm ${tab === 'factor-research' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'factor-research' ? inputStyle : {}}>选股因子研究</button>
         <button onClick={() => setTab('history')} className={`px-4 py-1.5 rounded text-sm ${tab === 'history' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'history' ? inputStyle : {}}>历史记录 ({history.length})</button>
       </div>
 
@@ -377,7 +449,7 @@ export default function PortfolioPanel() {
             </div>
             <div className="mb-3">
               <div className="flex items-center gap-2 mb-1">
-                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>标的池 (逗号分隔)</label>
+                <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票池 (逗号分隔)</label>
                 <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH,513880.SH,513260.SH,159985.SZ')}
                   className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>宽基ETF</button>
                 <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ')}
@@ -392,7 +464,7 @@ export default function PortfolioPanel() {
                 {loading ? '运行中...' : '运行组合回测'}
               </button>
               <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
-                {wfLoading ? 'WF验证中...' : 'Walk-Forward 验证'}
+                {wfLoading ? '验证中...' : '前推验证'}
               </button>
               <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
                 className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle} title="折数" />
@@ -456,7 +528,7 @@ export default function PortfolioPanel() {
                   <div className="overflow-x-auto max-h-48 overflow-y-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                     <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                       <thead><tr style={{ backgroundColor: 'var(--bg-primary)', position: 'sticky', top: 0 }}>
-                        <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>换仓日</th>
+                        <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>调仓日期</th>
                         <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>持仓</th>
                       </tr></thead>
                       <tbody>{result.weights_history.map((wh, i) => (
@@ -499,21 +571,21 @@ export default function PortfolioPanel() {
             </div>
           )}
 
-          {/* Walk-Forward Result */}
+          {/* 前推验证 Result */}
           {wfResult && (
             <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-              <h4 className="text-sm font-medium mb-2">Walk-Forward 验证结果 ({wfResult.n_splits}-fold)</h4>
+              <h4 className="text-sm font-medium mb-2">前推验证结果 ({wfResult.n_splits} 折)</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                 <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS 夏普</div>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>样本外夏普</div>
                   <div className="text-sm font-medium">{wfResult.oos_metrics?.sharpe_ratio?.toFixed(4) ?? '-'}</div>
                 </div>
                 <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS 总收益</div>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>样本外总收益</div>
                   <div className="text-sm font-medium">{wfResult.oos_metrics?.total_return != null ? (wfResult.oos_metrics.total_return * 100).toFixed(2) + '%' : '-'}</div>
                 </div>
                 <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>降质评分</div>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>过拟合评分 (越小越好)</div>
                   <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.3 ? 'var(--color-down)' : 'var(--text-primary)' }}>
                     {wfResult.overfitting_score?.toFixed(2) ?? '-'}
                   </div>
@@ -528,8 +600,8 @@ export default function PortfolioPanel() {
                 )}
               </div>
               <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                IS 夏普: [{wfResult.is_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}] |
-                OOS 夏普: [{wfResult.oos_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}]
+                样本内夏普: [{wfResult.is_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}] |
+                样本外夏普: [{wfResult.oos_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}]
               </div>
               <button onClick={() => setWfResult(null)} className="mt-2 text-xs px-2 py-1 rounded"
                 style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>
@@ -540,52 +612,135 @@ export default function PortfolioPanel() {
 
       {tab === 'factor-research' && (
         <div className="p-4 rounded mb-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <h3 className="text-sm font-medium mb-3">截面因子评估 (多股排名)</h3>
+          <h3 className="text-sm font-medium mb-3">选股因子研究</h3>
           <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-            对全池股票按因子值排名，计算因子排名与未来收益的截面相关性。区别于看板的"时序因子"(单股指标如RSI)。
+            测试"用这个指标选股靠不靠谱"。选因子 → 填股票池 → 评估 → 看选股能力和分档收益。
           </p>
-          <div className="flex flex-wrap gap-2 mb-3">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子 (多选):</label>
-            {factors.map(f => (
-              <button key={f} onClick={() => setEvalFactors(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])}
-                className="text-xs px-2 py-0.5 rounded"
-                style={{ backgroundColor: evalFactors.includes(f) ? 'var(--color-accent)' : 'var(--bg-primary)',
-                         color: evalFactors.includes(f) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                {f}
-              </button>
-            ))}
+          <div className="mb-3">
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>选择因子 (可多选):</label>
+            {factorCategories.length > 0 ? factorCategories.map(cat => {
+              // Simplify category label: remove English
+              return (
+              <div key={cat.key} className="mb-2">
+                <span className="text-xs font-medium mr-2" style={{ color: 'var(--text-secondary)' }}>{CATEGORY_LABELS[cat.key] || cat.label}:</span>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
+                    const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
+                    const fLabel = FACTOR_LABELS[fKey] || fKey
+                    const fDesc = typeof f === 'object' ? f.description : ''
+                    const needsFina = typeof f === 'object' && f.needs_fina
+                    return (
+                      <button key={fKey} onClick={() => setEvalFactors(prev => prev.includes(fKey) ? prev.filter(x => x !== fKey) : [...prev, fKey])}
+                        className="text-xs px-2 py-0.5 rounded" title={fDesc || fKey}
+                        style={{ backgroundColor: evalFactors.includes(fKey) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                                 color: evalFactors.includes(fKey) ? '#fff' : 'var(--text-secondary)',
+                                 border: '1px solid var(--border)', opacity: needsFina ? 0.85 : 1 }}>
+                        {fLabel}{needsFina ? ' *' : ''}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}) : (
+              <div className="flex flex-wrap gap-1">
+                {factors.map(f => (
+                  <button key={f} onClick={() => setEvalFactors(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])}
+                    className="text-xs px-2 py-0.5 rounded"
+                    style={{ backgroundColor: evalFactors.includes(f) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                             color: evalFactors.includes(f) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                    {FACTOR_LABELS[f] || f}
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>带 * 的因子需要 Tushare 付费接口</p>
           </div>
           <div className="mb-3">
             <DateRangePicker startDate={startDate} endDate={endDate} onStartChange={setStartDate} onEndChange={setEndDate} />
           </div>
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-1">
-              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>标的池</label>
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票池</label>
               <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH,513880.SH,513260.SH,159985.SZ')}
                 className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>宽基ETF</button>
             </div>
             <textarea value={symbols} onChange={e => setSymbols(e.target.value)} rows={2} className="w-full px-3 py-1.5 rounded text-sm font-mono" style={inputStyle} />
           </div>
-          <button onClick={handleEvaluateFactors} disabled={evalLoading}
-            className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: evalLoading ? '#30363d' : '#0891b2' }}>
-            {evalLoading ? '评估中...' : '评估因子'}
-          </button>
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={async () => {
+              const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+              if (symbolList.length === 0) return
+              setFetchingFunda(true); setFundaStatus('获取中...')
+              try {
+                // Determine if fina_indicator data needed based on factor categories metadata
+                const finaFactorKeys = new Set<string>()
+                factorCategories.forEach(cat => {
+                  if (Array.isArray(cat.factors)) cat.factors.forEach((f: any) => {
+                    if (typeof f === 'object' && f.needs_fina) finaFactorKeys.add(f.key || f.class_name || '')
+                  })
+                })
+                const hasFina = evalFactors.some(f => finaFactorKeys.has(f))
+                const res = await fetchFundamentalData({ symbols: symbolList, start_date: startDate, end_date: endDate, include_fina: hasFina })
+                setFundaStatus(res.data.message || '完成')
+                // Fetch quality report
+                const qr = await fundamentalDataQuality({ symbols: symbolList, start_date: startDate, end_date: endDate })
+                setQualityReport(qr.data.report || [])
+              } catch (e: any) { setFundaStatus(e.response?.data?.detail || '获取失败') }
+              finally { setFetchingFunda(false) }
+            }} disabled={fetchingFunda}
+              className="px-3 py-1.5 rounded text-sm font-medium" style={{ backgroundColor: fetchingFunda ? '#30363d' : '#1e6b3a', color: '#fff' }}>
+              {fetchingFunda ? '获取中...' : '获取基本面数据'}
+            </button>
+            <button onClick={handleEvaluateFactors} disabled={evalLoading}
+              className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: evalLoading ? '#30363d' : '#0891b2' }}>
+              {evalLoading ? '评估中...' : '评估因子'}
+            </button>
+            {fundaStatus && <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{fundaStatus}</span>}
+          </div>
+
+          {qualityReport.length > 0 && (
+            <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>数据质量报告</h4>
+              <div className="overflow-x-auto" style={{ maxHeight: 200 }}>
+                <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                    {['标的', '行业', '日度数据', '覆盖率', '财务报告'].map(h => (
+                      <th key={h} className="px-2 py-1 text-left" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {qualityReport.map(r => (
+                      <tr key={r.symbol} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td className="px-2 py-1 font-mono">{r.symbol}</td>
+                        <td className="px-2 py-1">{r.industry || '-'}</td>
+                        <td className="px-2 py-1">{r.daily_count}/{r.daily_expected}</td>
+                        <td className="px-2 py-1" style={{ color: r.daily_coverage_pct > 80 ? '#3fb950' : r.daily_coverage_pct > 50 ? '#d29922' : '#f85149' }}>
+                          {r.daily_coverage_pct}%
+                        </td>
+                        <td className="px-2 py-1">{r.has_fina ? `${r.fina_reports} 期` : '无'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Evaluation results */}
           {evalResult && evalResult.results && (
             <div className="mt-4">
               {/* IC summary table */}
-              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子 IC 汇总</h4>
+              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子选股能力 (IC 汇总)</h4>
               <div className="overflow-x-auto mb-4" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                 <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                   <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                    {['因子', 'IC均值', 'RankIC均值', 'ICIR', 'RankICIR', '评估日数', '平均覆盖'].map(h => (
+                    {['因子', '选股能力(IC)', '排名IC', '稳定性(ICIR)', '排名ICIR', '评估日数', '平均覆盖'].map(h => (
                       <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                     ))}
                   </tr></thead>
                   <tbody>{evalResult.results.map((r: any) => (
                     <tr key={r.factor_name} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td className="px-3 py-1.5 font-mono">{r.factor_name}</td>
+                      <td className="px-3 py-1.5">{FACTOR_LABELS[r.factor_name] || r.factor_name}</td>
                       <td className="px-3 py-1.5" style={{ color: (r.mean_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_ic)}</td>
                       <td className="px-3 py-1.5" style={{ color: (r.mean_rank_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_rank_ic)}</td>
                       <td className="px-3 py-1.5">{fmt(r.icir)}</td>
@@ -601,15 +756,15 @@ export default function PortfolioPanel() {
               {evalResult.results[0]?.ic_series?.length > 0 && (
                 <ReactECharts option={{
                   backgroundColor: '#0d1117',
-                  title: { text: 'Rank IC 时序', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                  title: { text: '选股能力随时间变化 (Rank IC)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
                   tooltip: { trigger: 'axis' as const },
-                  legend: { data: evalResult.results.map((r: any) => r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+                  legend: { data: evalResult.results.map((r: any) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
                   grid: { left: 60, right: 20, top: 50, bottom: 30 },
                   xAxis: { type: 'time' as const, axisLabel: { color: '#8b949e', fontSize: 9 } },
                   yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
                   color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
                   series: evalResult.results.map((r: any) => ({
-                    name: r.factor_name, type: 'line' as const,
+                    name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
                     data: (r.eval_dates || []).map((d: string, i: number) => [d, r.rank_ic_series?.[i] ?? 0]),
                     showSymbol: false,
                   })),
@@ -622,15 +777,15 @@ export default function PortfolioPanel() {
                 {evalResult.results[0]?.ic_decay && (
                   <ReactECharts option={{
                     backgroundColor: '#0d1117',
-                    title: { text: 'IC 衰减', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                    title: { text: '信号持续性 (IC随天数衰减)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
                     tooltip: { trigger: 'axis' as const },
-                    legend: { data: evalResult.results.map((r: any) => r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+                    legend: { data: evalResult.results.map((r: any) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
                     grid: { left: 60, right: 20, top: 50, bottom: 30 },
                     xAxis: { type: 'category' as const, data: ['1天', '5天', '10天', '20天'], axisLabel: { color: '#8b949e' } },
                     yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
                     color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
                     series: evalResult.results.map((r: any) => ({
-                      name: r.factor_name, type: 'line' as const,
+                      name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
                       data: [r.ic_decay['1'], r.ic_decay['5'], r.ic_decay['10'], r.ic_decay['20']],
                     })),
                   }} style={{ height: 220 }} />
@@ -639,14 +794,14 @@ export default function PortfolioPanel() {
                 {evalResult.results[0]?.quintile_returns && (
                   <ReactECharts option={{
                     backgroundColor: '#0d1117',
-                    title: { text: '分位数收益 (前向5天)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                    title: { text: '按因子排名分5档的未来5天收益', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
                     tooltip: { trigger: 'axis' as const },
                     grid: { left: 60, right: 20, top: 50, bottom: 30 },
                     xAxis: { type: 'category' as const, data: ['Q1(低)', 'Q2', 'Q3', 'Q4', 'Q5(高)'], axisLabel: { color: '#8b949e' } },
                     yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e', formatter: (v: number) => (v * 100).toFixed(2) + '%' } },
                     color: ['#2563eb', '#ef4444', '#22c55e'],
                     series: evalResult.results.map((r: any) => ({
-                      name: r.factor_name, type: 'bar' as const,
+                      name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'bar' as const,
                       data: [1, 2, 3, 4, 5].map(q => r.quintile_returns[String(q)] ?? 0),
                     })),
                   }} style={{ height: 220 }} />
@@ -654,15 +809,17 @@ export default function PortfolioPanel() {
               </div>
 
               {/* Correlation heatmap */}
-              {corrResult && corrResult.factor_names?.length >= 2 && (
+              {corrResult && corrResult.factor_names?.length >= 2 && (() => {
+                const corrLabels = corrResult.factor_names.map((n: string) => FACTOR_LABELS[n] || n)
+                return (
                 <div className="mt-3">
-                  <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子相关性矩阵</h4>
+                  <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子相关性 (高相关说明因子重复)</h4>
                   <ReactECharts option={{
                     backgroundColor: '#0d1117',
-                    tooltip: { formatter: (p: any) => `${corrResult.factor_names[p.data[1]]} × ${corrResult.factor_names[p.data[0]]}: ${p.data[2].toFixed(3)}` },
+                    tooltip: { formatter: (p: any) => `${corrLabels[p.data[1]]} × ${corrLabels[p.data[0]]}: ${p.data[2].toFixed(3)}` },
                     grid: { left: 120, right: 40, top: 10, bottom: 40 },
-                    xAxis: { type: 'category' as const, data: corrResult.factor_names, axisLabel: { color: '#8b949e', fontSize: 9, rotate: 30 } },
-                    yAxis: { type: 'category' as const, data: corrResult.factor_names, axisLabel: { color: '#8b949e', fontSize: 9 } },
+                    xAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: '#8b949e', fontSize: 9, rotate: 30 } },
+                    yAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: '#8b949e', fontSize: 9 } },
                     visualMap: { min: -1, max: 1, calculable: true, orient: 'vertical' as const, right: 0, top: 'center', inRange: { color: ['#2563eb', '#0d1117', '#ef4444'] }, textStyle: { color: '#8b949e' } },
                     series: [{
                       type: 'heatmap', data: corrResult.correlation_matrix.flatMap((row: number[], i: number) =>
@@ -671,7 +828,7 @@ export default function PortfolioPanel() {
                     }],
                   }} style={{ height: Math.max(200, corrResult.factor_names.length * 40 + 60) }} />
                 </div>
-              )}
+              )})()}
             </div>
           )}
         </div>
@@ -744,7 +901,7 @@ export default function PortfolioPanel() {
                 <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                   <thead><tr style={{ backgroundColor: 'var(--bg-secondary)' }}>
                     <th className="px-3 py-1.5 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>策略</th>
-                    {['总收益', '年化收益', '夏普', 'Sortino', '最大回撤', '年化波动', '交易数'].map(h => (
+                    {['总收益率', '年化收益率', '夏普比率', '索提诺', '最大回撤', '年化波动率', '交易次数'].map(h => (
                       <th key={h} className="px-3 py-1.5 text-right font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                     ))}
                   </tr></thead>

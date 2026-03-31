@@ -28,7 +28,7 @@ function formatEvent(e: SSEEvent): { icon: string; text: string; color: string }
     case 'batch_start':
       return { icon: '⚙', text: `开始回测 ${d.total_specs} 个策略...`, color: '#8b949e' }
     case 'batch_complete':
-      return { icon: '📊', text: `回测完成: ${d.passed}/${d.executed} 通过 Gate${d.best_sharpe ? `, 最佳 Sharpe ${(d.best_sharpe as number).toFixed(2)}` : ''}`, color: (d.passed as number) > 0 ? '#22c55e' : '#f59e0b' }
+      return { icon: '📊', text: `回测完成: ${d.passed}/${d.executed} 通过门控${d.best_sharpe ? `, 最佳夏普 ${(d.best_sharpe as number).toFixed(2)}` : ''}`, color: (d.passed as number) > 0 ? '#22c55e' : '#f59e0b' }
     case 'analysis':
       return { icon: '🧠', text: `分析: ${d.direction}`, color: '#a78bfa' }
     case 'iteration_end':
@@ -223,7 +223,7 @@ export default function ResearchPanel() {
         <h3 className="text-lg font-semibold mb-3">自主研究任务</h3>
         <div className="flex flex-col gap-3">
           <textarea value={goal} onChange={e => setGoal(e.target.value)}
-            placeholder="描述研究目标，例如：探索A股动量策略，目标 Sharpe > 1，最大回撤 < 20%"
+            placeholder="描述研究目标，例如：探索A股动量策略，目标夏普比率 > 1，最大回撤 < 20%"
             className="w-full p-3 rounded text-sm resize-none"
             style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', minHeight: '80px' }} />
           <div className="flex gap-3 items-end flex-wrap">
@@ -254,7 +254,7 @@ export default function ResearchPanel() {
                 { label: '最大轮次', value: maxIterations, set: setMaxIterations, min: 1, max: 50 },
                 { label: '回测上限', value: maxSpecs, set: setMaxSpecs, min: 10, max: 5000 },
                 { label: '假设数/轮', value: nHypotheses, set: setNHypotheses, min: 1, max: 20 },
-                { label: '最低Sharpe', value: gateMinSharpe, set: setGateMinSharpe, min: 0, max: 3, step: 0.1 },
+                { label: '最低夏普', value: gateMinSharpe, set: setGateMinSharpe, min: 0, max: 3, step: 0.1 },
                 { label: '最大回撤', value: gateMaxDrawdown, set: setGateMaxDrawdown, min: 0.05, max: 0.8, step: 0.05 },
               ].map(f => (
                 <div key={f.label}>
@@ -438,7 +438,7 @@ export default function ResearchPanel() {
                             {it.strategies_passed}/{it.strategies_tried} 通过
                           </span>
                           {it.best_sharpe > 0 && (
-                            <span className="text-xs" style={{ color: '#f59e0b' }}>Sharpe {it.best_sharpe.toFixed(2)}</span>
+                            <span className="text-xs" style={{ color: '#f59e0b' }}>夏普 {it.best_sharpe.toFixed(2)}</span>
                           )}
                         </div>
                       </div>
