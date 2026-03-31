@@ -1,10 +1,12 @@
-"""V2.7+V2.9: Code validation sandbox for user/AI-generated code.
+"""V2.7+V2.10: Code validation sandbox for user/AI-generated code.
 
-Security:
+Security layers:
+  1. AST blacklist (defense-in-depth): forbidden imports, dunders, builtins, dict-dunder access
+  2. Subprocess isolation (security boundary): contract test + import validation in subprocess
+  3. Factor kind: NO exec_module in main process (subprocess validates, main uses AST stubs)
+  4. Strategy/portfolio kinds: contract test in subprocess, hot-reload in main process
+     (strategy/portfolio still exec_module in main — tracked for future subprocess-only migration)
   - Only writes to whitelisted directories: strategies/, factors/, portfolio_strategies/, cross_factors/
-  - Validates Python syntax before saving
-  - Runs contract test in subprocess with timeout
-  - AST check for dangerous imports (os, subprocess, socket, etc.)
 """
 from __future__ import annotations
 
@@ -539,11 +541,10 @@ def save_and_validate_code(
         module_name = f"{target_dir.name}.{stem}"
         try:
             # Subprocess import test with 10s timeout (code NEVER runs in main process)
-            import subprocess as _sp
             safe_path = str(target).replace("\\", "/")  # Windows path fix
             # Subprocess: import + verify Factor subclass exists + print class names
             test_code = (
-                f"import importlib.util, sys, ast\n"
+                f"import importlib.util, sys\n"
                 f"spec = importlib.util.spec_from_file_location('{module_name}', '{safe_path}')\n"
                 f"mod = importlib.util.module_from_spec(spec)\n"
                 f"spec.loader.exec_module(mod)\n"
@@ -552,7 +553,8 @@ def save_and_validate_code(
                 f"if not classes: raise ValueError('No Factor subclass')\n"
                 f"print(','.join(classes))\n"
             )
-            proc = _sp.run([sys.executable, "-c", test_code], capture_output=True, text=True, timeout=10)
+            import subprocess as _sp_mod
+            proc = _sp_mod.run([sys.executable, "-c", test_code], capture_output=True, text=True, timeout=10)
             if proc.returncode != 0:
                 raise ValueError(f"Import failed: {proc.stderr[-200:]}")
             # Register via AST class name extraction ONLY (no exec_module in main process)
@@ -565,13 +567,14 @@ def save_and_validate_code(
             for node in ast.walk(_tree):
                 if isinstance(node, ast.ClassDef) and node.name in registered:
                     # Create a minimal class stub that records module origin
-                    stub = type(node.name, (Factor,), {
+                    # type() with Factor base triggers __init_subclass__ → auto-registers
+                    type(node.name, (Factor,), {
                         "name": property(lambda self, n=node.name: n.lower()),
                         "warmup_period": property(lambda self: 0),
-                        "compute": lambda self, data: data,
+                        "compute": lambda self, data: (_ for _ in ()).throw(NotImplementedError("Stub factor — re-save to use")),
                         "__module__": module_name,
                     })
-                    Factor._registry[node.name] = stub
+                    # __init_subclass__ already registered it in Factor._registry
         except Exception as e:
             # Clean up any dirty registry entries
             dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
@@ -579,13 +582,11 @@ def save_and_validate_code(
                 del Factor._registry[k]
             if module_name in sys.modules:
                 del sys.modules[module_name]
-            # Rollback file
+            # Rollback file (no exec_module — just restore file, no re-registration)
             if backup is not None:
                 target.write_text(backup, encoding="utf-8")
-                try:
-                    _reload_factor_code(safe_name, target_dir)
-                except Exception:
-                    pass  # best-effort re-register old version
+                # Old version was previously registered; registry was cleaned above.
+                # User must re-save to re-register. This is safer than exec_module on rollback.
             else:
                 target.unlink(missing_ok=True)
             return {"success": False, "errors": [f"Factor validation failed: {e}"]}

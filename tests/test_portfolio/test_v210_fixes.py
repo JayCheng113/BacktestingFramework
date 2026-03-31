@@ -151,6 +151,18 @@ class TestSandboxDictGet:
         errors = check_syntax(code)
         assert any("__dict__" in e for e in errors), f"Expected __dict__ block, got: {errors}"
 
+    def test_gc_import_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = 'import gc'
+        errors = check_syntax(code)
+        assert any("gc" in e for e in errors), f"Expected gc block, got: {errors}"
+
+    def test_gc_from_import_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = 'from gc import get_referrers'
+        errors = check_syntax(code)
+        assert any("gc" in e for e in errors), f"Expected gc block, got: {errors}"
+
 
 class TestNaNBarNoTrade:
     """NaN price on a day with bar should NOT allow trading."""
