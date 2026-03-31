@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation } from '../api'
+import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import type { BacktestSettingsValue } from './BacktestSettings'
@@ -42,6 +42,8 @@ export default function PortfolioPanel() {
   const [strategyParams, setStrategyParams] = useState<Record<string, any>>({})
   const [settings, setSettings] = useState<BacktestSettingsValue>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(false)
+  const [wfLoading, setWfLoading] = useState(false)
+  const [wfResult, setWfResult] = useState<any>(null)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
   const [tab, setTab] = useState<'run' | 'factor-research' | 'history'>('run')
@@ -200,6 +202,28 @@ export default function PortfolioPanel() {
     } finally { setLoading(false) }
   }
 
+  const handleWalkForward = async () => {
+    setWfLoading(true); setWfResult(null)
+    try {
+      const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+      const res = await portfolioWalkForward({
+        strategy_name: selected, symbols: symbolList,
+        start_date: startDate, end_date: endDate, freq,
+        strategy_params: strategyParams, initial_cash: settings.initial_cash,
+        n_splits: 5, train_ratio: 0.7,
+        buy_commission_rate: settings.buy_commission_rate,
+        sell_commission_rate: settings.sell_commission_rate,
+        min_commission: settings.min_commission,
+        stamp_tax_rate: settings.stamp_tax_rate,
+        slippage_rate: settings.slippage_rate,
+        lot_size: settings.lot_size, limit_pct: settings.limit_pct,
+      })
+      setWfResult(res.data)
+    } catch (e: any) {
+      alert('Walk-Forward 失败: ' + (e?.response?.data?.detail || e?.message || ''))
+    } finally { setWfLoading(false) }
+  }
+
   const fmt = (v: number | null | undefined, pct = false) => {
     if (v == null) return '-'
     return pct ? `${(v * 100).toFixed(2)}%` : v.toFixed(4)
@@ -301,6 +325,7 @@ export default function PortfolioPanel() {
     benchmark_return: '基准收益', alpha: 'Alpha', beta: 'Beta',
     trade_count: '交易次数', turnover_per_rebalance: '换手率/次',
     annualized_volatility: '年化波动', n_rebalances: '换仓次数',
+    concentration_hhi: '集中度(HHI)',
   }
 
   const currentDesc = strategies.find(s => s.name === selected)?.description || ''
@@ -357,9 +382,14 @@ export default function PortfolioPanel() {
               </div>
               <textarea value={symbols} onChange={e => setSymbols(e.target.value)} rows={2} className="w-full px-3 py-1.5 rounded text-sm font-mono" style={inputStyle} />
             </div>
-            <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
-              {loading ? '运行中...' : '运行组合回测'}
-            </button>
+            <div className="flex gap-2">
+              <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
+                {loading ? '运行中...' : '运行组合回测'}
+              </button>
+              <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
+                {wfLoading ? 'WF验证中...' : 'Walk-Forward 验证'}
+              </button>
+            </div>
           </div>
 
           {result && (
@@ -455,6 +485,43 @@ export default function PortfolioPanel() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Walk-Forward Result */}
+          {wfResult && (
+            <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+              <h4 className="text-sm font-medium mb-2">Walk-Forward 验证结果 ({wfResult.n_splits}-fold)</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS 夏普</div>
+                  <div className="text-sm font-medium">{wfResult.oos_metrics?.sharpe_ratio?.toFixed(4) ?? '-'}</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>OOS 总收益</div>
+                  <div className="text-sm font-medium">{wfResult.oos_metrics?.total_return != null ? (wfResult.oos_metrics.total_return * 100).toFixed(2) + '%' : '-'}</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>降质评分</div>
+                  <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.3 ? 'var(--color-down)' : 'var(--text-primary)' }}>
+                    {wfResult.overfitting_score?.toFixed(2) ?? '-'}
+                  </div>
+                </div>
+                {wfResult.significance && (
+                  <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+                    <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>显著性 p</div>
+                    <div className="text-sm font-medium" style={{ color: wfResult.significance.is_significant ? 'var(--color-up)' : 'var(--color-down)' }}>
+                      {wfResult.significance.p_value?.toFixed(3) ?? '-'}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                IS 夏普: [{wfResult.is_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}] |
+                OOS 夏普: [{wfResult.oos_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}]
+              </div>
+              <button onClick={() => setWfResult(null)} className="mt-2 text-xs px-2 py-1 rounded"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>
             </div>
           )}
         </>

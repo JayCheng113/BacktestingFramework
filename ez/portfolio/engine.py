@@ -392,6 +392,15 @@ def run_portfolio_backtest(
         n_rebal = max(len(result.rebalance_dates), 1)
         turnover = (total_trade_value / avg_equity / n_rebal) if avg_equity > 0 else 0
 
+        # Concentration (HHI): average Herfindahl index across rebalance weights
+        hhi_values = []
+        for w_dict in result.weights_history:
+            if w_dict:
+                ws = [v for v in w_dict.values() if v > 0]
+                if ws:
+                    hhi_values.append(sum(w ** 2 for w in ws))
+        avg_concentration = float(np.mean(hhi_values)) if hhi_values else 0
+
         result.metrics = {
             "total_return": total_ret,
             "annualized_return": ann_ret,
@@ -406,6 +415,7 @@ def run_portfolio_backtest(
             "trade_count": len(result.trades),
             "turnover_per_rebalance": turnover,
             "n_rebalances": n_rebal,
+            "concentration_hhi": avg_concentration,
         }
 
     return result
