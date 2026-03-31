@@ -5,6 +5,10 @@ from fastapi.testclient import TestClient
 from ez.api.app import app
 from ez.types import Bar
 
+# Ensure strategies are loaded (TestClient doesn't trigger lifespan)
+from ez.strategy.loader import load_all_strategies
+load_all_strategies()
+
 client = TestClient(app)
 
 
@@ -28,7 +32,7 @@ def _mock_bars(n=50):
     return bars
 
 
-@patch("ez.api.routes.backtest.get_chain")
+@patch("ez.api.deps.get_chain")
 def test_run_backtest_success(mock_chain):
     mock_chain.return_value.get_kline.return_value = _mock_bars(80)
     resp = client.post("/api/backtest/run", json={
@@ -45,7 +49,7 @@ def test_run_backtest_success(mock_chain):
     assert len(data["equity_curve"]) > 0
 
 
-@patch("ez.api.routes.backtest.get_chain")
+@patch("ez.api.deps.get_chain")
 def test_run_backtest_no_data(mock_chain):
     mock_chain.return_value.get_kline.return_value = []
     resp = client.post("/api/backtest/run", json={
@@ -65,7 +69,7 @@ def test_run_backtest_unknown_strategy():
     assert "not found" in resp.json()["detail"]
 
 
-@patch("ez.api.routes.backtest.get_chain")
+@patch("ez.api.deps.get_chain")
 def test_walk_forward_success(mock_chain):
     mock_chain.return_value.get_kline.return_value = _mock_bars(100)
     resp = client.post("/api/backtest/walk-forward", json={
