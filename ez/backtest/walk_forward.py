@@ -39,6 +39,10 @@ class WalkForwardValidator:
         train_ratio: float = 0.7,
         initial_capital: float = 100000.0,
     ) -> WalkForwardResult:
+        if n_splits < 2:
+            raise ValueError(f"n_splits must be >= 2, got {n_splits}")
+        if not (0.0 < train_ratio < 1.0):
+            raise ValueError(f"train_ratio must be in (0, 1), got {train_ratio}")
         n = len(data)
         window_size = n // n_splits
 

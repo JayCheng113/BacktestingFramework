@@ -19,7 +19,7 @@ export default function ExperimentPanel() {
 
   // Form state
   const [strategyName, setStrategyName] = useState('')
-  const [params, setParams] = useState<Record<string, number>>({})
+  const [params, setParams] = useState<Record<string, number | string | boolean>>({})
   const [symbol, setSymbol] = useState('000001.SZ')
   const [market] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
@@ -246,8 +246,16 @@ export default function ExperimentPanel() {
             {Object.entries(params).map(([k, v]) => (
               <div key={k}>
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{k}</label>
-                <input type="number" value={v} onChange={e => setParams({...params, [k]: Number(e.target.value)})}
-                  className="w-24 px-2 py-1.5 rounded text-sm" style={inputStyle} />
+                {typeof v === 'boolean' ? (
+                  <input type="checkbox" checked={v} onChange={e => setParams({...params, [k]: e.target.checked})}
+                    className="ml-2" />
+                ) : typeof v === 'string' ? (
+                  <input type="text" value={v} onChange={e => setParams({...params, [k]: e.target.value})}
+                    className="w-24 px-2 py-1.5 rounded text-sm" style={inputStyle} />
+                ) : (
+                  <input type="number" value={v as number} onChange={e => setParams({...params, [k]: Number(e.target.value)})}
+                    className="w-24 px-2 py-1.5 rounded text-sm" style={inputStyle} />
+                )}
               </div>
             ))}
           </div>

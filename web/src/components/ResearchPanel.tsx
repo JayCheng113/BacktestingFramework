@@ -56,9 +56,12 @@ export default function ResearchPanel() {
   const [symbol, setSymbol] = useState('000001.SZ')
   const [startDate, setStartDate] = useState(() => {
     const d = new Date(); d.setFullYear(d.getFullYear() - 3)
-    return d.toISOString().split('T')[0]
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [maxIterations, setMaxIterations] = useState(10)
   const [maxSpecs, setMaxSpecs] = useState(500)

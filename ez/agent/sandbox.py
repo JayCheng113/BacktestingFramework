@@ -293,6 +293,16 @@ def check_syntax(code: str) -> list[str]:
             if node.id == "__builtins__":
                 errors.append(f"Forbidden name: __builtins__ (line {node.lineno})")
 
+        # Block dict-style dunder access: type.__dict__["__subclasses__"], vars()["__import__"], etc.
+        elif isinstance(node, ast.Subscript):
+            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                key = node.slice.value
+                if key.startswith("__") and key.endswith("__"):
+                    errors.append(f"Forbidden dict dunder access: [\"{key}\"] (line {node.lineno})")
+            # Also block __dict__ attribute on subscript target
+            if isinstance(node.value, ast.Attribute) and node.value.attr == "__dict__":
+                errors.append(f"Forbidden __dict__ subscript access (line {node.lineno})")
+
     return errors
 
 

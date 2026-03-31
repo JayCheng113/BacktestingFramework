@@ -245,18 +245,18 @@ def run_portfolio_backtest(
                     # Buy: need cash
                     total_buy = amount + total_cost
                     if total_buy > cash:
-                        # Reduce shares to fit budget (include min_commission in estimate)
+                        # Reduce shares to fit budget. price already includes slippage.
                         min_cost = max(cost_model.min_commission, 0)
-                        affordable = (cash - min_cost) / (price * (1 + cost_model.buy_commission_rate + cost_model.slippage_rate)) if price > 0 else 0
+                        affordable = (cash - min_cost) / (price * (1 + cost_model.buy_commission_rate)) if price > 0 else 0
                         if affordable <= 0:
-                            continue  # can't even afford min_commission
+                            continue
                         tgt = cur + _lot_round(affordable, lot_size)
                         delta = tgt - cur
                         if delta <= 0:
                             continue
-                        amount = delta * price
+                        amount = delta * price  # price already includes slippage
                         comm = _compute_commission(amount, cost_model.buy_commission_rate, cost_model.min_commission)
-                        total_cost = comm + amount * cost_model.slippage_rate
+                        total_cost = comm  # no separate slippage — already in price
                         total_buy = amount + total_cost
 
                     # Final guard: skip if still over budget (min_commission rounding)

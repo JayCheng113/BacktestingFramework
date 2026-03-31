@@ -69,8 +69,14 @@ class RSI(Factor):
         delta = ts_ops.diff(data["adj_close"])
         gain = ts_ops.rolling_mean(delta.clip(lower=0), self._period)
         loss = ts_ops.rolling_mean((-delta.clip(upper=0)), self._period)
-        rs = gain / loss.replace(0, float("nan"))
-        data[self.name] = 100 - (100 / (1 + rs))
+        # When loss=0 (pure uptrend), RSI=100; when gain=0, RSI=0
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        # Handle edge cases: loss=0 → RSI=100, gain=0 → RSI=0
+        rsi = rsi.fillna(100.0).where(loss.notna(), other=float('nan'))  # preserve warmup NaN
+        rsi[loss == 0] = 100.0
+        rsi[(gain == 0) & (loss > 0)] = 0.0
+        data[self.name] = rsi
         return data
 
 
@@ -161,7 +167,11 @@ class VWAP(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
-        typical_price = (data["high"] + data["low"] + data["adj_close"]) / 3
+        # Use adj_close for split-adjusted consistency; scale high/low by adj ratio
+        adj_ratio = data["adj_close"] / data["close"] if "adj_close" in data.columns and (data["close"] != 0).all() else 1
+        adj_high = data["high"] * adj_ratio
+        adj_low = data["low"] * adj_ratio
+        typical_price = (adj_high + adj_low + data["adj_close"]) / 3
         tp_vol = typical_price * data["volume"]
         data[self.name] = (
             tp_vol.rolling(self._period).sum()
@@ -209,11 +219,15 @@ class ATR(Factor):
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
         data = data.copy()
+        # Use split-adjusted OHLC for consistency
+        adj_ratio = data["adj_close"] / data["close"] if "adj_close" in data.columns and (data["close"] != 0).all() else 1
+        adj_high = data["high"] * adj_ratio
+        adj_low = data["low"] * adj_ratio
         prev_close = data["adj_close"].shift(1)
         tr = pd.concat([
-            data["high"] - data["low"],
-            (data["high"] - prev_close).abs(),
-            (data["low"] - prev_close).abs(),
+            adj_high - adj_low,
+            (adj_high - prev_close).abs(),
+            (adj_low - prev_close).abs(),
         ], axis=1).max(axis=1)
         data[self.name] = ts_ops.rolling_mean(tr, self._period)
         return data
