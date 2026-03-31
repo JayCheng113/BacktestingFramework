@@ -112,9 +112,11 @@ pending → running → completed
 - CodeEditor sidebar hides `research_` files
 - Promote workflow: POST /api/code/promote copies research_ file → removes prefix → renames class → contract test → registers globally
 
-## Sandbox Security (V2.7)
+## Sandbox Security (V2.7+V2.10)
 - **Forbidden imports**: os, sys, subprocess, socket, shutil, pathlib, importlib, ctypes, multiprocessing, threading, signal, pickle, http, urllib, requests, httpx, duckdb, etc.
-- **File writes**: Only to strategies/ directory
+- **Dunder access**: AST check for `__attr__` attribute access; only _SAFE_DUNDERS allowed (__init__, __getitem__, __setitem__, __contains__, __call__, etc.)
+- **Dict-style dunder access**: Blocks `vars()["__import__"]`, `type.__dict__["__subclasses__"]` and similar string-key dunder subscripts (V2.10)
+- **File writes**: Only to whitelisted directories: strategies/, factors/, portfolio_strategies/, cross_factors/
 - **Filename validation**: No path traversal, no hidden files, no underscore prefix
 - **Contract test**: Runs in subprocess with 30s timeout
 - **Failed test cleanup**: File is deleted if contract test fails

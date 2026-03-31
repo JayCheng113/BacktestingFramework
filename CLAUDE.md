@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.10 | Tests: 1172 (1182 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.10 | Tests: 1202 (1212 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -47,7 +47,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 | Type | Directory | Base Class | Test |
 |------|-----------|------------|------|
 | Data source | ez/data/providers/ | DataProvider | pytest tests/test_data/test_provider_contract.py |
-| Factor | ez/factor/builtin/ | Factor | pytest tests/test_factor/test_factor_contract.py |
+| Factor | factors/ or ez/factor/builtin/ | Factor | pytest tests/test_factor/test_factor_contract.py |
 | Strategy | strategies/ or ez/strategy/builtin/ | Strategy | pytest tests/test_strategy/ |
 | Matcher | ez/core/matcher.py | Matcher | pytest tests/test_core/test_matcher_contract.py |
 
@@ -55,7 +55,7 @@ ez/backtest/walk_forward.py, ez/backtest/significance.py
 ```bash
 ./scripts/start.sh          # Start backend (8000) + frontend (3000)
 ./scripts/stop.sh            # Stop all
-pytest tests/                # Full test suite (1182 collected, 1172 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
+pytest tests/                # Full test suite (1212 collected, 1202 pass, 10 skip). 停掉后端再跑: ./scripts/stop.sh
 python scripts/benchmark.py  # Performance baseline
 pip install -e . --no-build-isolation  # Rebuild C++ extension
 ```
@@ -86,6 +86,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.9**: Portfolio / Rotation — 多股组合回测 (TradingCalendar+PIT Universe+CrossSectionalFactor+PortfolioStrategy有状态+Allocator+PortfolioEngine离散股数记账+会计不变量+涨跌停+基准对比+Sortino/Alpha/Beta+组合API+DuckDB持久化+Agent工具4个+前端组合tab 6-tab架构), 1119 tests
 - **V2.9.1**: Stability — 引擎价格预索引(bisect O(log n), 10x加速), 单股回测接入MarketRules(stamp_tax+lot_size+limit_pct), 策略参数动态渲染(schema驱动), CodeEditor组合代码类型(4组侧栏+新建组合策略/截面因子), TopNRotation/MultiFactorRotation description+schema补全, 23项回归测试(C1 raw close涨跌停+C2 NaN carry-forward+内置策略行为+引擎确定性+印花税+容差+排序), 1156 tests
 - **V2.10**: Factor Research + Research Efficiency — CrossSectionalEvaluator(截面IC/RankIC/ICIR/IC衰减/分位数收益), FactorCorrelationMatrix(Spearman秩相关热力图), PortfolioWalkForward(组合WF验证), PortfolioSignificance(Bootstrap CI+Monte Carlo), 多回测对比(checkbox选择+叠加曲线+指标表), CSV导出(净值曲线+交易记录), 预设标的池(宽基ETF/ETF轮动池/行业+宽基22只), 持仓饼图(latest_weights), 因子研究sub-tab(IC表+时序+衰减+分位数+相关性热力图), 3个新API端点, 1172 tests
+- **V2.10 post-release fixes**: Sandbox安全加固(dict-style dunder access拦截: `vars()["__import__"]`), RSI修正(flat=50/uptrend=100/downtrend=0), VWAP/ATR adj_ratio缩放(split-adjusted一致性), 组合引擎T+1(sold_today集合+当日卖出股禁买), 方向性滑点(买推高/卖推低), DateRangePicker共享组件(react-datepicker), ExperimentPanel 3 sub-tabs(单次运行/参数搜索/组合实验), Factor/CrossSectionalFactor __init_subclass__自动注册, factors/用户因子目录, WalkForward参数校验(n_splits>=2, 0<train_ratio<1), fetch_kline_df共享到deps.py, 1202 tests
 - **Next: V2.10.1** — Stability → V2.11 基本面数据层 → V2.11.1 Alpha组合+中性化 → V2.12 优化器+归因+风控 → V2.13 ML Alpha+多策略 → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)
@@ -95,7 +96,6 @@ No version tag without review pass. No push without critical issues resolved.
 - 配对交易空腿、市场中性 — A 股不可行，推迟到 V3.x 有期货基础设施后考虑
 
 ## Known Limitations (后续版本跟进)
-- 单股引擎印花税 — 已改为 _SellSideTaxMatcher 卖方 only (V2.9.1 修复)
 - 研究任务不支持进程恢复 (crash recovery)
 - 研究任务串行 (同时只跑 1 个)
 - 数据源链扁平去重而非按市场独立路由

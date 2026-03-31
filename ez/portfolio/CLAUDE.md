@@ -43,12 +43,15 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - Benchmark: optional symbol for comparison curve + alpha/beta
 
 ## A-share Rules (built into engine)
+- T+1: sold_today tracking — cannot buy a symbol that was sold on the same day
 - Lot size: 100 shares (configurable)
 - Stamp tax: sell-side 0.05% (configurable)
 - Limit up/down: 10% (configurable, 20% for ChiNext/STAR)
 - Min commission: 5 yuan
+- Directional slippage: buy price = base * (1 + slippage_rate), sell price = base * (1 - slippage_rate)
 
 ## Status
 - V2.9: Full implementation, 5 built-in strategies, 70+ tests
 - V2.9.1: Bisect pre-indexing (10x speedup), regression tests (19 new), TopNRotation/MultiFactorRotation schema + description
 - V2.10: CrossSectionalEvaluator (IC/RankIC/ICIR/IC decay/quintile returns), FactorCorrelationMatrix (pairwise Spearman), PortfolioWalkForward, PortfolioSignificance (Bootstrap CI + Monte Carlo), 24 new tests (14 evaluator + 10 WF)
+- V2.10 post-release: Engine T+1 enforcement (sold_today set, cannot buy symbol sold same day), directional slippage (buy pushes price up, sell pushes price down), CrossSectionalFactor __init_subclass__ auto-registration

@@ -39,6 +39,11 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 - `POST /api/research/tasks/{task_id}/cancel` — Cancel running research task (V2.8)
 - `GET /api/research/tasks/{task_id}/stream` — SSE progress stream (V2.8)
 - `POST /api/code/promote` — Promote research strategy to user strategy (V2.8)
+- `GET /api/portfolio/strategies` — List portfolio strategies + schemas (V2.9)
+- `POST /api/portfolio/run` — Run portfolio backtest (V2.9)
+- `GET /api/portfolio/runs` — List portfolio backtest runs (V2.9)
+- `GET /api/portfolio/runs/{run_id}` — Get portfolio run detail (V2.9)
+- `DELETE /api/portfolio/runs/{run_id}` — Delete portfolio run (V2.9)
 - `POST /api/portfolio/evaluate-factors` — Cross-sectional factor evaluation (IC/RankIC/ICIR/decay/quintile) (V2.10)
 - `POST /api/portfolio/factor-correlation` — Factor pairwise Spearman correlation matrix (V2.10)
 - `POST /api/portfolio/walk-forward` — Portfolio walk-forward validation + significance (V2.10)
@@ -47,7 +52,7 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 | File | Role |
 |------|------|
 | app.py | FastAPI app entry, CORS, lifespan, router registration |
-| deps.py | Singleton DuckDBStore + DataProviderChain + cleanup lifecycle |
+| deps.py | Singleton DuckDBStore + DataProviderChain + fetch_kline_df shared helper + cleanup lifecycle |
 | routes/market_data.py | Market data endpoints |
 | routes/backtest.py | Backtest + walk-forward endpoints |
 | routes/factors.py | Factor listing + evaluation endpoints |
@@ -56,6 +61,7 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 | routes/code.py | Code editor: template, validate, save, list, read, delete, promote (V2.7+V2.8) |
 | routes/chat.py | AI chat SSE endpoint + status (V2.7) |
 | routes/settings.py | LLM + Tushare config read/write (V2.7) |
+| routes/portfolio.py | Portfolio: strategies/run/runs/detail/delete + factor evaluation/correlation + walk-forward (V2.9+V2.10) |
 | routes/research.py | Autonomous research: start/list/detail/cancel/stream + serialization guard (V2.8) |
 
 ## Dependencies
@@ -81,3 +87,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 - V2.9: Portfolio API (strategies/run/runs/detail/delete), buy/sell commission split, limit_pct, benchmark, cost validation ge=0, skipped symbols reporting, code save kind param (portfolio_strategy/cross_factor)
 - V2.9.1: Single-stock backtest MarketRules integration (stamp_tax_rate+lot_size+limit_pct → MarketRulesMatcher wrapper)
 - V2.10: Portfolio factor research API (evaluate-factors, factor-correlation, walk-forward) — cross-sectional IC/ICIR/decay/quintile, Spearman correlation matrix, walk-forward + Bootstrap/Monte Carlo significance
+- V2.10 post-release: fetch_kline_df shared helper in deps.py

@@ -11,7 +11,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | KlineChart | ECharts candlestick + volume + MA5/10/20/60 + BOLL bands + buy/sell markers |
 | BacktestPanel | Strategy dropdown (filters research_) + params (number/bool/str) + costs + results + trade table + CSV (V2.8.1: multi-type params) |
 | FactorPanel | Factor IC evaluation + IC decay + distribution (V2.8.1: dynamic factor list from API) |
-| ExperimentPanel | Single Run / Param Search sub-tabs + runs table (filters research_) + gate detail + date range column (V2.8) |
+| ExperimentPanel | 3 sub-tabs (单次运行/参数搜索/组合实验) + runs table (filters research_) + gate detail + date range column (V2.8+V2.10) |
 | CandidateSearch | Parameter grid/random search form + ranked results table (filters research_) |
 | CodeEditor | Monaco editor + "新建策略/因子/组合策略/截面因子" buttons + file-bound AI chat + 4-group sidebar (V2.9.1) |
 | ChatPanel | AI assistant — SSE streaming, Chinese tool labels, file-bound conversations, multi-conversation + localStorage (V2.8) |
@@ -19,6 +19,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | DocsPage | Comprehensive documentation — 12 sections, 1658 lines (V2.8) |
 | ResearchPanel | Autonomous research: goal form + date presets + SSE Chinese progress + task list + report + "注册到全局" promote button (V2.8) |
 | PortfolioPanel | Portfolio backtest: 3-tab layout (组合回测|因子研究|历史记录). 组合回测: dynamic strategy params + preset pools (宽基ETF/ETF轮动池/行业+宽基22只) + BacktestSettings + equity curve vs benchmark + metrics + trades + holdings pie chart + CSV export + multi-backtest comparison (checkbox + overlay curves + metrics table). 因子研究: IC table + time series + decay chart + quintile returns + correlation heatmap. Walk-Forward + significance (V2.10) |
+| DateRangePicker | Shared date range component (react-datepicker): start/end date pickers + preset buttons (V2.10) |
 | BacktestSettings | Shared cost/rules component: buy/sell commission, stamp tax, slippage, lot size, limit price (V2.9) |
 | Dashboard | Main page, orchestrates chart/backtest/factor components |
 
@@ -52,4 +53,6 @@ API proxied to http://localhost:8000
 | components/ChatPanel.tsx | AI chat: file-bound conversations + Chinese tool labels (V2.7+V2.8) |
 | components/SettingsModal.tsx | Settings modal for API keys (V2.7) |
 | components/ResearchPanel.tsx | Research: goal form + SSE progress + report + promote (V2.8) |
+| components/DateRangePicker.tsx | Shared date range picker with preset buttons (V2.10) |
+| components/PortfolioPanel.tsx | Portfolio backtest: 3-tab layout + factor research + history (V2.9+V2.10) |
 | pages/DocsPage.tsx | Documentation: 12 sections (V2.10: 因子研究 sub-tab, IC/ICIR, Walk-Forward, CSV export, preset pools, pie chart) |
