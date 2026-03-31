@@ -171,3 +171,97 @@ def promote_research_strategy(req: PromoteRequest):
     if not result["success"]:
         raise HTTPException(status_code=422, detail=result["errors"][0] if result["errors"] else "验证失败")
     return {"success": True, "filename": safe_dst, "path": result.get("path", "")}
+
+
+@router.get("/registry")
+def get_registry():
+    """List all registered strategies/factors with builtin/user classification."""
+    from ez.strategy.base import Strategy
+    from ez.factor.base import Factor
+    from ez.portfolio.portfolio_strategy import PortfolioStrategy
+    from ez.portfolio.cross_factor import CrossSectionalFactor
+    # Ensure all lazy-loaded builtin modules are registered
+    try:
+        import ez.factor.builtin.fundamental  # noqa: F401
+        import ez.portfolio.builtin_strategies  # noqa: F401
+    except ImportError:
+        pass
+
+    def _classify(registry: dict, user_prefixes: tuple[str, ...]) -> dict:
+        builtin, user = [], []
+        for name, cls in registry.items():
+            mod = getattr(cls, '__module__', '') or ''
+            desc = ''
+            try:
+                if hasattr(cls, 'get_description'):
+                    desc = cls.get_description().strip()[:100]
+                elif cls.__doc__:
+                    desc = cls.__doc__.strip().split('\n')[0][:100]
+            except Exception:
+                pass
+            short_name = name.rsplit(".", 1)[-1] if "." in name else name
+            info = {"name": short_name, "module": mod, "description": desc}
+            if any(mod.startswith(p) for p in user_prefixes):
+                # Find the .py filename from module name
+                parts = mod.rsplit('.', 1)
+                info["filename"] = parts[-1] + '.py' if len(parts) > 1 else ''
+                info["editable"] = True
+                user.append(info)
+            else:
+                info["editable"] = False
+                builtin.append(info)
+        return {"builtin": builtin, "user": user}
+
+    return {
+        "strategy": _classify(Strategy.get_registry(), ("strategies.",)),
+        "factor": _classify(Factor.get_registry(), ("factors.",)),
+        "portfolio_strategy": _classify(PortfolioStrategy.get_registry(), ("portfolio_strategies.",)),
+        "cross_factor": _classify(CrossSectionalFactor.get_registry(), ("cross_factors.",)),
+    }
+
+
+@router.delete("/cleanup-research-strategies")
+def cleanup_research_strategies():
+    """Delete all research_* strategy files and clean up Strategy registry."""
+    import sys
+    from ez.strategy.base import Strategy
+
+    strategies_dir = _get_dir("strategy")
+    deleted = []
+    for f in sorted(strategies_dir.glob("research_*.py")):
+        stem = f.stem
+        module_name = f"strategies.{stem}"
+        f.unlink()
+        # Clean registry
+        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
+        for k in old_keys:
+            del Strategy._registry[k]
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        deleted.append(f.name)
+
+    return {"deleted": deleted, "count": len(deleted)}
+
+
+@router.post("/refresh")
+def refresh_registries():
+    """Re-scan all user directories and reload registries."""
+    from ez.strategy.loader import load_all_strategies, load_user_factors
+    from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
+
+    load_all_strategies()
+    load_user_factors()
+    load_portfolio_strategies()
+    load_cross_factors()
+
+    from ez.strategy.base import Strategy
+    from ez.factor.base import Factor
+    from ez.portfolio.portfolio_strategy import PortfolioStrategy
+    from ez.portfolio.cross_factor import CrossSectionalFactor
+
+    return {
+        "strategies": len(Strategy.get_registry()),
+        "factors": len(Factor.get_registry()),
+        "portfolio_strategies": len(PortfolioStrategy.get_registry()),
+        "cross_factors": len(CrossSectionalFactor.get_registry()),
+    }

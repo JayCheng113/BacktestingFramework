@@ -173,6 +173,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [factorFiles, setFactorFiles] = useState<FileInfo[]>([])
   const [portfolioFiles, setPortfolioFiles] = useState<FileInfo[]>([])
   const [crossFactorFiles, setCrossFactorFiles] = useState<FileInfo[]>([])
+  const [registry, setRegistry] = useState<Record<string, { builtin: any[]; user: any[] }>>({})
   const [status, setStatus] = useState<string>('')
   const [errors, setErrors] = useState<string[]>([])
   const [testOutput, setTestOutput] = useState('')
@@ -204,6 +205,11 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
     try {
       const res = await api('/files?kind=cross_factor')
       if (res.ok) setCrossFactorFiles(await res.json())
+    } catch {}
+    // Load registry (builtin + user registered objects)
+    try {
+      const res = await api('/registry')
+      if (res.ok) setRegistry(await res.json())
     } catch {}
   }
 
@@ -361,36 +367,65 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {allEmpty && <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>暂无文件</div>}
-          {/* Strategies */}
-          {strategyFiles.length > 0 && (
-            <>
-              <div className="text-xs font-medium px-2 py-1 mt-1" style={{ color: KIND_COLORS.strategy }}>策略</div>
-              {strategyFiles.map(f => renderFileItem(f, 'strategy'))}
-            </>
-          )}
-          {/* Factors */}
-          {factorFiles.length > 0 && (
-            <>
-              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: KIND_COLORS.factor }}>因子</div>
-              {factorFiles.map(f => renderFileItem(f, 'factor'))}
-            </>
-          )}
-          {/* Portfolio Strategies */}
-          {portfolioFiles.length > 0 && (
-            <>
-              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: KIND_COLORS.portfolio_strategy }}>组合策略</div>
-              {portfolioFiles.map(f => renderFileItem(f, 'portfolio_strategy'))}
-            </>
-          )}
-          {/* Cross Factors */}
-          {crossFactorFiles.length > 0 && (
-            <>
-              <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: KIND_COLORS.cross_factor }}>截面因子</div>
-              {crossFactorFiles.map(f => renderFileItem(f, 'cross_factor'))}
-            </>
-          )}
-          {/* Uncategorized */}
+          {/* Toolbar: refresh + cleanup */}
+          <div className="flex gap-1 mb-2">
+            <button onClick={async () => {
+              try { await api('/refresh', { method: 'POST' }); await loadAllFiles(); setStatus('已刷新') } catch {}
+            }} className="text-xs px-2 py-0.5 rounded flex-1" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              title="重新扫描用户目录并刷新注册表">刷新</button>
+            <button onClick={async () => {
+              if (!confirm('删除所有 research_* 开头的策略文件？已注册到全局的不受影响。')) return
+              try {
+                const res = await api('/cleanup-research-strategies', { method: 'DELETE' })
+                if (res.ok) { const d = await res.json(); setStatus(`清理了 ${d.count} 个研究策略`); await loadAllFiles() }
+              } catch {}
+            }} className="text-xs px-2 py-0.5 rounded flex-1" style={{ color: '#f59e0b', border: '1px solid var(--border)' }}
+              title="清理研究助手生成的 research_* 策略">清理研究</button>
+          </div>
+
+          {/* 4 groups: strategy, factor, portfolio_strategy, cross_factor */}
+          {(['strategy', 'factor', 'portfolio_strategy', 'cross_factor'] as CodeKind[]).map(kind => {
+            const label = KIND_LABELS[kind]
+            const color = KIND_COLORS[kind]
+            const reg = registry[kind] || { builtin: [], user: [] }
+            const userFiles = kind === 'strategy' ? strategyFiles
+              : kind === 'factor' ? factorFiles
+              : kind === 'portfolio_strategy' ? portfolioFiles
+              : crossFactorFiles
+            const total = reg.builtin.length + reg.user.length
+
+            return (
+              <div key={kind} className="mb-2">
+                <div className="text-xs font-medium px-2 py-1 flex items-center justify-between" style={{ color }}>
+                  <span>{label} ({total})</span>
+                </div>
+                {/* Builtin items (collapsed) */}
+                {reg.builtin.length > 0 && (
+                  <div className="px-2">
+                    <details>
+                      <summary className="text-xs cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+                        系统内置 ({reg.builtin.length})
+                      </summary>
+                      <div className="ml-2 mt-1 space-y-0.5">
+                        {reg.builtin.map(b => (
+                          <div key={b.name} className="text-xs px-1 py-0.5 truncate" style={{ color: 'var(--text-secondary)' }}
+                            title={b.description || b.name}>
+                            {b.name}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                )}
+                {/* User items (always visible) */}
+                {userFiles.map(f => renderFileItem(f, kind))}
+                {userFiles.length === 0 && reg.builtin.length === 0 && (
+                  <div className="text-xs px-3 py-0.5" style={{ color: 'var(--text-muted)' }}>无</div>
+                )}
+              </div>
+            )
+          })}
+          {/* Uncategorized user files */}
           {otherFiles.length > 0 && (
             <>
               <div className="text-xs font-medium px-2 py-1 mt-2" style={{ color: 'var(--text-secondary)' }}>其他</div>

@@ -51,6 +51,11 @@ export const readCodeFile = (filename: string) => api.get(`/code/files/${filenam
 
 export const deleteCodeFile = (filename: string) => api.delete(`/code/files/${filename}`)
 
+// Registry management (V2.11.1)
+export const getCodeRegistry = () => api.get('/code/registry')
+export const cleanupResearchStrategies = () => api.delete('/code/cleanup-research-strategies')
+export const refreshRegistries = () => api.post('/code/refresh')
+
 // Chat (V2.7)
 export const chatStatus = () => api.get('/chat/status')
 

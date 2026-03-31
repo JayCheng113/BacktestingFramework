@@ -13,7 +13,7 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | FactorPanel | 技术指标评估(单股): 预测能力(IC) + 稳定性(ICIR) + 信号持续性 + 分布 |
 | ExperimentPanel | 3 sub-tabs (单次运行/参数搜索/组合实验→跳转组合历史) + 运行表 + 门控详情 |
 | CandidateSearch | 参数网格/随机搜索 + 排名结果表 (全中文: 夏普/显著性/门控) |
-| CodeEditor | Monaco编辑器 + "新建策略/因子/组合策略/截面因子" + AI对话 + 4组侧栏 |
+| CodeEditor | Monaco编辑器 + 4类新建 + registry侧栏(系统内置折叠+用户文件+注册状态) + 刷新/清理研究 + AI对话 |
 | ChatPanel | AI助手 — SSE流式, 中文工具标签, 文件绑定对话, 多会话 |
 | SettingsModal | LLM + Tushare 配置面板 |
 | DocsPage | 开发文档 — 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明) |

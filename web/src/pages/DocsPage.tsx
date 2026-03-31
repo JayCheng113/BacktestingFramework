@@ -309,6 +309,15 @@ class MyStrategy(Strategy):  # 继承即注册
           <div style={h2s}>文件位置与热重载</div>
           <p style={ps}>策略文件放在 <code>strategies/</code> 目录下。系统启动时自动扫描该目录，import 所有 <code>.py</code> 文件。通过代码编辑器保存的策略文件也放在这里。保存后无需重启后端，策略会自动重新加载。</p>
 
+          <div style={h2s}>策略与因子管理</div>
+          <p style={ps}>代码编辑器的侧栏是管理中心。每类对象（策略/因子/组合策略/截面因子）分两组显示：</p>
+          <table style={tbl}><tbody>
+            <tr><td style={{...tds, fontWeight:600}}>系统内置</td><td style={tds}>折叠显示，只读不可删。包含 MA交叉、RSI、TopNRotation、EP/ROE 等。</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>用户自定义</td><td style={tds}>可编辑、可删除。删除同时从注册表清理。</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>刷新</td><td style={tds}>重新扫描用户目录并重新注册（手动放文件后使用）。</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>清理研究</td><td style={tds}>一键删除所有 research_* 开头的策略文件（研究助手生成的临时策略）。已注册到全局的不受影响。</td></tr>
+          </tbody></table>
+
           <div style={h2s}>Contract Test 检查项</div>
           <table style={tbl}>
             <thead><tr><th style={ths}>测试</th><th style={ths}>检查内容</th><th style={ths}>常见失败原因</th></tr></thead>
