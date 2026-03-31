@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from ez.api.deps import get_chain
 from ez.portfolio.calendar import TradingCalendar
-from ez.portfolio.cross_factor import MomentumRank, VolumeRank, ReverseVolatilityRank
+from ez.portfolio.cross_factor import CrossSectionalFactor, MomentumRank, VolumeRank, ReverseVolatilityRank
 from ez.portfolio.engine import CostModel, run_portfolio_backtest
 from ez.portfolio.portfolio_strategy import PortfolioStrategy, TopNRotation, MultiFactorRotation
 from ez.portfolio.builtin_strategies import EtfMacdRotation, EtfSectorSwitch, EtfStockEnhance  # noqa: F401
@@ -89,16 +89,21 @@ def _get_factor_map() -> dict:
     Fundamental factors are registered by BOTH class name (EP) and instance.name (ep),
     ensuring frontend can resolve using either convention.
     """
-    from ez.portfolio.cross_factor import CrossSectionalFactor
     # Ensure fundamental factors are imported (triggers auto-registration)
     try:
         import ez.factor.builtin.fundamental  # noqa: F401
     except ImportError:
         pass
     result = dict(_BUILTIN_FACTOR_MAP)
+    # V2.11.1: AlphaCombiner placeholder (actual construction in _create_alpha_combiner)
+    from ez.portfolio.alpha_combiner import AlphaCombiner
+    result["alpha_combiner"] = AlphaCombiner  # placeholder, not callable without args
     for name, cls in CrossSectionalFactor.get_registry().items():
         # Skip builtin classes (already mapped with parameterized keys)
         if name in _BUILTIN_CLASS_NAMES:
+            continue
+        # Skip abstract base classes (Issue 2: can't be instantiated)
+        if getattr(cls, '__abstractmethods__', None):
             continue
         if name not in result:
             result[name] = cls
@@ -111,6 +116,104 @@ def _get_factor_map() -> dict:
         except (TypeError, Exception):
             pass
     return result
+
+
+def _create_alpha_combiner(params: dict, symbols=None, start=None, end=None, market="cn_stock", skip_ensure=False):
+    """Create AlphaCombiner from strategy params. Returns (factor, warnings)."""
+    from ez.portfolio.alpha_combiner import AlphaCombiner
+    from ez.factor.builtin.fundamental import NEEDS_FINA
+
+    sub_names = params.pop("alpha_factors", [])
+    method = params.pop("alpha_method", "equal")
+    _VALID_METHODS = ("equal", "ic", "icir")
+
+    if method not in _VALID_METHODS:
+        raise HTTPException(400, f"alpha_method 必须是 {_VALID_METHODS} 之一，收到: '{method}'")
+    if not sub_names:
+        raise HTTPException(400, "alpha_combiner 需要指定 alpha_factors (子因子列表)")
+
+    # Issue 7: prevent alpha_combiner as own sub-factor
+    if "alpha_combiner" in sub_names:
+        raise HTTPException(400, "alpha_combiner 不能作为自身的子因子")
+
+    # Resolve sub-factors (Issue 6: deduplicate by instance.name)
+    sub_factors = []
+    seen_names: set[str] = set()
+    has_fundamental = False
+    need_fina = False
+    fmap = _get_factor_map()  # call once, not per sub-factor
+    for fn in sub_names:
+        factory = fmap.get(fn)
+        if not factory:
+            raise HTTPException(400, f"Unknown factor: {fn}")
+        f = factory()
+        if f.name in seen_names:
+            continue  # skip duplicate (e.g., EP and ep both resolve to name="ep")
+        seen_names.add(f.name)
+        f = _inject_fundamental_store(f)
+        if _is_fundamental_factor(type(f)):
+            has_fundamental = True
+            if type(f).__name__ in NEEDS_FINA:
+                need_fina = True
+        sub_factors.append(f)
+
+    warnings: list[str] = []
+    if not skip_ensure and has_fundamental and symbols and start and end:
+        warnings = _ensure_fundamental_data(symbols, start, end, need_fina=need_fina)
+
+    # Compute weights for ic/icir methods
+    weights = None
+    if method in ("ic", "icir") and symbols and start and end:
+        weights = _compute_alpha_weights(sub_factors, symbols, market, start, end, method)
+        if weights is None:
+            warnings.append(f"IC/ICIR 权重计算失败，回退到等权")
+
+    return AlphaCombiner(factors=sub_factors, weights=weights), warnings
+
+
+def _compute_alpha_weights(factors, symbols, market, start, end, method,
+                           forward_days: int = 5) -> dict[str, float] | None:
+    """Pre-compute IC/ICIR weights from training data before backtest start.
+
+    forward_days: horizon for IC computation (default 5, matches typical rebalance cycle).
+    """
+    from ez.portfolio.cross_evaluator import evaluate_cross_sectional_factor
+    from ez.factor.builtin.fundamental import FundamentalCrossFactor, NEEDS_FINA
+
+    train_end = start - timedelta(days=1)
+    train_start = start - timedelta(days=365)
+
+    try:
+        universe_data, calendar = _fetch_data(symbols, market, train_start, train_end, lookback_days=300)
+    except Exception as e:
+        logger.warning("AlphaCombiner training data fetch failed: %s", e)
+        return None
+
+    # Ensure fundamental data is available for training window (Issue 1 fix)
+    has_funda = any(_is_fundamental_factor(type(f)) for f in factors)
+    if has_funda:
+        need_fina = any(type(f).__name__ in NEEDS_FINA for f in factors if _is_fundamental_factor(type(f)))
+        _ensure_fundamental_data(symbols, train_start, train_end, need_fina=need_fina)
+
+    weights = {}
+    for f in factors:
+        try:
+            result = evaluate_cross_sectional_factor(
+                factor=f, universe_data=universe_data, calendar=calendar,
+                start=train_start, end=train_end, forward_days=forward_days, eval_freq="weekly",
+            )
+            if method == "ic":
+                # Use raw IC (preserve sign: negative IC = factor direction wrong, gets negative weight)
+                weights[f.name] = result.mean_ic if result.mean_ic else 0.0
+            elif method == "icir":
+                weights[f.name] = result.icir if result.icir else 0.0
+        except Exception as e:
+            logger.warning("AlphaCombiner weight computation failed for %s: %s", f.name, e)
+            weights[f.name] = 0.0
+
+    if all(v == 0 for v in weights.values()):
+        return None
+    return weights
 
 
 class PortfolioRunRequest(BaseModel):
@@ -134,7 +237,9 @@ class PortfolioRunRequest(BaseModel):
 
 
 def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
-                     start: date | None = None, end: date | None = None) -> tuple[PortfolioStrategy, list[str]]:
+                     start: date | None = None, end: date | None = None,
+                     market: str = "cn_stock",
+                     skip_ensure: bool = False) -> tuple[PortfolioStrategy, list[str]]:
     """Instantiate strategy by name + params. Auto-injects FundamentalStore if needed.
 
     Returns (strategy, warnings) tuple. Warnings are non-fatal messages about data availability.
@@ -144,13 +249,19 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
     p = dict(params)  # don't mutate input
     if name == "TopNRotation":
         factor_name = p.pop("factor", "momentum_rank_20")
-        factory = _get_factor_map().get(factor_name)
-        if not factory:
-            raise HTTPException(400, f"Unknown factor: {factor_name}. Available: {list(_get_factor_map().keys())}")
-        factor = factory()
-        factor = _inject_fundamental_store(factor)
-        if _is_fundamental_factor(type(factor)) and symbols and start and end:
-            warnings = _ensure_fundamental_data(symbols, start, end, need_fina=type(factor).__name__ in NEEDS_FINA)
+
+        # V2.11.1: AlphaCombiner special case
+        if factor_name == "alpha_combiner":
+            factor, warnings = _create_alpha_combiner(p, symbols, start, end, market=market, skip_ensure=skip_ensure)
+        else:
+            factory = _get_factor_map().get(factor_name)
+            if not factory:
+                raise HTTPException(400, f"Unknown factor: {factor_name}. Available: {list(_get_factor_map().keys())}")
+            factor = factory()
+            factor = _inject_fundamental_store(factor)
+            if not skip_ensure and _is_fundamental_factor(type(factor)) and symbols and start and end:
+                warnings = _ensure_fundamental_data(symbols, start, end, need_fina=type(factor).__name__ in NEEDS_FINA)
+
         top_n = p.pop("top_n", 10)
         return TopNRotation(factor=factor, top_n=top_n, **p), warnings
     elif name == "MultiFactorRotation":
@@ -169,7 +280,7 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
                 if type(f).__name__ in NEEDS_FINA:
                     need_fina = True
             factors.append(f)
-        if has_fundamental and symbols and start and end:
+        if not skip_ensure and has_fundamental and symbols and start and end:
             warnings = _ensure_fundamental_data(symbols, start, end, need_fina=need_fina)
         top_n = p.pop("top_n", 10)
         return MultiFactorRotation(factors=factors, top_n=top_n, **p), warnings
@@ -244,6 +355,9 @@ def list_portfolio_strategies():
     # Build categorized factor list
     factor_map = _get_factor_map()
     factor_list = list(factor_map.keys())
+    # V2.11.1: Add alpha_combiner as special option (not in registry)
+    if "alpha_combiner" not in factor_list:
+        factor_list.append("alpha_combiner")
 
     # Factor categories for frontend grouping
     try:
@@ -281,7 +395,8 @@ def list_portfolio_strategies():
                 categories.append({"key": cat_key, "label": CATEGORY_LABELS.get(cat_key, cat_key), "factors": cat_factors})
 
         # "Other" category: user-registered factors not in any category above
-        other_factors = [f for f in factor_list if f not in categorized_keys]
+        # Exclude alpha_combiner (special construct, not evaluable as single factor)
+        other_factors = [f for f in factor_list if f not in categorized_keys and f != "alpha_combiner"]
         if other_factors:
             categories.append({"key": "other", "label": "其他 (Other)", "factors": other_factors})
 
@@ -299,7 +414,8 @@ def run_portfolio(req: PortfolioRunRequest):
 
     try:
         strategy, fund_warnings = _create_strategy(req.strategy_name, req.strategy_params,
-                                                   symbols=req.symbols, start=start, end=end)
+                                                   symbols=req.symbols, start=start, end=end,
+                                                   market=req.market)
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     universe = Universe(req.symbols)
@@ -426,7 +542,8 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
 
     def strategy_factory():
         s, _w = _create_strategy(req.strategy_name, req.strategy_params,
-                                 symbols=req.symbols, start=start, end=end)
+                                 symbols=req.symbols, start=start, end=end,
+                                 market=req.market)
         return s
 
     universe = Universe(req.symbols)
@@ -474,6 +591,128 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     }
 
 
+# ─── V2.11.1: Portfolio Parameter Search ───
+
+class PortfolioSearchRequest(BaseModel):
+    strategy_name: str = "TopNRotation"
+    symbols: list[str]
+    market: str = "cn_stock"
+    start_date: date | None = None
+    end_date: date | None = None
+    freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly|quarterly)$")
+    param_grid: dict[str, list] = {}
+    max_combinations: int = Field(default=50, ge=1, le=200)
+    initial_cash: float = Field(default=1_000_000, ge=10_000)
+    buy_commission_rate: float = Field(default=0.0003, ge=0)
+    sell_commission_rate: float = Field(default=0.0003, ge=0)
+    min_commission: float = Field(default=5.0, ge=0)
+    stamp_tax_rate: float = Field(default=0.0005, ge=0)
+    slippage_rate: float = Field(default=0.0, ge=0)
+    lot_size: int = Field(default=100, ge=1)
+    limit_pct: float = Field(default=0.10, ge=0, le=0.30)
+
+
+def _generate_combinations(param_grid: dict[str, list], max_combos: int) -> list[dict]:
+    """Expand parameter grid. Random-sample if exceeds max_combos."""
+    import itertools
+    import random
+    keys = list(param_grid.keys())
+    if not keys:
+        return []
+    values = [param_grid[k] for k in keys]
+    all_combos = [dict(zip(keys, v)) for v in itertools.product(*values)]
+    if len(all_combos) > max_combos:
+        random.shuffle(all_combos)
+        all_combos = all_combos[:max_combos]
+    return all_combos
+
+
+@router.post("/search")
+def portfolio_search(req: PortfolioSearchRequest):
+    """Batch parameter search. Fetch data once, run N backtests, rank by Sharpe."""
+    end = req.end_date or date.today()
+    start = req.start_date or (end - timedelta(days=365 * 3))
+
+    combos = _generate_combinations(req.param_grid, req.max_combinations)
+    if not combos:
+        raise HTTPException(400, "参数网格为空")
+
+    # Fetch data once (E1: shared across all combinations)
+    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+
+    # Pre-load fundamental data once if any combo uses fundamental factors (E1+I2)
+    from ez.factor.builtin.fundamental import FundamentalCrossFactor, NEEDS_FINA
+    need_fina = False
+    needs_preload = False
+    factor_map = _get_factor_map()
+    def _check_factor_name(fn):
+        nonlocal needs_preload, need_fina
+        factory = factor_map.get(fn)
+        if factory and isinstance(factory, type) and issubclass(factory, FundamentalCrossFactor):
+            needs_preload = True
+            if factory.__name__ in NEEDS_FINA:
+                need_fina = True
+
+    for combo in combos:
+        # TopNRotation: single "factor" key
+        fn = combo.get("factor", "")
+        _check_factor_name(fn)
+        # AlphaCombiner sub-factors
+        if fn == "alpha_combiner":
+            for sf in combo.get("alpha_factors", []):
+                _check_factor_name(sf)
+        # MultiFactorRotation: "factors" list key
+        for mfn in combo.get("factors", []):
+            _check_factor_name(mfn)
+    if needs_preload:
+        _ensure_fundamental_data(req.symbols, start, end, need_fina=need_fina)
+
+    cost_model = CostModel(
+        buy_commission_rate=req.buy_commission_rate,
+        sell_commission_rate=req.sell_commission_rate,
+        min_commission=req.min_commission,
+        stamp_tax_rate=req.stamp_tax_rate,
+        slippage_rate=req.slippage_rate,
+    )
+
+    results = []
+    for i, params in enumerate(combos):
+        try:
+            strategy, _ = _create_strategy(req.strategy_name, params,
+                                           symbols=req.symbols, start=start, end=end,
+                                           market=req.market, skip_ensure=True)
+            result = run_portfolio_backtest(
+                strategy=strategy, universe=Universe(req.symbols),
+                universe_data=universe_data, calendar=calendar,
+                start=start, end=end, freq=req.freq,
+                initial_cash=req.initial_cash, cost_model=cost_model,
+                lot_size=req.lot_size, limit_pct=req.limit_pct,
+            )
+            m = result.metrics
+            results.append({
+                "rank": 0,
+                "params": params,
+                "sharpe": m.get("sharpe_ratio"),
+                "total_return": m.get("total_return"),
+                "annualized_return": m.get("annualized_return"),
+                "max_drawdown": m.get("max_drawdown"),
+                "trade_count": m.get("trade_count", 0),
+            })
+        except Exception as e:
+            logger.warning("Search combo %d/%d failed: %s", i + 1, len(combos), e)
+
+    def _sort_key(r):
+        v = r.get("sharpe")
+        if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+            return -999.0
+        return v
+    results.sort(key=_sort_key, reverse=True)
+    for i, r in enumerate(results):
+        r["rank"] = i + 1
+
+    return {"results": results, "total_combinations": len(combos), "completed": len(results)}
+
+
 @router.get("/runs")
 def list_portfolio_runs(
     limit: int = Query(default=50, ge=1, le=500),
@@ -508,6 +747,7 @@ class FactorEvalRequest(BaseModel):
     forward_days: int = Field(default=5, ge=1, le=60)
     eval_freq: str = Field(default="weekly", pattern="^(daily|weekly|monthly)$")
     n_quantiles: int = Field(default=5, ge=2, le=10)
+    neutralize: bool = Field(default=False, description="行业中性化")
 
 
 class FactorCorrelationRequest(BaseModel):
@@ -546,6 +786,47 @@ def _resolve_factors(names: list[str], symbols: list[str] | None = None,
     return resolved
 
 
+# Note: _NeutralizedWrapper is defined at module level (not inside a function) to avoid
+# repeated class creation. __init_subclass__ registers it momentarily; the pop on line ~820
+# removes it immediately. This is import-order safe because pop executes at module load time.
+class _NeutralizedWrapper(CrossSectionalFactor):
+    """Transparent wrapper that neutralizes factor scores by industry."""
+    def __init__(self, inner, ind_map):
+        self._inner = inner
+        self._ind_map = ind_map
+        self.neutralize_warnings: list[str] = []
+
+    @property
+    def name(self):
+        return self._inner.name
+
+    @property
+    def warmup_period(self):
+        return self._inner.warmup_period
+
+    def compute_raw(self, universe_data, date):
+        from ez.portfolio.neutralization import neutralize_by_industry
+        raw = self._inner.compute_raw(universe_data, date)
+        if len(raw) == 0:
+            return raw
+        neutralized, warnings = neutralize_by_industry(raw, self._ind_map)
+        for w in warnings:
+            if w not in self.neutralize_warnings:
+                self.neutralize_warnings.append(w)
+        return neutralized
+
+    def compute(self, universe_data, date):
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw
+
+CrossSectionalFactor._registry.pop("_NeutralizedWrapper", None)
+
+
+def _wrap_neutralized(factor, industry_map: dict):
+    """Wrap a factor to apply industry neutralization on compute_raw()."""
+    return _NeutralizedWrapper(factor, industry_map)
+
+
 @router.post("/evaluate-factors")
 def evaluate_factors(req: FactorEvalRequest):
     """Evaluate cross-sectional factors: IC, Rank IC, ICIR, IC decay, quintile returns."""
@@ -556,6 +837,15 @@ def evaluate_factors(req: FactorEvalRequest):
     factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+
+    # V2.11.1: Apply industry neutralization if requested
+    neutralize_warnings = []
+    if req.neutralize:
+        from ez.api.deps import get_fundamental_store
+        store = get_fundamental_store()
+        store.preload(req.symbols, start, end)
+        industry_map = store.get_all_industries()
+        factors = [_wrap_neutralized(f, industry_map) for f in factors]
 
     def _safe(v):
         if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
@@ -589,7 +879,16 @@ def evaluate_factors(req: FactorEvalRequest):
             "ic_decay": {k: _safe(v) for k, v in decay.items()},
         })
 
-    return {"results": results, "symbols_count": len(universe_data)}
+    # Collect neutralization warnings
+    if req.neutralize:
+        for f in factors:
+            if hasattr(f, 'neutralize_warnings') and f.neutralize_warnings:
+                neutralize_warnings.extend(f.neutralize_warnings)
+
+    resp = {"results": results, "symbols_count": len(universe_data)}
+    if neutralize_warnings:
+        resp["warnings"] = list(set(neutralize_warnings))
+    return resp
 
 
 @router.post("/factor-correlation")

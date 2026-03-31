@@ -41,13 +41,19 @@ def _date_to_tushare(d: date) -> str:
 
 
 def _tushare_to_datetime(s: str) -> datetime:
-    """Convert Tushare date string '20240102' to datetime."""
-    return datetime.strptime(s, "%Y%m%d")
+    """Convert Tushare date string '20240102' to datetime. Raises ProviderError on bad format."""
+    try:
+        return datetime.strptime(s, "%Y%m%d")
+    except (ValueError, TypeError) as e:
+        raise ProviderError(f"Invalid Tushare date format: '{s}'") from e
 
 
 def _tushare_to_date(s: str) -> date:
-    """Convert Tushare date string '20240102' to date."""
-    return datetime.strptime(s, "%Y%m%d").date()
+    """Convert Tushare date string '20240102' to date. Raises ProviderError on bad format."""
+    try:
+        return datetime.strptime(s, "%Y%m%d").date()
+    except (ValueError, TypeError) as e:
+        raise ProviderError(f"Invalid Tushare date format: '{s}'") from e
 
 
 class TushareDataProvider(DataProvider):

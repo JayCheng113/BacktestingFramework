@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class FetchRequest(BaseModel):
-    symbols: list[str]
+    symbols: list[str] = Field(min_length=1)
     market: str = "cn_stock"
     start_date: date | None = None
     end_date: date | None = None
@@ -22,7 +22,7 @@ class FetchRequest(BaseModel):
 
 
 class DataQualityRequest(BaseModel):
-    symbols: list[str]
+    symbols: list[str] = Field(min_length=1)
     start_date: date | None = None
     end_date: date | None = None
 

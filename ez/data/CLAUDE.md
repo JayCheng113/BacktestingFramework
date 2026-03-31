@@ -50,4 +50,5 @@ Fetch, validate, cache, and serve market data (K-line) from multiple sources wit
 ## Status
 - Implemented: DuckDBStore, TencentProvider, FMPProvider, TushareProvider, DataValidator, DataProviderChain
 - V2.11: FundamentalStore (DuckDB fundamental_daily + fina_indicator tables, PIT ann_date alignment, in-memory preload cache, data quality report), TushareProvider extended (get_fina_indicator, dv_ratio in daily_basic)
+- V2.11.1: PIT query改用max(end_date)不依赖排序假设, fina DO UPDATE不覆盖ann_date(保留首次公告日, 重报正确), ann_date INDEX加速, threading.Lock保护preload, additive cache(并发安全), Tushare日期转换try/except容错, /fundamental/fetch+quality symbols min_length校验
 - Not implemented: AKShare

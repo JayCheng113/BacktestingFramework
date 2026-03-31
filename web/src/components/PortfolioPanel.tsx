@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward, fetchFundamentalData, fundamentalDataQuality } from '../api'
+import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward, fetchFundamentalData, fundamentalDataQuality, portfolioSearch } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import type { BacktestSettingsValue } from './BacktestSettings'
@@ -32,6 +32,8 @@ const FACTOR_LABELS: Record<string, string> = {
   debt_to_assets: '低负债率', current_ratio: '流动比率',
   // 行业
   industry_momentum: '行业动量',
+  // 合成
+  alpha_combiner: '多因子合成',
 }
 
 interface PortfolioMetrics {
@@ -82,6 +84,7 @@ export default function PortfolioPanel() {
   const [tab, setTab] = useState<'run' | 'factor-research' | 'history'>('run')
   // Factor research state
   const [evalFactors, setEvalFactors] = useState<string[]>(['momentum_rank_20'])
+  const [neutralize, setNeutralize] = useState(false)
   const [evalResult, setEvalResult] = useState<any>(null)
   const [corrResult, setCorrResult] = useState<any>(null)
   const [evalLoading, setEvalLoading] = useState(false)
@@ -93,6 +96,12 @@ export default function PortfolioPanel() {
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
+  // Parameter search state
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchFactors, setSearchFactors] = useState<string[]>(['momentum_rank_20', 'ep'])
+  const [searchTopNs, setSearchTopNs] = useState('3,5,10')
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchResults, setSearchResults] = useState<any[]>([])
 
   // Current strategy's parameter schema
   const currentSchema = useMemo(() => {
@@ -165,7 +174,7 @@ export default function PortfolioPanel() {
     setEvalLoading(true); setEvalResult(null); setCorrResult(null)
     try {
       const [evalRes, corrRes] = await Promise.all([
-        evaluateFactors({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors, forward_days: 5, eval_freq: 'weekly' }),
+        evaluateFactors({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors, forward_days: 5, eval_freq: 'weekly', neutralize }),
         evalFactors.length >= 2
           ? factorCorrelation({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors })
           : Promise.resolve(null),
@@ -428,6 +437,34 @@ export default function PortfolioPanel() {
               </div>
               {/* Dynamic strategy parameters from schema */}
               {Object.entries(currentSchema).map(([key, schema]) => renderParamInput(key, schema))}
+              {/* V2.11.1: AlphaCombiner sub-panel when factor=alpha_combiner */}
+              {strategyParams.factor === 'alpha_combiner' && (
+                <div className="col-span-full p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+                  <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>子因子 (多选)</label>
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {factors.filter(f => f !== 'alpha_combiner').map(f => (
+                      <button key={f} onClick={() => {
+                        const cur = strategyParams.alpha_factors || []
+                        if (cur.includes(f)) updateParam('alpha_factors', cur.filter((x: string) => x !== f))
+                        else updateParam('alpha_factors', [...cur, f])
+                      }}
+                        className="text-xs px-2 py-0.5 rounded"
+                        style={{ backgroundColor: (strategyParams.alpha_factors || []).includes(f) ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                                 color: (strategyParams.alpha_factors || []).includes(f) ? '#fff' : 'var(--text-secondary)',
+                                 border: '1px solid var(--border)' }}>
+                        {FACTOR_LABELS[f] || f}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>合成方法</label>
+                  <select value={strategyParams.alpha_method || 'equal'} onChange={e => updateParam('alpha_method', e.target.value)}
+                    className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+                    <option value="equal">等权</option>
+                    <option value="ic">IC加权 (选股能力越强权重越大)</option>
+                    <option value="icir">ICIR加权 (又强又稳的权重更大)</option>
+                  </select>
+                </div>
+              )}
               <div className="flex flex-col gap-1">
                 <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>换仓频率</label>
                 <select value={freq} onChange={e => setFreq(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
@@ -459,12 +496,16 @@ export default function PortfolioPanel() {
               </div>
               <textarea value={symbols} onChange={e => setSymbols(e.target.value)} rows={2} className="w-full px-3 py-1.5 rounded text-sm font-mono" style={inputStyle} />
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
                 {loading ? '运行中...' : '运行组合回测'}
               </button>
               <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
                 {wfLoading ? '验证中...' : '前推验证'}
+              </button>
+              <button onClick={() => setSearchMode(!searchMode)} className="px-3 py-1.5 rounded text-sm font-medium"
+                style={{ backgroundColor: searchMode ? '#1e6b3a' : 'var(--bg-primary)', color: searchMode ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                参数搜索
               </button>
               <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
                 className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle} title="折数" />
@@ -474,6 +515,79 @@ export default function PortfolioPanel() {
               <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>训练</span>
             </div>
           </div>
+
+          {/* V2.11.1: Parameter Search Panel */}
+          {searchMode && (
+            <div className="p-4 rounded mb-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+              <h4 className="text-sm font-medium mb-2">参数搜索</h4>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>因子 (多选值)</label>
+                  <div className="flex flex-wrap gap-1">
+                    {factors.filter(f => f !== 'alpha_combiner').map(f => (
+                      <button key={f} onClick={() => setSearchFactors(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])}
+                        className="text-xs px-2 py-0.5 rounded"
+                        style={{ backgroundColor: searchFactors.includes(f) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                                 color: searchFactors.includes(f) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                        {FACTOR_LABELS[f] || f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>top_n (逗号分隔)</label>
+                  <input value={searchTopNs} onChange={e => setSearchTopNs(e.target.value)} className="w-full px-3 py-1.5 rounded text-sm" style={inputStyle} placeholder="3,5,10" />
+                </div>
+              </div>
+              <button onClick={async () => {
+                const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+                if (symbolList.length === 0 || searchFactors.length === 0) { alert('请填写股票池和因子'); return }
+                const topNs = searchTopNs.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0)
+                if (topNs.length === 0) { alert('请填写 top_n 值'); return }
+                setSearchLoading(true); setSearchResults([])
+                try {
+                  const res = await portfolioSearch({
+                    strategy_name: selected, symbols: symbolList, market: 'cn_stock',
+                    start_date: startDate, end_date: endDate, freq,
+                    param_grid: { factor: searchFactors, top_n: topNs },
+                    max_combinations: 50,
+                    buy_commission_rate: settings.buy_commission_rate, sell_commission_rate: settings.sell_commission_rate,
+                    min_commission: settings.min_commission, stamp_tax_rate: settings.stamp_tax_rate,
+                    slippage_rate: settings.slippage_rate, lot_size: settings.lot_size, limit_pct: settings.limit_pct,
+                    initial_cash: settings.initial_cash,
+                  })
+                  setSearchResults(res.data.results || [])
+                } catch (e: any) { alert(e?.response?.data?.detail || '搜索失败') }
+                finally { setSearchLoading(false) }
+              }} disabled={searchLoading}
+                className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: searchLoading ? '#30363d' : '#1e6b3a' }}>
+                {searchLoading ? '搜索中...' : `搜索 (${searchFactors.length} 因子 × ${searchTopNs.split(',').filter(Boolean).length} top_n)`}
+              </button>
+              {searchResults.length > 0 && (
+                <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+                  <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                    <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
+                      {['#', '因子', 'top_n', '夏普比率', '总收益率', '年化收益率', '最大回撤', '交易次数'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>{searchResults.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i === 0 ? 'rgba(34,197,94,0.08)' : undefined }}>
+                        <td className="px-3 py-1.5 font-medium">{r.rank}</td>
+                        <td className="px-3 py-1.5">{FACTOR_LABELS[r.params?.factor] || r.params?.factor}</td>
+                        <td className="px-3 py-1.5">{r.params?.top_n}</td>
+                        <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? '#22c55e' : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
+                        <td className="px-3 py-1.5">{r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}</td>
+                        <td className="px-3 py-1.5">{r.annualized_return != null ? (r.annualized_return * 100).toFixed(1) + '%' : '-'}</td>
+                        <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{r.max_drawdown != null ? (r.max_drawdown * 100).toFixed(1) + '%' : '-'}</td>
+                        <td className="px-3 py-1.5">{r.trade_count ?? '-'}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {result && (
             <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
@@ -655,8 +769,13 @@ export default function PortfolioPanel() {
             )}
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>带 * 的因子需要 Tushare 付费接口</p>
           </div>
-          <div className="mb-3">
+          <div className="flex items-center gap-3 mb-3">
             <DateRangePicker startDate={startDate} endDate={endDate} onStartChange={setStartDate} onEndChange={setEndDate} />
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+              <input type="checkbox" checked={neutralize} onChange={e => setNeutralize(e.target.checked)} />
+              行业中性化
+              <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>(去除行业偏差，需个股池)</span>
+            </label>
           </div>
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-1">

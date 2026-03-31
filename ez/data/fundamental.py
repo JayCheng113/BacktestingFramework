@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
+import threading
+
 import duckdb
 
 logger = logging.getLogger(__name__)
@@ -29,10 +31,11 @@ class FundamentalStore:
     def __init__(self, conn: duckdb.DuckDBPyConnection):
         self._conn = conn
         self._init_tables()
-        # In-memory caches populated by preload()
+        # In-memory caches populated by preload(). Protected by _cache_lock for thread safety.
         self._daily_cache: dict[tuple[str, date], dict] = {}
         self._fina_cache: dict[str, list[dict]] = {}  # symbol -> sorted by end_date desc
         self._industry_cache: dict[str, str] = {}
+        self._cache_lock = threading.Lock()
 
     # ── Schema ────────────────────────────────────────────────────────
 
@@ -78,6 +81,10 @@ class FundamentalStore:
                 PRIMARY KEY (symbol, end_date)
             )
         """)
+        # Index for PIT queries: WHERE symbol IN (...) AND ann_date <= ?
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_fina_ann_date ON fina_indicator(symbol, ann_date)
+        """)
 
     # ── Data ingestion ────────────────────────────────────────────────
 
@@ -87,6 +94,9 @@ class FundamentalStore:
         Uses ON CONFLICT DO NOTHING: daily_basic values (PE/PB/MV) are published once per
         trade_date and never revised. Unlike fina_indicator (which may have restated ann_date),
         daily_basic is immutable after publication.
+
+        Note: count uses SELECT COUNT before/after. DuckDB single-connection mode prevents
+        concurrent writes, so the count is accurate in practice.
         """
         if not records:
             return 0
@@ -139,7 +149,7 @@ class FundamentalStore:
                  revenue_yoy, profit_yoy, roe_yoy, eps, dt_eps)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, end_date) DO UPDATE SET
-                ann_date=EXCLUDED.ann_date, roe=EXCLUDED.roe, roe_waa=EXCLUDED.roe_waa,
+                roe=EXCLUDED.roe, roe_waa=EXCLUDED.roe_waa,
                 roa=EXCLUDED.roa, grossprofit_margin=EXCLUDED.grossprofit_margin,
                 netprofit_margin=EXCLUDED.netprofit_margin, debt_to_assets=EXCLUDED.debt_to_assets,
                 current_ratio=EXCLUDED.current_ratio, quick_ratio=EXCLUDED.quick_ratio,
@@ -178,11 +188,13 @@ class FundamentalStore:
     def preload(self, symbols: list[str], start: date, end: date) -> None:
         """Bulk-load fundamental data into memory for fast compute() lookups.
 
+        Thread-safe: uses _cache_lock to prevent concurrent corruption.
         Must be called before using get_daily_basic_at() or get_fina_pit().
         """
-        self._preload_daily(symbols, start, end)
-        self._preload_fina(symbols, end)
-        self._preload_industry(symbols)
+        with self._cache_lock:
+            self._preload_daily(symbols, start, end)
+            self._preload_fina(symbols, end)
+            self._preload_industry(symbols)
 
     def _preload_daily(self, symbols: list[str], start: date, end: date) -> None:
         # Additive: don't clear — avoids concurrent request cache pollution
@@ -253,6 +265,9 @@ class FundamentalStore:
                 self._industry_cache[r[0]] = r[1]
 
     # ── Point-in-time queries (from preloaded cache) ──────────────────
+    # Note: read operations below are NOT locked. Under CPython GIL, dict.get()
+    # and list iteration are atomic and thread-safe for reads. Write operations
+    # (preload) are protected by _cache_lock above.
 
     def get_daily_basic_at(self, symbol: str, trade_date: date) -> dict | None:
         """Get daily basic data for exact date. Returns None if unavailable.
@@ -270,16 +285,18 @@ class FundamentalStore:
     def get_fina_pit(self, symbol: str, as_of: date) -> dict | None:
         """Get latest financial indicator announced on or before as_of (PIT).
 
-        Returns the most recent report by end_date whose ann_date <= as_of.
+        Correctness: finds the report with the latest end_date among all reports
+        whose ann_date <= as_of. Does NOT assume end_date and ann_date are
+        monotonically ordered (handles late filings and restatements).
         """
         reports = self._fina_cache.get(symbol)
         if not reports:
             return None
-        # Reports are sorted by end_date desc in preload; find first with ann_date <= as_of
-        for r in reports:
-            if r["ann_date"] <= as_of:
-                return r
-        return None
+        # Filter to reports announced by as_of, pick the one with latest end_date
+        valid = [r for r in reports if r["ann_date"] <= as_of]
+        if not valid:
+            return None
+        return max(valid, key=lambda r: r["end_date"])
 
     def get_industry(self, symbol: str) -> str | None:
         """Get industry name for symbol (from symbols table cache)."""

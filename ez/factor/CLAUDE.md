@@ -39,4 +39,5 @@ Compute technical indicators and evaluate their predictive power via IC analysis
 - Implemented: MA, EMA, RSI, MACD, BOLL, Momentum, VWAP, OBV, ATR, FactorEvaluator (time-series IC)
 - V2.10: Factor __init_subclass__ auto-registration, factors/ user directory for custom factors, RSI/VWAP/ATR correctness fixes
 - V2.11: 18 fundamental CrossSectionalFactors (FundamentalCrossFactor base), data from FundamentalStore (daily_basic + fina_indicator), all output percentile rank with "高分=好" convention, PIT-aligned via ann_date
+- V2.11.1: compute_raw() refactor (raw values for neutralization/combination), EP/BP排除PE<0/PB<0, SP排除PS<0/NaN, compute_raw() 统一dropna过滤NaN, FundamentalCrossFactor从registry pop
 - Known limitation: V1 IC is time-series (single stock); cross-sectional IC available via ez/portfolio/CrossSectionalEvaluator (V2.10)

@@ -910,11 +910,9 @@ Agent 循环:
         {/*  6.8 组合回测 (V2.9)                                              */}
         {/* ================================================================ */}
         {active === 'portfolio' && <>
-          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>组合回测 (V2.9+V2.10)</h1>
-
-          <div style={h2s}>概述</div>
-          <p style={ps}>从"单股票单策略"升级到"多股票组合/轮动"回测。支持 ETF、个股、混合股票池。V2.10 新增因子研究 sub-tab，支持截面 IC 评估、Walk-Forward 验证、多回测对比和 CSV 导出。</p>
-          <div style={note}>导航栏 → "组合" tab → 三个子页签：组合回测 | 因子研究 | 历史记录</div>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>组合回测</h1>
+          <p style={ps}>多股票组合/轮动回测。支持 ETF、个股、混合池。从选因子、评估因子、合成信号到运行回测的完整流程。</p>
+          <div style={note}>导航栏 → "组合" tab → 三个子页签：<strong>组合回测</strong>（运行策略）| <strong>选股因子研究</strong>（评估因子质量）| <strong>历史记录</strong>（对比/导出）</div>
 
           <div style={h2s}>内置策略</div>
           <table style={tbl}><thead><tr><th style={ths}>策略</th><th style={ths}>说明</th><th style={ths}>关键参数</th></tr></thead><tbody>
@@ -925,11 +923,13 @@ Agent 循环:
             <tr><td style={tds}>EtfStockEnhance</td><td style={tds}>ETF 轮动底仓 + 个股增强</td><td style={tds}>top_n, stock_ratio</td></tr>
           </tbody></table>
 
-          <div style={h2s}>股票池示例</div>
-          <div style={h3s}>策略 1 (EtfMacdRotation) — 10 只 ETF</div>
-          <pre style={code}>510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ</pre>
-          <div style={h3s}>策略 2/3 (SectorSwitch/StockEnhance) — 22 只 ETF</div>
-          <pre style={code}>510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH</pre>
+          <div style={h2s}>预设股票池</div>
+          <p style={ps}>回测时可点击快捷按钮一键填入，也可手动输入证券代码（逗号分隔）。</p>
+          <table style={tbl}><thead><tr><th style={ths}>预设</th><th style={ths}>数量</th><th style={ths}>适用策略</th></tr></thead><tbody>
+            <tr><td style={tds}>宽基 ETF</td><td style={tds}>8 只</td><td style={tds}>沪深300/中证500/创业板等宽基</td></tr>
+            <tr><td style={tds}>ETF 轮动池</td><td style={tds}>10 只</td><td style={tds}>含跨境、商品 ETF，适合动量轮动</td></tr>
+            <tr><td style={tds}>行业+宽基</td><td style={tds}>22 只</td><td style={tds}>行业 ETF + 宽基，适合行业轮动</td></tr>
+          </tbody></table>
 
           <div style={h2s}>核心概念</div>
           <div style={h3s}>交易日历 (TradingCalendar)</div>
@@ -976,96 +976,51 @@ class MyRotation(PortfolioStrategy):
         # 返回 {symbol: weight}, weight >= 0, sum <= 1.0
         return {"510300.SH": 0.5, "518880.SH": 0.5}`}</pre>
 
-          <div style={h2s}>API 端点</div>
-          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>/api/portfolio/strategies</td><td style={tds}>GET</td><td style={tds}>列出已注册策略 + 可用因子</td></tr>
-            <tr><td style={tds}>/api/portfolio/run</td><td style={tds}>POST</td><td style={tds}>执行组合回测</td></tr>
-            <tr><td style={tds}>/api/portfolio/runs</td><td style={tds}>GET</td><td style={tds}>历史回测列表</td></tr>
-            <tr><td style={tds}>/api/portfolio/runs/{'<id>'}</td><td style={tds}>GET</td><td style={tds}>回测详情</td></tr>
-            <tr><td style={tds}>/api/portfolio/runs/{'<id>'}</td><td style={tds}>DELETE</td><td style={tds}>删除回测</td></tr>
-          </tbody></table>
+          {/* ── 选股因子研究 ── */}
+          <div style={h2s}>选股因子研究</div>
+          <p style={ps}>回答核心问题：<strong>"用这个指标选股靠不靠谱？"</strong>无需运行回测，直接评估因子质量。</p>
 
-          <div style={h2s}>V2.9.1 增强</div>
-          <table style={tbl}><thead><tr><th style={ths}>改进</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>引擎性能优化</td><td style={tds}>价格查找从 O(n) DataFrame 遍历改为 O(log n) bisect 预索引，20 只标的 × 470 天: 3s → 0.26s</td></tr>
-            <tr><td style={tds}>单股回测 A 股规则</td><td style={tds}>看板的单股回测现在也支持印花税、整手、涨跌停（之前只有组合回测支持）</td></tr>
-            <tr><td style={tds}>策略参数动态渲染</td><td style={tds}>选择不同策略时，参数表单自动切换。例如 EtfMacdRotation 显示 top_n + rank_period，TopNRotation 显示 top_n + factor</td></tr>
-            <tr><td style={tds}>代码编辑器扩展</td><td style={tds}>新增"新建组合策略"和"新建截面因子"按钮，侧栏分 4 组显示（策略/因子/组合策略/截面因子）</td></tr>
-            <tr><td style={tds}>回归测试</td><td style={tds}>新增 19 项回归测试：涨跌停 raw close 验证、NaN carry-forward、内置策略行为、引擎确定性</td></tr>
-          </tbody></table>
-
-          <div style={h2s}>V2.10 因子研究 + 研究效率</div>
-
-          <div style={h3s}>因子研究 sub-tab</div>
-          <p style={ps}>组合 tab 新增"因子研究"子页签，无需运行回测即可评估因子质量。</p>
-          <table style={tbl}><thead><tr><th style={ths}>功能</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>选股能力 (IC / Rank IC)</td><td style={tds}>每日对全 universe 股票计算因子值与未来收益的截面相关性（Pearson IC + Spearman Rank IC）</td></tr>
-            <tr><td style={tds}>ICIR</td><td style={tds}>IC 均值 / IC 标准差，衡量因子稳定性。ICIR &gt; 0.5 为可用因子</td></tr>
-            <tr><td style={tds}>信号持续性 (IC 衰减)</td><td style={tds}>lag 1/5/10/20 天的 IC 变化，观察因子有效期。好因子的 IC 随 lag 递减</td></tr>
-            <tr><td style={tds}>分档收益</td><td style={tds}>按因子值分 5 组（quintile），比较 Top 和 Bottom 组收益差。有效因子 Top &gt; Bottom</td></tr>
-            <tr><td style={tds}>因子相关性热力图</td><td style={tds}>多因子之间的 Spearman 秩相关矩阵，高相关（&gt;0.7）表示因子冗余</td></tr>
-            <tr><td style={tds}>IC 时序图</td><td style={tds}>IC 随时间变化的折线图，观察因子在不同市场环境下的表现</td></tr>
-          </tbody></table>
-
-          <div style={h3s}>前推验证</div>
-          <p style={ps}>PortfolioWalkForward 将回测区间分为 N 折训练集和测试集，验证策略在样本外的稳定性。PortfolioSignificance 提供 Bootstrap 置信区间和 Monte Carlo 信号置换检验。</p>
-
-          <div style={h3s}>多回测对比</div>
-          <p style={ps}>在历史记录中勾选多个回测（checkbox），叠加净值曲线（不同颜色）并生成指标对比表，方便横向比较不同策略或参数。</p>
-
-          <div style={h3s}>CSV 导出</div>
-          <p style={ps}>回测结果支持一键导出：净值曲线 CSV + 交易记录 CSV。可直接用 Excel 打开分析。</p>
-
-          <div style={h3s}>预设股票池</div>
-          <p style={ps}>三组快捷股票池按钮，点击即填入：</p>
-          <table style={tbl}><thead><tr><th style={ths}>预设</th><th style={ths}>内容</th></tr></thead><tbody>
-            <tr><td style={tds}>宽基 ETF</td><td style={tds}>沪深300/中证500/创业板等宽基 ETF</td></tr>
-            <tr><td style={tds}>ETF 轮动池</td><td style={tds}>10 只 ETF（含跨境、商品）</td></tr>
-            <tr><td style={tds}>行业+宽基 22 只</td><td style={tds}>行业 ETF + 宽基 ETF 组合，适合行业轮动策略</td></tr>
-          </tbody></table>
-
-          <div style={h3s}>持仓饼图</div>
-          <p style={ps}>回测完成后显示最新持仓权重（latest_weights）饼图，直观展示当前组合配置。</p>
-
-          <div style={h3s}>新增 API 端点 (V2.10)</div>
-          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>/api/portfolio/evaluate-factors</td><td style={tds}>POST</td><td style={tds}>截面因子评估（IC/RankIC/ICIR/衰减/分位数）</td></tr>
-            <tr><td style={tds}>/api/portfolio/factor-correlation</td><td style={tds}>POST</td><td style={tds}>因子相关性矩阵（Spearman 秩相关）</td></tr>
-            <tr><td style={tds}>/api/portfolio/walk-forward</td><td style={tds}>POST</td><td style={tds}>组合 Walk-Forward 验证 + 显著性检验</td></tr>
-          </tbody></table>
-
-          {/* ── V2.11 基本面数据 ── */}
-          <div style={h2s}>V2.11 基本面数据层</div>
-
-          <div style={h3s}>什么是基本面因子？</div>
-          <p style={ps}>之前的因子（动量、波动率、成交量）都是从<strong>价格和成交量</strong>推算的，叫"量价因子"。基本面因子来自<strong>财务报表</strong>（PE、ROE、营收增速等），是价值投资和多因子选股的核心数据源。</p>
-          <div style={note}>
-            简单理解：量价因子看"股价怎么走"，基本面因子看"公司赚不赚钱"。两类因子互补，组合使用效果更好。
-          </div>
-
-          <div style={h3s}>选股因子研究怎么用？</div>
-          <p style={ps}>选股因子研究回答一个核心问题：<strong>"这个因子能不能帮我选出好股票？"</strong></p>
-          <p style={ps}>操作步骤：</p>
-          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th><th style={ths}>看什么</th></tr></thead><tbody>
-            <tr><td style={tds}>1</td><td style={tds}>组合 tab → 因子研究 → 选因子（多选）</td><td style={tds}>按类别分组：量价、估值、质量、成长等</td></tr>
+          <div style={h3s}>操作流程</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>组合 tab → 选股因子研究 → 选因子（可多选）</td><td style={tds}>按类别分组：量价、估值、质量、成长等</td></tr>
             <tr><td style={tds}>2</td><td style={tds}>填股票池 + 日期范围</td><td style={tds}>建议 20+ 只股票、2 年以上</td></tr>
-            <tr><td style={tds}>3</td><td style={tds}>如用基本面因子 → 先点"获取基本面数据"</td><td style={tds}>首次获取较慢（Tushare API），之后有缓存</td></tr>
-            <tr><td style={tds}>4</td><td style={tds}>点"评估因子"</td><td style={tds}>IC/ICIR 表 + IC 时序 + 分档收益</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>基本面因子需先点"获取基本面数据"</td><td style={tds}>首次从 Tushare 拉取并缓存，之后直接读本地</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>（可选）勾选"行业中性化"</td><td style={tds}>去除行业偏差，仅对个股池有效</td></tr>
+            <tr><td style={tds}>5</td><td style={tds}>点"评估因子"</td><td style={tds}>输出选股能力表 + IC 时序图 + 信号持续性 + 分档收益 + 相关性热力图</td></tr>
           </tbody></table>
 
-          <div style={h3s}>怎么看评估结果？</div>
+          <div style={h3s}>怎么看评估结果</div>
           <table style={tbl}><thead><tr><th style={ths}>指标</th><th style={ths}>含义</th><th style={ths}>好的标准</th></tr></thead><tbody>
-            <tr><td style={tds}>IC 均值</td><td style={tds}>因子值与未来收益的相关性</td><td style={tds}>|IC| &gt; 0.03 有信号</td></tr>
-            <tr><td style={tds}>ICIR</td><td style={tds}>IC 的稳定性（均值/标准差）</td><td style={tds}>|ICIR| &gt; 0.5 可用</td></tr>
-            <tr><td style={tds}>分档收益</td><td style={tds}>按因子排名分 5 组的收益</td><td style={tds}>Top 组 &gt; Bottom 组</td></tr>
-            <tr><td style={tds}>IC 衰减</td><td style={tds}>信号随时间变弱的速度</td><td style={tds}>lag 1 最高，逐渐递减</td></tr>
+            <tr><td style={tds}>选股能力 (IC)</td><td style={tds}>因子值与未来收益的相关性</td><td style={tds}>|IC| &gt; 0.03 有信号</td></tr>
+            <tr><td style={tds}>稳定性 (ICIR)</td><td style={tds}>IC 均值 / IC 标准差</td><td style={tds}>|ICIR| &gt; 0.5 可用</td></tr>
+            <tr><td style={tds}>分档收益</td><td style={tds}>按因子排名分 5 组，比较 Top vs Bottom</td><td style={tds}>Top 组 &gt; Bottom 组</td></tr>
+            <tr><td style={tds}>信号持续性</td><td style={tds}>IC 随天数衰减的速度</td><td style={tds}>lag 1 最高，逐渐递减</td></tr>
             <tr><td style={tds}>因子相关性</td><td style={tds}>两因子之间的排名相关</td><td style={tds}>&lt; 0.7 说明不冗余</td></tr>
           </tbody></table>
           <div style={note}>
-            实际案例：如果 EP（盈利收益率）的 IC 均值 = 0.05, ICIR = 0.8, 分位数 Top &gt; Bottom，说明"买便宜股票"在历史上持续有效。可以把 EP 用在 TopNRotation 策略里。
+            案例：EP 的 IC=0.05, ICIR=0.8, Top &gt; Bottom → "买便宜股票"历史上持续有效，可以用在 TopNRotation 里。
           </div>
 
-          <div style={h3s}>18 个基本面因子</div>
+          <div style={h3s}>行业中性化</div>
+          <p style={ps}>EP 选出的全是银行股？不是因为银行"便宜"，而是银行 PE 天然就低。中性化 = 减去同行业均值，只留"同行业里谁更便宜"。</p>
+          <table style={tbl}><tbody>
+            <tr><td style={{...tds, fontWeight:600}}>开启</td><td style={tds}>因子研究 tab → 勾选"行业中性化"</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>要求</td><td style={tds}>≥ 50% 股票有行业标签，否则自动跳过</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>注意</td><td style={tds}>ETF 无行业属性，中性化对 ETF 池无效</td></tr>
+          </tbody></table>
+
+          {/* ── 可用因子 ── */}
+          <div style={h2s}>可用因子</div>
+          <p style={ps}>分两大类：量价因子（从价格/成交量推算）和基本面因子（从财务报表来）。全部输出百分位排名，<strong>分数越高越好</strong>。</p>
+
+          <div style={h3s}>量价因子（内置，无需额外数据）</div>
+          <table style={tbl}><thead><tr><th style={ths}>因子</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>20日/10日/60日动量</td><td style={tds}>N 天收益率排名，涨得多分高</td></tr>
+            <tr><td style={tds}>成交量排名</td><td style={tds}>20 日平均成交量，量大分高</td></tr>
+            <tr><td style={tds}>低波动</td><td style={tds}>20 日波动率取反，波动小分高</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>基本面因子（18 个，需 Tushare 数据）</div>
           <p style={ps}>按类别分组，全部输出百分位排名（0~1），<strong>分数越高越好</strong>：</p>
           <table style={tbl}><thead><tr><th style={ths}>类别</th><th style={ths}>因子</th><th style={ths}>含义</th><th style={ths}>数据源</th></tr></thead><tbody>
             <tr><td style={{...tds, fontWeight:600}} rowSpan={4}>估值 (Value)</td><td style={tds}>EP</td><td style={tds}>1/PE_TTM，越高越便宜</td><td style={tds}>daily_basic</td></tr>
@@ -1088,27 +1043,74 @@ class MyRotation(PortfolioStrategy):
             <tr><td style={{...tds, fontWeight:600}}>行业 (Industry)</td><td style={tds}>IndustryMomentum</td><td style={tds}>所属行业平均涨幅</td><td style={tds}>价格+行业</td></tr>
           </tbody></table>
           <div style={warn}>* 标记因子需要 Tushare 付费接口（fina_indicator）。免费用户可用估值、规模、流动性共 7 个因子。</div>
-
-          <div style={h3s}>PIT (Point-in-Time) 对齐</div>
-          <p style={ps}>财报数据有"公告日"和"报告期"两个日期。例如 2024Q1 报告期是 3/31，但公告日可能是 4/28。</p>
           <div style={warn}>
-            系统使用<strong>公告日（ann_date）</strong>对齐，不使用报告期。确保回测时不会"偷看未来"。例如：在 4/15 做决策时，只能用到已公告的 2023Q4 报告，不能用尚未公告的 2024Q1。
+            <strong>PIT 对齐</strong>：基本面因子使用<strong>公告日（ann_date）</strong>而非报告期。4/15 做决策时只能看到已公告的 2023Q4，看不到未公告的 2024Q1。
           </div>
 
-          <div style={h3s}>数据获取流程</div>
-          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>1. 获取数据</td><td style={tds}>因子研究 tab → 点"获取基本面数据" → 从 Tushare 拉取并缓存到本地 DuckDB</td></tr>
-            <tr><td style={tds}>2. 查看质量</td><td style={tds}>自动显示数据质量报告：每只股票的日度覆盖率、财报期数、行业</td></tr>
-            <tr><td style={tds}>3. 评估因子</td><td style={tds}>选择基本面因子 → 点"评估因子" → 查看 IC/ICIR/分位数</td></tr>
-            <tr><td style={tds}>4. 用于回测</td><td style={tds}>组合回测 tab → TopNRotation 策略 → factor 下拉选 ep/roe 等 → 运行回测</td></tr>
+          {/* ── 多因子合成 ── */}
+          <div style={h2s}>多因子合成</div>
+          <p style={ps}>单个因子选股能力有限。AlphaCombiner 把多个因子合成一个综合得分。</p>
+          <p style={ps}>单个因子选股能力有限。AlphaCombiner 把多个因子合成一个<strong>综合得分</strong>：</p>
+          <div style={code}>综合得分 = w1 × zscore(EP) + w2 × zscore(ROE) + w3 × zscore(动量) + ...</div>
+          <table style={tbl}><thead><tr><th style={ths}>合成方法</th><th style={ths}>权重来源</th><th style={ths}>适用场景</th></tr></thead><tbody>
+            <tr><td style={tds}>等权</td><td style={tds}>每个因子权重一样</td><td style={tds}>不确定哪个因子更好时的默认选择</td></tr>
+            <tr><td style={tds}>IC 加权</td><td style={tds}>回测前 1 年的因子 IC（选股能力越强权重越大）</td><td style={tds}>有足够历史数据评估各因子时</td></tr>
+            <tr><td style={tds}>ICIR 加权</td><td style={tds}>IC / IC 标准差（又强又稳的因子权重更大）</td><td style={tds}>最严格的加权，推荐用于正式研究</td></tr>
+          </tbody></table>
+          <div style={note}>
+            操作：组合回测 tab → 策略选 TopNRotation → 因子下拉选"多因子合成" → 选子因子 + 合成方法 → 运行。
+          </div>
+          <p style={ps}>技术细节：</p>
+          <table style={tbl}><tbody>
+            <tr><td style={{...tds, fontWeight:600}}>z-score 标准化</td><td style={tds}>每个因子先减均值除标准差，消除量纲差异（PE 和换手率不在同一尺度）</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>缺失值处理</td><td style={tds}>某只股票缺少部分因子时，按可用因子重新归一化权重（不排除该股票）</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>除零保护</td><td style={tds}>全部股票因子值相同（标准差=0）时，该因子贡献设为 0</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>IC 权重前瞻</td><td style={tds}>IC/ICIR 用回测开始前 1 年数据计算，不使用回测期内数据（无前瞻偏差）</td></tr>
           </tbody></table>
 
-          <div style={h3s}>新增 API 端点 (V2.11)</div>
-          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
-            <tr><td style={tds}>/api/fundamental/fetch</td><td style={tds}>POST</td><td style={tds}>获取并缓存基本面数据（daily_basic + fina_indicator）</td></tr>
-            <tr><td style={tds}>/api/fundamental/quality</td><td style={tds}>POST</td><td style={tds}>数据质量报告（覆盖率、财报期数）</td></tr>
-            <tr><td style={tds}>/api/fundamental/factors</td><td style={tds}>GET</td><td style={tds}>列出全部基本面因子（含分类、描述、付费标注）</td></tr>
+          {/* ── 回测工具 ── */}
+          <div style={h2s}>回测工具</div>
+
+          <div style={h3s}>组合参数搜索</div>
+          <p style={ps}>手动试不同因子 + top_n 组合太慢。参数搜索自动跑所有组合，按夏普比率排名。</p>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>组合回测 tab → 点"参数搜索"按钮</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>选多个因子值（如 EP、ROE、动量）+ 多个 top_n（如 3、5、10）</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>点搜索 → 系统自动组合所有参数、逐一回测</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>查看排名表：#1 是夏普最高的参数组合</td></tr>
           </tbody></table>
+          <div style={note}>
+            数据只取一次，所有参数组合复用同一份数据，不重复获取。超过 50 个组合时自动随机采样。
+          </div>
+
+          <div style={h3s}>前推验证</div>
+          <p style={ps}>将回测区间分 N 折，训练集拟合 + 测试集验证，检查策略是否过拟合。输出样本外夏普、过拟合评分、Bootstrap 置信区间。</p>
+          <p style={ps}>操作：组合回测 tab → 点"前推验证" → 设折数和训练比例 → 查看结果。</p>
+
+          <div style={h3s}>多回测对比</div>
+          <p style={ps}>在历史记录中勾选多条回测 → 净值曲线叠加（不同颜色）+ 指标对比表。横向比较不同策略或参数。</p>
+
+          <div style={h3s}>CSV 导出</div>
+          <p style={ps}>回测完成后可一键导出净值曲线 CSV 和交易记录 CSV，用 Excel 分析。</p>
+
+          <div style={h3s}>持仓饼图</div>
+          <p style={ps}>回测完成后显示最后一天的持仓分配比例。一眼看出资金分布是否过于集中。</p>
+
+          {/* ── API ── */}
+          <div style={h2s}>API 端点</div>
+          <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>/api/portfolio/strategies</td><td style={tds}>GET</td><td style={tds}>列出策略 + 因子分类</td></tr>
+            <tr><td style={tds}>/api/portfolio/run</td><td style={tds}>POST</td><td style={tds}>运行组合回测</td></tr>
+            <tr><td style={tds}>/api/portfolio/search</td><td style={tds}>POST</td><td style={tds}>参数搜索（网格+排名）</td></tr>
+            <tr><td style={tds}>/api/portfolio/evaluate-factors</td><td style={tds}>POST</td><td style={tds}>因子评估（+neutralize 中性化）</td></tr>
+            <tr><td style={tds}>/api/portfolio/factor-correlation</td><td style={tds}>POST</td><td style={tds}>因子相关性矩阵</td></tr>
+            <tr><td style={tds}>/api/portfolio/walk-forward</td><td style={tds}>POST</td><td style={tds}>前推验证 + 显著性</td></tr>
+            <tr><td style={tds}>/api/portfolio/runs</td><td style={tds}>GET</td><td style={tds}>历史回测列表</td></tr>
+            <tr><td style={tds}>/api/fundamental/fetch</td><td style={tds}>POST</td><td style={tds}>获取基本面数据</td></tr>
+            <tr><td style={tds}>/api/fundamental/quality</td><td style={tds}>POST</td><td style={tds}>数据质量报告</td></tr>
+            <tr><td style={tds}>/api/fundamental/factors</td><td style={tds}>GET</td><td style={tds}>基本面因子列表</td></tr>
+          </tbody></table>
+
         </>}
 
         {/* ================================================================ */}

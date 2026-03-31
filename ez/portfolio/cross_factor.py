@@ -2,8 +2,12 @@
 
 Canonical interface (Codex #6 frozen):
     compute(universe_data: dict[str, pd.DataFrame], date: datetime) → pd.Series[symbol → score]
+    compute_raw(universe_data, date) → pd.Series[symbol → raw_value]  (V2.11.1)
 
 Input universe_data is engine-sliced to [date-lookback, date-1]. Strategy cannot see future data.
+
+V2.11.1: Added compute_raw() for neutralization and factor combination.
+  compute_raw() returns raw values (not ranked). compute() returns percentile rank (backward compat).
 """
 from __future__ import annotations
 
@@ -39,9 +43,21 @@ class CrossSectionalFactor(ABC):
     def warmup_period(self) -> int:
         return 0
 
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        """Compute raw (un-ranked) factor scores.
+
+        Used by neutralization and AlphaCombiner to access pre-rank values.
+        Default implementation returns compute() result (backward compatible for
+        user-defined factors that only implement compute()).
+
+        New factors should override this to return raw values, and have compute()
+        call compute_raw() then rank.
+        """
+        return self.compute(universe_data, date)
+
     @abstractmethod
     def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
-        """Compute cross-sectional factor scores.
+        """Compute cross-sectional factor scores (percentile rank).
 
         Args:
             universe_data: {symbol: DataFrame} sliced to [date-lookback, date-1].
@@ -67,7 +83,7 @@ class MomentumRank(CrossSectionalFactor):
     def warmup_period(self) -> int:
         return self._period
 
-    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
         scores = {}
         for sym, df in universe_data.items():
             if len(df) < self._period or "adj_close" not in df.columns:
@@ -75,7 +91,11 @@ class MomentumRank(CrossSectionalFactor):
             close = df["adj_close"]
             ret = (close.iloc[-1] - close.iloc[-self._period]) / close.iloc[-self._period]
             scores[sym] = ret
-        return pd.Series(scores).rank(pct=True) if scores else pd.Series(dtype=float)
+        return pd.Series(scores) if scores else pd.Series(dtype=float)
+
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw
 
 
 class VolumeRank(CrossSectionalFactor):
@@ -92,13 +112,17 @@ class VolumeRank(CrossSectionalFactor):
     def warmup_period(self) -> int:
         return self._period
 
-    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
         scores = {}
         for sym, df in universe_data.items():
             if len(df) < self._period or "volume" not in df.columns:
                 continue
             scores[sym] = df["volume"].iloc[-self._period:].mean()
-        return pd.Series(scores).rank(pct=True) if scores else pd.Series(dtype=float)
+        return pd.Series(scores) if scores else pd.Series(dtype=float)
+
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw
 
 
 class ReverseVolatilityRank(CrossSectionalFactor):
@@ -115,11 +139,15 @@ class ReverseVolatilityRank(CrossSectionalFactor):
     def warmup_period(self) -> int:
         return self._period + 1
 
-    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
         scores = {}
         for sym, df in universe_data.items():
             if len(df) < self._period + 1 or "adj_close" not in df.columns:
                 continue
             vol = df["adj_close"].pct_change().iloc[-self._period:].std()
             scores[sym] = -vol  # lower vol → higher score
-        return pd.Series(scores).rank(pct=True) if scores else pd.Series(dtype=float)
+        return pd.Series(scores) if scores else pd.Series(dtype=float)
+
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw

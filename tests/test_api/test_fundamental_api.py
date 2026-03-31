@@ -42,6 +42,8 @@ class TestFactorIDContract:
         for cat in data.get("factor_categories", []):
             for f in cat.get("factors", []):
                 fkey = f["key"] if isinstance(f, dict) else f
+                if fkey == "alpha_combiner":
+                    continue  # special case: handled in _create_alpha_combiner, not callable without args
                 assert fkey in factor_map, (
                     f"Factor key '{fkey}' from /strategies not found in factor_map. "
                     f"Available: {list(factor_map.keys())[:10]}..."

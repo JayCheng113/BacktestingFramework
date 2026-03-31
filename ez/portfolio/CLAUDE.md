@@ -1,20 +1,22 @@
-# ez/portfolio — Portfolio Backtesting Module (V2.9+V2.10)
+# ez/portfolio — Portfolio Backtesting Module
 
 ## Responsibility
-Multi-stock portfolio backtesting: universe management, cross-sectional factors, portfolio strategies, weight allocation, discrete-share engine with accounting invariant. Factor research: cross-sectional IC evaluation, IC decay, quintile returns, factor correlation, walk-forward validation, significance testing.
+Multi-stock portfolio backtesting: universe management, cross-sectional factors, portfolio strategies, weight allocation, discrete-share engine with accounting invariant. Factor research: cross-sectional IC evaluation, IC decay, quintile returns, factor correlation, walk-forward validation, significance testing. Alpha combination: industry neutralization, multi-factor composite, parameter search.
 
 ## Public Interfaces
 - `TradingCalendar` — Trading day calendar, rebalance date computation (no weekday hardcoding)
 - `Universe` — PIT security pool with delist/IPO filtering
-- `CrossSectionalFactor` — ABC: `compute(universe_data, date) → Series[symbol → score]`
+- `CrossSectionalFactor` — ABC: `compute(universe_data, date) → Series[rank]`, `compute_raw(universe_data, date) → Series[raw_value]` (V2.11.1)
 - `PortfolioStrategy` — ABC: `generate_weights(data, date, prev_w, prev_r) → dict[str, float]`
 - `Allocator` — ABC: `allocate(raw_weights) → dict[str, float]` (EqualWeight/MaxWeight/RiskParity)
 - `run_portfolio_backtest()` — Main engine function
-- `CrossSectionalEvaluator` — Cross-sectional IC/RankIC/ICIR/IC decay/quintile returns evaluation
+- `CrossSectionalEvaluator` — Cross-sectional IC/RankIC/ICIR/IC decay/quintile returns (nanmean/nanstd)
 - `FactorCorrelationMatrix` — Pairwise Spearman rank correlation between factors
 - `PortfolioWalkForward` — Walk-forward validation for portfolio strategies
 - `PortfolioSignificance` — Bootstrap CI + Monte Carlo significance testing
 - `PortfolioStore` — DuckDB persistence for portfolio runs
+- `neutralize_by_industry()` — Industry neutralization with coverage threshold (V2.11.1)
+- `AlphaCombiner` — Multi-factor composite: z-score + weighted sum (V2.11.1)
 - `resample()` — Daily → weekly/monthly/quarterly resampling utility
 
 ## Files
@@ -22,15 +24,17 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 |------|------|
 | calendar.py | TradingCalendar: rebalance dates, date alignment |
 | universe.py | PIT Universe: dynamic constituents, delist/IPO, data slicing |
-| cross_factor.py | CrossSectionalFactor ABC + MomentumRank/VolumeRank/ReverseVolatilityRank |
+| cross_factor.py | CrossSectionalFactor ABC (compute + compute_raw) + MomentumRank/VolumeRank/ReverseVolatilityRank |
 | portfolio_strategy.py | PortfolioStrategy ABC (stateful, _registry) + TopNRotation/MultiFactorRotation |
 | builtin_strategies.py | EtfMacdRotation/EtfSectorSwitch/EtfStockEnhance (QMT ports) |
 | allocator.py | EqualWeight/MaxWeight/RiskParity allocators |
 | engine.py | PortfolioEngine: discrete shares, accounting invariant, limit prices, benchmark |
 | metrics.py | resample() utility |
 | portfolio_store.py | DuckDB persistence |
-| cross_evaluator.py | CrossSectionalEvaluator: IC/RankIC/ICIR/IC decay/quintile + FactorCorrelationMatrix (V2.10) |
-| walk_forward.py | PortfolioWalkForward + PortfolioSignificance: Bootstrap CI + Monte Carlo (V2.10) |
+| cross_evaluator.py | CrossSectionalEvaluator: IC/RankIC/ICIR/IC decay/quintile + FactorCorrelationMatrix |
+| walk_forward.py | PortfolioWalkForward + PortfolioSignificance: Bootstrap CI + Monte Carlo |
+| neutralization.py | neutralize_by_industry(): coverage threshold, single-stock drop, no-industry fallback (V2.11.1) |
+| alpha_combiner.py | AlphaCombiner: z-score + weighted sum, equal/IC/ICIR, not auto-registered (V2.11.1) |
 | loader.py | Startup scanner for portfolio_strategies/ and cross_factors/ |
 
 ## Key Design Decisions
@@ -41,6 +45,9 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - Has-bar-today: only trade symbols with actual data on current day
 - Buy/sell separate commission rates
 - Benchmark: optional symbol for comparison curve + alpha/beta
+- compute_raw(): raw values for neutralization and combination; compute(): percentile rank (V2.11.1)
+- IC weights sign-preserving: negative IC = factor direction wrong → negative weight (V2.11.1)
+- FundamentalCrossFactor.compute_raw() includes dropna() to filter NaN from any data source (V2.11.1)
 
 ## A-share Rules (built into engine)
 - T+1: sold_today tracking — cannot buy a symbol that was sold on the same day
@@ -52,6 +59,7 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 
 ## Status
 - V2.9: Full implementation, 5 built-in strategies, 70+ tests
-- V2.9.1: Bisect pre-indexing (10x speedup), regression tests (19 new), TopNRotation/MultiFactorRotation schema + description
-- V2.10: CrossSectionalEvaluator (IC/RankIC/ICIR/IC decay/quintile returns), FactorCorrelationMatrix (pairwise Spearman), PortfolioWalkForward, PortfolioSignificance (Bootstrap CI + Monte Carlo), 24 new tests (14 evaluator + 10 WF)
-- V2.10 post-release: Engine T+1 enforcement (sold_today set, cannot buy symbol sold same day), directional slippage (buy pushes price up, sell pushes price down), CrossSectionalFactor __init_subclass__ auto-registration
+- V2.9.1: Bisect pre-indexing (10x speedup), regression tests (19 new)
+- V2.10: CrossSectionalEvaluator, FactorCorrelation, WalkForward, Significance, 24 new tests
+- V2.10 post-release: T+1, directional slippage, __init_subclass__ auto-registration
+- V2.11.1: compute_raw() interface, neutralization, AlphaCombiner, parameter search, IC nanmean/nanstd, EP/BP/SP negative exclusion, PIT restatement fix, ann_date INDEX

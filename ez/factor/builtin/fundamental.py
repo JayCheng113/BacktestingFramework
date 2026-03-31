@@ -93,8 +93,8 @@ class FundamentalCrossFactor(CrossSectionalFactor):
         """If True, higher raw values get higher rank. Override for inverse factors."""
         return True
 
-    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
-        """Compute factor scores as percentile rank. Higher = better."""
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        """Raw scores (direction-adjusted, not ranked). Used by neutralization and AlphaCombiner."""
         if self._store is None:
             return pd.Series(dtype=float)
 
@@ -105,10 +105,17 @@ class FundamentalCrossFactor(CrossSectionalFactor):
         if not raw:
             return pd.Series(dtype=float)
 
-        s = pd.Series(raw)
+        s = pd.Series(raw).dropna()  # filter NaN from any data source
+        if len(s) == 0:
+            return pd.Series(dtype=float)
         if not self.higher_is_better:
-            s = -s  # negate so ranking gives high score to low raw values
-        return s.rank(pct=True)
+            s = -s  # negate so higher = better
+        return s
+
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        """Percentile rank of raw scores. Higher = better."""
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw
 
     @abstractmethod
     def _raw_scores(self, symbols: list[str], d: date) -> dict[str, float]:
@@ -119,7 +126,7 @@ class FundamentalCrossFactor(CrossSectionalFactor):
 # ── Value factors (daily_basic) ───────────────────────────────────────
 
 class EP(FundamentalCrossFactor):
-    """Earnings/Price = 1/PE_TTM. Higher = cheaper."""
+    """Earnings/Price = 1/PE_TTM. Higher = cheaper. Excludes loss-making (PE<0)."""
 
     @property
     def name(self) -> str:
@@ -127,7 +134,7 @@ class EP(FundamentalCrossFactor):
 
     @property
     def description(self) -> str:
-        return "盈利收益率 (1/PE_TTM)，越高越便宜"
+        return "盈利收益率 (1/PE_TTM)，越高越便宜，排除亏损股"
 
     @property
     def category(self) -> str:
@@ -137,13 +144,13 @@ class EP(FundamentalCrossFactor):
         scores = {}
         for sym in symbols:
             data = self._store.get_daily_basic_at(sym, d)
-            if data and data.get("pe_ttm") and data["pe_ttm"] != 0:
+            if data and data.get("pe_ttm") and data["pe_ttm"] > 0:  # exclude loss-making
                 scores[sym] = 1.0 / data["pe_ttm"]
         return scores
 
 
 class BP(FundamentalCrossFactor):
-    """Book/Price = 1/PB. Higher = cheaper."""
+    """Book/Price = 1/PB. Higher = cheaper. Excludes negative equity (PB<0)."""
 
     @property
     def name(self) -> str:
@@ -151,7 +158,7 @@ class BP(FundamentalCrossFactor):
 
     @property
     def description(self) -> str:
-        return "市净率倒数 (1/PB)，越高越便宜"
+        return "市净率倒数 (1/PB)，越高越便宜，排除负资产股"
 
     @property
     def category(self) -> str:
@@ -161,7 +168,7 @@ class BP(FundamentalCrossFactor):
         scores = {}
         for sym in symbols:
             data = self._store.get_daily_basic_at(sym, d)
-            if data and data.get("pb") and data["pb"] != 0:
+            if data and data.get("pb") and data["pb"] > 0:  # exclude negative equity
                 scores[sym] = 1.0 / data["pb"]
         return scores
 
@@ -185,7 +192,7 @@ class SP(FundamentalCrossFactor):
         scores = {}
         for sym in symbols:
             data = self._store.get_daily_basic_at(sym, d)
-            if data and data.get("ps_ttm") and data["ps_ttm"] != 0:
+            if data and data.get("ps_ttm") is not None and data["ps_ttm"] > 0:
                 scores[sym] = 1.0 / data["ps_ttm"]
         return scores
 
@@ -209,8 +216,9 @@ class DP(FundamentalCrossFactor):
         scores = {}
         for sym in symbols:
             data = self._store.get_daily_basic_at(sym, d)
-            if data and data.get("dv_ratio") is not None:
-                scores[sym] = data["dv_ratio"]
+            v = data.get("dv_ratio") if data else None
+            if v is not None and v == v:  # v == v is False for NaN
+                scores[sym] = v
         return scores
 
 
@@ -491,10 +499,9 @@ class AmihudIlliquidity(FundamentalCrossFactor):
     def higher_is_better(self) -> bool:
         return False  # lower illiquidity = more liquid = better
 
-    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
-        """Uses price data from universe_data (not fundamental store)."""
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        """Raw Amihud illiquidity (negated: lower illiq = higher value). Uses price data."""
         scores = {}
-        d = date.date() if hasattr(date, 'date') else date
         lookback = 20
         for sym, df in universe_data.items():
             if len(df) < lookback + 1 or "adj_close" not in df.columns:
@@ -506,14 +513,15 @@ class AmihudIlliquidity(FundamentalCrossFactor):
                 continue
             amihud = (ret[valid].abs() / vol[valid]).mean()
             if amihud > 0:
-                scores[sym] = amihud
-        if not scores:
-            return pd.Series(dtype=float)
-        s = pd.Series(scores)
-        return (-s).rank(pct=True)  # negate: lower illiquidity = higher rank
+                scores[sym] = -amihud  # negate: lower illiquidity = higher value
+        return pd.Series(scores) if scores else pd.Series(dtype=float)
+
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw
 
     def _raw_scores(self, symbols, d):
-        return {}  # not used — compute() overridden
+        return {}  # not used — compute_raw() overridden directly
 
 
 # ── Leverage factors (fina_indicator) ─────────────────────────────────
@@ -594,7 +602,8 @@ class IndustryMomentum(FundamentalCrossFactor):
     def category(self) -> str:
         return "industry"
 
-    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+    def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        """Raw industry-average return (not ranked). Uses price data + industry mapping."""
         if self._store is None:
             return pd.Series(dtype=float)
 
@@ -628,12 +637,14 @@ class IndustryMomentum(FundamentalCrossFactor):
             if ind and ind in industry_avg:
                 scores[sym] = industry_avg[ind]
 
-        if not scores:
-            return pd.Series(dtype=float)
-        return pd.Series(scores).rank(pct=True)
+        return pd.Series(scores) if scores else pd.Series(dtype=float)
+
+    def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
+        raw = self.compute_raw(universe_data, date)
+        return raw.rank(pct=True) if len(raw) > 0 else raw
 
     def _raw_scores(self, symbols, d):
-        return {}  # compute() overridden
+        return {}  # compute_raw() overridden directly
 
 
 # Update category registry
@@ -643,6 +654,10 @@ NEEDS_FINA.discard("IndustryMomentum")  # doesn't need fina data
 
 
 # ── Registry helper ───────────────────────────────────────────────────
+
+# C1 fix: Remove abstract base from registry (registered by __init_subclass__ before __abstractmethods__ set)
+CrossSectionalFactor._registry.pop("FundamentalCrossFactor", None)
+
 
 def get_fundamental_factors() -> dict[str, type]:
     """Return all concrete FundamentalCrossFactor subclasses, keyed by class name."""

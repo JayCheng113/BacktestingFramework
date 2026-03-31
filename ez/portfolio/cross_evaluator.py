@@ -10,6 +10,7 @@ Computes:
 from __future__ import annotations
 
 import bisect
+import warnings
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
@@ -175,18 +176,20 @@ def evaluate_cross_sectional_factor(
         if len(s) < 5:
             continue
 
-        # IC (Pearson)
-        ic = float(np.corrcoef(s, r)[0, 1]) if np.std(s) > 0 and np.std(r) > 0 else 0.0
-        # Rank IC (Spearman)
-        rank_ic = float(stats.spearmanr(s, r).statistic) if len(s) >= 5 else 0.0
+        # IC (Pearson) — suppress ConstantInputWarning for zero-variance inputs
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ic = float(np.corrcoef(s, r)[0, 1]) if np.std(s) > 0 and np.std(r) > 0 else np.nan
+            rank_ic = float(stats.spearmanr(s, r).statistic) if len(s) >= 5 else np.nan
 
-        # Keep lists aligned: always append (NaN → 0.0 for aggregation lists)
-        ic_val = ic if not np.isnan(ic) else 0.0
-        rank_ic_val = rank_ic if not np.isnan(rank_ic) else 0.0
+        # NaN for invalid dates — both series and aggregation use NaN consistently.
+        # Frontend renders NaN as null (ECharts skips null points in line charts).
+        ic_val = ic if not np.isnan(ic) else np.nan
+        rank_ic_val = rank_ic if not np.isnan(rank_ic) else np.nan
         ic_list.append(ic_val)
         rank_ic_list.append(rank_ic_val)
-        result.ic_series.append(ic_val)
-        result.rank_ic_series.append(rank_ic_val)
+        result.ic_series.append(None if np.isnan(ic_val) else float(ic_val))
+        result.rank_ic_series.append(None if np.isnan(rank_ic_val) else float(rank_ic_val))
         result.eval_dates.append(eval_date.isoformat())
         stock_counts.append(len(common))
 
@@ -202,14 +205,14 @@ def evaluate_cross_sectional_factor(
         except (ValueError, IndexError):
             pass  # too few unique values for qcut
 
-    # Aggregate
+    # Aggregate (nanmean/nanstd: skip NaN dates to avoid biasing IC downward)
     if ic_list:
-        result.mean_ic = float(np.mean(ic_list))
-        result.ic_std = float(np.std(ic_list))
+        result.mean_ic = float(np.nanmean(ic_list))
+        result.ic_std = float(np.nanstd(ic_list))
         result.icir = result.mean_ic / result.ic_std if result.ic_std > 0 else 0.0
     if rank_ic_list:
-        result.mean_rank_ic = float(np.mean(rank_ic_list))
-        result.rank_ic_std = float(np.std(rank_ic_list))
+        result.mean_rank_ic = float(np.nanmean(rank_ic_list))
+        result.rank_ic_std = float(np.nanstd(rank_ic_list))
         result.rank_icir = result.mean_rank_ic / result.rank_ic_std if result.rank_ic_std > 0 else 0.0
 
     result.n_eval_dates = len(ic_list)

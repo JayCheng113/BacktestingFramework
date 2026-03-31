@@ -64,9 +64,18 @@ jobs:
             --hidden-import "ez.api.routes.market_data" \
             --hidden-import "ez.api.routes.backtest" \
             --hidden-import "ez.api.routes.factors" \
+            --hidden-import "ez.api.routes.experiments" \
+            --hidden-import "ez.api.routes.candidates" \
+            --hidden-import "ez.api.routes.code" \
+            --hidden-import "ez.api.routes.chat" \
+            --hidden-import "ez.api.routes.settings" \
+            --hidden-import "ez.api.routes.research" \
+            --hidden-import "ez.api.routes.portfolio" \
+            --hidden-import "ez.api.routes.fundamental" \
             --hidden-import "ez.api.deps" \
             --hidden-import "ez.strategy.builtin.ma_cross" \
             --hidden-import "ez.factor.builtin.technical" \
+            --hidden-import "ez.factor.builtin.fundamental" \
             --hidden-import "ez.data.providers.tushare_provider" \
             --hidden-import "ez.data.providers.tencent_provider" \
             --hidden-import "ez.data.providers.fmp_provider" \
