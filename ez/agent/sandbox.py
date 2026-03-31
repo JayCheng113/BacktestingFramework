@@ -52,6 +52,9 @@ _FORBIDDEN_MODULES = frozenset({
     "http", "urllib", "requests", "httpx", "ftplib", "smtplib",
     "sqlite3", "duckdb", "builtins", "__builtin__",
     "code", "codeop", "compile", "compileall",
+    # GC-based sandbox escapes: gc.get_referrers(type) → module objects → Popen
+    "gc", "_thread", "py_compile", "runpy", "pty", "pipes",
+    "webbrowser", "antigravity", "turtle",
 })
 
 # Template for new strategies
@@ -535,18 +538,40 @@ def save_and_validate_code(
         stem = safe_name.replace(".py", "")
         module_name = f"{target_dir.name}.{stem}"
         try:
-            # Subprocess import test with 10s timeout
+            # Subprocess import test with 10s timeout (code NEVER runs in main process)
             import subprocess as _sp
             safe_path = str(target).replace("\\", "/")  # Windows path fix
-            test_code = f"import importlib.util, sys; spec = importlib.util.spec_from_file_location('{module_name}', '{safe_path}'); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)"
+            # Subprocess: import + verify Factor subclass exists + print class names
+            test_code = (
+                f"import importlib.util, sys, ast\n"
+                f"spec = importlib.util.spec_from_file_location('{module_name}', '{safe_path}')\n"
+                f"mod = importlib.util.module_from_spec(spec)\n"
+                f"spec.loader.exec_module(mod)\n"
+                f"from ez.factor.base import Factor\n"
+                f"classes = [k for k, v in Factor._registry.items() if v.__module__ == '{module_name}']\n"
+                f"if not classes: raise ValueError('No Factor subclass')\n"
+                f"print(','.join(classes))\n"
+            )
             proc = _sp.run([sys.executable, "-c", test_code], capture_output=True, text=True, timeout=10)
             if proc.returncode != 0:
                 raise ValueError(f"Import failed: {proc.stderr[-200:]}")
-            # Now hot-reload in main process (safe — subprocess validated)
-            _reload_factor_code(safe_name, target_dir)
-            registered = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+            # Register via AST class name extraction ONLY (no exec_module in main process)
+            registered = [c.strip() for c in proc.stdout.strip().split(",") if c.strip()]
             if not registered:
                 raise ValueError("No Factor subclass found in code")
+            # Register class stubs in main process registry (for API visibility)
+            # Actual Factor instances are created on-demand by the API
+            _tree = ast.parse(code)
+            for node in ast.walk(_tree):
+                if isinstance(node, ast.ClassDef) and node.name in registered:
+                    # Create a minimal class stub that records module origin
+                    stub = type(node.name, (Factor,), {
+                        "name": property(lambda self, n=node.name: n.lower()),
+                        "warmup_period": property(lambda self: 0),
+                        "compute": lambda self, data: data,
+                        "__module__": module_name,
+                    })
+                    Factor._registry[node.name] = stub
         except Exception as e:
             # Clean up any dirty registry entries
             dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
