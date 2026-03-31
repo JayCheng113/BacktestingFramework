@@ -9,8 +9,11 @@ const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid va
 
 interface PortfolioMetrics {
   total_return?: number; annualized_return?: number; sharpe_ratio?: number
-  max_drawdown?: number; trade_count?: number; turnover_per_rebalance?: number
+  sortino_ratio?: number; max_drawdown?: number; max_drawdown_duration?: number
+  benchmark_return?: number; alpha?: number; beta?: number
+  trade_count?: number; turnover_per_rebalance?: number
   annualized_volatility?: number; n_rebalances?: number
+  concentration_hhi?: number
 }
 
 interface PortfolioRunResult {
@@ -44,6 +47,8 @@ export default function PortfolioPanel() {
   const [loading, setLoading] = useState(false)
   const [wfLoading, setWfLoading] = useState(false)
   const [wfResult, setWfResult] = useState<any>(null)
+  const [wfSplits, setWfSplits] = useState(5)
+  const [wfTrainRatio, setWfTrainRatio] = useState(0.7)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
   const [tab, setTab] = useState<'run' | 'factor-research' | 'history'>('run')
@@ -178,7 +183,7 @@ export default function PortfolioPanel() {
   }
 
   const handleRun = async () => {
-    setLoading(true); setResult(null)
+    setLoading(true); setResult(null); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
       const res = await runPortfolioBacktest({
@@ -210,7 +215,7 @@ export default function PortfolioPanel() {
         strategy_name: selected, symbols: symbolList,
         start_date: startDate, end_date: endDate, freq,
         strategy_params: strategyParams, initial_cash: settings.initial_cash,
-        n_splits: 5, train_ratio: 0.7,
+        n_splits: wfSplits, train_ratio: wfTrainRatio,
         buy_commission_rate: settings.buy_commission_rate,
         sell_commission_rate: settings.sell_commission_rate,
         min_commission: settings.min_commission,
@@ -389,6 +394,12 @@ export default function PortfolioPanel() {
               <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
                 {wfLoading ? 'WF验证中...' : 'Walk-Forward 验证'}
               </button>
+              <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
+                className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle} title="折数" />
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>折</span>
+              <input type="number" value={wfTrainRatio} min={0.1} max={0.9} step={0.1} onChange={e => setWfTrainRatio(Number(e.target.value) || 0.7)}
+                className="w-16 px-2 py-1.5 rounded text-xs" style={inputStyle} title="训练比例" />
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>训练</span>
             </div>
           </div>
 

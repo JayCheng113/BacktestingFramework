@@ -209,3 +209,5 @@ class TestMetrics:
         assert "total_return" in result.metrics
         assert "trade_count" in result.metrics
         assert result.metrics["trade_count"] == len(result.trades)
+        assert "concentration_hhi" in result.metrics
+        assert 0 <= result.metrics["concentration_hhi"] <= 1.0
