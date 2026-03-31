@@ -537,7 +537,8 @@ def save_and_validate_code(
         try:
             # Subprocess import test with 10s timeout
             import subprocess as _sp
-            test_code = f"import importlib.util, sys; spec = importlib.util.spec_from_file_location('{module_name}', '{target}'); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)"
+            safe_path = str(target).replace("\\", "/")  # Windows path fix
+            test_code = f"import importlib.util, sys; spec = importlib.util.spec_from_file_location('{module_name}', '{safe_path}'); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)"
             proc = _sp.run([sys.executable, "-c", test_code], capture_output=True, text=True, timeout=10)
             if proc.returncode != 0:
                 raise ValueError(f"Import failed: {proc.stderr[-200:]}")
