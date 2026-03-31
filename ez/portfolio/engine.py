@@ -330,10 +330,15 @@ def run_portfolio_backtest(
 
         first_day = result.dates[0]
         idx0 = bisect.bisect_right(bench_dates, first_day) - 1
+        # If first_day is before all benchmark data, use earliest available price
+        if idx0 < 0:
+            idx0 = 0
         first_price = _bench_price_at(idx0)
         if first_price > 0:
             for day in result.dates:
                 idx = bisect.bisect_right(bench_dates, day) - 1
+                if idx < 0:
+                    idx = 0  # day before benchmark data: use earliest available
                 p = _bench_price_at(idx)
                 if p > 0:
                     result.benchmark_curve.append(float(initial_cash * p / first_price))

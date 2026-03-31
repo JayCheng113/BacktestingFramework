@@ -99,17 +99,29 @@ class TushareDataProvider(DataProvider):
         ts_start = _date_to_tushare(start_date)
         ts_end = _date_to_tushare(end_date)
 
+        # ETF/fund codes use fund_daily API instead of daily
+        is_fund = self._is_fund_code(symbol)
+        fetch_api = f"fund_{api_name}" if is_fund else api_name
+
         kline_data = self._call_api(
-            api_name=api_name,
+            api_name=fetch_api,
             params={"ts_code": symbol, "start_date": ts_start, "end_date": ts_end},
             fields="ts_code,trade_date,open,high,low,close,vol",
         )
+        # Fallback: if fund_daily returns nothing, try stock daily (some ETFs work with both)
+        if not kline_data and is_fund:
+            kline_data = self._call_api(
+                api_name=api_name,
+                params={"ts_code": symbol, "start_date": ts_start, "end_date": ts_end},
+                fields="ts_code,trade_date,open,high,low,close,vol",
+            )
         if not kline_data:
             return []
 
         # For daily data, fetch adjustment factors for forward-adjusted close
+        # ETFs/funds don't use adj_factor (no stock-style splits/dividends)
         adj_map: dict[str, float] = {}
-        if period == "daily":
+        if period == "daily" and not is_fund:
             adj_data = self._call_api(
                 api_name="adj_factor",
                 params={"ts_code": symbol, "start_date": ts_start, "end_date": ts_end},
@@ -428,6 +440,15 @@ class TushareDataProvider(DataProvider):
         if last_error:
             raise last_error
         return None
+
+    @staticmethod
+    def _is_fund_code(symbol: str) -> bool:
+        """Check if symbol is an ETF/fund (uses fund_daily API instead of daily).
+
+        A-share ETF codes: 51xxxx.SH, 15xxxx.SZ, 16xxxx.SZ (场外)
+        """
+        code = symbol.split(".")[0] if "." in symbol else symbol
+        return code.startswith(("51", "15", "16"))
 
     def _throttle(self) -> None:
         """Enforce minimum delay between API calls."""

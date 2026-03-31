@@ -6,19 +6,19 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 ## Components
 | Component | Role |
 |-----------|------|
-| Navbar | 顶部导航: 看板 / 组合 / 实验 / 代码编辑器 / 研究助手 / 开发文档 (v0.2.11) |
+| Navbar | 顶部导航 + 后端状态指示灯(绿=运行/红=断开, 10s轮询) (v0.2.11.1) |
 | SearchBar | 股票搜索 + 市场 + 周期 + 日期范围 |
 | KlineChart | ECharts K线图 + 成交量 + MA5/10/20/60 + BOLL + 买卖标记 |
 | BacktestPanel | 策略下拉 + 参数(数值/布尔/文本) + 交易成本 + 结果 + 交易表 + CSV导出 |
 | FactorPanel | 技术指标评估(单股): 预测能力(IC) + 稳定性(ICIR) + 信号持续性 + 分布 |
-| ExperimentPanel | 3 sub-tabs (单次运行/参数搜索/组合实验) + 运行表 + 门控详情 (全中文表头) |
+| ExperimentPanel | 3 sub-tabs (单次运行/参数搜索/组合实验→跳转组合历史) + 运行表 + 门控详情 |
 | CandidateSearch | 参数网格/随机搜索 + 排名结果表 (全中文: 夏普/显著性/门控) |
 | CodeEditor | Monaco编辑器 + "新建策略/因子/组合策略/截面因子" + AI对话 + 4组侧栏 |
 | ChatPanel | AI助手 — SSE流式, 中文工具标签, 文件绑定对话, 多会话 |
 | SettingsModal | LLM + Tushare 配置面板 |
 | DocsPage | 开发文档 — 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明) |
 | ResearchPanel | 自主研究: 目标表单 + SSE中文进度 + 任务列表 + 报告 + 注册到全局 |
-| PortfolioPanel | 组合回测: 3-tab (组合回测/选股因子研究/历史记录). 组合回测: 策略参数 + 股票池预设 + 净值曲线 + 指标 + 持仓饼图 + CSV + 多回测对比. 选股因子研究: 因子分类(7大类中文标签) + 选股能力表 + 时序图 + 信号持续性 + 分档收益 + 因子相关性 + 前推验证 + 数据质量报告 (V2.10+V2.11) |
+| PortfolioPanel | 组合回测: 3-tab (组合回测/选股因子研究/历史记录). 组合回测: 策略参数+多因子合成UI+参数搜索面板+股票池预设+净值曲线+指标+持仓饼图+CSV+多回测对比. 选股因子研究: 因子分类(7大类中文标签)+行业中性化开关+选股能力表+时序图+信号持续性+分档收益+因子相关性+前推验证+数据质量报告 (V2.10+V2.11+V2.11.1) |
 | DateRangePicker | 日期范围选择器 (react-datepicker): 开始/结束 + 快捷按钮 |
 | BacktestSettings | 交易成本/规则: 买卖佣金, 印花税, 滑点率(模拟买卖价差), 最小交易单位, 涨跌停限制 |
 | Dashboard | 主页: K线图 + 单股回测 + 技术指标评估 |
@@ -54,5 +54,5 @@ API proxied to http://localhost:8000
 | components/SettingsModal.tsx | Settings modal for API keys (V2.7) |
 | components/ResearchPanel.tsx | Research: goal form + SSE progress + report + promote (V2.8) |
 | components/DateRangePicker.tsx | Shared date range picker with preset buttons (V2.10) |
-| components/PortfolioPanel.tsx | Portfolio backtest: 3-tab layout + factor research + history (V2.9+V2.10) |
+| components/PortfolioPanel.tsx | 组合回测: 3-tab+中性化+多因子合成+参数搜索 (V2.9+V2.10+V2.11.1) |
 | pages/DocsPage.tsx | 开发文档: 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明 + 数据获取流程) |

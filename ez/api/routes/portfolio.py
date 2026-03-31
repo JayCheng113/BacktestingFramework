@@ -321,6 +321,34 @@ def _fetch_data(symbols: list[str], market: str, start: date, end: date, lookbac
     return universe_data, calendar
 
 
+def _ensure_benchmark(benchmark_symbol: str, universe_data: dict, market: str,
+                      start: date, end: date, lookback_days: int = 252) -> str | None:
+    """Fetch benchmark data into universe_data if not already present.
+
+    Returns warning message if benchmark could not be fetched, None if OK.
+    """
+    if not benchmark_symbol:
+        return None
+    if benchmark_symbol in universe_data:
+        return None
+    try:
+        chain = get_chain()
+        fetch_start = start - timedelta(days=int(lookback_days * 1.6))
+        bars = chain.get_kline(benchmark_symbol, market, "daily", fetch_start, end)
+        if bars:
+            universe_data[benchmark_symbol] = pd.DataFrame([{
+                "open": b.open, "high": b.high, "low": b.low,
+                "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
+            } for b in bars], index=pd.DatetimeIndex([b.time for b in bars]))
+            return None
+        else:
+            logger.warning("No benchmark data for %s", benchmark_symbol)
+            return f"基准 {benchmark_symbol} 无数据，已退化为现金基准"
+    except Exception as e:
+        logger.warning("Failed to fetch benchmark %s: %s", benchmark_symbol, e)
+        return f"基准 {benchmark_symbol} 获取失败，已退化为现金基准"
+
+
 _portfolio_store = None
 
 
@@ -421,6 +449,14 @@ def run_portfolio(req: PortfolioRunRequest):
     universe = Universe(req.symbols)
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy.lookback_days)
 
+    # Count fetched symbols BEFORE adding benchmark (so benchmark doesn't inflate count)
+    fetched_count = len(universe_data)
+    skipped = [s for s in req.symbols if s not in universe_data]
+
+    bench_warn = _ensure_benchmark(req.benchmark_symbol, universe_data, req.market, start, end, strategy.lookback_days)
+    if bench_warn:
+        fund_warnings.append(bench_warn)
+
     buy_rate = req.commission_rate if req.commission_rate is not None else req.buy_commission_rate
     sell_rate = req.commission_rate if req.commission_rate is not None else req.sell_commission_rate
     cost_model = CostModel(
@@ -430,24 +466,6 @@ def run_portfolio(req: PortfolioRunRequest):
         stamp_tax_rate=req.stamp_tax_rate,
         slippage_rate=req.slippage_rate,
     )
-
-    # H4: count fetched symbols BEFORE adding benchmark
-    fetched_count = len(universe_data)
-    skipped = [s for s in req.symbols if s not in universe_data]
-
-    # If benchmark not in symbols, fetch it separately
-    if req.benchmark_symbol and req.benchmark_symbol not in universe_data:
-        try:
-            chain = get_chain()
-            fetch_start = start - timedelta(days=int(strategy.lookback_days * 1.6))
-            bars = chain.get_kline(req.benchmark_symbol, req.market, "daily", fetch_start, end)
-            if bars:
-                universe_data[req.benchmark_symbol] = pd.DataFrame([{
-                    "open": b.open, "high": b.high, "low": b.low,
-                    "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
-                } for b in bars], index=pd.DatetimeIndex([b.time for b in bars]))
-        except Exception:
-            pass
 
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,
@@ -550,6 +568,8 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     strategy_tmp = strategy_factory()
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, strategy_tmp.lookback_days)
 
+    wf_bench_warn = _ensure_benchmark(req.benchmark_symbol, universe_data, req.market, start, end, strategy_tmp.lookback_days)
+
     cost_model = CostModel(
         buy_commission_rate=req.buy_commission_rate,
         sell_commission_rate=req.sell_commission_rate,
@@ -588,6 +608,7 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             "p_value": sig.monte_carlo_p_value if sig else 1,
             "is_significant": sig.is_significant if sig else False,
         } if sig else None,
+        "warnings": [wf_bench_warn] if wf_bench_warn else None,
     }
 
 
@@ -610,6 +631,7 @@ class PortfolioSearchRequest(BaseModel):
     slippage_rate: float = Field(default=0.0, ge=0)
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)
+    benchmark_symbol: str = ""
 
 
 def _generate_combinations(param_grid: dict[str, list], max_combos: int) -> list[dict]:
@@ -639,6 +661,7 @@ def portfolio_search(req: PortfolioSearchRequest):
 
     # Fetch data once (E1: shared across all combinations)
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+    search_bench_warn = _ensure_benchmark(req.benchmark_symbol, universe_data, req.market, start, end, lookback_days=300)
 
     # Pre-load fundamental data once if any combo uses fundamental factors (E1+I2)
     from ez.factor.builtin.fundamental import FundamentalCrossFactor, NEEDS_FINA
@@ -687,6 +710,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 start=start, end=end, freq=req.freq,
                 initial_cash=req.initial_cash, cost_model=cost_model,
                 lot_size=req.lot_size, limit_pct=req.limit_pct,
+                benchmark_symbol=req.benchmark_symbol,
             )
             m = result.metrics
             results.append({
@@ -710,7 +734,10 @@ def portfolio_search(req: PortfolioSearchRequest):
     for i, r in enumerate(results):
         r["rank"] = i + 1
 
-    return {"results": results, "total_combinations": len(combos), "completed": len(results)}
+    resp = {"results": results, "total_combinations": len(combos), "completed": len(results)}
+    if search_bench_warn:
+        resp["warnings"] = [search_bench_warn]
+    return resp
 
 
 @router.get("/runs")

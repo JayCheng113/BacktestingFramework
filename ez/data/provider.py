@@ -108,6 +108,18 @@ class DataProviderChain:
                                        result.invalid_count, symbol, result.errors[:3])
                     if result.valid_bars:
                         self._store.save_kline(result.valid_bars, period)
+                        # Check coverage: if provider returns <50% of requested range
+                        # AND there are more providers to try, continue to next provider
+                        vb = result.valid_bars
+                        vb_start = vb[0].time.date()
+                        vb_end = vb[-1].time.date()
+                        req_days = (end_date - start_date).days
+                        cov_days = (vb_end - vb_start).days
+                        is_last = (provider is self._providers[-1])
+                        if req_days > 30 and cov_days < req_days * 0.5 and not is_last:
+                            logger.info("Provider %s returned partial data for %s (%d/%d days), trying next",
+                                        provider.name, symbol, cov_days, req_days)
+                            continue
                         return result.valid_bars
                     else:
                         logger.warning("All %d bars invalid from %s for %s, trying next provider",

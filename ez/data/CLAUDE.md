@@ -41,14 +41,20 @@ Fetch, validate, cache, and serve market data (K-line) from multiple sources wit
 - **Date format:** Tushare uses `YYYYMMDD` strings; helper functions handle conversion.
 - **Error handling:** Checks response `code` field; code 2002 = auth error, other non-zero = API error.
 - **No SDK:** Uses direct HTTP via httpx (no tushare pip package needed).
+- **ETF 支持 (V2.11.1):** 自动检测 ETF 代码 (51/15/16 开头) 使用 `fund_daily` API 而非 `daily`。
 
 ## Files (V2.11 additions)
 | File | Role | Core/Extension |
 |------|------|---------------|
 | fundamental.py | FundamentalStore: DuckDB tables (fundamental_daily, fina_indicator), PIT query, preload cache, data quality report | EXTENSION |
 
+## Files (V2.11.1 additions)
+| File | Role | Core/Extension |
+|------|------|---------------|
+| providers/akshare_provider.py | AKShare: 免费A股+ETF数据, 无需注册, 全历史 (V2.11.1) | EXTENSION |
+
 ## Status
-- Implemented: DuckDBStore, TencentProvider, FMPProvider, TushareProvider, DataValidator, DataProviderChain
+- Implemented: DuckDBStore, TencentProvider, FMPProvider, TushareProvider, AKShareProvider, DataValidator, DataProviderChain
 - V2.11: FundamentalStore (DuckDB fundamental_daily + fina_indicator tables, PIT ann_date alignment, in-memory preload cache, data quality report), TushareProvider extended (get_fina_indicator, dv_ratio in daily_basic)
 - V2.11.1: PIT query改用max(end_date)不依赖排序假设, fina DO UPDATE不覆盖ann_date(保留首次公告日, 重报正确), ann_date INDEX加速, threading.Lock保护preload, additive cache(并发安全), Tushare日期转换try/except容错, /fundamental/fetch+quality symbols min_length校验
-- Not implemented: AKShare
+- V2.11.1: AKShareProvider (免费fallback: 股票+ETF全历史, 双fetch qfq+raw, 0.6s节流)

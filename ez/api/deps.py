@@ -46,6 +46,13 @@ def _build_provider(name: str) -> DataProvider | None:
             from ez.data.providers.fmp_provider import FMPDataProvider
             return FMPDataProvider()
         return None
+    if name == "akshare":
+        try:
+            from ez.data.providers.akshare_provider import AKShareDataProvider
+            return AKShareDataProvider()
+        except ImportError:
+            logger.warning("akshare package not installed, skipping")
+            return None
     if name == "tencent":
         from ez.data.providers.tencent_provider import TencentDataProvider
         return TencentDataProvider()
@@ -77,7 +84,14 @@ def get_chain() -> DataProviderChain:
                         providers.append(p)
                         seen.add(name)
 
-        # Fallback: ensure at least Tencent is present
+        # Fallback: ensure AKShare + Tencent are present as safety net
+        if "akshare" not in seen:
+            try:
+                from ez.data.providers.akshare_provider import AKShareDataProvider
+                providers.append(AKShareDataProvider())
+                seen.add("akshare")
+            except ImportError:
+                pass
         if "tencent" not in seen:
             from ez.data.providers.tencent_provider import TencentDataProvider
             providers.append(TencentDataProvider())

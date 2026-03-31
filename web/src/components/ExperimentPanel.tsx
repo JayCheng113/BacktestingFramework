@@ -1,16 +1,15 @@
 import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
-import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments, listPortfolioRuns, deletePortfolioRun } from '../api'
+import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments } from '../api'
 import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
 import CandidateSearch from './CandidateSearch'
 import DateBtn from './shared/DateBtn'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
-export default function ExperimentPanel() {
+export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [subTab, setSubTab] = useState<'single' | 'search' | 'portfolio'>('single')
-  const [portfolioRuns, setPortfolioRuns] = useState<any[]>([])
   const [runs, setRuns] = useState<ExperimentRun[]>([])
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -41,18 +40,7 @@ export default function ExperimentPanel() {
         setParams(defaults)
       }
     }).catch(() => {})
-    loadPortfolioRuns()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadPortfolioRuns = () => {
-    listPortfolioRuns(50).then(r => setPortfolioRuns(r.data || [])).catch(() => {})
-  }
-
-  const handleDeletePortfolioRun = async (runId: string) => {
-    if (!confirm('确认删除此组合回测记录?')) return
-    try { await deletePortfolioRun(runId); loadPortfolioRuns() }
-    catch (e: any) { alert('删除失败: ' + (e?.message || '')) }
-  }
 
   const loadRuns = () => {
     setLoading(true)
@@ -144,41 +132,21 @@ export default function ExperimentPanel() {
               color: subTab === t ? '#fff' : 'var(--text-secondary)',
               border: '1px solid var(--border)',
             }}>
-            {t === 'single' ? '单次运行' : t === 'search' ? '参数搜索' : `组合实验 (${portfolioRuns.length})`}
+            {t === 'single' ? '单次运行' : t === 'search' ? '参数搜索' : '组合实验'}
           </button>
         ))}
       </div>
 
       {subTab === 'portfolio' ? (
-        <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>组合回测历史</h3>
-          {portfolioRuns.length === 0 ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>暂无组合回测记录。在"组合"tab 运行后会出现在这里。</p> : (
-            <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
-              <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
-                <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  {['策略', '区间', '频率', '夏普', '总收益', '最大回撤', '交易数', '时间', ''].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>{portfolioRuns.map((r: any) => (
-                  <tr key={r.run_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td className="px-3 py-1.5">{r.strategy_name}</td>
-                    <td className="px-3 py-1.5">{r.start_date?.slice(0,10)}~{r.end_date?.slice(0,10)}</td>
-                    <td className="px-3 py-1.5">{r.freq}</td>
-                    <td className="px-3 py-1.5">{r.metrics?.sharpe_ratio?.toFixed(4) ?? '-'}</td>
-                    <td className="px-3 py-1.5">{r.metrics?.total_return != null ? (r.metrics.total_return * 100).toFixed(2) + '%' : '-'}</td>
-                    <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{r.metrics?.max_drawdown != null ? (r.metrics.max_drawdown * 100).toFixed(2) + '%' : '-'}</td>
-                    <td className="px-3 py-1.5">{r.trade_count}</td>
-                    <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{r.created_at?.slice(0,16)}</td>
-                    <td className="px-3 py-1.5">
-                      <button onClick={() => handleDeletePortfolioRun(r.run_id)} className="text-xs px-1.5 py-0.5 rounded hover:opacity-80"
-                        style={{ color: '#ef4444', border: '1px solid #7f1d1d' }}>删除</button>
-                    </td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
+        <div className="rounded-lg p-6 text-center" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+          <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+            组合回测的历史记录、多回测对比、CSV 导出都在"组合"页面管理。
+          </p>
+          <button onClick={() => onNavigate?.('portfolio')}
+            className="px-4 py-2 rounded text-sm font-medium text-white"
+            style={{ backgroundColor: 'var(--color-accent)' }}>
+            前往组合 → 历史记录
+          </button>
         </div>
       ) : subTab === 'search' ? <CandidateSearch /> : <>
       {/* Submit Form */}

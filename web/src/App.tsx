@@ -22,7 +22,7 @@ export default function App() {
       <Navbar activeTab={activeTab} onTabChange={handleTabChange} />
       {activeTab === 'dashboard' && <Dashboard />}
       {activeTab === 'portfolio' && <PortfolioPanel />}
-      {activeTab === 'experiments' && <ExperimentPanel />}
+      {activeTab === 'experiments' && <ExperimentPanel onNavigate={handleTabChange} />}
       {editorMounted && (
         <div style={{ display: activeTab === 'editor' ? 'block' : 'none', height: 'calc(100vh - 48px)' }}>
           <CodeEditor onNavigate={handleTabChange} />

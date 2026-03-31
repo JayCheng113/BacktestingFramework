@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import SettingsModal from './SettingsModal'
 
 interface Props {
@@ -17,6 +17,16 @@ const tabs = [
 
 export default function Navbar({ activeTab, onTabChange }: Props) {
   const [showSettings, setShowSettings] = useState(false)
+  const [backendOk, setBackendOk] = useState(false)
+
+  useEffect(() => {
+    const check = () => {
+      fetch('/api/health').then(r => setBackendOk(r.ok)).catch(() => setBackendOk(false))
+    }
+    check()
+    const timer = setInterval(check, 10000) // check every 10s
+    return () => clearInterval(timer)
+  }, [])
 
   return (
     <>
@@ -24,7 +34,13 @@ export default function Navbar({ activeTab, onTabChange }: Props) {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
             <span className="text-xl font-bold" style={{ color: 'var(--color-accent)' }}>ez-trading</span>
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>v0.2.9</span>
+            <span style={{
+              display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+              backgroundColor: backendOk ? '#22c55e' : '#ef4444',
+              boxShadow: backendOk ? '0 0 6px #22c55e80' : '0 0 6px #ef444480',
+              animation: 'pulse 2s ease-in-out infinite',
+            }} title={backendOk ? '后端运行中' : '后端未连接'} />
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>v0.2.11.1</span>
           </div>
           <div className="flex gap-1">
             {tabs.map(t => (

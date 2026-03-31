@@ -96,10 +96,10 @@ export default function PortfolioPanel() {
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
-  // Parameter search state
+  // Parameter search state — dynamic from schema
   const [searchMode, setSearchMode] = useState(false)
-  const [searchFactors, setSearchFactors] = useState<string[]>(['momentum_rank_20', 'ep'])
-  const [searchTopNs, setSearchTopNs] = useState('3,5,10')
+  const [searchGrid, setSearchGrid] = useState<Record<string, string>>({})  // key → comma-separated values
+  const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({})  // UI-only expand state
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchResults, setSearchResults] = useState<any[]>([])
 
@@ -143,28 +143,36 @@ export default function PortfolioPanel() {
   }
 
   const handleCompare = async () => {
-    if (selectedRuns.size < 2) { alert('请至少选择 2 条记录'); return }
-    if (selectedRuns.size > 10) { alert('最多对比 10 条记录'); return }
+    const ids = Array.from(selectedRuns)
+    if (ids.length < 2) { alert('请至少选择 2 条记录'); return }
+    if (ids.length > 10) { alert('最多对比 10 条记录'); return }
     setComparing(true)
     setCompareData([])
-    try {
-      const data = await Promise.all(
-        Array.from(selectedRuns).map(async id => {
-          const res = await getPortfolioRun(id)
-          const d = res.data
-          return {
-            id, name: `${d.strategy_name} (${d.start_date?.slice(0, 10)}~${d.end_date?.slice(0, 10)})`,
-            equity: (d.equity_curve || []).map((v: number) => v / (d.equity_curve?.[0] || 1)),  // normalize to 1.0
-            dates: [], metrics: d.metrics || {},
-          }
+    const results: typeof compareData = []
+    let errors: string[] = []
+    for (const id of ids) {
+      try {
+        const res = await getPortfolioRun(id)
+        const d = res.data
+        const ec = d.equity_curve || d.equity || []
+        results.push({
+          id, name: `${d.strategy_name || '未知'} (${(d.start_date || '').slice(0, 10)}~${(d.end_date || '').slice(0, 10)})`,
+          equity: ec.map((v: number) => v / (ec[0] || 1)),
+          dates: [], metrics: d.metrics || {},
         })
-      )
-      setCompareData(data)
-    } catch (e: any) {
-      const msg = e?.response?.data?.detail || e?.message || '未知错误'
-      alert('对比加载失败: ' + msg + '\n记录可能已删除，请刷新页面重试')
+      } catch (e: any) {
+        errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
+      }
+    }
+    if (results.length >= 2) {
+      setCompareData(results)
+    } else if (errors.length > 0) {
+      alert('对比加载失败:\n' + errors.join('\n'))
       loadHistory()
-    } finally { setComparing(false) }
+    } else {
+      alert('对比数据不足（需至少 2 条有效记录）')
+    }
+    setComparing(false)
   }
 
   const handleEvaluateFactors = async () => {
@@ -229,10 +237,12 @@ export default function PortfolioPanel() {
     setLoading(true); setResult(null); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+      // Filter out UI-only keys (e.g., _expand_*) from strategy params
+      const cleanParams = Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_')))
       const res = await runPortfolioBacktest({
         strategy_name: selected, symbols: symbolList,
         start_date: startDate, end_date: endDate, freq,
-        strategy_params: strategyParams,
+        strategy_params: cleanParams,
         initial_cash: settings.initial_cash,
         buy_commission_rate: settings.buy_commission_rate,
         sell_commission_rate: settings.sell_commission_rate,
@@ -257,8 +267,10 @@ export default function PortfolioPanel() {
       const res = await portfolioWalkForward({
         strategy_name: selected, symbols: symbolList,
         start_date: startDate, end_date: endDate, freq,
-        strategy_params: strategyParams, initial_cash: settings.initial_cash,
+        strategy_params: Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
+        initial_cash: settings.initial_cash,
         n_splits: wfSplits, train_ratio: wfTrainRatio,
+        benchmark_symbol: settings.benchmark,
         buy_commission_rate: settings.buy_commission_rate,
         sell_commission_rate: settings.sell_commission_rate,
         min_commission: settings.min_commission,
@@ -290,69 +302,96 @@ export default function PortfolioPanel() {
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
           <select value={value} onChange={e => updateParam(key, e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            {useCategories ? factorCategories.map(cat => {
-              const catLabel = CATEGORY_LABELS
-              return (
-              <optgroup key={cat.key} label={catLabel[cat.key] || cat.label}>
-                {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
-                  const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
-                  const needsFina = typeof f === 'object' && f.needs_fina
-                  return <option key={fKey} value={fKey}>{FACTOR_LABELS[fKey] || fKey}{needsFina ? ' *' : ''}</option>
-                })}
+            {useCategories ? (<>
+              {factorCategories.map(cat => {
+                const catLabel = CATEGORY_LABELS
+                return (
+                <optgroup key={cat.key} label={catLabel[cat.key] || cat.label}>
+                  {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
+                    const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
+                    const needsFina = typeof f === 'object' && f.needs_fina
+                    return <option key={fKey} value={fKey}>{FACTOR_LABELS[fKey] || fKey}{needsFina ? ' *' : ''}</option>
+                  })}
+                </optgroup>
+              )})}
+              <optgroup label="合成">
+                <option value="alpha_combiner">{FACTOR_LABELS['alpha_combiner'] || '多因子合成'}</option>
               </optgroup>
-            )}) : options.map(o => <option key={o} value={o}>{FACTOR_LABELS[o] || o}</option>)}
+            </>) : options.map(o => <option key={o} value={o}>{FACTOR_LABELS[o] || o}</option>)}
           </select>
         </div>
       )
     }
 
     if (schema.type === 'multi_select') {
-      // Use schema.options if provided, otherwise fall back to available_factors (grouped by category)
-      const options: string[] = schema.options ?? (factors.length > 0 ? factors : [])
+      const options: string[] = schema.options ?? (factors.length > 0 ? factors.filter(f => f !== 'alpha_combiner') : [])
       const selected_vals: string[] = Array.isArray(value) ? value : [String(value)]
       const useCategories = !schema.options && factorCategories.length > 0
+      const expanded = expandedParams[key] ?? false
+      const setExpanded = (v: boolean) => setExpandedParams(prev => ({ ...prev, [key]: v }))
       return (
         <div key={key} className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-          {useCategories ? factorCategories.map(cat => {
-            return (
-            <div key={cat.key} className="mb-1">
-              <span className="text-xs mr-1" style={{ color: 'var(--text-muted)' }}>{CATEGORY_LABELS[cat.key] || cat.label}:</span>
-              <div className="flex flex-wrap gap-1 mt-0.5">
-                {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
-                  const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
-                  const needsFina = typeof f === 'object' && f.needs_fina
-                  return (
-                    <button key={fKey} onClick={() => {
-                      const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
-                      if (cur.includes(fKey)) updateParam(key, cur.filter(x => x !== fKey))
-                      else updateParam(key, [...cur, fKey])
-                    }}
-                      className="text-xs px-2 py-0.5 rounded"
-                      style={{ backgroundColor: selected_vals.includes(fKey) ? 'var(--color-accent)' : 'var(--bg-primary)',
-                               color: selected_vals.includes(fKey) ? '#fff' : 'var(--text-secondary)',
-                               border: '1px solid var(--border)' }}>
-                      {FACTOR_LABELS[fKey] || fKey}{needsFina ? ' *' : ''}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}) : (
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--color-accent)' }}>
+              已选 {selected_vals.filter(v => v && options.includes(v)).length} 个
+            </span>
+            <button onClick={() => setExpanded(!expanded)} className="text-xs" style={{ color: 'var(--color-accent)' }}>
+              {expanded ? '收起' : '展开选择'}
+            </button>
+          </div>
+          {/* 已选标签（始终显示） */}
+          {selected_vals.length > 0 && !expanded && (
             <div className="flex flex-wrap gap-1">
-              {options.map(o => (
-                <button key={o} onClick={() => {
-                  const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
-                  if (cur.includes(o)) updateParam(key, cur.filter(x => x !== o))
-                  else updateParam(key, [...cur, o])
-                }}
-                  className="text-xs px-2 py-0.5 rounded"
-                  style={{ backgroundColor: selected_vals.includes(o) ? 'var(--color-accent)' : 'var(--bg-primary)',
-                           color: selected_vals.includes(o) ? '#fff' : 'var(--text-secondary)',
-                           border: '1px solid var(--border)' }}>
-                  {FACTOR_LABELS[o] || o}
-                </button>
+              {selected_vals.filter(v => v && options.includes(v)).map(v => (
+                <span key={v} className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
+                  {FACTOR_LABELS[v] || v}
+                  <button onClick={() => updateParam(key, selected_vals.filter(x => x !== v))} className="ml-1 opacity-70 hover:opacity-100">×</button>
+                </span>
               ))}
+            </div>
+          )}
+          {/* 展开后的选择面板 */}
+          {expanded && (
+            <div className="p-2 rounded mt-1" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto' }}>
+              {useCategories ? factorCategories.map(cat => {
+                const catFactors = (Array.isArray(cat.factors) ? cat.factors : [])
+                  .map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
+                  .filter((f: string) => f && f !== 'alpha_combiner')
+                if (catFactors.length === 0) return null
+                return (
+                  <div key={cat.key} className="mb-1">
+                    <span className="text-xs mr-1 font-medium" style={{ color: 'var(--text-muted)' }}>{CATEGORY_LABELS[cat.key] || cat.label}:</span>
+                    <span className="inline-flex flex-wrap gap-1">
+                      {catFactors.map((fKey: string) => (
+                        <button key={fKey} onClick={() => {
+                          const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
+                          if (cur.includes(fKey)) updateParam(key, cur.filter(x => x !== fKey))
+                          else updateParam(key, [...cur, fKey])
+                        }} className="text-xs px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: selected_vals.includes(fKey) ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                                   color: selected_vals.includes(fKey) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                          {FACTOR_LABELS[fKey] || fKey}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                )
+              }) : (
+                <div className="flex flex-wrap gap-1">
+                  {options.map(o => (
+                    <button key={o} onClick={() => {
+                      const cur = Array.isArray(strategyParams[key]) ? [...strategyParams[key]] : []
+                      if (cur.includes(o)) updateParam(key, cur.filter(x => x !== o))
+                      else updateParam(key, [...cur, o])
+                    }} className="text-xs px-1.5 py-0.5 rounded"
+                      style={{ backgroundColor: selected_vals.includes(o) ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                               color: selected_vals.includes(o) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                      {FACTOR_LABELS[o] || o}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -519,63 +558,135 @@ export default function PortfolioPanel() {
           {/* V2.11.1: Parameter Search Panel */}
           {searchMode && (
             <div className="p-4 rounded mb-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-              <h4 className="text-sm font-medium mb-2">参数搜索</h4>
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>因子 (多选值)</label>
-                  <div className="flex flex-wrap gap-1">
-                    {factors.filter(f => f !== 'alpha_combiner').map(f => (
-                      <button key={f} onClick={() => setSearchFactors(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])}
-                        className="text-xs px-2 py-0.5 rounded"
-                        style={{ backgroundColor: searchFactors.includes(f) ? 'var(--color-accent)' : 'var(--bg-primary)',
-                                 color: searchFactors.includes(f) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                        {FACTOR_LABELS[f] || f}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>top_n (逗号分隔)</label>
-                  <input value={searchTopNs} onChange={e => setSearchTopNs(e.target.value)} className="w-full px-3 py-1.5 rounded text-sm" style={inputStyle} placeholder="3,5,10" />
-                </div>
+              <h4 className="text-sm font-medium mb-1">参数搜索 — {strategies.find(s => s.name === selected)?.name || selected}</h4>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
+                为当前策略的每个参数设置多个候选值（逗号分隔），系统自动组合并按夏普排名。
+              </p>
+              <div className="space-y-2 mb-3">
+                {Object.entries(currentSchema).map(([key, schema]) => {
+                  const label = schema.label || key
+                  const gridVal = searchGrid[key] || ''
+
+                  // select/multi_select: show clickable buttons (factor-style)
+                  if (schema.type === 'select' || schema.type === 'multi_select') {
+                    const options: string[] = schema.options ?? (factors.length > 0 ? factors.filter(f => f !== 'alpha_combiner') : [])
+                    const selectedVals = gridVal ? gridVal.split(',').filter(Boolean) : []
+                    const toggleVal = (v: string) => {
+                      const cur = selectedVals.includes(v) ? selectedVals.filter(x => x !== v) : [...selectedVals, v]
+                      setSearchGrid(prev => ({ ...prev, [key]: cur.join(',') }))
+                    }
+
+                    // Group by category if available and this is a factor-type param
+                    const useCategories = !schema.options && factorCategories.length > 0
+                    return (
+                      <div key={key}>
+                        <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>{label} (多选)</label>
+                        {useCategories ? factorCategories.map(cat => {
+                          const catFactors = (Array.isArray(cat.factors) ? cat.factors : [])
+                            .map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
+                            .filter((f: string) => f && f !== 'alpha_combiner')
+                          if (catFactors.length === 0) return null
+                          return (
+                            <div key={cat.key} className="mb-1">
+                              <span className="text-xs mr-1" style={{ color: 'var(--text-muted)' }}>{CATEGORY_LABELS[cat.key] || cat.label}:</span>
+                              <span className="inline-flex flex-wrap gap-1">
+                                {catFactors.map((f: string) => (
+                                  <button key={f} onClick={() => toggleVal(f)} className="text-xs px-2 py-0.5 rounded"
+                                    style={{ backgroundColor: selectedVals.includes(f) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                                             color: selectedVals.includes(f) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                                    {FACTOR_LABELS[f] || f}
+                                  </button>
+                                ))}
+                              </span>
+                            </div>
+                          )
+                        }) : (
+                          <div className="flex flex-wrap gap-1">
+                            {options.map(o => (
+                              <button key={o} onClick={() => toggleVal(o)} className="text-xs px-2 py-0.5 rounded"
+                                style={{ backgroundColor: selectedVals.includes(o) ? 'var(--color-accent)' : 'var(--bg-primary)',
+                                         color: selectedVals.includes(o) ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                                {FACTOR_LABELS[o] || o}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+
+                  // int/float: comma-separated input
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <label className="text-xs w-24 shrink-0" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+                      <input value={gridVal} onChange={e => setSearchGrid(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="flex-1 px-3 py-1.5 rounded text-sm" style={inputStyle}
+                        placeholder={`多个值用逗号分隔，如 ${schema.min ?? 3},${schema.default ?? 5},${schema.max ?? 10}`} />
+                    </div>
+                  )
+                })}
               </div>
               <button onClick={async () => {
                 const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
-                if (symbolList.length === 0 || searchFactors.length === 0) { alert('请填写股票池和因子'); return }
-                const topNs = searchTopNs.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0)
-                if (topNs.length === 0) { alert('请填写 top_n 值'); return }
+                if (symbolList.length === 0) { alert('请填写股票池'); return }
+
+                // Build param_grid from searchGrid
+                const paramGrid: Record<string, any[]> = {}
+                let totalCombos = 1
+                for (const [key, schema] of Object.entries(currentSchema)) {
+                  const raw = searchGrid[key] || ''
+                  if (!raw) continue
+                  if (schema.type === 'select') {
+                    const vals = raw.split(',').filter(Boolean)
+                    if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
+                  } else if (schema.type === 'multi_select') {
+                    // Each selected value becomes a single-element list (one factor per combo)
+                    const vals = raw.split(',').filter(Boolean)
+                    if (vals.length > 0) { paramGrid[key] = vals.map(v => [v]); totalCombos *= vals.length }
+                  } else if (schema.type === 'int') {
+                    const vals = raw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+                    if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
+                  } else if (schema.type === 'float') {
+                    const vals = raw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
+                    if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
+                  }
+                }
+                if (Object.keys(paramGrid).length === 0) { alert('请至少为一个参数设置多个候选值'); return }
+
                 setSearchLoading(true); setSearchResults([])
                 try {
                   const res = await portfolioSearch({
                     strategy_name: selected, symbols: symbolList, market: 'cn_stock',
                     start_date: startDate, end_date: endDate, freq,
-                    param_grid: { factor: searchFactors, top_n: topNs },
-                    max_combinations: 50,
+                    param_grid: paramGrid, max_combinations: 50,
                     buy_commission_rate: settings.buy_commission_rate, sell_commission_rate: settings.sell_commission_rate,
                     min_commission: settings.min_commission, stamp_tax_rate: settings.stamp_tax_rate,
                     slippage_rate: settings.slippage_rate, lot_size: settings.lot_size, limit_pct: settings.limit_pct,
-                    initial_cash: settings.initial_cash,
+                    initial_cash: settings.initial_cash, benchmark_symbol: settings.benchmark,
                   })
                   setSearchResults(res.data.results || [])
                 } catch (e: any) { alert(e?.response?.data?.detail || '搜索失败') }
                 finally { setSearchLoading(false) }
               }} disabled={searchLoading}
                 className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: searchLoading ? '#30363d' : '#1e6b3a' }}>
-                {searchLoading ? '搜索中...' : `搜索 (${searchFactors.length} 因子 × ${searchTopNs.split(',').filter(Boolean).length} top_n)`}
+                {searchLoading ? '搜索中...' : '开始搜索'}
               </button>
               {searchResults.length > 0 && (
                 <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                   <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                     <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                      {['#', '因子', 'top_n', '夏普比率', '总收益率', '年化收益率', '最大回撤', '交易次数'].map(h => (
+                      {['#', '参数', '夏普比率', '总收益率', '年化收益率', '最大回撤', '交易次数'].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr></thead>
                     <tbody>{searchResults.map((r, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i === 0 ? 'rgba(34,197,94,0.08)' : undefined }}>
                         <td className="px-3 py-1.5 font-medium">{r.rank}</td>
-                        <td className="px-3 py-1.5">{FACTOR_LABELS[r.params?.factor] || r.params?.factor}</td>
-                        <td className="px-3 py-1.5">{r.params?.top_n}</td>
+                        <td className="px-3 py-1.5">{Object.entries(r.params || {}).map(([k, v]) => {
+                          const label = currentSchema[k]?.label || k
+                          const val = typeof v === 'string' ? (FACTOR_LABELS[v] || v) : String(v)
+                          return `${label}=${val}`
+                        }).join(', ')}</td>
                         <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? '#22c55e' : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
                         <td className="px-3 py-1.5">{r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}</td>
                         <td className="px-3 py-1.5">{r.annualized_return != null ? (r.annualized_return * 100).toFixed(1) + '%' : '-'}</td>
@@ -593,8 +704,8 @@ export default function PortfolioPanel() {
             <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
               {result.symbols_skipped && result.symbols_skipped.length > 0 && (
                 <div className="mb-3 px-3 py-2 rounded text-xs" style={{ backgroundColor: '#3b2a1a', border: '1px solid #6b4c2a', color: '#f59e0b' }}>
-                  {result.symbols_skipped.length} 只标的无数据被跳过: {result.symbols_skipped.join(', ')}
-                  （可能未上市或 Tushare 无覆盖）
+                  {result.symbols_skipped.length} 只标的在回测起始日无数据: {result.symbols_skipped.join(', ')}
+                  （可能尚未上市，有数据后会自动纳入）
                 </div>
               )}
               <div className="flex gap-2 mb-3">
@@ -606,7 +717,7 @@ export default function PortfolioPanel() {
                   <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
                     <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{metricLabels[k] || k}</div>
                     <div className="text-sm font-medium" style={{ color: k === 'max_drawdown' ? 'var(--color-down)' : k === 'sharpe_ratio' && (v as number) > 1 ? 'var(--color-up)' : 'var(--text-primary)' }}>
-                      {['total_return', 'annualized_return', 'max_drawdown', 'annualized_volatility', 'turnover_per_rebalance'].includes(k) ? fmt(v as number, true) : k === 'trade_count' || k === 'n_rebalances' ? String(v) : fmt(v as number)}
+                      {['total_return', 'annualized_return', 'max_drawdown', 'annualized_volatility', 'turnover_per_rebalance', 'benchmark_return', 'alpha'].includes(k) ? fmt(v as number, true) : k === 'trade_count' || k === 'n_rebalances' || k === 'max_drawdown_duration' ? String(v) : fmt(v as number)}
                     </div>
                   </div>
                 ))}
@@ -848,6 +959,12 @@ export default function PortfolioPanel() {
           {/* Evaluation results */}
           {evalResult && evalResult.results && (
             <div className="mt-4">
+              {/* Warnings (e.g., neutralization skipped) */}
+              {evalResult.warnings && evalResult.warnings.length > 0 && (
+                <div className="mb-3 px-3 py-2 rounded text-xs" style={{ backgroundColor: '#3b2a1a', border: '1px solid #6b4c2a', color: '#f59e0b' }}>
+                  {evalResult.warnings.map((w: string, i: number) => <div key={i}>{w}</div>)}
+                </div>
+              )}
               {/* IC summary table */}
               <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子选股能力 (IC 汇总)</h4>
               <div className="overflow-x-auto mb-4" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
@@ -969,7 +1086,7 @@ export default function PortfolioPanel() {
             <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
               <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                 <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  {['', '策略', '区间', '频率', '夏普', '总收益', '最大回撤', '交易数', '时间', ''].map(h => (
+                  {['选择', '策略', '区间', '频率', '夏普比率', '总收益率', '最大回撤', '交易次数', '创建时间', '操作'].map(h => (
                     <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr></thead>

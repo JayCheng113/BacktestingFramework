@@ -1118,12 +1118,15 @@ class MyRotation(PortfolioStrategy):
         {/* ================================================================ */}
         {active === 'data' && <>
           <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>数据源</h1>
+          <div style={note}>
+            数据获取优先级：<strong>Tushare</strong>（主，需 Token）→ <strong>AKShare</strong>（免费兜底，全历史）→ <strong>腾讯财经</strong>（最后方案，约 3 年）。缓存命中时直接从本地 DuckDB 读取。
+          </div>
 
           <div style={h2s}>支持的市场</div>
           <table style={tbl}>
             <thead><tr><th style={ths}>市场标识</th><th style={ths}>名称</th><th style={ths}>数据源</th><th style={ths}>股票代码格式</th></tr></thead>
             <tbody>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>cn_stock</td><td style={tds}>A 股（中国大陆）</td><td style={tds}>Tushare (主) / 腾讯 (备)</td><td style={tds}>000001.SZ, 600519.SH</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>cn_stock</td><td style={tds}>A 股（中国大陆）</td><td style={tds}>Tushare → AKShare → 腾讯</td><td style={tds}>000001.SZ, 600519.SH, 510300.SH(ETF)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>us_stock</td><td style={tds}>美股</td><td style={tds}>FMP</td><td style={tds}>AAPL, MSFT, TSLA</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>hk_stock</td><td style={tds}>港股</td><td style={tds}>FMP</td><td style={tds}>0700.HK, 9988.HK</td></tr>
             </tbody>
@@ -1142,12 +1145,23 @@ class MyRotation(PortfolioStrategy):
             </tbody>
           </table>
 
-          <div style={h3s}>腾讯财经 (A 股备用)</div>
+          <div style={h3s}>AKShare (免费全历史)</div>
           <table style={tbl}>
             <tbody>
-              <tr><td style={{...tds, width:'140px', fontWeight:600}}>覆盖范围</td><td style={tds}>A 股主要股票</td></tr>
+              <tr><td style={{...tds, width:'140px', fontWeight:600}}>覆盖范围</td><td style={tds}>A 股股票 + ETF，上市至今的完整历史</td></tr>
+              <tr><td style={{...tds, fontWeight:600}}>认证</td><td style={tds}>完全免费，无需注册和 Token</td></tr>
+              <tr><td style={{...tds, fontWeight:600}}>数据源</td><td style={tds}>底层走东方财富/新浪接口（akshare 包封装）</td></tr>
+              <tr><td style={{...tds, fontWeight:600}}>速率限制</td><td style={tds}>0.6 秒/次（东财反爬较严，调用过快会临时封 IP）</td></tr>
+              <tr><td style={{...tds, fontWeight:600}}>适用场景</td><td style={tds}>Tushare 获取不到时的自动兜底（ETF 长期历史、免费用户）</td></tr>
+            </tbody>
+          </table>
+
+          <div style={h3s}>腾讯财经 (最后兜底)</div>
+          <table style={tbl}>
+            <tbody>
+              <tr><td style={{...tds, width:'140px', fontWeight:600}}>覆盖范围</td><td style={tds}>A 股股票 + ETF（约 3 年历史）</td></tr>
               <tr><td style={{...tds, fontWeight:600}}>认证</td><td style={tds}>免费，无需 Token</td></tr>
-              <tr><td style={{...tds, fontWeight:600}}>适用场景</td><td style={tds}>没有 Tushare Token 时的后备方案</td></tr>
+              <tr><td style={{...tds, fontWeight:600}}>适用场景</td><td style={tds}>其他数据源都获取不到时的最后方案</td></tr>
             </tbody>
           </table>
 

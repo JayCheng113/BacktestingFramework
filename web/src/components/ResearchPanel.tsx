@@ -40,7 +40,8 @@ function formatEvent(e: SSEEvent): { icon: string; text: string; color: string }
     case 'task_failed':
       return { icon: '❌', text: `失败: ${d.error}`, color: '#ef4444' }
     default:
-      return { icon: '·', text: JSON.stringify(d), color: '#8b949e' }
+      // Unknown event: show type + brief content, not raw JSON
+      return { icon: '·', text: `${e.event || '事件'}: ${typeof d === 'object' ? (d.message || d.text || d.status || '处理中...') : String(d)}`, color: '#8b949e' }
   }
 }
 
@@ -146,7 +147,11 @@ export default function ResearchPanel() {
   const cancelTask = async (taskId: string) => {
     try {
       await fetch(`/api/research/tasks/${taskId}/cancel`, { method: 'POST' })
-      // Refresh immediately so status updates
+      // Stop streaming immediately so user sees the change
+      if (streamingTaskId === taskId) {
+        setStreaming(false)
+        setStreamingTaskId('')
+      }
       await loadTasks()
     } catch {}
   }

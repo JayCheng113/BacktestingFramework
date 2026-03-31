@@ -334,7 +334,7 @@ wheels = [
 
 [[package]]
 name = "ez-trading"
-version = "0.2.9"
+version = "0.2.11.1"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
