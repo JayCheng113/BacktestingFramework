@@ -156,8 +156,8 @@ def run_portfolio_backtest(
                     raw_close_today[sym] = raw_val
             elif sym in prev_prices and not np.isnan(prev_prices[sym]):
                 prices[sym] = prev_prices[sym]
-            if day in date_set:
-                has_bar_today.add(sym)
+            if day in date_set and sym in raw_close_today:
+                has_bar_today.add(sym)  # require valid price on today's bar
 
         # Compute equity BEFORE rebalance
         position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)

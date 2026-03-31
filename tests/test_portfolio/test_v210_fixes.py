@@ -133,3 +133,60 @@ class TestRSIEdgeCases:
         result = rsi.compute(df)
         valid = result[rsi.name].dropna()
         assert (valid == 50.0).all(), f"Flat price RSI should be 50, got: {valid.values[-5:]}"
+
+
+class TestSandboxDictGet:
+    """Sandbox must block __dict__.get() bypass."""
+
+    def test_dict_get_subclasses_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = 'x = type.__dict__.get("__subclasses__")(object)'
+        errors = check_syntax(code)
+        assert any("__dict__" in e or "dunder" in e.lower() for e in errors), \
+            f"Expected __dict__ block, got: {errors}"
+
+    def test_dict_attr_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = 'x = object.__dict__'
+        errors = check_syntax(code)
+        assert any("__dict__" in e for e in errors), f"Expected __dict__ block, got: {errors}"
+
+
+class TestNaNBarNoTrade:
+    """NaN price on a day with bar should NOT allow trading."""
+
+    def test_nan_close_with_bar_blocks_trade(self):
+        dates = pd.date_range("2024-01-02", periods=20, freq="B")
+        prices = np.full(20, 10.0)
+        adj_prices = prices.copy()
+        raw_prices = prices.copy()
+        # Day 10: bar exists but prices are NaN (suspension with partial data)
+        adj_prices[10] = np.nan
+        raw_prices[10] = np.nan
+
+        data = {"A": pd.DataFrame({
+            "open": prices, "high": prices, "low": prices,
+            "close": raw_prices, "adj_close": adj_prices,
+            "volume": np.full(20, 100000.0),
+        }, index=dates)}
+
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.engine import CostModel, run_portfolio_backtest
+        from ez.portfolio.universe import Universe
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        class AlwaysFull(PortfolioStrategy):
+            def generate_weights(self, universe_data, dt, pw, pr):
+                return {"A": 1.0}
+
+        result = run_portfolio_backtest(
+            strategy=AlwaysFull(), universe=Universe(["A"]),
+            universe_data=data, calendar=cal,
+            start=dates[5].date(), end=dates[-1].date(),
+            freq="daily", initial_cash=100000, lot_size=1,
+            cost_model=CostModel(buy_commission_rate=0, sell_commission_rate=0,
+                                  min_commission=0, stamp_tax_rate=0, slippage_rate=0),
+        )
+        day10 = dates[10].date()
+        trades_on_nan_day = [t for t in result.trades if t["date"] == day10.isoformat()]
+        assert len(trades_on_nan_day) == 0, "Should not trade on NaN-price day"

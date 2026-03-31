@@ -241,7 +241,7 @@ _SAFE_DUNDERS = frozenset({
     "__le__", "__ge__", "__hash__", "__bool__", "__add__", "__sub__",
     "__mul__", "__truediv__", "__floordiv__", "__mod__", "__pow__",
     "__getitem__", "__setitem__", "__contains__", "__call__",
-    "__annotations__", "__dict__", "__slots__", "__all__",
+    "__annotations__", "__slots__", "__all__",
     "__init_subclass__", "__post_init__", "__abstractmethods__",
     "__future__",
 })
@@ -427,6 +427,7 @@ def _reload_user_strategy(filename: str) -> None:
                 logger.info("Hot-reloaded strategy: %s", filename)
         except Exception as e:
             logger.warning("Failed to hot-reload strategy %s: %s", filename, e)
+            raise
 
 
 def _run_contract_test(filename: str, timeout: int = 30) -> dict:
@@ -520,24 +521,36 @@ def save_and_validate_code(
         if target.exists():
             backup = target.read_text(encoding="utf-8")
         target.write_text(code, encoding="utf-8")
-        # Hot-reload with timeout (prevent blocking from user code)
-        import concurrent.futures
+        # Validate via subprocess (like strategy contract test) for isolation + timeout
+        from ez.factor.base import Factor
+        stem = safe_name.replace(".py", "")
+        module_name = f"{target_dir.name}.{stem}"
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(_reload_factor_code, safe_name, target_dir)
-                future.result(timeout=10)  # 10s max
-            # Verify at least one Factor subclass was registered
-            from ez.factor.base import Factor
-            stem = safe_name.replace(".py", "")
-            module_name = f"{target_dir.name}.{stem}"
+            # Subprocess import test with 10s timeout
+            import subprocess as _sp
+            test_code = f"import importlib.util, sys; spec = importlib.util.spec_from_file_location('{module_name}', '{target}'); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)"
+            proc = _sp.run([sys.executable, "-c", test_code], capture_output=True, text=True, timeout=10)
+            if proc.returncode != 0:
+                raise ValueError(f"Import failed: {proc.stderr[-200:]}")
+            # Now hot-reload in main process (safe — subprocess validated)
+            _reload_factor_code(safe_name, target_dir)
             registered = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
             if not registered:
                 raise ValueError("No Factor subclass found in code")
         except Exception as e:
-            # Rollback: restore old file or delete new one
+            # Clean up any dirty registry entries
+            dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+            for k in dirty:
+                del Factor._registry[k]
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+            # Rollback file
             if backup is not None:
                 target.write_text(backup, encoding="utf-8")
-                _reload_factor_code(safe_name, target_dir)  # re-register old version
+                try:
+                    _reload_factor_code(safe_name, target_dir)
+                except Exception:
+                    pass  # best-effort re-register old version
             else:
                 target.unlink(missing_ok=True)
             return {"success": False, "errors": [f"Factor validation failed: {e}"]}
@@ -679,6 +692,7 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
                 logger.info("Hot-reloaded %s: %s", kind, filename)
         except Exception as e:
             logger.warning("Failed to hot-reload %s %s: %s", kind, filename, e)
+            raise
 
 
 def _reload_factor_code(filename: str, target_dir: Path) -> None:
