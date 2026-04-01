@@ -75,6 +75,9 @@ export const factorCorrelation = (data: any) => api.post('/portfolio/factor-corr
 // Portfolio parameter search (V2.11.1)
 export const portfolioSearch = (data: any) => api.post('/portfolio/search', data)
 
+// Portfolio run weights history (V2.12.1)
+export const getPortfolioRunWeights = (runId: string) => api.get(`/portfolio/runs/${runId}/weights`)
+
 // Fundamental data (V2.11)
 export const fetchFundamentalData = (data: any) => api.post('/fundamental/fetch', data)
 export const fundamentalDataQuality = (data: any) => api.post('/fundamental/quality', data)
