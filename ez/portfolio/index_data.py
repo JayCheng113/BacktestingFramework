@@ -98,6 +98,8 @@ class IndexDataProvider:
     def _normalize_code(code: str) -> str:
         """Convert bare code to standard format: 600519 → 600519.SH."""
         code = code.strip()
+        if not code:
+            return ""
         if "." in code:
             return code  # already has suffix
         if code.startswith("6") or code.startswith("9"):

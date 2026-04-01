@@ -101,6 +101,10 @@ class TestPortfolioOptimizerContract:
         result = optimizer.optimize({"A": 0.5, "B": 0.3, "C": 0.2})
         assert isinstance(result, dict)
         assert all(w >= 0 for w in result.values())
+        if result:
+            # Fallback: all weights should be equal
+            weights = list(result.values())
+            assert len(set(round(w, 10) for w in weights)) == 1, "Fallback should use equal weight"
 
     def test_deterministic_with_same_input(self, optimizer, universe, context_date):
         """Same input → same output (no randomness in optimization)."""

@@ -100,5 +100,9 @@ class TestCrossSectionalFactorContract:
         assert len(result) == 0
 
     def test_registered_in_registry(self, factor):
+        """Factor class must be retrievable from registry."""
         registry = CrossSectionalFactor.get_registry()
-        assert factor.name in registry or type(factor).__name__ in registry
+        factory = registry.get(type(factor).__name__)
+        assert factory is not None, f"{type(factor).__name__} not in registry"
+        fresh = factory()
+        assert isinstance(fresh.name, str)

@@ -48,7 +48,8 @@ class TestAllocatorContract:
 
     def test_single_stock_returns_weight(self, allocator):
         result = allocator.allocate({"A": 1.0})
-        assert len(result) >= 0  # may return empty or single
+        assert isinstance(result, dict)
+        assert len(result) <= 1  # single stock → at most 1 weight
 
     def test_negative_inputs_clipped(self, allocator):
         """Negative weights in input should not produce negative output."""

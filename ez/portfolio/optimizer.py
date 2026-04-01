@@ -219,8 +219,8 @@ class MeanVarianceOptimizer(PortfolioOptimizer):
             w_b = np.array([self._benchmark_weights.get(s, 0) for s in symbols])
             cons.append({
                 "type": "ineq",
-                "fun": lambda w, wb=w_b: float(
-                    self._max_te ** 2 - (w - wb) @ sigma @ (w - wb)
+                "fun": lambda w, wb=w_b, sig=sigma: float(
+                    self._max_te ** 2 - (w - wb) @ sig @ (w - wb)
                 ),
             })
 
@@ -261,8 +261,8 @@ class MinVarianceOptimizer(PortfolioOptimizer):
             w_b = np.array([self._benchmark_weights.get(s, 0) for s in symbols])
             cons.append({
                 "type": "ineq",
-                "fun": lambda w, wb=w_b: float(
-                    self._max_te ** 2 - (w - wb) @ sigma @ (w - wb)
+                "fun": lambda w, wb=w_b, sig=sigma: float(
+                    self._max_te ** 2 - (w - wb) @ sig @ (w - wb)
                 ),
             })
 
