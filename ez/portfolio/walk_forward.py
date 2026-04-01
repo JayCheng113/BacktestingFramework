@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 import numpy as np
+from scipy import stats
 
 from ez.portfolio.calendar import TradingCalendar
 from ez.portfolio.engine import CostModel, run_portfolio_backtest, PortfolioResult
@@ -100,8 +101,8 @@ def portfolio_walk_forward(
         train_end_idx = win_start + int(window_size * train_ratio)
         test_end_idx = min(win_start + window_size, n_days)
 
-        if train_end_idx >= n_days or test_end_idx > n_days:
-            continue
+        if train_end_idx >= n_days:
+            continue  # not enough data for this fold
 
         train_start_date = trading_days[win_start]
         train_end_date = trading_days[train_end_idx - 1]
@@ -191,13 +192,31 @@ def portfolio_significance(
     observed = _sharpe(returns, daily_rf)
     rng = np.random.default_rng(seed)
 
-    # Bootstrap CI (resample WITH replacement — changes mean/std)
+    # Bootstrap CI — BCa (Bias-Corrected and Accelerated) when possible
     boot = np.array([
         _sharpe(rng.choice(returns, size=len(returns), replace=True), daily_rf)
         for _ in range(n_bootstrap)
     ])
-    ci_lower = float(np.percentile(boot, 2.5))
-    ci_upper = float(np.percentile(boot, 97.5))
+    # BCa bias correction: proportion of bootstrap < observed
+    # Clamp fraction to [0.5/B, 1-0.5/B] to avoid ppf(0)=-inf / ppf(1)=inf
+    boot_frac = float(np.mean(boot < observed))
+    boot_frac = max(0.5 / n_bootstrap, min(boot_frac, 1 - 0.5 / n_bootstrap))
+    z0 = float(stats.norm.ppf(boot_frac)) if np.std(boot) > 0 else 0.0
+    # BCa acceleration: jackknife estimate
+    n = len(returns)
+    jack_sharpes = np.array([
+        _sharpe(np.delete(returns, j), daily_rf) for j in range(min(n, 200))  # cap at 200 for speed
+    ])
+    jack_mean = np.mean(jack_sharpes)
+    jack_diff = jack_mean - jack_sharpes
+    a = float(np.sum(jack_diff ** 3) / (6 * (np.sum(jack_diff ** 2) ** 1.5 + 1e-20)))
+    # Adjusted percentiles
+    alpha_lo, alpha_hi = 0.025, 0.975
+    z_lo, z_hi = stats.norm.ppf(alpha_lo), stats.norm.ppf(alpha_hi)
+    adj_lo = stats.norm.cdf(z0 + (z0 + z_lo) / (1 - a * (z0 + z_lo) + 1e-20))
+    adj_hi = stats.norm.cdf(z0 + (z0 + z_hi) / (1 - a * (z0 + z_hi) + 1e-20))
+    ci_lower = float(np.percentile(boot, 100 * max(0.001, min(adj_lo, 0.999))))
+    ci_upper = float(np.percentile(boot, 100 * max(0.001, min(adj_hi, 0.999))))
 
     # Monte Carlo under null: excess returns centered at 0 (no alpha)
     excess = returns - daily_rf

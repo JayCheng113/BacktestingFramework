@@ -39,7 +39,7 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 
 ## Key Design Decisions
 - Anti-lookahead: engine slices data to [date-lookback, date-1] before calling strategy
-- Accounting invariant: `cash + Σ(shares × price) == equity` checked every day
+- Accounting invariant: `cash >= -0.01` + `equity > 0` checked every day (V2.11.1 post-release: 替换原同义反复 assert)
 - Discrete shares: weight → amount → shares (lot-size rounded) → remainder to cash
 - Sell-before-buy: two-pass trade execution (sells first to free cash)
 - Has-bar-today: only trade symbols with actual data on current day
@@ -63,3 +63,4 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - V2.10: CrossSectionalEvaluator, FactorCorrelation, WalkForward, Significance, 24 new tests
 - V2.10 post-release: T+1, directional slippage, __init_subclass__ auto-registration
 - V2.11.1: compute_raw() interface, neutralization, AlphaCombiner, parameter search, IC nanmean/nanstd, EP/BP/SP negative exclusion, PIT restatement fix, ann_date INDEX
+- V2.11.1 post-release: 会计assert改有意义(cash>=0+equity>0), WF不可达代码移除(test_end_idx>n_days), Bootstrap CI升级BCa(z0 clamp防±inf, jackknife加速)

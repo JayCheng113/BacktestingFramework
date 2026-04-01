@@ -152,6 +152,201 @@ class TestIndustryCache:
         assert "600519.SH" in industries
 
 
+class TestLRUEviction:
+    """Test LRU cache eviction for FundamentalStore."""
+
+    def _set_access_time(self, store, symbol: str, t: float):
+        """Directly set LRU timestamp — avoids fragile sleep-based ordering."""
+        store._symbol_access_time[symbol] = t
+
+    def test_evicts_oldest_symbols_first(self, store):
+        """Oldest-accessed symbols should be evicted when cache exceeds threshold."""
+        from ez.data.fundamental import FundamentalStore
+
+        original_max = FundamentalStore._MAX_DAILY_CACHE
+        FundamentalStore._MAX_DAILY_CACHE = 10
+        try:
+            # Load A (8 entries) and B (5 entries) into DB
+            store.save_daily_basic([
+                {"symbol": "000001.SZ", "trade_date": date(2024, 1, d), "pe_ttm": 8.0}
+                for d in range(2, 10)
+            ])
+            store.save_daily_basic([
+                {"symbol": "600519.SH", "trade_date": date(2024, 1, d), "pe_ttm": 35.0}
+                for d in range(2, 7)
+            ])
+            # Preload both, then set A older than B
+            store.preload(["000001.SZ", "600519.SH"], date(2024, 1, 1), date(2024, 1, 15))
+            assert len(store._daily_cache) == 13  # no eviction yet (protected)
+            self._set_access_time(store, "000001.SZ", 1.0)  # old
+            self._set_access_time(store, "600519.SH", 2.0)  # new
+
+            # Trigger eviction by preloading B again (total 13 > 10)
+            store.preload(["600519.SH"], date(2024, 1, 1), date(2024, 1, 15))
+
+            # A (oldest, unprotected) evicted; B (protected) retained
+            assert store.get_daily_basic_at("000001.SZ", date(2024, 1, 2)) is None
+            assert store.get_daily_basic_at("600519.SH", date(2024, 1, 2)) is not None
+        finally:
+            FundamentalStore._MAX_DAILY_CACHE = original_max
+
+    def test_read_refreshes_access_time(self, store):
+        """Reading a symbol should refresh its LRU timestamp, protecting it from eviction."""
+        from ez.data.fundamental import FundamentalStore
+
+        original_max = FundamentalStore._MAX_DAILY_CACHE
+        # Units: daily + industry. A(3d+1i=4)+B(5d+1i=6)+C(3d+1i=4)=14
+        # threshold=12, target=9. 14>12 → evict B(6)→remaining=8<=9
+        FundamentalStore._MAX_DAILY_CACHE = 12
+        try:
+            store.save_daily_basic([
+                {"symbol": "000001.SZ", "trade_date": date(2024, 1, d), "pe_ttm": 8.0}
+                for d in range(2, 5)
+            ])
+            store.save_daily_basic([
+                {"symbol": "600519.SH", "trade_date": date(2024, 1, d), "pe_ttm": 35.0}
+                for d in range(2, 7)
+            ])
+            store.save_daily_basic([
+                {"symbol": "000858.SZ", "trade_date": date(2024, 1, d), "pe_ttm": 50.0}
+                for d in range(2, 5)
+            ])
+            # Load all three
+            store.preload(["000001.SZ", "600519.SH"], date(2024, 1, 1), date(2024, 1, 15))
+            self._set_access_time(store, "000001.SZ", 1.0)  # A: old
+            self._set_access_time(store, "600519.SH", 2.0)  # B: middle
+
+            # Read A → refreshes its timestamp above B
+            store.get_daily_basic_at("000001.SZ", date(2024, 1, 3))
+            assert store._symbol_access_time["000001.SZ"] > store._symbol_access_time["600519.SH"]
+
+            # Preload C → total 11 > 10, B is now oldest → evicted
+            store.preload(["000858.SZ"], date(2024, 1, 1), date(2024, 1, 15))
+
+            assert store.get_daily_basic_at("600519.SH", date(2024, 1, 2)) is None  # B evicted
+            assert store.get_daily_basic_at("000001.SZ", date(2024, 1, 2)) is not None  # A survived
+            assert store.get_daily_basic_at("000858.SZ", date(2024, 1, 2)) is not None  # C protected
+        finally:
+            FundamentalStore._MAX_DAILY_CACHE = original_max
+
+    def test_eviction_cleans_all_caches(self, store):
+        """Eviction should clean daily, fina, industry, and access_time consistently."""
+        from ez.data.fundamental import FundamentalStore
+
+        original_max = FundamentalStore._MAX_DAILY_CACHE
+        FundamentalStore._MAX_DAILY_CACHE = 8
+        try:
+            store.save_daily_basic([
+                {"symbol": "000001.SZ", "trade_date": date(2024, 1, d), "pe_ttm": 8.0}
+                for d in range(2, 8)
+            ])
+            store.save_fina_indicator([
+                {"symbol": "000001.SZ", "ann_date": date(2024, 4, 28),
+                 "end_date": date(2024, 3, 31), "roe": 12.5},
+            ])
+            store.save_daily_basic([
+                {"symbol": "600519.SH", "trade_date": date(2024, 1, d), "pe_ttm": 35.0}
+                for d in range(2, 6)
+            ])
+            # Preload A, set it old
+            store.preload(["000001.SZ"], date(2024, 1, 1), date(2024, 1, 15))
+            assert store.get_industry("000001.SZ") == "银行"
+            self._set_access_time(store, "000001.SZ", 1.0)
+
+            # Preload B → total 10 > 8, A (old, unprotected) evicted
+            store.preload(["600519.SH"], date(2024, 1, 1), date(2024, 1, 15))
+
+            assert store.get_daily_basic_at("000001.SZ", date(2024, 1, 2)) is None
+            assert store.get_fina_pit("000001.SZ", date(2024, 5, 1)) is None
+            assert store.get_industry("000001.SZ") is None
+            assert "000001.SZ" not in store._symbol_access_time
+        finally:
+            FundamentalStore._MAX_DAILY_CACHE = original_max
+
+    def test_eviction_respects_75pct_target(self, store):
+        """After eviction, cache size should be at or below 75% of max."""
+        from ez.data.fundamental import FundamentalStore
+
+        original_max = FundamentalStore._MAX_DAILY_CACHE
+        FundamentalStore._MAX_DAILY_CACHE = 20
+        try:
+            for i, (sym, pe) in enumerate([("000001.SZ", 8.0), ("600519.SH", 35.0), ("000858.SZ", 50.0)]):
+                store.save_daily_basic([
+                    {"symbol": sym, "trade_date": date(2024, 1, d), "pe_ttm": pe}
+                    for d in range(2, 10)
+                ])
+            # Preload each separately, staggering timestamps
+            store.preload(["000001.SZ"], date(2024, 1, 1), date(2024, 1, 15))
+            self._set_access_time(store, "000001.SZ", 1.0)
+            store.preload(["600519.SH"], date(2024, 1, 1), date(2024, 1, 15))
+            self._set_access_time(store, "600519.SH", 2.0)
+            store.preload(["000858.SZ"], date(2024, 1, 1), date(2024, 1, 15))
+            # 24 > 20 → evict oldest until <= 15
+
+            assert len(store._daily_cache) <= 15
+        finally:
+            FundamentalStore._MAX_DAILY_CACHE = original_max
+
+    def test_current_request_never_self_evicted(self, store):
+        """A large preload batch must never evict its own symbols. (Issue #1)"""
+        from ez.data.fundamental import FundamentalStore
+
+        original_max = FundamentalStore._MAX_DAILY_CACHE
+        # threshold=5, target=3. Load 8 entries for 2 symbols → exceeds threshold
+        # but both are in the current request → must NOT self-evict
+        FundamentalStore._MAX_DAILY_CACHE = 5
+        try:
+            store.save_daily_basic([
+                {"symbol": "000001.SZ", "trade_date": date(2024, 1, d), "pe_ttm": 8.0}
+                for d in range(2, 6)
+            ])
+            store.save_daily_basic([
+                {"symbol": "600519.SH", "trade_date": date(2024, 1, d), "pe_ttm": 35.0}
+                for d in range(2, 6)
+            ])
+            # Total 8 > 5 after preload, but both symbols are protected
+            store.preload(["000001.SZ", "600519.SH"], date(2024, 1, 1), date(2024, 1, 15))
+
+            # Both symbols MUST still be in cache
+            assert store.get_daily_basic_at("000001.SZ", date(2024, 1, 2)) is not None
+            assert store.get_daily_basic_at("600519.SH", date(2024, 1, 2)) is not None
+            assert len(store._daily_cache) == 8
+        finally:
+            FundamentalStore._MAX_DAILY_CACHE = original_max
+
+    def test_fina_only_symbol_evicted(self, store):
+        """Symbols with only fina/industry data (no daily) must be eviction candidates. (Issue #2)"""
+        from ez.data.fundamental import FundamentalStore
+
+        original_max = FundamentalStore._MAX_DAILY_CACHE
+        FundamentalStore._MAX_DAILY_CACHE = 6
+        try:
+            # Sym A: fina + industry only (no daily entries in DB)
+            store.save_fina_indicator([
+                {"symbol": "000001.SZ", "ann_date": date(2024, 4, 28),
+                 "end_date": date(2024, 3, 31), "roe": 12.5},
+            ])
+            # end must be >= ann_date so fina data actually loads
+            store.preload(["000001.SZ"], date(2024, 1, 1), date(2024, 12, 31))
+            self._set_access_time(store, "000001.SZ", 1.0)
+            assert "000001.SZ" in store._fina_cache
+            assert "000001.SZ" in store._industry_cache
+
+            # Sym B: 8 daily entries → triggers eviction
+            store.save_daily_basic([
+                {"symbol": "600519.SH", "trade_date": date(2024, 1, d), "pe_ttm": 35.0}
+                for d in range(2, 10)
+            ])
+            store.preload(["600519.SH"], date(2024, 1, 1), date(2024, 12, 31))
+
+            # A (fina-only, oldest) should be cleaned from all caches
+            assert "000001.SZ" not in store._fina_cache
+            assert "000001.SZ" not in store._industry_cache
+            assert "000001.SZ" not in store._symbol_access_time
+        finally:
+            FundamentalStore._MAX_DAILY_CACHE = original_max
+
+
 class TestDataQualityReport:
     def test_report_structure(self, store):
         records = [

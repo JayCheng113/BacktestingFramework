@@ -298,13 +298,16 @@ def run_portfolio_backtest(
                     current_returns[sym] = (prices[sym] - old_p) / old_p
         prev_returns = current_returns
 
-        # End-of-day equity
+        # End-of-day equity — compute position value from two independent paths
         position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)
         equity = cash + position_value
 
-        # Accounting invariant check (Codex #4)
-        assert abs(cash + position_value - equity) < EPS_FUND, \
-            f"Accounting invariant violated on {day}: cash={cash}, pos={position_value}, eq={equity}"
+        # Accounting invariant: no negative cash (unless rounding error)
+        assert cash >= -EPS_FUND, \
+            f"Negative cash on {day}: cash={cash:.2f}"
+        # Accounting invariant: equity must be positive
+        assert equity > 0, \
+            f"Non-positive equity on {day}: equity={equity:.2f}, cash={cash:.2f}, pos={position_value:.2f}"
 
         result.equity_curve.append(equity)
         result.dates.append(day)
