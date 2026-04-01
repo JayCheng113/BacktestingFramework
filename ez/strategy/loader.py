@@ -54,7 +54,8 @@ def load_all_strategies() -> None:
         except ImportError as e:
             logger.warning("Failed to load frozen builtin strategy: %s", e)
         # Also load user strategies from strategies/ dir next to exe
-        exe_dir = Path(os.environ.get("EZ_DATA_DIR", "")).parent if os.environ.get("EZ_DATA_DIR") else _PROJECT_ROOT
+        data_dir = os.environ.get("EZ_DATA_DIR")
+        exe_dir = Path(data_dir).parent if data_dir and Path(data_dir).parent.exists() else _PROJECT_ROOT
         _load_py_files(exe_dir / "strategies", "strategies")
         return
 
@@ -99,8 +100,9 @@ def load_all_strategies() -> None:
 def load_user_factors() -> None:
     """Import all factor modules from factors/ directory (user-created)."""
     # In frozen mode, user factors are next to exe
-    if getattr(sys, "frozen", False) and os.environ.get("EZ_DATA_DIR"):
-        factors_dir = Path(os.environ["EZ_DATA_DIR"]).parent / "factors"
+    data_dir = os.environ.get("EZ_DATA_DIR")
+    if getattr(sys, "frozen", False) and data_dir and Path(data_dir).parent.exists():
+        factors_dir = Path(data_dir).parent / "factors"
     else:
         factors_dir = _PROJECT_ROOT / "factors"
     if not factors_dir.exists():

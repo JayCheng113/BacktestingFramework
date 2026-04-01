@@ -108,6 +108,8 @@ def health():
 import sys as _sys
 if getattr(_sys, 'frozen', False):
     _FRONTEND_DIR = Path(_sys._MEIPASS) / "web" / "dist"
+    if not _FRONTEND_DIR.exists():
+        logging.getLogger(__name__).warning("Frontend assets not found at %s", _FRONTEND_DIR)
 else:
     _FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 if _FRONTEND_DIR.exists():

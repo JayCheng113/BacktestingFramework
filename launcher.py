@@ -6,6 +6,11 @@ import threading
 import webbrowser
 import socket
 
+# Windows: ensure correct asyncio event loop policy before any async imports
+if sys.platform == "win32":
+    import asyncio
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # IMPORTANT: Compute exe_dir BEFORE chdir
 exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 

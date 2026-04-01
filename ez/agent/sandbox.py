@@ -28,8 +28,9 @@ _PROJECT_ROOT = get_project_root()
 
 # In frozen mode, user dirs are next to exe, not inside _MEIPASS
 def _user_dir_root() -> Path:
-    if getattr(sys, "frozen", False) and os.environ.get("EZ_DATA_DIR"):
-        return Path(os.environ["EZ_DATA_DIR"]).parent
+    data_dir = os.environ.get("EZ_DATA_DIR")
+    if getattr(sys, "frozen", False) and data_dir and Path(data_dir).parent.exists():
+        return Path(data_dir).parent
     return _PROJECT_ROOT
 
 _STRATEGIES_DIR = _user_dir_root() / "strategies"
