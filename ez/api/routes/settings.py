@@ -9,7 +9,8 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+from ez.config import get_project_root
+_PROJECT_ROOT = get_project_root()
 _ENV_FILE = _PROJECT_ROOT / ".env"
 
 

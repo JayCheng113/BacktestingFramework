@@ -111,7 +111,8 @@ if getattr(_sys, 'frozen', False):
     if not _FRONTEND_DIR.exists():
         logging.getLogger(__name__).warning("Frontend assets not found at %s", _FRONTEND_DIR)
 else:
-    _FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+    from ez.config import get_project_root as _get_root
+    _FRONTEND_DIR = _get_root() / "web" / "dist"
 if _FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIR / "assets")), name="assets")
 

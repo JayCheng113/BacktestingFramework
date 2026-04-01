@@ -82,7 +82,8 @@ def _find_latest_strategy(before_set: set[str]) -> tuple[str | None, str | None]
     if not new_files:
         return None, None
     filename = sorted(new_files)[0]
-    strategies_dir = Path(__file__).resolve().parent.parent.parent / "strategies"
+    from ez.config import get_project_root
+    strategies_dir = get_project_root() / "strategies"
     code = (strategies_dir / filename).read_text(encoding="utf-8")
     class_name = _extract_strategy_class_name(code)
     return filename, class_name

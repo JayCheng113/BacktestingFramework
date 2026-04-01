@@ -80,7 +80,8 @@ def _resolve_db_path() -> Path:
         config = load_config()
         p = Path(config.database.path)
         if not p.is_absolute():
-            project_root = Path(__file__).resolve().parent.parent.parent
+            from ez.config import get_project_root
+            project_root = get_project_root()
             p = project_root / p
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
