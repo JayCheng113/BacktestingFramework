@@ -29,7 +29,12 @@ _start_lock: asyncio.Lock | None = None
 
 
 def get_start_lock() -> asyncio.Lock:
-    """Public accessor for the task-start serialization lock (lazy init)."""
+    """Public accessor for the task-start serialization lock (lazy init).
+
+    Thread safety: only call from async context (FastAPI route handlers).
+    The check-and-assign is atomic within a single event loop iteration.
+    Do NOT call from threads — use a threading.Lock wrapper if needed.
+    """
     global _start_lock
     if _start_lock is None:
         _start_lock = asyncio.Lock()

@@ -475,7 +475,7 @@ def _reload_user_strategy(filename: str) -> None:
         if not py_file.exists():
             return
         try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod
@@ -676,7 +676,7 @@ def save_and_validate_code(
 
 def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> dict:
     """Contract test for portfolio strategies and cross-sectional factors."""
-    # Use forward slashes for Windows compat (Python accepts them on all platforms)
+    # Use repr() for proper Python string literal escaping (handles backslashes, spaces, quotes)
     safe_path_repr = repr(str(target_dir / filename))
     if kind == "portfolio_strategy":
         test_code = f"""
@@ -768,7 +768,7 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
         if not py_file.exists():
             return
         try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod
@@ -804,7 +804,7 @@ def _reload_factor_code(filename: str, target_dir: Path) -> None:
         if not py_file.exists():
             return
         try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod
