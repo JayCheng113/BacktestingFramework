@@ -4,6 +4,7 @@ Security layers:
   1. AST blacklist (defense-in-depth): forbidden imports, dunders, builtins, dict-dunder access
   2. Subprocess isolation (security boundary): contract test + import validation in subprocess
   3. Factor kind: NO exec_module in main process (subprocess validates, main uses AST stubs)
+     Exception: frozen mode without standalone Python falls back to in-process validation
   4. Strategy/portfolio kinds: contract test in subprocess, hot-reload in main process
      (strategy/portfolio still exec_module in main — tracked for future subprocess-only migration)
   - Only writes to whitelisted directories: strategies/, factors/, portfolio_strategies/, cross_factors/
@@ -489,7 +490,7 @@ def _validate_strategy_inprocess(filename: str) -> dict:
     """In-process strategy validation for frozen mode (no subprocess Python)."""
     try:
         target = _STRATEGIES_DIR / filename
-        spec = importlib.util.spec_from_file_location(f"_check_{filename}", str(target))
+        spec = importlib.util.spec_from_file_location(f"_check_{filename.replace('.py', '')}", str(target))
         if not spec or not spec.loader:
             return {"passed": False, "output": f"Cannot create module spec for {filename}"}
         mod = importlib.util.module_from_spec(spec)
@@ -649,8 +650,9 @@ def save_and_validate_code(
             )
             import subprocess as _sp_mod
             _py = _get_python_executable()
+            _frozen_inprocess = False
             if not _py:
-                # Frozen mode fallback: in-process import
+                # Frozen mode fallback: in-process import (exec_module registers real class)
                 spec = importlib.util.spec_from_file_location(module_name, str(target))
                 if spec and spec.loader:
                     mod = importlib.util.module_from_spec(spec)
@@ -658,31 +660,31 @@ def save_and_validate_code(
                     registered = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
                     if not registered:
                         raise ValueError("No Factor subclass found")
-                    proc = type("R", (), {"returncode": 0, "stdout": ",".join(registered), "stderr": ""})()
+                    _frozen_inprocess = True  # real class already registered, skip stub
                 else:
                     raise ValueError("Cannot create module spec")
             else:
                 proc = _sp_mod.run([_py, "-c", test_code], capture_output=True, text=True, timeout=10)
-            if proc.returncode != 0:
-                raise ValueError(f"Import failed: {proc.stderr[-200:]}")
-            # Register via AST class name extraction ONLY (no exec_module in main process)
-            registered = [c.strip() for c in proc.stdout.strip().split(",") if c.strip()]
+                if proc.returncode != 0:
+                    raise ValueError(f"Import failed: {proc.stderr[-200:]}")
+                registered = [c.strip() for c in proc.stdout.strip().split(",") if c.strip()]
             if not registered:
                 raise ValueError("No Factor subclass found in code")
             # Register class stubs in main process registry (for API visibility)
-            # Actual Factor instances are created on-demand by the API
-            _tree = ast.parse(code)
-            for node in ast.walk(_tree):
-                if isinstance(node, ast.ClassDef) and node.name in registered:
-                    # Create a minimal class stub that records module origin
-                    # type() with Factor base triggers __init_subclass__ → auto-registers
-                    type(node.name, (Factor,), {
-                        "name": property(lambda self, n=node.name: n.lower()),
-                        "warmup_period": property(lambda self: 0),
-                        "compute": lambda self, data: (_ for _ in ()).throw(NotImplementedError("Stub factor — re-save to use")),
-                        "__module__": module_name,
-                    })
-                    # __init_subclass__ already registered it in Factor._registry
+            # Skip if frozen in-process: exec_module already registered real classes
+            if not _frozen_inprocess:
+                _tree = ast.parse(code)
+                for node in ast.walk(_tree):
+                    if isinstance(node, ast.ClassDef) and node.name in registered:
+                        # Create a minimal class stub that records module origin
+                        # type() with Factor base triggers __init_subclass__ → auto-registers
+                        type(node.name, (Factor,), {
+                            "name": property(lambda self, n=node.name: n.lower()),
+                            "warmup_period": property(lambda self: 0),
+                            "compute": lambda self, data: (_ for _ in ()).throw(NotImplementedError("Stub factor — re-save to use")),
+                            "__module__": module_name,
+                        })
+                        # __init_subclass__ already registered it in Factor._registry
         except Exception as e:
             # Clean up any dirty registry entries
             dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
