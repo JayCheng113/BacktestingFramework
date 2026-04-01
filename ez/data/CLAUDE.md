@@ -59,3 +59,4 @@ Fetch, validate, cache, and serve market data (K-line) from multiple sources wit
 - V2.11.1: PIT query改用max(end_date)不依赖排序假设, fina DO UPDATE不覆盖ann_date(保留首次公告日, 重报正确), ann_date INDEX加速, threading.Lock保护preload, Tushare日期转换try/except容错, /fundamental/fetch+quality symbols min_length校验
 - V2.11.1 post-release: LRU缓存淘汰(symbol粒度, 统一cache units=daily+fina+industry, protect防自淘汰, 75%hysteresis, ghost清理, 读路径best-effort时间戳更新)
 - V2.11.1: AKShareProvider (免费fallback: 股票+ETF全历史, 双fetch qfq+raw, 0.6s节流)
+- V2.12.1: DuckDBStore.query_kline_batch(单SQL批量查询), DataProviderChain.get_kline_batch(热缓存批量+冷缺失逐个fetch)

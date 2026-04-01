@@ -100,10 +100,9 @@ class IndexDataProvider:
         code = code.strip()
         if "." in code:
             return code  # already has suffix
-        bare = code.split(".")[0]
-        if bare.startswith("6") or bare.startswith("9"):
-            return f"{bare}.SH"
-        return f"{bare}.SZ"
+        if code.startswith("6") or code.startswith("9"):
+            return f"{code}.SH"
+        return f"{code}.SZ"
 
     def _get_cached(self, key: str):
         entry = self._cache.get(key)
