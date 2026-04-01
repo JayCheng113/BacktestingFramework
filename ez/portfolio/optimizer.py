@@ -271,6 +271,7 @@ class MinVarianceOptimizer(PortfolioOptimizer):
         result = optimize.minimize(
             objective, w0, method="SLSQP",
             bounds=bounds, constraints=cons,
+            options={"maxiter": max(500, n * 5)},
         )
         if not result.success:
             raise RuntimeError(result.message)
@@ -314,7 +315,7 @@ class RiskParityOptimizer(PortfolioOptimizer):
         result = optimize.minimize(
             risk_contribution_obj, w0, method="SLSQP",
             bounds=bounds, constraints=cons,
-            options={"maxiter": 1000},
+            options={"maxiter": max(1000, n * 5)},
         )
         if not result.success:
             return w0  # fallback: inverse-vol

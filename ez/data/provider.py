@@ -62,6 +62,17 @@ class DataStore(ABC):
         start_date: date, end_date: date,
     ) -> bool: ...
 
+    def query_kline_batch(
+        self, symbols: list[str], market: str, period: str,
+        start_date: date, end_date: date,
+    ) -> dict[str, list[Bar]]:
+        """Batch query. Default: falls back to N individual queries."""
+        result = {}
+        for sym in symbols:
+            bars = self.query_kline(sym, market, period, start_date, end_date)
+            result[sym] = bars
+        return result
+
 
 class DataProviderChain:
     """Try providers in priority order with failover."""
