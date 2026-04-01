@@ -558,10 +558,14 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     end = req.end_date or date.today()
     start = req.start_date or (end - timedelta(days=365 * 3))
 
+    wf_warnings: list[str] = []
+
     def strategy_factory():
-        s, _w = _create_strategy(req.strategy_name, req.strategy_params,
-                                 symbols=req.symbols, start=start, end=end,
-                                 market=req.market)
+        s, w = _create_strategy(req.strategy_name, req.strategy_params,
+                                symbols=req.symbols, start=start, end=end,
+                                market=req.market)
+        if w:
+            wf_warnings.extend(w)
         return s
 
     universe = Universe(req.symbols)
@@ -608,7 +612,7 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             "p_value": sig.monte_carlo_p_value if sig else 1,
             "is_significant": sig.is_significant if sig else False,
         } if sig else None,
-        "warnings": [wf_bench_warn] if wf_bench_warn else None,
+        "warnings": (wf_warnings + ([wf_bench_warn] if wf_bench_warn else [])) or None,
     }
 
 
@@ -658,6 +662,7 @@ def portfolio_search(req: PortfolioSearchRequest):
     combos = _generate_combinations(req.param_grid, req.max_combinations)
     if not combos:
         raise HTTPException(400, "参数网格为空")
+    search_funda_warn: list[str] = []
 
     # Fetch data once (E1: shared across all combinations)
     universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
@@ -688,7 +693,7 @@ def portfolio_search(req: PortfolioSearchRequest):
         for mfn in combo.get("factors", []):
             _check_factor_name(mfn)
     if needs_preload:
-        _ensure_fundamental_data(req.symbols, start, end, need_fina=need_fina)
+        search_funda_warn = _ensure_fundamental_data(req.symbols, start, end, need_fina=need_fina)
 
     cost_model = CostModel(
         buy_commission_rate=req.buy_commission_rate,
@@ -735,8 +740,9 @@ def portfolio_search(req: PortfolioSearchRequest):
         r["rank"] = i + 1
 
     resp = {"results": results, "total_combinations": len(combos), "completed": len(results)}
-    if search_bench_warn:
-        resp["warnings"] = [search_bench_warn]
+    all_search_warns = (search_funda_warn or []) + ([search_bench_warn] if search_bench_warn else [])
+    if all_search_warns:
+        resp["warnings"] = all_search_warns
     return resp
 
 

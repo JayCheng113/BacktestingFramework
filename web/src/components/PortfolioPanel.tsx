@@ -51,6 +51,7 @@ interface PortfolioRunResult {
   symbols_fetched?: number; symbols_skipped?: string[]
   weights_history?: { date: string; weights: Record<string, number> }[]
   latest_weights?: Record<string, number>
+  warnings?: string[] | null
 }
 
 interface HistoryRun {
@@ -279,6 +280,7 @@ export default function PortfolioPanel() {
         lot_size: settings.lot_size, limit_pct: settings.limit_pct,
       })
       setWfResult(res.data)
+      if (res.data.warnings?.length) alert('前推验证提示: ' + res.data.warnings.join('\n'))
     } catch (e: any) {
       alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
     } finally { setWfLoading(false) }
@@ -665,6 +667,11 @@ export default function PortfolioPanel() {
                     initial_cash: settings.initial_cash, benchmark_symbol: settings.benchmark,
                   })
                   setSearchResults(res.data.results || [])
+                  const tc = res.data.total_combinations || 0
+                  const comp = res.data.completed || 0
+                  let searchMsg = res.data.warnings?.length ? res.data.warnings.join('\n') + '\n' : ''
+                  if (tc > 50) searchMsg += `共 ${tc} 种组合，随机采样 50 个展示（可能不完整）`
+                  if (searchMsg) alert(searchMsg.trim())
                 } catch (e: any) { alert(e?.response?.data?.detail || '搜索失败') }
                 finally { setSearchLoading(false) }
               }} disabled={searchLoading}
@@ -706,6 +713,11 @@ export default function PortfolioPanel() {
                 <div className="mb-3 px-3 py-2 rounded text-xs" style={{ backgroundColor: '#3b2a1a', border: '1px solid #6b4c2a', color: '#f59e0b' }}>
                   {result.symbols_skipped.length} 只标的在回测起始日无数据: {result.symbols_skipped.join(', ')}
                   （可能尚未上市，有数据后会自动纳入）
+                </div>
+              )}
+              {result.warnings && result.warnings.length > 0 && (
+                <div className="mb-3 px-3 py-2 rounded text-xs" style={{ backgroundColor: '#3b2a1a', border: '1px solid #6b4c2a', color: '#f59e0b' }}>
+                  {result.warnings.map((w, i) => <div key={i}>{w}</div>)}
                 </div>
               )}
               <div className="flex gap-2 mb-3">

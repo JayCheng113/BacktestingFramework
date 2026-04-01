@@ -1137,7 +1137,7 @@ class MyRotation(PortfolioStrategy):
             <tbody>
               <tr><td style={{...tds, fontFamily:'monospace'}}>cn_stock</td><td style={tds}>A 股（中国大陆）</td><td style={tds}>Tushare → AKShare → 腾讯</td><td style={tds}>000001.SZ, 600519.SH, 510300.SH(ETF)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>us_stock</td><td style={tds}>美股</td><td style={tds}>FMP</td><td style={tds}>AAPL, MSFT, TSLA</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>hk_stock</td><td style={tds}>港股</td><td style={tds}>FMP</td><td style={tds}>0700.HK, 9988.HK</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>hk_stock</td><td style={tds}>港股</td><td style={tds}>腾讯 (主)</td><td style={tds}>0700.HK, 9988.HK</td></tr>
             </tbody>
           </table>
 
