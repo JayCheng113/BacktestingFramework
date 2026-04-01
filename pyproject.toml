@@ -28,6 +28,7 @@ dev = [
 ]
 tushare = ["tushare>=1.4"]
 akshare = ["akshare>=1.14"]
+all = ["tushare>=1.4", "akshare>=1.14"]
 
 [tool.scikit-build]
 wheel.packages = ["ez"]

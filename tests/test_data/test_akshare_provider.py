@@ -5,7 +5,14 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
 
+try:
+    import akshare  # noqa: F401
+    HAS_AKSHARE = True
+except ImportError:
+    HAS_AKSHARE = False
 
+
+@pytest.mark.skipif(not HAS_AKSHARE, reason="akshare not installed")
 class TestAKShareProvider:
     def test_etf_prefix_detection(self):
         from ez.data.providers.akshare_provider import _ETF_PREFIXES
