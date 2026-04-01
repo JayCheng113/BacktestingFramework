@@ -658,7 +658,7 @@ export default function PortfolioPanel() {
                 setSearchLoading(true); setSearchResults([])
                 try {
                   const res = await portfolioSearch({
-                    strategy_name: selected, symbols: symbolList, market: 'cn_stock',
+                    strategy_name: selected, symbols: symbolList,
                     start_date: startDate, end_date: endDate, freq,
                     param_grid: paramGrid, max_combinations: 50,
                     buy_commission_rate: settings.buy_commission_rate, sell_commission_rate: settings.sell_commission_rate,
