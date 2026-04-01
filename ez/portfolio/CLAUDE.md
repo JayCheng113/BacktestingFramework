@@ -71,3 +71,4 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - V2.11.1: compute_raw() interface, neutralization, AlphaCombiner, parameter search, IC nanmean/nanstd, EP/BP/SP negative exclusion, PIT restatement fix, ann_date INDEX
 - V2.11.1 post-release: 会计assert改有意义(cash>=0+equity>0), WF不可达代码移除(test_end_idx>n_days), Bootstrap CI升级BCa(z0 clamp防±inf, jackknife加速)
 - V2.12: PortfolioOptimizer(MeanVariance/MinVariance/RiskParity, Ledoit-Wolf), RiskManager(drawdown+turnover), Brinson attribution(Carino几何链接), engine每日回撤+紧急减仓+期末强平, PortfolioStore归因数据持久化(rebalance_weights+trades)
+- V2.12.1: Gram-Schmidt因子正交化(orthogonalization.py), IndexDataProvider(AKShare成分+24h cache), Optimizer TE约束(benchmark_weights+max_tracking_error), batch kline query, weights完整历史端点, TypeScript types(0 as any)

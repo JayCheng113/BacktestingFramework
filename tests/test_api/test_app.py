@@ -13,7 +13,7 @@ def test_health_endpoint():
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["version"] == "0.2.12"
+    assert data["version"] == "0.2.12.1"
     assert "strategies_registered" in data
 
 
