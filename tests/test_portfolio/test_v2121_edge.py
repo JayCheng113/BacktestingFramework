@@ -38,6 +38,32 @@ class TestGramSchmidt:
         np.testing.assert_array_equal(orth, mat)
 
 
+class TestOptimizerTE:
+    def test_te_constraint_with_benchmark_weights(self):
+        """Optimizer should respect tracking error constraint."""
+        from ez.portfolio.optimizer import MeanVarianceOptimizer, OptimizationConstraints
+        symbols = [f"S{i}" for i in range(5)]
+        rng = np.random.default_rng(42)
+        dates_range = pd.date_range("2023-01-02", periods=100, freq="B")
+        data = {}
+        for i, sym in enumerate(symbols):
+            prices = 10 * np.cumprod(1 + rng.normal(0.001 * (i + 1), 0.01 * (i + 1), 100))
+            data[sym] = pd.DataFrame({"close": prices, "adj_close": prices, "volume": rng.integers(100000, 5000000, 100)}, index=dates_range)
+
+        benchmark_w = {f"S{i}": 0.2 for i in range(5)}
+        opt = MeanVarianceOptimizer(
+            risk_aversion=1.0,
+            constraints=OptimizationConstraints(max_weight=0.40),
+            cov_lookback=60,
+            benchmark_weights=benchmark_w,
+            max_tracking_error=0.05,
+        )
+        opt.set_context(date(2023, 7, 1), data)
+        result = opt.optimize({s: 0.2 for s in symbols})
+        assert all(w >= -1e-9 for w in result.values())
+        assert abs(sum(result.values()) - 1.0) < 1e-5
+
+
 class TestIndexData:
     def test_cache_prevents_repeated_calls(self):
         from ez.portfolio.index_data import IndexDataProvider

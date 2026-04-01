@@ -66,9 +66,13 @@ class PortfolioOptimizer(ABC):
     Unlike Allocator, receives date context via set_context() before each optimize().
     """
 
-    def __init__(self, constraints: OptimizationConstraints, cov_lookback: int = 60):
+    def __init__(self, constraints: OptimizationConstraints, cov_lookback: int = 60,
+                 benchmark_weights: dict[str, float] | None = None,
+                 max_tracking_error: float | None = None):
         self._constraints = constraints
         self._cov_lookback = cov_lookback
+        self._benchmark_weights = benchmark_weights  # V2.12.1: index enhancement
+        self._max_te = max_tracking_error
         self._current_date: date | None = None
         self._universe_data: dict[str, pd.DataFrame] | None = None
 
@@ -210,6 +214,16 @@ class MeanVarianceOptimizer(PortfolioOptimizer):
                 ),
             })
 
+        # V2.12.1: Tracking error constraint (active-universe approximation)
+        if self._benchmark_weights and self._max_te:
+            w_b = np.array([self._benchmark_weights.get(s, 0) for s in symbols])
+            cons.append({
+                "type": "ineq",
+                "fun": lambda w, wb=w_b: float(
+                    self._max_te ** 2 - (w - wb) @ sigma @ (w - wb)
+                ),
+            })
+
         bounds = [(0.0, max_w)] * n
         w0 = np.full(n, 1.0 / n)
         result = optimize.minimize(
@@ -241,6 +255,14 @@ class MinVarianceOptimizer(PortfolioOptimizer):
                 "type": "ineq",
                 "fun": lambda w, idx=idx_list: float(
                     self._constraints.max_industry_weight - sum(w[i] for i in idx)
+                ),
+            })
+        if self._benchmark_weights and self._max_te:
+            w_b = np.array([self._benchmark_weights.get(s, 0) for s in symbols])
+            cons.append({
+                "type": "ineq",
+                "fun": lambda w, wb=w_b: float(
+                    self._max_te ** 2 - (w - wb) @ sigma @ (w - wb)
                 ),
             })
 

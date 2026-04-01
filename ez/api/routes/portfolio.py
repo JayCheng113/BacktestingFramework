@@ -246,6 +246,9 @@ class PortfolioRunRequest(BaseModel):
     drawdown_reduce: float = Field(default=0.50, gt=0, le=1.0)
     drawdown_recovery: float = Field(default=0.10, gt=0, le=0.50)
     max_turnover: float = Field(default=0.50, gt=0, le=2.0)
+    # V2.12.1: Index enhancement
+    index_benchmark: str = Field(default="", pattern=r"^(|000300|000905|000852)$")
+    max_tracking_error: float = Field(default=0.05, gt=0, le=0.20)
 
 
 def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
@@ -444,7 +447,22 @@ def list_portfolio_strategies():
     return {"strategies": result, "available_factors": factor_list, "factor_categories": categories}
 
 
-def _compute_inline_attribution(result, universe_data, initial_cash):
+def _build_active_weights(result, index_weights):
+    """Build active weight deviation dict for index enhancement."""
+    if not index_weights:
+        return None
+    latest_w = result.rebalance_weights[-1] if result.rebalance_weights else {}
+    active = {}
+    for s in sorted(set(latest_w) | set(index_weights)):
+        pw = latest_w.get(s, 0)
+        bw = index_weights.get(s, 0)
+        if abs(pw - bw) > 1e-6:
+            active[s] = {"portfolio": round(pw, 6), "benchmark": round(bw, 6), "active": round(pw - bw, 6)}
+    return active if active else None
+
+
+def _compute_inline_attribution(result, universe_data, initial_cash,
+                                 benchmark_type="equal", custom_benchmark=None):
     """Compute Brinson attribution inline after a run. Returns dict or None."""
     try:
         from ez.portfolio.attribution import compute_attribution
@@ -456,7 +474,10 @@ def _compute_inline_attribution(result, universe_data, initial_cash):
                 industry_map = fstore.get_all_industries()
         except Exception:
             pass
-        attr = compute_attribution(result, universe_data, industry_map, initial_cash=initial_cash)
+        attr = compute_attribution(result, universe_data, industry_map,
+                                   initial_cash=initial_cash,
+                                   benchmark_type=benchmark_type,
+                                   custom_benchmark=custom_benchmark)
         if attr.cumulative is None:
             return None
         return {
@@ -515,6 +536,18 @@ def run_portfolio(req: PortfolioRunRequest):
         slippage_rate=req.slippage_rate,
     )
 
+    # V2.12.1: Index enhancement — fetch constituent weights
+    index_weights: dict[str, float] = {}
+    if req.index_benchmark:
+        try:
+            from ez.portfolio.index_data import IndexDataProvider
+            idx_provider = IndexDataProvider()
+            index_weights = idx_provider.get_weights(req.index_benchmark)
+            if not index_weights:
+                fund_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
+        except Exception as e:
+            fund_warnings.append(f"指数数据获取失败: {e}")
+
     # V2.12: Optimizer
     optimizer_instance = None
     if req.optimizer != "none":
@@ -537,11 +570,15 @@ def run_portfolio(req: PortfolioRunRequest):
             max_industry_weight=req.max_industry_weight,
             industry_map=industry_map,
         )
+        # V2.12.1: pass index weights + TE to optimizer
+        opt_extra = {}
+        if index_weights:
+            opt_extra = {"benchmark_weights": index_weights, "max_tracking_error": req.max_tracking_error}
         opt_map = {
             "mean_variance": lambda: MeanVarianceOptimizer(
-                risk_aversion=req.risk_aversion, constraints=constraints, cov_lookback=req.cov_lookback),
-            "min_variance": lambda: MinVarianceOptimizer(constraints=constraints, cov_lookback=req.cov_lookback),
-            "risk_parity": lambda: RiskParityOptimizer(constraints=constraints, cov_lookback=req.cov_lookback),
+                risk_aversion=req.risk_aversion, constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra),
+            "min_variance": lambda: MinVarianceOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra),
+            "risk_parity": lambda: RiskParityOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra),
         }
         optimizer_instance = opt_map[req.optimizer]()
 
@@ -624,7 +661,12 @@ def run_portfolio(req: PortfolioRunRequest):
         ] if result.weights_history else [],
         "warnings": fund_warnings if fund_warnings else None,
         "risk_events": result.risk_events if result.risk_events else None,
-        "attribution": _compute_inline_attribution(result, universe_data, req.initial_cash),
+        "attribution": _compute_inline_attribution(
+            result, universe_data, req.initial_cash,
+            benchmark_type="custom" if index_weights else "equal",
+            custom_benchmark=index_weights or None,
+        ),
+        "active_weights": _build_active_weights(result, index_weights),
     }
 
 
@@ -861,6 +903,15 @@ def get_portfolio_run(run_id: str):
     if not run:
         raise HTTPException(404, f"Run '{run_id}' not found")
     return run
+
+
+@router.get("/runs/{run_id}/weights")
+def get_run_weights(run_id: str):
+    """Return full rebalance_weights for a run (V2.12.1 S3)."""
+    run = _get_store().get_run(run_id)
+    if not run:
+        raise HTTPException(404, f"Run '{run_id}' not found")
+    return {"rebalance_weights": run.get("rebalance_weights", [])}
 
 
 @router.delete("/runs/{run_id}")
