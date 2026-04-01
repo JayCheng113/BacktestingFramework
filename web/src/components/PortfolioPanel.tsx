@@ -97,6 +97,19 @@ export default function PortfolioPanel() {
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
+  // V2.12: Optimizer + Risk Control
+  const [optimizer, setOptimizer] = useState('none')
+  const [riskAversion, setRiskAversion] = useState(1.0)
+  const [maxWeight, setMaxWeight] = useState(10)
+  const [maxIndustryWeight, setMaxIndustryWeight] = useState(30)
+  const [covLookback, setCovLookback] = useState(60)
+  const [riskControl, setRiskControl] = useState(false)
+  const [maxDrawdown, setMaxDrawdown] = useState(20)
+  const [drawdownReduce, setDrawdownReduce] = useState(50)
+  const [maxTurnover, setMaxTurnover] = useState(50)
+  const [showOptimizer, setShowOptimizer] = useState(false)
+  const [showRiskControl, setShowRiskControl] = useState(false)
+  const [showAttribution, setShowAttribution] = useState(false)
   // Parameter search state — dynamic from schema
   const [searchMode, setSearchMode] = useState(false)
   const [searchGrid, setSearchGrid] = useState<Record<string, string>>({})  // key → comma-separated values
@@ -253,6 +266,16 @@ export default function PortfolioPanel() {
         lot_size: settings.lot_size,
         limit_pct: settings.limit_pct,
         benchmark_symbol: settings.benchmark,
+        // V2.12: Optimizer + Risk
+        optimizer,
+        risk_aversion: riskAversion,
+        max_weight: maxWeight / 100,
+        max_industry_weight: maxIndustryWeight / 100,
+        cov_lookback: covLookback,
+        risk_control: riskControl,
+        max_drawdown: maxDrawdown / 100,
+        drawdown_reduce: drawdownReduce / 100,
+        max_turnover: maxTurnover / 100,
       })
       setResult(res.data)
       loadHistory()
@@ -537,7 +560,65 @@ export default function PortfolioPanel() {
               </div>
               <textarea value={symbols} onChange={e => setSymbols(e.target.value)} rows={2} className="w-full px-3 py-1.5 rounded text-sm font-mono" style={inputStyle} />
             </div>
-            <div className="flex gap-2 flex-wrap">
+            {/* V2.12: Optimizer Panel */}
+            <div className="border rounded mt-2" style={{ borderColor: 'var(--border)' }}>
+              <button onClick={() => setShowOptimizer(!showOptimizer)} className="w-full text-left px-3 py-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {showOptimizer ? '▼' : '▶'} 组合优化
+              </button>
+              {showOptimizer && (
+                <div className="px-3 pb-3 space-y-2">
+                  <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>优化方法
+                    <select value={optimizer} onChange={e => setOptimizer(e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle}>
+                      <option value="none">不优化</option>
+                      <option value="mean_variance">均值-方差</option>
+                      <option value="min_variance">最小方差</option>
+                      <option value="risk_parity">风险平价</option>
+                    </select>
+                  </label>
+                  {optimizer === 'mean_variance' && (
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>风险厌恶系数 λ
+                      <input type="number" step="0.1" value={riskAversion} onChange={e => setRiskAversion(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                  )}
+                  {optimizer !== 'none' && (<>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>协方差回看期 (天)
+                      <input type="number" value={covLookback} onChange={e => setCovLookback(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>单股上限 (%)
+                      <input type="number" step="1" value={maxWeight} onChange={e => setMaxWeight(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>行业上限 (%)
+                      <input type="number" step="5" value={maxIndustryWeight} onChange={e => setMaxIndustryWeight(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                  </>)}
+                </div>
+              )}
+            </div>
+            {/* V2.12: Risk Control Panel */}
+            <div className="border rounded mt-2" style={{ borderColor: 'var(--border)' }}>
+              <button onClick={() => setShowRiskControl(!showRiskControl)} className="w-full text-left px-3 py-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {showRiskControl ? '▼' : '▶'} 风险控制
+              </button>
+              {showRiskControl && (
+                <div className="px-3 pb-3 space-y-2">
+                  <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    <input type="checkbox" checked={riskControl} onChange={e => setRiskControl(e.target.checked)} /> 启用风控
+                  </label>
+                  {riskControl && (<>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>最大回撤阈值 (%)
+                      <input type="number" step="5" value={maxDrawdown} onChange={e => setMaxDrawdown(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>回撤减仓比例 (%)
+                      <input type="number" step="10" value={drawdownReduce} onChange={e => setDrawdownReduce(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>换手率上限 (%)
+                      <input type="number" step="10" value={maxTurnover} onChange={e => setMaxTurnover(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                  </>)}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 flex-wrap mt-2">
               <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
                 {loading ? '运行中...' : '运行组合回测'}
               </button>
@@ -756,6 +837,48 @@ export default function PortfolioPanel() {
                       ],
                     }],
                   }} style={{ height: 250 }} />
+                </div>
+              )}
+              {/* V2.12: Attribution */}
+              {(result as any).attribution?.cumulative && (
+                <div className="border rounded mt-3" style={{ borderColor: 'var(--border)' }}>
+                  <button onClick={() => setShowAttribution(!showAttribution)} className="w-full text-left px-3 py-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    {showAttribution ? '▼' : '▶'} 归因分析
+                  </button>
+                  {showAttribution && (
+                    <div className="px-3 pb-3 text-sm space-y-1">
+                      {[
+                        ['配置效应', (result as any).attribution.cumulative.allocation],
+                        ['选股效应', (result as any).attribution.cumulative.selection],
+                        ['交互效应', (result as any).attribution.cumulative.interaction],
+                        ['交易成本', -(result as any).attribution.cost_drag],
+                      ].map(([label, val]) => (
+                        <div key={label as string} className="flex justify-between">
+                          <span style={{ color: 'var(--text-secondary)' }}>{label as string}</span>
+                          <span style={{ color: (val as number) >= 0 ? '#f85149' : '#3fb950' }}>
+                            {((val as number) * 100).toFixed(2)}%
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-medium pt-1 mt-1" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span>累计超额</span>
+                        <span>{((result as any).attribution.cumulative.total_excess * 100).toFixed(2)}%</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* V2.12: Risk Events */}
+              {(result as any).risk_events?.length > 0 && (
+                <div className="border rounded mt-3" style={{ borderColor: '#d29922' }}>
+                  <div className="px-3 py-1.5 text-sm" style={{ color: '#d29922' }}>
+                    风控事件 ({(result as any).risk_events.length})
+                  </div>
+                  <div className="px-3 pb-3 text-xs max-h-40 overflow-y-auto" style={{ color: 'var(--text-secondary)' }}>
+                    {(result as any).risk_events.map((e: any, i: number) => (
+                      <div key={i} className="py-0.5">{e.date}  {e.event}</div>
+                    ))}
+                  </div>
                 </div>
               )}
               {/* 持仓变动表 */}
