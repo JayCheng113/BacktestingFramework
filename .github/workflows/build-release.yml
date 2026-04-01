@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           pip install pyinstaller scikit-build-core nanobind
-          pip install -e ".[dev]" --no-build-isolation
+          pip install -e ".[dev,all]" --no-build-isolation
 
       - name: Run tests before build
         shell: bash
@@ -60,6 +60,9 @@ jobs:
             --add-data "web/dist${SEP}web/dist" \
             --add-data "configs${SEP}configs" \
             --add-data "strategies${SEP}strategies" \
+            --add-data "portfolio_strategies${SEP}portfolio_strategies" \
+            --add-data "cross_factors${SEP}cross_factors" \
+            --add-data "factors${SEP}factors" \
             --hidden-import "ez.api.app" \
             --hidden-import "ez.api.routes.market_data" \
             --hidden-import "ez.api.routes.backtest" \
@@ -79,6 +82,16 @@ jobs:
             --hidden-import "ez.data.providers.tushare_provider" \
             --hidden-import "ez.data.providers.tencent_provider" \
             --hidden-import "ez.data.providers.fmp_provider" \
+            --hidden-import "ez.data.providers.akshare_provider" \
+            --hidden-import "ez.data.fundamental" \
+            --collect-submodules "ez.portfolio" \
+            --collect-submodules "ez.agent" \
+            --collect-submodules "ez.llm" \
+            --collect-submodules "ez.core" \
+            --collect-submodules "ez.data" \
+            --collect-submodules "ez.factor" \
+            --collect-submodules "ez.strategy" \
+            --collect-submodules "ez.api" \
             --hidden-import "uvicorn.logging" \
             --hidden-import "uvicorn.loops.auto" \
             --hidden-import "uvicorn.protocols.http.auto" \
@@ -86,6 +99,7 @@ jobs:
             --hidden-import "uvicorn.lifespan.on" \
             --collect-submodules "uvicorn" \
             --collect-submodules "duckdb" \
+            --collect-submodules "scipy" \
             launcher.py
         shell: bash
 
