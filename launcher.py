@@ -18,13 +18,14 @@ else:
     os.chdir(os.environ['EZ_ROOT'])
 env_file = os.path.join(exe_dir, '.env')
 if os.path.exists(env_file):
-    for line in open(env_file):
-        line = line.strip()
-        if line and not line.startswith('#') and '=' in line:
-            k, _, v = line.partition('=')
-            k, v = k.strip(), v.strip().strip('"').strip("'")
-            if k and k not in os.environ:
-                os.environ[k] = v
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                k, _, v = line.partition('=')
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
 
 # Ensure data directory exists (next to exe)
 data_dir = os.path.join(exe_dir, 'data')

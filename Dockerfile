@@ -21,14 +21,16 @@ WORKDIR /app
 
 # Install all Python dependencies (including optional akshare/tushare)
 COPY pyproject.toml ./
+# Required dependencies (fail build if missing)
 RUN pip install --no-cache-dir \
     "fastapi>=0.115" "uvicorn[standard]>=0.30" "duckdb>=1.0" \
     "pandas>=2.2" "numpy>=2.0" "httpx>=0.27" "pyyaml>=6.0" \
-    "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14" \
-    "akshare>=1.14" "tushare>=1.4" 2>/dev/null || true
+    "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14"
+# Optional data sources (ok if unavailable)
+RUN pip install --no-cache-dir "akshare>=1.14" "tushare>=1.4" 2>/dev/null || true
 
-# Copy C++ extensions from builder (if built)
-COPY --from=builder /app/ez/core/*.so /app/ez/core/ 2>/dev/null || true
+# Copy C++ extensions from builder (directory always exists; .so may be absent)
+COPY --from=builder /app/ez/core/ /app/ez/core/
 
 # Copy source code (all modules)
 COPY ez/ ./ez/

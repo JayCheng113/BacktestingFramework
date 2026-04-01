@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -17,14 +18,21 @@ from ez.config import get_project_root
 _PROJECT_ROOT = get_project_root()
 
 
+def _user_root() -> Path:
+    """In frozen mode, user dirs are next to exe (not inside _MEIPASS)."""
+    if getattr(sys, "frozen", False) and os.environ.get("EZ_DATA_DIR"):
+        return Path(os.environ["EZ_DATA_DIR"]).parent
+    return _PROJECT_ROOT
+
+
 def load_portfolio_strategies() -> None:
     """Import all portfolio strategy modules from portfolio_strategies/."""
-    _scan_dir(_PROJECT_ROOT / "portfolio_strategies", "portfolio_strategies")
+    _scan_dir(_user_root() / "portfolio_strategies", "portfolio_strategies")
 
 
 def load_cross_factors() -> None:
     """Import all cross factor modules from cross_factors/."""
-    _scan_dir(_PROJECT_ROOT / "cross_factors", "cross_factors")
+    _scan_dir(_user_root() / "cross_factors", "cross_factors")
 
 
 def _scan_dir(path: Path, module_base: str) -> None:

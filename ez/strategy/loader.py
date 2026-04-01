@@ -98,8 +98,11 @@ def load_all_strategies() -> None:
 
 def load_user_factors() -> None:
     """Import all factor modules from factors/ directory (user-created)."""
-    import sys
-    factors_dir = _PROJECT_ROOT / "factors"
+    # In frozen mode, user factors are next to exe
+    if getattr(sys, "frozen", False) and os.environ.get("EZ_DATA_DIR"):
+        factors_dir = Path(os.environ["EZ_DATA_DIR"]).parent / "factors"
+    else:
+        factors_dir = _PROJECT_ROOT / "factors"
     if not factors_dir.exists():
         return
     for py_file in sorted(factors_dir.glob("*.py")):

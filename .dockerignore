@@ -6,7 +6,7 @@ __pycache__
 data/*.db
 data/*.db.wal
 web/node_modules
-docs/superpowers
+docs
 tests
 .pytest_cache
 .claude
