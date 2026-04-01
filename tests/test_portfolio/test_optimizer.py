@@ -108,6 +108,42 @@ class TestMeanVarianceOptimizer:
         opt = MeanVarianceOptimizer(constraints=OptimizationConstraints(max_weight=1.0))
         assert opt.optimize({"A": 1.0}) == {"A": 1.0}
 
+    def test_industry_constraint_respected(self):
+        """Industry weight sum must not exceed max_industry_weight."""
+        from ez.portfolio.optimizer import MeanVarianceOptimizer, OptimizationConstraints
+        from datetime import date
+        # 3 industries × 3 stocks each = 9 stocks. Industry limit 40% (feasible: 3×40%=120% > 100%)
+        symbols = [f"S{i}" for i in range(9)]
+        data = _make_opt_data(symbols, seed=42)
+        industry_map = {}
+        for i in range(3):
+            industry_map[f"S{i}"] = "银行"
+        for i in range(3, 6):
+            industry_map[f"S{i}"] = "食品饮料"
+        for i in range(6, 9):
+            industry_map[f"S{i}"] = "医药"
+        opt = MeanVarianceOptimizer(
+            risk_aversion=0.5,
+            constraints=OptimizationConstraints(max_weight=0.20, max_industry_weight=0.40,
+                                                industry_map=industry_map),
+            cov_lookback=60,
+        )
+        opt.set_context(date(2023, 7, 1), data)
+        result = opt.optimize({s: 1.0 for s in symbols})
+        bank_total = sum(result.get(f"S{i}", 0) for i in range(3))
+        food_total = sum(result.get(f"S{i}", 0) for i in range(3, 6))
+        med_total = sum(result.get(f"S{i}", 0) for i in range(6, 9))
+        assert bank_total <= 0.40 + 1e-3, f"银行 {bank_total:.3f} > 40%"
+        assert food_total <= 0.40 + 1e-3, f"食品饮料 {food_total:.3f} > 40%"
+        assert med_total <= 0.40 + 1e-3, f"医药 {med_total:.3f} > 40%"
+
+    def test_single_stock_respects_max_weight(self):
+        """Single stock still capped at max_weight — rest is cash."""
+        from ez.portfolio.optimizer import MeanVarianceOptimizer, OptimizationConstraints
+        opt = MeanVarianceOptimizer(constraints=OptimizationConstraints(max_weight=0.10))
+        result = opt.optimize({"A": 1.0})
+        assert result == {"A": 0.10}
+
 
 class TestMinVarianceOptimizer:
     def test_long_only_sum_one(self):

@@ -176,6 +176,8 @@ def run_portfolio_backtest(
                 result.risk_events.append({"date": day.isoformat(), "event": dd_event})
             # Bug3 fix: only emergency sell on FIRST breach (dd_event contains "减仓"),
             # not every day while breached. Subsequent days dd_event is None.
+            # On rebalance days, emergency sell is skipped — the drawdown scale is
+            # applied to weights instead (line ~240), avoiding double cost.
             if dd_event and "减仓" in dd_event and day not in rebal_dates:
                 # Emergency sell: reduce all positions proportionally
                 for sym in list(holdings.keys()):

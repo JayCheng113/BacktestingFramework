@@ -244,6 +244,7 @@ class PortfolioRunRequest(BaseModel):
     risk_control: bool = False
     max_drawdown: float = Field(default=0.20, gt=0, le=0.50)
     drawdown_reduce: float = Field(default=0.50, gt=0, le=1.0)
+    drawdown_recovery: float = Field(default=0.10, gt=0, le=0.50)
     max_turnover: float = Field(default=0.50, gt=0, le=2.0)
 
 
@@ -551,6 +552,7 @@ def run_portfolio(req: PortfolioRunRequest):
         risk_mgr = RiskManager(RiskConfig(
             max_drawdown_threshold=req.max_drawdown,
             drawdown_reduce_ratio=req.drawdown_reduce,
+            drawdown_recovery_ratio=req.drawdown_recovery,
             max_turnover=req.max_turnover,
         ))
 

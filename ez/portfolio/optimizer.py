@@ -85,6 +85,8 @@ class PortfolioOptimizer(ABC):
         if len(symbols) == 0:
             return {}
         if len(symbols) == 1:
+            # Single stock: still respect max_weight (consistency with multi-stock behavior).
+            # If max_weight=0.10, single stock gets 10%, rest is cash.
             s = symbols[0]
             return {s: min(1.0, self._constraints.max_weight)}
 
