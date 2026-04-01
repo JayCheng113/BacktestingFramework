@@ -532,6 +532,8 @@ def run_portfolio(req: PortfolioRunRequest):
                 industry_map = fstore.get_all_industries()
         except Exception:
             pass
+        if not industry_map and req.max_industry_weight < 1.0:
+            fund_warnings.append("无行业分类数据，行业约束不生效。请先获取基本面数据。")
         constraints = OptimizationConstraints(
             max_weight=req.max_weight,
             max_industry_weight=req.max_industry_weight,
@@ -548,6 +550,8 @@ def run_portfolio(req: PortfolioRunRequest):
     # V2.12: Risk control
     risk_mgr = None
     if req.risk_control:
+        if req.drawdown_recovery >= req.max_drawdown:
+            raise HTTPException(422, f"drawdown_recovery({req.drawdown_recovery}) must be < max_drawdown({req.max_drawdown})")
         from ez.portfolio.risk_manager import RiskManager, RiskConfig
         risk_mgr = RiskManager(RiskConfig(
             max_drawdown_threshold=req.max_drawdown,

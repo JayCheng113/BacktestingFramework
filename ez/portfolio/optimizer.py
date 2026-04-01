@@ -5,6 +5,7 @@ Uses Ledoit-Wolf shrinkage covariance (numpy, no sklearn dependency).
 """
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
@@ -12,6 +13,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 from scipy import optimize
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,7 +104,8 @@ class PortfolioOptimizer(ABC):
 
         try:
             w = self._optimize(alpha, sigma, symbols)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Optimization failed (%s), falling back to equal weight", exc)
             return self._fallback(symbols)
 
         return self._apply_constraints(dict(zip(symbols, w)))

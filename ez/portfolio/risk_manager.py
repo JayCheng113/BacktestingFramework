@@ -61,10 +61,10 @@ class RiskManager:
         where alpha = min(1, max_turnover / actual_turnover)
         """
         all_syms = set(new_weights) | set(prev_weights)
-        actual_turnover = sum(
-            abs(new_weights.get(s, 0) - prev_weights.get(s, 0))
-            for s in all_syms
-        )
+        # Single-sided turnover: max(total buys, total sells) as fraction of portfolio
+        buy_side = sum(max(0, new_weights.get(s, 0) - prev_weights.get(s, 0)) for s in all_syms)
+        sell_side = sum(max(0, prev_weights.get(s, 0) - new_weights.get(s, 0)) for s in all_syms)
+        actual_turnover = max(buy_side, sell_side)
         if actual_turnover <= self._config.max_turnover:
             return new_weights, None
 
