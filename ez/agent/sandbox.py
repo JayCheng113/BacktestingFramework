@@ -17,17 +17,51 @@ import logging
 import re
 import threading
 import subprocess
+import os
 import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_STRATEGIES_DIR = _PROJECT_ROOT / "strategies"
-_PORTFOLIO_STRATEGIES_DIR = _PROJECT_ROOT / "portfolio_strategies"
-_CROSS_FACTORS_DIR = _PROJECT_ROOT / "cross_factors"
+from ez.config import get_project_root
+_PROJECT_ROOT = get_project_root()
 
-_FACTORS_DIR = _PROJECT_ROOT / "factors"
+# In frozen mode, user dirs are next to exe, not inside _MEIPASS
+def _user_dir_root() -> Path:
+    if getattr(sys, "frozen", False) and os.environ.get("EZ_DATA_DIR"):
+        return Path(os.environ["EZ_DATA_DIR"]).parent
+    return _PROJECT_ROOT
+
+_STRATEGIES_DIR = _user_dir_root() / "strategies"
+_PORTFOLIO_STRATEGIES_DIR = _user_dir_root() / "portfolio_strategies"
+_CROSS_FACTORS_DIR = _user_dir_root() / "cross_factors"
+
+_FACTORS_DIR = _user_dir_root() / "factors"
+
+
+def _get_python_executable() -> str:
+    """Get the real Python interpreter, not the frozen launcher.
+
+    In frozen mode (PyInstaller), sys.executable is the launcher exe.
+    We need the bundled Python to run subprocesses correctly.
+    """
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    # PyInstaller bundles Python in _internal/ (onedir) or alongside exe
+    base = Path(sys._MEIPASS)
+    # Windows: python.exe or python3.exe in base
+    for name in ("python.exe", "python3.exe", "python"):
+        candidate = base / name
+        if candidate.exists():
+            return str(candidate)
+    # Fallback: try system Python
+    import shutil
+    py = shutil.which("python3") or shutil.which("python")
+    if py:
+        return py
+    # Last resort: use sys.executable (will re-launch app but at least won't crash)
+    logger.warning("Cannot find Python interpreter in frozen mode, using sys.executable")
+    return sys.executable
 
 _KIND_DIR_MAP = {
     "strategy": _STRATEGIES_DIR,
@@ -452,14 +486,14 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
     """
     # Check if pytest is available
     check = subprocess.run(
-        [sys.executable, "-c", "import pytest"],
+        [_get_python_executable(), "-c", "import pytest"],
         capture_output=True, timeout=5,
     )
     if check.returncode != 0:
         # Fallback: try to import the file and verify it defines a Strategy subclass
         logger.warning("pytest not installed — running import-only validation")
         verify = subprocess.run(
-            [sys.executable, "-c",
+            [_get_python_executable(), "-c",
              f"import importlib.util, sys; "
              f"spec=importlib.util.spec_from_file_location('_check','{_STRATEGIES_DIR / filename}'); "
              f"mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
@@ -475,7 +509,7 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
     try:
         result = subprocess.run(
             [
-                sys.executable, "-m", "pytest",
+                _get_python_executable(), "-m", "pytest",
                 "tests/test_strategy/test_strategy_contract.py",
                 "-v", "--tb=short", "-x",
             ],
@@ -554,7 +588,7 @@ def save_and_validate_code(
                 f"print(','.join(classes))\n"
             )
             import subprocess as _sp_mod
-            proc = _sp_mod.run([sys.executable, "-c", test_code], capture_output=True, text=True, timeout=10)
+            proc = _sp_mod.run([_get_python_executable(), "-c", test_code], capture_output=True, text=True, timeout=10)
             if proc.returncode != 0:
                 raise ValueError(f"Import failed: {proc.stderr[-200:]}")
             # Register via AST class name extraction ONLY (no exec_module in main process)
@@ -685,7 +719,7 @@ print(f'OK: {{cls.__name__}} scores={{result.to_dict()}}')
 """
     try:
         result = subprocess.run(
-            [sys.executable, "-c", test_code],
+            [_get_python_executable(), "-c", test_code],
             capture_output=True, text=True, timeout=30, cwd=str(_PROJECT_ROOT),
         )
         return {"passed": result.returncode == 0,
