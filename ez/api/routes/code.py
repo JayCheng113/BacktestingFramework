@@ -245,13 +245,13 @@ def cleanup_research_strategies():
     for f in sorted(strategies_dir.glob("research_*.py")):
         stem = f.stem
         module_name = f"strategies.{stem}"
-        f.unlink()
-        # Clean registry
+        # Clean registry FIRST, then delete file
         old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
         for k in old_keys:
             del Strategy._registry[k]
         if module_name in sys.modules:
             del sys.modules[module_name]
+        f.unlink()
         deleted.append(f.name)
 
     return {"deleted": deleted, "count": len(deleted)}

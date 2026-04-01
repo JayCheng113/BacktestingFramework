@@ -403,7 +403,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
             return (
               <div key={kind} className="mb-2">
                 <div className="text-xs font-medium px-2 py-1 flex items-center justify-between" style={{ color }}>
-                  <span>{label} ({total})</span>
+                  <span>{label} ({total} 已注册)</span>
                 </div>
                 {/* Builtin items (collapsed) */}
                 {reg.builtin.length > 0 && (
