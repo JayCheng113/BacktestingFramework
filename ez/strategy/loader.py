@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+import sys
 from pathlib import Path
 
 from ez.config import load_config
@@ -63,6 +64,7 @@ def load_all_strategies() -> None:
                     spec = importlib.util.spec_from_file_location(module_name, py_file)
                     if spec and spec.loader:
                         mod = importlib.util.module_from_spec(spec)
+                        sys.modules[module_name] = mod  # register before exec to prevent double-import
                         spec.loader.exec_module(mod)
                         logger.debug("Loaded user strategy: %s", py_file.name)
                 except Exception as e:
