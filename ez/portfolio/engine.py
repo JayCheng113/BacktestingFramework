@@ -169,11 +169,14 @@ def run_portfolio_backtest(
         equity = cash + position_value
 
         # V2.12: Daily drawdown check (every trading day, not just rebalance)
+        dd_scale = 1.0  # default: no drawdown scaling
         if risk_manager:
             dd_scale, dd_event = risk_manager.check_drawdown(equity)
             if dd_event:
                 result.risk_events.append({"date": day.isoformat(), "event": dd_event})
-            if dd_scale < 1.0 and day not in rebal_dates:
+            # Bug3 fix: only emergency sell on FIRST breach (dd_event contains "减仓"),
+            # not every day while breached. Subsequent days dd_event is None.
+            if dd_event and "减仓" in dd_event and day not in rebal_dates:
                 # Emergency sell: reduce all positions proportionally
                 for sym in list(holdings.keys()):
                     target = _lot_round(holdings[sym] * dd_scale, lot_size)
@@ -182,6 +185,11 @@ def run_portfolio_backtest(
                         continue
                     if sym not in has_bar_today:
                         continue
+                    # Bug4 fix: check limit down before emergency sell (same as normal sell)
+                    if limit_pct > 0 and sym in raw_close_today and sym in prev_raw_close:
+                        change = (raw_close_today[sym] - prev_raw_close[sym]) / prev_raw_close[sym] if prev_raw_close[sym] > 0 else 0
+                        if change <= -limit_pct + 1e-6:
+                            continue  # 跌停不可卖
                     sell_price = prices[sym] * (1 - cost_model.slippage_rate)
                     sell_amount = abs(delta) * sell_price
                     comm = _compute_commission(sell_amount, cost_model.sell_commission_rate, cost_model.min_commission)
@@ -226,6 +234,11 @@ def run_portfolio_backtest(
                 raw_weights, to_event = risk_manager.check_turnover(raw_weights, prev_weights)
                 if to_event:
                     result.risk_events.append({"date": day.isoformat(), "event": to_event})
+
+            # Bug6 fix: on rebalance day, also apply drawdown scale to weights
+            # (dd_scale computed earlier in daily drawdown check)
+            if dd_scale < 1.0:
+                raw_weights = {s: w * dd_scale for s, w in raw_weights.items()}
 
             # Clip to long-only, normalize if needed
             weights = {k: max(0.0, v) for k, v in raw_weights.items() if v > 0}
