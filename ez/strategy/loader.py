@@ -6,7 +6,9 @@ Resolves relative paths against the project root (where pyproject.toml lives).
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
+import os
 import pkgutil
 import sys
 from pathlib import Path
@@ -15,22 +17,45 @@ from ez.config import load_config
 
 logger = logging.getLogger(__name__)
 
-# Project root = parent of ez/ package
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+# Project root: use get_project_root() for frozen-mode compatibility
+from ez.config import get_project_root
+_PROJECT_ROOT = get_project_root()
+
+
+def _load_py_files(directory: Path, module_prefix: str) -> None:
+    """Load all .py files from a directory via importlib (works in frozen mode)."""
+    if not directory.exists():
+        return
+    for py_file in sorted(directory.glob("*.py")):
+        if py_file.name.startswith("_"):
+            continue
+        module_name = f"{module_prefix}.{py_file.stem}"
+        if module_name in sys.modules:
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+                logger.debug("Loaded user module: %s", py_file.name)
+        except Exception as e:
+            logger.warning("Failed to load %s: %s", py_file, e)
 
 
 def load_all_strategies() -> None:
     """Import all strategy modules from configured scan directories."""
-    import sys
     if getattr(sys, 'frozen', False):
-        # PyInstaller frozen mode: hidden-imports are already bundled, just import them
+        # PyInstaller frozen mode: load builtins + user strategies
         try:
             import ez.strategy.builtin.ma_cross  # noqa: F401
             import ez.strategy.builtin.momentum  # noqa: F401
             import ez.strategy.builtin.boll_reversion  # noqa: F401
-            logger.debug("Loaded frozen strategies: ma_cross, momentum, boll_reversion")
         except ImportError as e:
-            logger.warning("Failed to load frozen strategy: %s", e)
+            logger.warning("Failed to load frozen builtin strategy: %s", e)
+        # Also load user strategies from strategies/ dir next to exe
+        exe_dir = Path(os.environ.get("EZ_DATA_DIR", "")).parent if os.environ.get("EZ_DATA_DIR") else _PROJECT_ROOT
+        _load_py_files(exe_dir / "strategies", "strategies")
         return
 
     config = load_config()

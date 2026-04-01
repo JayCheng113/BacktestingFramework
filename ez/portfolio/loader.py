@@ -13,7 +13,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+from ez.config import get_project_root
+_PROJECT_ROOT = get_project_root()
 
 
 def load_portfolio_strategies() -> None:

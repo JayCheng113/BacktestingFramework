@@ -88,7 +88,17 @@ def _load_dotenv(env_path: str = ".env") -> None:
             os.environ[key] = value
 
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def get_project_root() -> Path:
+    """Project root: respects EZ_ROOT env (frozen builds), else derives from file path."""
+    import sys
+    env_root = os.environ.get("EZ_ROOT")
+    if env_root:
+        return Path(env_root)
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent.parent
+
+_PROJECT_ROOT = get_project_root()
 
 
 def load_config(config_path: str = "configs/default.yaml") -> EzConfig:
