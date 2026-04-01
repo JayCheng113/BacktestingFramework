@@ -315,7 +315,7 @@ class MyStrategy(Strategy):  # 继承即注册
             <tr><td style={{...tds, fontWeight:600}}>系统内置</td><td style={tds}>折叠显示，只读不可删。包含 MA交叉、RSI、TopNRotation、EP/ROE 等。</td></tr>
             <tr><td style={{...tds, fontWeight:600}}>用户自定义</td><td style={tds}>可编辑、可删除。删除同时从注册表清理。</td></tr>
             <tr><td style={{...tds, fontWeight:600}}>刷新</td><td style={tds}>重新扫描用户目录并重新注册（手动放文件后使用）。</td></tr>
-            <tr><td style={{...tds, fontWeight:600}}>清理研究</td><td style={tds}>一键删除所有 research_* 开头的策略文件（研究助手生成的临时策略）。已注册到全局的不受影响。</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>清理研究</td><td style={tds}>一键删除所有 research_* 开头的策略文件及其注册。通过"注册到全局"复制出去的副本不受影响。</td></tr>
           </tbody></table>
 
           <div style={h2s}>Contract Test 检查项</div>

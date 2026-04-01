@@ -310,11 +310,17 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
     try {
       const res = await api(`/files/${fname}?kind=${kind}`, { method: 'DELETE' })
       if (res.ok) {
+        const data = await res.json()
         loadAllFiles()
         if (fname === filename) { setCode(''); setFilename('') }
-        setStatus(`已删除 ${fname}`)
+        setStatus(data.warning ? `已删除 ${fname}（${data.warning}）` : `已删除 ${fname}`)
+      } else {
+        const err = await res.json().catch(() => ({ detail: '未知错误' }))
+        setStatus(`删除失败: ${err.detail || res.statusText}`)
       }
-    } catch {}
+    } catch (e: any) {
+      setStatus(`删除失败: ${e?.message || '网络错误'}`)
+    }
   }
 
   // Sidebar file item renderer
@@ -374,7 +380,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
             }} className="text-xs px-2 py-0.5 rounded flex-1" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               title="重新扫描用户目录并刷新注册表">刷新</button>
             <button onClick={async () => {
-              if (!confirm('删除所有 research_* 开头的策略文件？已注册到全局的不受影响。')) return
+              if (!confirm('删除所有 research_* 开头的策略文件及其注册？\n（已通过"注册到全局"复制出去的副本不受影响）')) return
               try {
                 const res = await api('/cleanup-research-strategies', { method: 'DELETE' })
                 if (res.ok) { const d = await res.json(); setStatus(`清理了 ${d.count} 个研究策略`); await loadAllFiles() }

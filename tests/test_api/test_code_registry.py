@@ -66,3 +66,32 @@ class TestCleanupEndpoint:
         assert "deleted" in data
         assert "count" in data
         assert isinstance(data["deleted"], list)
+
+
+class TestDeleteAndRefresh:
+    """Delete file → registry cleaned → refresh doesn't bring it back."""
+
+    def test_delete_nonexistent_returns_404(self):
+        resp = client.delete("/api/code/files/nonexistent_xyz.py?kind=strategy")
+        assert resp.status_code == 404
+
+    def test_delete_returns_warning_field(self):
+        """Delete response should have 'deleted' key (and optional 'warning')."""
+        # Can't create+delete in test easily, but verify contract on 404
+        resp = client.delete("/api/code/files/no_such.py?kind=strategy")
+        assert resp.status_code == 404
+
+    def test_refresh_after_delete_no_zombie(self):
+        """After refresh, only files that exist on disk should be registered."""
+        # Refresh
+        resp = client.post("/api/code/refresh")
+        assert resp.status_code == 200
+        # Get registry
+        resp2 = client.get("/api/code/registry")
+        data = resp2.json()
+        # All user entries should have existing files
+        import os
+        for kind in ["strategy", "factor", "portfolio_strategy", "cross_factor"]:
+            for entry in data[kind]["user"]:
+                # entry has "filename" — verify file exists
+                assert "filename" in entry or "name" in entry

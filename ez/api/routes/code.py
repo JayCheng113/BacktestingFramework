@@ -19,6 +19,23 @@ from ez.agent.sandbox import (
 )
 
 
+def _get_registry_for_kind(kind: str) -> dict | None:
+    """Get the _registry dict for a given kind."""
+    if kind == "strategy":
+        from ez.strategy.base import Strategy
+        return Strategy._registry
+    elif kind == "factor":
+        from ez.factor.base import Factor
+        return Factor._registry
+    elif kind == "portfolio_strategy":
+        from ez.portfolio.portfolio_strategy import PortfolioStrategy
+        return PortfolioStrategy._registry
+    elif kind == "cross_factor":
+        from ez.portfolio.cross_factor import CrossSectionalFactor
+        return CrossSectionalFactor._registry
+    return None
+
+
 def _validate_kind(kind: str) -> None:
     if kind not in _VALID_KINDS:
         raise HTTPException(status_code=422, detail=f"Invalid kind: {kind}. Must be one of: {sorted(_VALID_KINDS)}")
@@ -98,7 +115,11 @@ def read_file(filename: str, kind: str = Query(default="strategy")):
 
 @router.delete("/files/{filename}")
 def delete_file(filename: str, kind: str = Query(default="strategy")):
-    """Delete a code file and unregister from registry."""
+    """Delete a code file and unregister from registry.
+
+    Order: clean registry FIRST, then delete file. If registry cleanup fails,
+    file is still deleted but warning is returned (no zombie state).
+    """
     _validate_kind(kind)
     safe_name = _safe_filename(filename)
     if not safe_name:
@@ -107,37 +128,30 @@ def delete_file(filename: str, kind: str = Query(default="strategy")):
     target = target_dir / safe_name
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-    target.unlink()
-    # Clean up registry based on kind
+
+    # Step 1: Clean registry BEFORE deleting file (prevents zombie state)
+    import sys
+    cleanup_warning = ""
+    stem = safe_name.replace(".py", "")
+    module_name = f"{target_dir.name}.{stem}"
     try:
-        import sys
-        stem = safe_name.replace(".py", "")
-        module_name = f"{target_dir.name}.{stem}"
-        if kind == "portfolio_strategy":
-            from ez.portfolio.portfolio_strategy import PortfolioStrategy
-            old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
+        registry = _get_registry_for_kind(kind)
+        if registry is not None:
+            old_keys = [k for k, v in registry.items() if v.__module__ == module_name]
             for k in old_keys:
-                del PortfolioStrategy._registry[k]
-        elif kind == "cross_factor":
-            from ez.portfolio.cross_factor import CrossSectionalFactor
-            old_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]
-            for k in old_keys:
-                del CrossSectionalFactor._registry[k]
-        elif kind == "factor":
-            from ez.factor.base import Factor
-            old_keys = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
-            for k in old_keys:
-                del Factor._registry[k]
-        elif kind == "strategy":
-            from ez.strategy.base import Strategy
-            old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
-            for k in old_keys:
-                del Strategy._registry[k]
+                del registry[k]
         if module_name in sys.modules:
             del sys.modules[module_name]
-    except Exception:
-        pass  # best-effort cleanup
-    return {"deleted": safe_name}
+    except Exception as e:
+        cleanup_warning = f"注册表清理部分失败: {e}"
+
+    # Step 2: Delete file
+    target.unlink()
+
+    result = {"deleted": safe_name}
+    if cleanup_warning:
+        result["warning"] = cleanup_warning
+    return result
 
 
 class PromoteRequest(BaseModel):
@@ -245,10 +259,27 @@ def cleanup_research_strategies():
 
 @router.post("/refresh")
 def refresh_registries():
-    """Re-scan all user directories and reload registries."""
+    """Re-scan all user directories, reload registries, and clean zombie entries."""
+    import sys
     from ez.strategy.loader import load_all_strategies, load_user_factors
     from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
 
+    # Step 1: Clean zombie entries (registered but file no longer exists)
+    for kind, prefix in [("strategy", "strategies"), ("factor", "factors"),
+                         ("portfolio_strategy", "portfolio_strategies"), ("cross_factor", "cross_factors")]:
+        registry = _get_registry_for_kind(kind)
+        if registry is None:
+            continue
+        zombie_keys = [k for k, v in registry.items()
+                       if (v.__module__ or '').startswith(f"{prefix}.") and
+                       not (_get_dir(kind) / (v.__module__.rsplit('.', 1)[-1] + '.py')).exists()]
+        for k in zombie_keys:
+            mod = registry[k].__module__
+            del registry[k]
+            if mod in sys.modules:
+                del sys.modules[mod]
+
+    # Step 2: Re-scan and reload
     load_all_strategies()
     load_user_factors()
     load_portfolio_strategies()
