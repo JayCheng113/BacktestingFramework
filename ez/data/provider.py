@@ -135,6 +135,31 @@ class DataProviderChain:
             raise ProviderError(f"All providers failed for {symbol}: {last_error}") from last_error
         return []
 
+    def get_kline_batch(
+        self, symbols: list[str], market: str, period: str,
+        start_date: date, end_date: date,
+    ) -> dict[str, list[Bar]]:
+        """Batch: single DB query for cached, individual fetch for missing."""
+        cached = self._store.query_kline_batch(symbols, market, period, start_date, end_date)
+        result: dict[str, list[Bar]] = {}
+        missing: list[str] = []
+        for sym in symbols:
+            bars = cached.get(sym, [])
+            if bars:
+                cs, ce = bars[0].time.date(), bars[-1].time.date()
+                if (cs - start_date).days <= 3 and (end_date - ce).days <= 3:
+                    result[sym] = bars
+                    continue
+            missing.append(sym)
+        for sym in missing:
+            try:
+                bars = self.get_kline(sym, market, period, start_date, end_date)
+                if bars:
+                    result[sym] = bars
+            except Exception as e:
+                logger.warning("Batch fetch failed for %s: %s", sym, e)
+        return result
+
     def search_symbols(self, keyword: str, market: str = "") -> list[dict]:
         for provider in self._providers:
             try:

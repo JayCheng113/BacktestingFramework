@@ -87,6 +87,30 @@ class DuckDBStore(DataStore):
             for r in rows
         ]
 
+    def query_kline_batch(
+        self, symbols: list[str], market: str, period: str,
+        start_date: date, end_date: date,
+    ) -> dict[str, list[Bar]]:
+        """Batch query: single SQL with WHERE symbol IN (...)."""
+        if not symbols:
+            return {}
+        table = _safe_table(period)
+        placeholders = ",".join(["?"] * len(symbols))
+        rows = self._conn.execute(
+            f"SELECT * FROM {table} WHERE symbol IN ({placeholders}) AND market=? "
+            f"AND time>=? AND time<=? ORDER BY symbol, time",
+            [*symbols, market,
+             datetime.combine(start_date, datetime.min.time()),
+             datetime.combine(end_date, datetime.max.time())],
+        ).fetchall()
+        result: dict[str, list[Bar]] = {s: [] for s in symbols}
+        for r in rows:
+            bar = Bar(time=r[0], symbol=r[1], market=r[2], open=r[3], high=r[4],
+                      low=r[5], close=r[6], adj_close=r[7], volume=int(r[8]))
+            if bar.symbol in result:
+                result[bar.symbol].append(bar)
+        return result
+
     def save_kline(self, bars: list[Bar], period: str) -> int:
         if not bars:
             return 0

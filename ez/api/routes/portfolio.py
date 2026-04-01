@@ -309,21 +309,19 @@ def _fetch_data(symbols: list[str], market: str, start: date, end: date, lookbac
     # Add lookback buffer (1.6x to account for weekends/holidays)
     fetch_start = start - timedelta(days=int(lookback_days * 1.6))
 
+    # V2.12.1: batch query (single SQL for cached, individual for missing)
+    batch_result = chain.get_kline_batch(symbols, market, "daily", fetch_start, end)
     universe_data = {}
     all_dates = set()
-    for sym in symbols:
-        try:
-            bars = chain.get_kline(sym, market, "daily", fetch_start, end)
-            if not bars:
-                continue
-            df = pd.DataFrame([{
-                "open": b.open, "high": b.high, "low": b.low,
-                "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
-            } for b in bars], index=pd.DatetimeIndex([b.time for b in bars]))
-            universe_data[sym] = df
-            all_dates.update(d.date() for d in df.index)
-        except Exception as e:
-            logger.warning("Failed to fetch %s: %s", sym, e)
+    for sym, bars in batch_result.items():
+        if not bars:
+            continue
+        df = pd.DataFrame([{
+            "open": b.open, "high": b.high, "low": b.low,
+            "close": b.close, "adj_close": b.adj_close, "volume": b.volume,
+        } for b in bars], index=pd.DatetimeIndex([b.time for b in bars]))
+        universe_data[sym] = df
+        all_dates.update(d.date() for d in df.index)
 
     if not universe_data:
         raise HTTPException(400, "No data available for any of the provided symbols")
