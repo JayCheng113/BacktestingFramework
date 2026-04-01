@@ -102,3 +102,51 @@ export interface SearchResult {
   passed_count: number
   ranked: CandidateResult[]
 }
+
+// V2.12+ Portfolio types
+export interface PortfolioMetrics {
+  total_return?: number; annualized_return?: number; sharpe_ratio?: number
+  sortino_ratio?: number; max_drawdown?: number; max_drawdown_duration?: number
+  benchmark_return?: number; alpha?: number; beta?: number
+  trade_count?: number; turnover_per_rebalance?: number
+  annualized_volatility?: number; n_rebalances?: number
+  concentration_hhi?: number
+}
+
+export interface RiskEvent { date: string; event: string }
+
+export interface BrinsonPeriod {
+  start: string; end: string
+  allocation: number; selection: number; interaction: number; total_excess: number
+}
+
+export interface AttributionResult {
+  cumulative: { allocation: number; selection: number; interaction: number; total_excess: number } | null
+  cost_drag: number
+  by_industry: Record<string, { allocation: number; selection: number; interaction: number }>
+  periods: BrinsonPeriod[]
+}
+
+export interface ActiveWeight { portfolio: number; benchmark: number; active: number }
+
+export interface PortfolioRunResult {
+  run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
+  benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
+  symbols_fetched?: number; symbols_skipped?: string[]
+  weights_history?: { date: string; weights: Record<string, number> }[]
+  latest_weights?: Record<string, number>
+  warnings?: string[] | null
+  risk_events?: RiskEvent[]
+  attribution?: AttributionResult
+  active_weights?: Record<string, ActiveWeight>
+}
+
+export interface HistoryRun {
+  run_id: string; strategy_name: string; start_date: string; end_date: string
+  freq: string; metrics: PortfolioMetrics; trade_count: number; created_at: string
+}
+
+export interface ParamSchema {
+  type: string; default: any; min?: number; max?: number; label?: string
+  options?: string[]
+}

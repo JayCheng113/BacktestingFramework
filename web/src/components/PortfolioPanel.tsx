@@ -3,6 +3,7 @@ import ReactECharts from 'echarts-for-react'
 import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward, fetchFundamentalData, fundamentalDataQuality, portfolioSearch } from '../api'
 import BacktestSettings, { DEFAULT_SETTINGS } from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
+import type { PortfolioRunResult, HistoryRun, ParamSchema } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -36,33 +37,7 @@ const FACTOR_LABELS: Record<string, string> = {
   alpha_combiner: '多因子合成',
 }
 
-interface PortfolioMetrics {
-  total_return?: number; annualized_return?: number; sharpe_ratio?: number
-  sortino_ratio?: number; max_drawdown?: number; max_drawdown_duration?: number
-  benchmark_return?: number; alpha?: number; beta?: number
-  trade_count?: number; turnover_per_rebalance?: number
-  annualized_volatility?: number; n_rebalances?: number
-  concentration_hhi?: number
-}
-
-interface PortfolioRunResult {
-  run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
-  benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
-  symbols_fetched?: number; symbols_skipped?: string[]
-  weights_history?: { date: string; weights: Record<string, number> }[]
-  latest_weights?: Record<string, number>
-  warnings?: string[] | null
-}
-
-interface HistoryRun {
-  run_id: string; strategy_name: string; start_date: string; end_date: string
-  freq: string; metrics: PortfolioMetrics; trade_count: number; created_at: string
-}
-
-interface ParamSchema {
-  type: string; default: any; min?: number; max?: number; label?: string
-  options?: string[]  // for select / multi_select types
-}
+// Types imported from '../types' (PortfolioRunResult, PortfolioMetrics, HistoryRun, ParamSchema)
 
 export default function PortfolioPanel() {
   const [strategies, setStrategies] = useState<{ name: string; description: string; parameters: Record<string, ParamSchema> }[]>([])
@@ -845,7 +820,7 @@ export default function PortfolioPanel() {
                 </div>
               )}
               {/* V2.12: Attribution */}
-              {(result as any).attribution?.cumulative && (
+              {result.attribution?.cumulative && (
                 <div className="border rounded mt-3" style={{ borderColor: 'var(--border)' }}>
                   <button onClick={() => setShowAttribution(!showAttribution)} className="w-full text-left px-3 py-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
                     {showAttribution ? '▼' : '▶'} 归因分析
@@ -853,10 +828,10 @@ export default function PortfolioPanel() {
                   {showAttribution && (
                     <div className="px-3 pb-3 text-sm space-y-1">
                       {[
-                        ['配置效应', (result as any).attribution.cumulative.allocation],
-                        ['选股效应', (result as any).attribution.cumulative.selection],
-                        ['交互效应', (result as any).attribution.cumulative.interaction],
-                        ['交易成本', -(result as any).attribution.cost_drag],
+                        ['配置效应', result.attribution.cumulative.allocation],
+                        ['选股效应', result.attribution.cumulative.selection],
+                        ['交互效应', result.attribution.cumulative.interaction],
+                        ['交易成本', -result.attribution.cost_drag],
                       ].map(([label, val]) => (
                         <div key={label as string} className="flex justify-between">
                           <span style={{ color: 'var(--text-secondary)' }}>{label as string}</span>
@@ -867,20 +842,20 @@ export default function PortfolioPanel() {
                       ))}
                       <div className="flex justify-between font-medium pt-1 mt-1" style={{ borderTop: '1px solid var(--border)' }}>
                         <span>累计超额</span>
-                        <span>{((result as any).attribution.cumulative.total_excess * 100).toFixed(2)}%</span>
+                        <span>{(result.attribution.cumulative.total_excess * 100).toFixed(2)}%</span>
                       </div>
                     </div>
                   )}
                 </div>
               )}
               {/* V2.12: Risk Events */}
-              {(result as any).risk_events?.length > 0 && (
+              {result.risk_events && result.risk_events.length > 0 && (
                 <div className="border rounded mt-3" style={{ borderColor: '#d29922' }}>
                   <div className="px-3 py-1.5 text-sm" style={{ color: '#d29922' }}>
-                    风控事件 ({(result as any).risk_events.length})
+                    风控事件 ({result.risk_events.length})
                   </div>
                   <div className="px-3 pb-3 text-xs max-h-40 overflow-y-auto" style={{ color: 'var(--text-secondary)' }}>
-                    {(result as any).risk_events.map((e: any, i: number) => (
+                    {result.risk_events.map((e, i) => (
                       <div key={i} className="py-0.5">{e.date}  {e.event}</div>
                     ))}
                   </div>
