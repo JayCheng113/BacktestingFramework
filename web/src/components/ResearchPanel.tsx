@@ -49,6 +49,7 @@ export default function ResearchPanel() {
   const [tasks, setTasks] = useState<ResearchTask[]>([])
   const [selectedTask, setSelectedTask] = useState<ResearchTask | null>(null)
   const [events, setEvents] = useState<SSEEvent[]>([])
+  const abortRef = useRef<AbortController | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [streamingTaskId, setStreamingTaskId] = useState('')
   const [loading, setLoading] = useState(false)
@@ -110,12 +111,17 @@ export default function ResearchPanel() {
   }
 
   const streamTask = async (taskId: string) => {
+    // Abort previous stream if any
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setStreaming(true)
     setStreamingTaskId(taskId)
     setEvents([])
     setSelectedTask(null)
     try {
-      const res = await fetch(`/api/research/tasks/${taskId}/stream`)
+      const res = await fetch(`/api/research/tasks/${taskId}/stream`, { signal: controller.signal })
       if (!res.ok || !res.body) { setStreaming(false); return }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -147,11 +153,11 @@ export default function ResearchPanel() {
   const cancelTask = async (taskId: string) => {
     try {
       await fetch(`/api/research/tasks/${taskId}/cancel`, { method: 'POST' })
-      // Stop streaming immediately so user sees the change
-      if (streamingTaskId === taskId) {
-        setStreaming(false)
-        setStreamingTaskId('')
-      }
+      // Abort SSE stream immediately (reader.read() will throw AbortError)
+      abortRef.current?.abort()
+      abortRef.current = null
+      setStreaming(false)
+      setStreamingTaskId('')
       await loadTasks()
     } catch {}
   }

@@ -638,19 +638,21 @@ class PortfolioSearchRequest(BaseModel):
     benchmark_symbol: str = ""
 
 
-def _generate_combinations(param_grid: dict[str, list], max_combos: int) -> list[dict]:
-    """Expand parameter grid. Random-sample if exceeds max_combos."""
+def _generate_combinations(param_grid: dict[str, list], max_combos: int) -> tuple[list[dict], int]:
+    """Expand parameter grid. Returns (combos, total_before_truncation)."""
     import itertools
     import random
     keys = list(param_grid.keys())
     if not keys:
-        return []
+        return [], 0
     values = [param_grid[k] for k in keys]
     all_combos = [dict(zip(keys, v)) for v in itertools.product(*values)]
-    if len(all_combos) > max_combos:
+    total = len(all_combos)
+    if total > max_combos:
+        random.seed(42)  # reproducible sampling
         random.shuffle(all_combos)
         all_combos = all_combos[:max_combos]
-    return all_combos
+    return all_combos, total
 
 
 @router.post("/search")
@@ -659,7 +661,7 @@ def portfolio_search(req: PortfolioSearchRequest):
     end = req.end_date or date.today()
     start = req.start_date or (end - timedelta(days=365 * 3))
 
-    combos = _generate_combinations(req.param_grid, req.max_combinations)
+    combos, total_before_truncation = _generate_combinations(req.param_grid, req.max_combinations)
     if not combos:
         raise HTTPException(400, "参数网格为空")
     search_funda_warn: list[str] = []
@@ -739,7 +741,7 @@ def portfolio_search(req: PortfolioSearchRequest):
     for i, r in enumerate(results):
         r["rank"] = i + 1
 
-    resp = {"results": results, "total_combinations": len(combos), "completed": len(results)}
+    resp = {"results": results, "total_combinations": total_before_truncation, "sampled": len(combos), "completed": len(results)}
     all_search_warns = (search_funda_warn or []) + ([search_bench_warn] if search_bench_warn else [])
     if all_search_warns:
         resp["warnings"] = all_search_warns

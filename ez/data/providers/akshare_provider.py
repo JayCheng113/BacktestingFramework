@@ -33,7 +33,9 @@ class AKShareDataProvider(DataProvider):
     """
 
     def __init__(self):
+        import threading
         self._last_call_time: float = 0.0
+        self._throttle_lock = threading.Lock()
 
     @property
     def name(self) -> str:
@@ -142,7 +144,8 @@ class AKShareDataProvider(DataProvider):
         return []
 
     def _throttle(self) -> None:
-        elapsed = time.monotonic() - self._last_call_time
-        if elapsed < _RATE_LIMIT_DELAY:
-            time.sleep(_RATE_LIMIT_DELAY - elapsed)
-        self._last_call_time = time.monotonic()
+        with self._throttle_lock:
+            elapsed = time.monotonic() - self._last_call_time
+            if elapsed < _RATE_LIMIT_DELAY:
+                time.sleep(_RATE_LIMIT_DELAY - elapsed)
+            self._last_call_time = time.monotonic()

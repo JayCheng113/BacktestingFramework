@@ -259,27 +259,31 @@ def cleanup_research_strategies():
 
 @router.post("/refresh")
 def refresh_registries():
-    """Re-scan all user directories, reload registries, and clean zombie entries."""
+    """Re-scan all user directories, reload registries from scratch.
+
+    Clears ALL user registry entries and sys.modules first, then re-imports.
+    This correctly handles: file modified, file deleted, file added.
+    """
     import sys
     from ez.strategy.loader import load_all_strategies, load_user_factors
     from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
 
-    # Step 1: Clean zombie entries (registered but file no longer exists)
+    # Step 1: Clear ALL user entries from registries + sys.modules
+    # (so loaders don't skip already-imported modules)
     for kind, prefix in [("strategy", "strategies"), ("factor", "factors"),
                          ("portfolio_strategy", "portfolio_strategies"), ("cross_factor", "cross_factors")]:
         registry = _get_registry_for_kind(kind)
         if registry is None:
             continue
-        zombie_keys = [k for k, v in registry.items()
-                       if (v.__module__ or '').startswith(f"{prefix}.") and
-                       not (_get_dir(kind) / (v.__module__.rsplit('.', 1)[-1] + '.py')).exists()]
-        for k in zombie_keys:
+        user_keys = [k for k, v in registry.items()
+                     if (v.__module__ or '').startswith(f"{prefix}.")]
+        for k in user_keys:
             mod = registry[k].__module__
             del registry[k]
             if mod in sys.modules:
                 del sys.modules[mod]
 
-    # Step 2: Re-scan and reload
+    # Step 2: Re-scan and reload (all user modules now cleared, loader will re-import)
     load_all_strategies()
     load_user_factors()
     load_portfolio_strategies()
