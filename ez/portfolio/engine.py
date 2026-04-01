@@ -45,6 +45,7 @@ class PortfolioResult:
     trades: list[dict] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
     rebalance_dates: list[date] = field(default_factory=list)
+    rebalance_weights: list[dict[str, float]] = field(default_factory=list)  # V2.12: per-rebalance weights (aligned with rebalance_dates)
     risk_events: list[dict] = field(default_factory=list)  # V2.12: 风控事件日志
 
 
@@ -339,6 +340,7 @@ def run_portfolio_backtest(
                 })
 
             result.rebalance_dates.append(day)
+            result.rebalance_weights.append(dict(weights))  # V2.12: for attribution
 
             # Record actual weights for next call
             new_equity = cash + sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)

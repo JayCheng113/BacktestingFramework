@@ -98,3 +98,44 @@ class TestBrinsonIdentity:
         assert "银行" in attr.by_industry
         assert "食品饮料" in attr.by_industry
         assert "allocation" in attr.by_industry["银行"]
+
+
+class TestAttributionEngineIntegration:
+    """CRITICAL-1 regression: attribution must work with real engine output."""
+
+    def test_attribution_with_engine_output(self):
+        """rebalance_weights must align with rebalance_dates (not per-day weights_history)."""
+        from ez.portfolio.attribution import compute_attribution
+        from ez.portfolio.engine import run_portfolio_backtest, CostModel
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.cross_factor import MomentumRank
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.universe import Universe
+
+        symbols = [f"S{i}" for i in range(5)]
+        data = _make_attribution_data(symbols, n_days=120, seed=42)
+        dates = data[symbols[0]].index
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+        )
+
+        # rebalance_weights must be aligned with rebalance_dates
+        assert len(result.rebalance_weights) == len(result.rebalance_dates)
+        # weights_history has one entry per trading day (much longer)
+        assert len(result.weights_history) > len(result.rebalance_weights)
+
+        industry_map = {f"S{i}": f"ind{i % 2}" for i in range(5)}
+        attr = compute_attribution(result, data, industry_map, initial_cash=1_000_000)
+
+        # Must have periods matching rebalance intervals
+        assert len(attr.periods) == len(result.rebalance_dates) - 1
+        # Brinson identity must hold
+        for p in attr.periods:
+            recon = p.allocation_effect + p.selection_effect + p.interaction_effect
+            assert abs(recon - p.total_excess) < 1e-10

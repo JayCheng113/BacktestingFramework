@@ -85,7 +85,12 @@ def compute_attribution(
     Equal-weight benchmark dynamically computed per period.
     """
     rebalance_dates = result.rebalance_dates
-    weights_history = result.weights_history
+    # Use rebalance_weights (1:1 aligned with rebalance_dates) if available,
+    # otherwise fall back to weights_history (for manually constructed results in tests)
+    weights_history = (
+        result.rebalance_weights if hasattr(result, 'rebalance_weights') and result.rebalance_weights
+        else result.weights_history
+    )
 
     if len(rebalance_dates) < 2 or len(weights_history) < 1:
         return AttributionResult()
