@@ -6,23 +6,40 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-# Stage 2: Python runtime
+# Stage 2: Build C++ extensions
+FROM python:3.12-slim AS builder
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml CMakeLists.txt ./
+COPY ez/core/ ./ez/core/
+RUN pip install --no-cache-dir scikit-build-core nanobind && \
+    pip install --no-cache-dir -e . --no-build-isolation 2>/dev/null || true
+
+# Stage 3: Python runtime
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install Python dependencies
+# Install all Python dependencies (including optional akshare/tushare)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir . 2>/dev/null || pip install --no-cache-dir \
+RUN pip install --no-cache-dir \
     "fastapi>=0.115" "uvicorn[standard]>=0.30" "duckdb>=1.0" \
     "pandas>=2.2" "numpy>=2.0" "httpx>=0.27" "pyyaml>=6.0" \
-    "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14"
+    "pydantic>=2.9" "pydantic-settings>=2.5" "scipy>=1.14" \
+    "akshare>=1.14" "tushare>=1.4" 2>/dev/null || true
 
-# Copy source code
+# Copy C++ extensions from builder (if built)
+COPY --from=builder /app/ez/core/*.so /app/ez/core/ 2>/dev/null || true
+
+# Copy source code (all modules)
 COPY ez/ ./ez/
 COPY configs/ ./configs/
 COPY strategies/ ./strategies/
+COPY portfolio_strategies/ ./portfolio_strategies/
+COPY cross_factors/ ./cross_factors/
+COPY factors/ ./factors/
 COPY scripts/ ./scripts/
-COPY CLAUDE.md pyproject.toml ./
+COPY launcher.py pyproject.toml CLAUDE.md ./
+COPY .env.example ./.env.example
 
 # Copy built frontend
 COPY --from=frontend-builder /app/web/dist ./web/dist
@@ -33,9 +50,10 @@ RUN mkdir -p data
 # Expose port
 EXPOSE 8000
 
-# Environment variables (override with docker run -e or .env)
+# Environment variables
 ENV TUSHARE_TOKEN=""
 ENV FMP_API_KEY=""
+ENV DEEPSEEK_API_KEY=""
 
-# Start FastAPI serving both API and frontend
+# Start
 CMD ["uvicorn", "ez.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

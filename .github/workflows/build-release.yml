@@ -145,13 +145,28 @@ jobs:
           body: |
             ## ez-trading ${{ github.ref_name }}
 
-            Download the package for your platform:
+            **无需预装任何环境** — Python、依赖库全部打包在内，解压即用。
+
+            ### 下载
             - **Mac (Apple Silicon)**: `ez-trading-mac-arm64.zip`
             - **Windows**: `ez-trading-windows.zip`
             - **Linux**: `ez-trading-linux.zip`
 
-            ### Quick Start
-            1. Download and unzip
-            2. (Optional) Create `.env` file with `TUSHARE_TOKEN=your_token`
-            3. Double-click `ez-trading` (Mac/Linux) or `ez-trading.exe` (Windows)
-            4. Browser opens automatically at http://localhost:8000
+            ### 使用
+            1. 下载解压
+            2. (可选) 在解压目录创建 `.env` 文件:
+               ```
+               TUSHARE_TOKEN=你的token
+               DEEPSEEK_API_KEY=你的key
+               ```
+            3. 双击 `ez-trading` (Mac/Linux) 或 `ez-trading.exe` (Windows)
+            4. 浏览器自动打开 http://localhost:8000
+
+            ### 自定义策略
+            解压目录下的 `strategies/`、`portfolio_strategies/`、`cross_factors/`、`factors/` 放入 .py 文件即可使用。
+
+            ### Docker
+            ```bash
+            docker compose up -d
+            # 打开 http://localhost:8000
+            ```

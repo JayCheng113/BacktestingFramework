@@ -4,9 +4,13 @@ __pycache__
 .git
 .env
 data/*.db
+data/*.db.wal
 web/node_modules
-web/dist
-docs
+docs/superpowers
 tests
 .pytest_cache
 .claude
+.venv
+build
+dist
+*.spec

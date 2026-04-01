@@ -4,9 +4,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data          # persist database
-      - ./strategies:/app/strategies  # user strategies
+      - ./data:/app/data                              # persist database
+      - ./strategies:/app/strategies                    # user strategies
+      - ./portfolio_strategies:/app/portfolio_strategies # user portfolio strategies
+      - ./cross_factors:/app/cross_factors              # user cross-sectional factors
+      - ./factors:/app/factors                          # user factors
+      - ./configs:/app/configs                          # user config overrides
     env_file:
       - path: .env
-        required: false           # OK if .env doesn't exist
+        required: false
     restart: unless-stopped
