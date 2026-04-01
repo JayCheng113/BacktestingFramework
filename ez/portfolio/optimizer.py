@@ -229,7 +229,7 @@ class MeanVarianceOptimizer(PortfolioOptimizer):
         result = optimize.minimize(
             objective, w0, method="SLSQP",
             bounds=bounds, constraints=cons,
-            options={"maxiter": 500, "ftol": 1e-10},
+            options={"maxiter": max(500, n * 5), "ftol": 1e-10},
         )
         if not result.success:
             raise RuntimeError(result.message)
