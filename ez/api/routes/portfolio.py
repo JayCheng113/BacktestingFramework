@@ -234,6 +234,17 @@ class PortfolioRunRequest(BaseModel):
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)  # 涨跌停比例 (10%=0.10, 科创板20%=0.20)
     benchmark_symbol: str = ""  # e.g. "510300.SH"
+    # V2.12: Optimizer
+    optimizer: str = Field(default="none", pattern="^(none|mean_variance|min_variance|risk_parity)$")
+    risk_aversion: float = Field(default=1.0, gt=0)
+    max_weight: float = Field(default=0.10, gt=0, le=1.0)
+    max_industry_weight: float = Field(default=0.30, gt=0, le=1.0)
+    cov_lookback: int = Field(default=60, ge=10, le=500)
+    # V2.12: Risk control
+    risk_control: bool = False
+    max_drawdown: float = Field(default=0.20, gt=0, le=0.50)
+    drawdown_reduce: float = Field(default=0.50, gt=0, le=1.0)
+    max_turnover: float = Field(default=0.50, gt=0, le=2.0)
 
 
 def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
@@ -434,6 +445,44 @@ def list_portfolio_strategies():
     return {"strategies": result, "available_factors": factor_list, "factor_categories": categories}
 
 
+def _compute_inline_attribution(result, universe_data, initial_cash):
+    """Compute Brinson attribution inline after a run. Returns dict or None."""
+    try:
+        from ez.portfolio.attribution import compute_attribution
+        industry_map = {}
+        try:
+            from ez.api.deps import get_fundamental_store
+            fstore = get_fundamental_store()
+            if fstore:
+                industry_map = fstore.get_all_industries()
+        except Exception:
+            pass
+        attr = compute_attribution(result, universe_data, industry_map, initial_cash=initial_cash)
+        if attr.cumulative is None:
+            return None
+        return {
+            "cumulative": {
+                "allocation": round(attr.cumulative.allocation_effect, 6),
+                "selection": round(attr.cumulative.selection_effect, 6),
+                "interaction": round(attr.cumulative.interaction_effect, 6),
+                "total_excess": round(attr.cumulative.total_excess, 6),
+            },
+            "cost_drag": round(attr.cost_drag, 6),
+            "by_industry": {k: {kk: round(vv, 6) for kk, vv in v.items()}
+                           for k, v in attr.by_industry.items()},
+            "periods": [
+                {"start": p.period_start, "end": p.period_end,
+                 "allocation": round(p.allocation_effect, 6),
+                 "selection": round(p.selection_effect, 6),
+                 "interaction": round(p.interaction_effect, 6),
+                 "total_excess": round(p.total_excess, 6)}
+                for p in attr.periods
+            ],
+        }
+    except Exception:
+        return None
+
+
 @router.post("/run")
 def run_portfolio(req: PortfolioRunRequest):
     """Run a portfolio backtest."""
@@ -467,12 +516,51 @@ def run_portfolio(req: PortfolioRunRequest):
         slippage_rate=req.slippage_rate,
     )
 
+    # V2.12: Optimizer
+    optimizer_instance = None
+    if req.optimizer != "none":
+        from ez.portfolio.optimizer import (
+            MeanVarianceOptimizer, MinVarianceOptimizer,
+            RiskParityOptimizer, OptimizationConstraints,
+        )
+        industry_map = {}
+        try:
+            from ez.api.deps import get_fundamental_store
+            fstore = get_fundamental_store()
+            if fstore:
+                industry_map = fstore.get_all_industries()
+        except Exception:
+            pass
+        constraints = OptimizationConstraints(
+            max_weight=req.max_weight,
+            max_industry_weight=req.max_industry_weight,
+            industry_map=industry_map,
+        )
+        opt_map = {
+            "mean_variance": lambda: MeanVarianceOptimizer(
+                risk_aversion=req.risk_aversion, constraints=constraints, cov_lookback=req.cov_lookback),
+            "min_variance": lambda: MinVarianceOptimizer(constraints=constraints, cov_lookback=req.cov_lookback),
+            "risk_parity": lambda: RiskParityOptimizer(constraints=constraints, cov_lookback=req.cov_lookback),
+        }
+        optimizer_instance = opt_map[req.optimizer]()
+
+    # V2.12: Risk control
+    risk_mgr = None
+    if req.risk_control:
+        from ez.portfolio.risk_manager import RiskManager, RiskConfig
+        risk_mgr = RiskManager(RiskConfig(
+            max_drawdown_threshold=req.max_drawdown,
+            drawdown_reduce_ratio=req.drawdown_reduce,
+            max_turnover=req.max_turnover,
+        ))
+
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,
         calendar=calendar, start=start, end=end, freq=req.freq,
         initial_cash=req.initial_cash, cost_model=cost_model,
         lot_size=req.lot_size, limit_pct=req.limit_pct,
         benchmark_symbol=req.benchmark_symbol,
+        optimizer=optimizer_instance, risk_manager=risk_mgr,
     )
 
     # Sanitize NaN/Inf in metrics
@@ -526,6 +614,8 @@ def run_portfolio(req: PortfolioRunRequest):
             if result.weights_history[i]  # skip empty weight entries (non-rebalance days)
         ] if result.weights_history else [],
         "warnings": fund_warnings if fund_warnings else None,
+        "risk_events": result.risk_events if result.risk_events else None,
+        "attribution": _compute_inline_attribution(result, universe_data, req.initial_cash),
     }
 
 
