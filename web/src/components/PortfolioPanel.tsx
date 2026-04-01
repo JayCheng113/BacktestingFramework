@@ -668,7 +668,7 @@ export default function PortfolioPanel() {
                   })
                   setSearchResults(res.data.results || [])
                   const tc = res.data.total_combinations || 0
-                  const comp = res.data.completed || 0
+                  void res.data.completed  // available in response but not displayed yet
                   let searchMsg = res.data.warnings?.length ? res.data.warnings.join('\n') + '\n' : ''
                   if (tc > 50) searchMsg += `共 ${tc} 种组合，随机采样 50 个展示（可能不完整）`
                   if (searchMsg) alert(searchMsg.trim())

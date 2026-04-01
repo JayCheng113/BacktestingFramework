@@ -338,7 +338,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   // Filter strategy files (exclude research_), factor files come from separate state
   const strategyFiles = files.filter(f => f.class_name && !f.filename.startsWith('research_'))
   const otherFiles = files.filter(f => !f.class_name && !f.filename.startsWith('research_'))
-  const allEmpty = strategyFiles.length === 0 && factorFiles.length === 0 && portfolioFiles.length === 0 && crossFactorFiles.length === 0 && otherFiles.length === 0
+  // (allEmpty removed — sidebar now always shows registry groups)
 
   return (
     <div className="flex" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
