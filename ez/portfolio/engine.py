@@ -508,8 +508,8 @@ def run_portfolio_backtest(
             "benchmark_return": bench_ret,
             "alpha": alpha,
             "beta": beta,
-            "trade_count": len(result.trades),
-            "turnover_per_rebalance": turnover,
+            "trade_count": len(result.trades),  # includes final liquidation trades
+            "turnover_per_rebalance": turnover,  # excludes liquidation trades
             "n_rebalances": n_rebal,
             "concentration_hhi": avg_concentration,
         }
