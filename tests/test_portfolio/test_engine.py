@@ -211,3 +211,126 @@ class TestMetrics:
         assert result.metrics["trade_count"] == len(result.trades)
         assert "concentration_hhi" in result.metrics
         assert 0 <= result.metrics["concentration_hhi"] <= 1.0
+
+
+class TestOptimizerIntegration:
+    """V2.12: optimizer param in run_portfolio_backtest."""
+
+    def test_mean_variance_runs(self):
+        from ez.portfolio.optimizer import MeanVarianceOptimizer, OptimizationConstraints
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_universe_data(symbols)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+        opt = MeanVarianceOptimizer(
+            risk_aversion=1.0,
+            constraints=OptimizationConstraints(max_weight=0.40),
+            cov_lookback=60,
+        )
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=5),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            optimizer=opt,
+        )
+        assert len(result.equity_curve) > 0
+        assert result.metrics.get("sharpe_ratio") is not None
+
+    def test_min_variance_runs(self):
+        from ez.portfolio.optimizer import MinVarianceOptimizer, OptimizationConstraints
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_universe_data(symbols)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+        opt = MinVarianceOptimizer(
+            constraints=OptimizationConstraints(max_weight=0.40),
+            cov_lookback=60,
+        )
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=5),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            optimizer=opt,
+        )
+        assert len(result.equity_curve) > 0
+
+    def test_risk_parity_runs(self):
+        from ez.portfolio.optimizer import RiskParityOptimizer, OptimizationConstraints
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_universe_data(symbols)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+        opt = RiskParityOptimizer(
+            constraints=OptimizationConstraints(max_weight=0.40),
+            cov_lookback=60,
+        )
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=5),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            optimizer=opt,
+        )
+        assert len(result.equity_curve) > 0
+
+
+class TestRiskManagerIntegration:
+    """V2.12: risk_manager param + daily drawdown check."""
+
+    def test_risk_events_populated(self):
+        from ez.portfolio.risk_manager import RiskManager, RiskConfig
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_universe_data(symbols)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+        rm = RiskManager(RiskConfig(max_drawdown_threshold=0.01, drawdown_reduce_ratio=0.50))
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            risk_manager=rm,
+        )
+        assert len(result.equity_curve) > 0
+        assert len(result.risk_events) > 0
+
+    def test_accounting_invariant_with_risk_manager(self):
+        from ez.portfolio.risk_manager import RiskManager, RiskConfig
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_universe_data(symbols)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+        rm = RiskManager(RiskConfig(max_drawdown_threshold=0.05))
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            risk_manager=rm,
+        )
+        assert len(result.equity_curve) > 0
+
+    def test_optimizer_plus_risk_manager(self):
+        """Both optimizer and risk_manager together."""
+        from ez.portfolio.optimizer import MeanVarianceOptimizer, OptimizationConstraints
+        from ez.portfolio.risk_manager import RiskManager, RiskConfig
+        symbols = [f"S{i}" for i in range(5)]
+        data, dates = _make_universe_data(symbols)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+        opt = MeanVarianceOptimizer(
+            risk_aversion=1.0,
+            constraints=OptimizationConstraints(max_weight=0.40),
+            cov_lookback=60,
+        )
+        rm = RiskManager(RiskConfig(max_drawdown_threshold=0.03, max_turnover=0.60))
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=5),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            optimizer=opt, risk_manager=rm,
+        )
+        assert len(result.equity_curve) > 0

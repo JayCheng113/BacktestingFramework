@@ -17,7 +17,9 @@ import pandas as pd
 
 from ez.portfolio.allocator import Allocator
 from ez.portfolio.calendar import RebalanceFreq, TradingCalendar
+from ez.portfolio.optimizer import PortfolioOptimizer
 from ez.portfolio.portfolio_strategy import PortfolioStrategy
+from ez.portfolio.risk_manager import RiskManager
 from ez.portfolio.universe import Universe, slice_universe_data
 
 
@@ -43,6 +45,7 @@ class PortfolioResult:
     trades: list[dict] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
     rebalance_dates: list[date] = field(default_factory=list)
+    risk_events: list[dict] = field(default_factory=list)  # V2.12: 风控事件日志
 
 
 def _lot_round(shares: float, lot_size: int = 100) -> int:
@@ -69,6 +72,8 @@ def run_portfolio_backtest(
     lot_size: int = 100,
     limit_pct: float = 0.10,  # A-share 涨跌停 10% (科创板/创业板 20%)
     benchmark_symbol: str = "",  # e.g. "510300.SH" for CSI300 ETF benchmark
+    optimizer: PortfolioOptimizer | None = None,  # V2.12: 组合优化器
+    risk_manager: RiskManager | None = None,      # V2.12: 风控管理器
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -163,6 +168,37 @@ def run_portfolio_backtest(
         position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)
         equity = cash + position_value
 
+        # V2.12: Daily drawdown check (every trading day, not just rebalance)
+        if risk_manager:
+            dd_scale, dd_event = risk_manager.check_drawdown(equity)
+            if dd_event:
+                result.risk_events.append({"date": day.isoformat(), "event": dd_event})
+            if dd_scale < 1.0 and day not in rebal_dates:
+                # Emergency sell: reduce all positions proportionally
+                for sym in list(holdings.keys()):
+                    target = _lot_round(holdings[sym] * dd_scale, lot_size)
+                    delta = target - holdings[sym]
+                    if delta >= 0 or sym not in prices:
+                        continue
+                    if sym not in has_bar_today:
+                        continue
+                    sell_price = prices[sym] * (1 - cost_model.slippage_rate)
+                    sell_amount = abs(delta) * sell_price
+                    comm = _compute_commission(sell_amount, cost_model.sell_commission_rate, cost_model.min_commission)
+                    stamp = sell_amount * cost_model.stamp_tax_rate
+                    cash += sell_amount - comm - stamp
+                    if target == 0:
+                        holdings.pop(sym, None)
+                    else:
+                        holdings[sym] = target
+                    result.trades.append({
+                        "date": day.isoformat(), "symbol": sym, "side": "sell",
+                        "shares": abs(delta), "price": sell_price, "cost": comm + stamp,
+                    })
+                # Recompute equity after emergency sells
+                position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)
+                equity = cash + position_value
+
         # Rebalance
         if day in rebal_dates:
             # Slice data for strategy (anti-lookahead: up to day-1)
@@ -178,9 +214,18 @@ def run_portfolio_backtest(
                 prev_weights, prev_returns,
             )
 
-            # Apply allocator if provided
-            if allocator:
+            # V2.12: Optimizer takes priority over allocator
+            if optimizer:
+                optimizer.set_context(day, sliced_tradeable)
+                raw_weights = optimizer.optimize(raw_weights)
+            elif allocator:
                 raw_weights = allocator.allocate(raw_weights)
+
+            # V2.12: Turnover check (only RiskManager, not optimizer)
+            if risk_manager:
+                raw_weights, to_event = risk_manager.check_turnover(raw_weights, prev_weights)
+                if to_event:
+                    result.risk_events.append({"date": day.isoformat(), "event": to_event})
 
             # Clip to long-only, normalize if needed
             weights = {k: max(0.0, v) for k, v in raw_weights.items() if v > 0}
