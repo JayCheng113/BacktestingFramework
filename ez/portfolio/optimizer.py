@@ -280,6 +280,14 @@ class RiskParityOptimizer(PortfolioOptimizer):
         max_w = self._constraints.max_weight
         bounds = [(1e-6, max_w)] * n
         cons = [{"type": "eq", "fun": lambda w: float(np.sum(w) - 1.0)}]
+        # Industry constraints (same as MeanVariance/MinVariance)
+        for _ind, idx_list in self._industry_groups(symbols).items():
+            cons.append({
+                "type": "ineq",
+                "fun": lambda w, idx=idx_list: float(
+                    self._constraints.max_industry_weight - sum(w[i] for i in idx)
+                ),
+            })
 
         result = optimize.minimize(
             risk_contribution_obj, w0, method="SLSQP",

@@ -106,6 +106,7 @@ export default function PortfolioPanel() {
   const [riskControl, setRiskControl] = useState(false)
   const [maxDrawdown, setMaxDrawdown] = useState(20)
   const [drawdownReduce, setDrawdownReduce] = useState(50)
+  const [drawdownRecovery, setDrawdownRecovery] = useState(10)
   const [maxTurnover, setMaxTurnover] = useState(50)
   const [showOptimizer, setShowOptimizer] = useState(false)
   const [showRiskControl, setShowRiskControl] = useState(false)
@@ -275,6 +276,7 @@ export default function PortfolioPanel() {
         risk_control: riskControl,
         max_drawdown: maxDrawdown / 100,
         drawdown_reduce: drawdownReduce / 100,
+        drawdown_recovery: drawdownRecovery / 100,
         max_turnover: maxTurnover / 100,
       })
       setResult(res.data)
@@ -610,6 +612,9 @@ export default function PortfolioPanel() {
                     </label>
                     <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>回撤减仓比例 (%)
                       <input type="number" step="10" value={drawdownReduce} onChange={e => setDrawdownReduce(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
+                    </label>
+                    <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>回撤恢复阈值 (%)
+                      <input type="number" step="5" value={drawdownRecovery} onChange={e => setDrawdownRecovery(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />
                     </label>
                     <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>换手率上限 (%)
                       <input type="number" step="10" value={maxTurnover} onChange={e => setMaxTurnover(+e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle} />

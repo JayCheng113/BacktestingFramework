@@ -205,9 +205,13 @@ def run_portfolio_backtest(
                         "date": day.isoformat(), "symbol": sym, "side": "sell",
                         "shares": abs(delta), "price": sell_price, "cost": comm + stamp,
                     })
-                # Recompute equity after emergency sells
+                # Recompute equity + prev_weights after emergency sells
+                # (IMPORTANT-3: prev_weights must reflect post-sell state for turnover check)
                 position_value = sum(holdings.get(sym, 0) * prices.get(sym, 0) for sym in holdings)
                 equity = cash + position_value
+                if equity > 0:
+                    prev_weights = {s: (holdings.get(s, 0) * prices.get(s, 0)) / equity
+                                    for s in holdings if s in prices}
 
         # Rebalance
         if day in rebal_dates:

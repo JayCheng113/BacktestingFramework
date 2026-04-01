@@ -74,4 +74,8 @@ class RiskManager:
             w = alpha * new_weights.get(s, 0) + (1 - alpha) * prev_weights.get(s, 0)
             if w > 1e-10:
                 mixed[s] = w
+        # Normalize: mixing can produce sum != 1 if new/old have different totals
+        total = sum(mixed.values())
+        if total > 1.0 + 1e-9:
+            mixed = {k: v / total for k, v in mixed.items()}
         return mixed, f"换手率{actual_turnover:.1%}超限{self._config.max_turnover:.0%}→混合α={alpha:.2f}"
