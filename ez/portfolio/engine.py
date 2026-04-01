@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -386,7 +386,7 @@ def run_portfolio_backtest(
     # Use "T+1" date (next calendar day after last trading day) to avoid
     # same-day ordering conflict with rebalance trades.
     if holdings and prices and trading_days:
-        liq_date = trading_days[-1] + __import__('datetime').timedelta(days=1)
+        liq_date = trading_days[-1] + timedelta(days=1)
         for sym in list(holdings.keys()):
             shares = holdings[sym]
             if shares <= 0 or sym not in prices:
@@ -400,6 +400,7 @@ def run_portfolio_backtest(
                 "date": liq_date.isoformat(),
                 "symbol": sym, "side": "sell",
                 "shares": shares, "price": sell_price, "cost": comm + stamp,
+                "liquidation": True,
             })
         holdings.clear()
 
@@ -482,7 +483,7 @@ def run_portfolio_backtest(
                 alpha = float(ann_ret - beta * (bench_ret / max(n_years, 0.01)))
 
         # Turnover (average per rebalance)
-        total_trade_value = sum(t["shares"] * t["price"] for t in result.trades)
+        total_trade_value = sum(t["shares"] * t["price"] for t in result.trades if not t.get("liquidation"))
         avg_equity = np.mean(eq)
         n_rebal = max(len(result.rebalance_dates), 1)
         turnover = (total_trade_value / avg_equity / n_rebal) if avg_equity > 0 else 0

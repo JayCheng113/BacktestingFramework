@@ -101,7 +101,11 @@ class PortfolioStore:
 
     def get_run(self, run_id: str) -> dict | None:
         row = self._conn.execute(
-            "SELECT * FROM portfolio_runs WHERE run_id = ?", [run_id],
+            """SELECT run_id, strategy_name, strategy_params, symbols,
+                      start_date, end_date, freq, initial_cash,
+                      metrics, equity_curve, trade_count, rebalance_count, created_at,
+                      rebalance_weights, trades
+               FROM portfolio_runs WHERE run_id = ?""", [run_id],
         ).fetchone()
         if not row:
             return None
@@ -109,7 +113,7 @@ class PortfolioStore:
                 "start_date", "end_date", "freq", "initial_cash",
                 "metrics", "equity_curve", "trade_count", "rebalance_count", "created_at",
                 "rebalance_weights", "trades"]
-        d = dict(zip(cols, row[:len(cols)]))
+        d = dict(zip(cols, row))
         for key in ("strategy_params", "symbols", "metrics", "equity_curve",
                      "rebalance_weights", "trades"):
             if d.get(key) and isinstance(d[key], str):

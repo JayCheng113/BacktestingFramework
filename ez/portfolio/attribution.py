@@ -166,7 +166,9 @@ def compute_attribution(
         def _carino_k(r: float) -> float:
             if abs(r) < 1e-10:
                 return 1.0
-            return np.log(1 + r) / r
+            if r <= -1.0:
+                return 1.0  # degenerate: total wipeout, fall back to arithmetic
+            return float(np.log(1 + r) / r)
 
         K = _carino_k(total_return)
         if abs(K) < 1e-15:
@@ -203,9 +205,10 @@ def compute_attribution(
     else:
         industry_accum = {}
 
+    # Exclude liquidation trades from cost_drag (they occur after last rebalance period)
     cost_drag = (
-        sum(float(t.get("cost", 0)) for t in result.trades) / initial_cash
-        if initial_cash > 0 else 0.0
+        sum(float(t.get("cost", 0)) for t in result.trades if not t.get("liquidation"))
+        / initial_cash if initial_cash > 0 else 0.0
     )
 
     return AttributionResult(
