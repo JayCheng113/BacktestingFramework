@@ -452,6 +452,8 @@ def _build_active_weights(result, index_weights):
     if not index_weights:
         return None
     latest_w = result.rebalance_weights[-1] if result.rebalance_weights else {}
+    if not latest_w:
+        return None
     active = {}
     for s in sorted(set(latest_w) | set(index_weights)):
         pw = latest_w.get(s, 0)
