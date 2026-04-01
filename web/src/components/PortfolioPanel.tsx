@@ -273,6 +273,8 @@ export default function PortfolioPanel() {
         drawdown_reduce: drawdownReduce / 100,
         drawdown_recovery: drawdownRecovery / 100,
         max_turnover: maxTurnover / 100,
+        index_benchmark: indexBenchmark,
+        max_tracking_error: trackingError / 100,
       })
       setResult(res.data)
       loadHistory()

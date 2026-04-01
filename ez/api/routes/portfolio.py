@@ -125,6 +125,7 @@ def _create_alpha_combiner(params: dict, symbols=None, start=None, end=None, mar
 
     sub_names = params.pop("alpha_factors", [])
     method = params.pop("alpha_method", "equal")
+    orthogonalize = params.pop("orthogonalize", False)
     _VALID_METHODS = ("equal", "ic", "icir")
 
     if method not in _VALID_METHODS:
@@ -168,7 +169,7 @@ def _create_alpha_combiner(params: dict, symbols=None, start=None, end=None, mar
         if weights is None:
             warnings.append(f"IC/ICIR 权重计算失败，回退到等权")
 
-    return AlphaCombiner(factors=sub_factors, weights=weights), warnings
+    return AlphaCombiner(factors=sub_factors, weights=weights, orthogonalize=orthogonalize), warnings
 
 
 def _compute_alpha_weights(factors, symbols, market, start, end, method,

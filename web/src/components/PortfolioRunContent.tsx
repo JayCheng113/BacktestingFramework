@@ -121,7 +121,7 @@ export default function PortfolioRunContent(props: Props) {
     setWeightsLoading(true)
     try {
       const res = await getPortfolioRunWeights(result.run_id)
-      setFullWeights(res.data.weights_history || res.data || [])
+      setFullWeights(res.data.rebalance_weights || [])
     } catch (e: any) {
       alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
     } finally { setWeightsLoading(false) }
@@ -255,11 +255,9 @@ export default function PortfolioRunContent(props: Props) {
                 <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>指数基准
                   <select value={indexBenchmark} onChange={e => setIndexBenchmark(e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle}>
                     <option value="">无 (绝对收益)</option>
-                    <option value="000300.SH">沪深300</option>
-                    <option value="000905.SH">中证500</option>
-                    <option value="000852.SH">中证1000</option>
-                    <option value="000016.SH">上证50</option>
-                    <option value="399006.SZ">创业板指</option>
+                    <option value="000300">沪深300</option>
+                    <option value="000905">中证500</option>
+                    <option value="000852">中证1000</option>
                   </select>
                 </label>
                 {indexBenchmark && (
