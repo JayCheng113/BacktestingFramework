@@ -32,15 +32,19 @@ class AlphaCombiner(CrossSectionalFactor):
         self,
         factors: list[CrossSectionalFactor],
         weights: dict[str, float] | None = None,
+        orthogonalize: bool = False,
     ):
         """
         Args:
             factors: Sub-factor instances (each must implement compute_raw).
             weights: {factor.name: weight}. None → equal weight.
                      Pre-computed by API from training-period IC/ICIR.
+            orthogonalize: If True, apply Gram-Schmidt to remove inter-factor correlation
+                          before weighted combination. Factor order determines priority.
         """
         self._factors = factors
         self._weights = weights
+        self._orthogonalize = orthogonalize
 
     @property
     def name(self) -> str:
@@ -90,6 +94,12 @@ class AlphaCombiner(CrossSectionalFactor):
                 z_df[col] = (s - s.mean()) / std
             else:
                 z_df[col] = 0.0
+
+        # V2.12.1: Gram-Schmidt orthogonalization (after z-score, before combination)
+        if self._orthogonalize and len(z_df.columns) > 1:
+            from ez.portfolio.orthogonalization import gram_schmidt_orthogonalize
+            orth = gram_schmidt_orthogonalize(z_df.values)
+            z_df = pd.DataFrame(orth, index=z_df.index, columns=z_df.columns)
 
         # Build weight vector (validate coverage)
         if self._weights:
