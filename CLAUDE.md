@@ -103,11 +103,8 @@ No version tag without review pass. No push without critical issues resolved.
 - 研究任务串行 (同时只跑 1 个)
 - 数据源链扁平去重而非按市场独立路由
 - C++ 加速路径持 GIL (并发场景受限)
-- 回测未强平期末持仓 (trade_count 略低于真实)
 - LLM 调用计数近似 (chat_sync 内部多轮不精确计入，已文档化为估计值)
 - Tencent provider close=adj_close (qfq当raw, 涨跌停判断不精确; Tushare/AKShare优先所以影响低)
 - multi_select 参数搜索只搜单因子组合 (设计限制, 不是多因子组合空间)
 - AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log)
-- 归因分析仅当次回测可用 (weights_history 未存入 DB, 历史 run 无法归因, V2.12.1 扩展)
-- Brinson 多期归因用算术求和 (非几何链接, 长回测可能有累积误差, V2.12.1 考虑 Carino 链接)
-- 约束风险平价近似 (post-hoc clip 可能破坏等风险贡献特性)
+- 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)

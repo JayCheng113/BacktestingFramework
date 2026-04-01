@@ -56,8 +56,12 @@ class TestBrinsonIdentity:
         )
         attr = compute_attribution(result, data, {"A": "银行", "B": "食品饮料"})
         assert attr.cumulative is not None
-        assert abs(attr.cumulative.allocation_effect -
-                   sum(p.allocation_effect for p in attr.periods)) < 1e-10
+        # Carino linking: cumulative ≠ simple sum, but should be close
+        simple_sum = sum(p.allocation_effect for p in attr.periods)
+        assert abs(attr.cumulative.allocation_effect - simple_sum) < 0.01  # within 1%
+        # Carino identity: alloc + select + interact = total_excess
+        recon = attr.cumulative.allocation_effect + attr.cumulative.selection_effect + attr.cumulative.interaction_effect
+        assert abs(recon - attr.cumulative.total_excess) < 1e-10
 
     def test_cost_drag_positive(self):
         from ez.portfolio.attribution import compute_attribution

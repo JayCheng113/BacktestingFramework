@@ -600,6 +600,11 @@ def run_portfolio(req: PortfolioRunRequest):
         "equity_curve": [round(v, 2) for v in result.equity_curve],
         "trade_count": len(result.trades),
         "rebalance_count": len(result.rebalance_dates),
+        "rebalance_weights": [
+            {"date": d.isoformat(), "weights": w}
+            for d, w in zip(result.rebalance_dates, result.rebalance_weights)
+        ],
+        "trades": result.trades,
     })
 
     return {

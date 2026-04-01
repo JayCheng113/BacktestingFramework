@@ -96,7 +96,8 @@ def compute_attribution(
         return AttributionResult()
 
     periods: list[BrinsonAttribution] = []
-    industry_accum: dict[str, dict[str, float]] = {}
+    # Per-period per-industry effects (for Carino-linked industry accumulation)
+    period_industry_effects: list[dict[str, dict[str, float]]] = []
 
     for i in range(min(len(rebalance_dates) - 1, len(weights_history))):
         t_start = rebalance_dates[i]
@@ -122,6 +123,7 @@ def compute_attribution(
         # Brinson decomposition by industry
         industries = set(industry_map.get(s, "_other") for s in all_syms)
         alloc, select, interact = 0.0, 0.0, 0.0
+        period_ind: dict[str, dict[str, float]] = {}
 
         for ind in industries:
             syms = [s for s in all_syms if industry_map.get(s, "_other") == ind]
@@ -136,28 +138,70 @@ def compute_attribution(
             alloc += a
             select += s_eff
             interact += ix
-
-            if ind not in industry_accum:
-                industry_accum[ind] = {"allocation": 0.0, "selection": 0.0, "interaction": 0.0}
-            industry_accum[ind]["allocation"] += a
-            industry_accum[ind]["selection"] += s_eff
-            industry_accum[ind]["interaction"] += ix
+            period_ind.setdefault(ind, {"allocation": 0.0, "selection": 0.0, "interaction": 0.0})
+            period_ind[ind]["allocation"] += a
+            period_ind[ind]["selection"] += s_eff
+            period_ind[ind]["interaction"] += ix
 
         total = alloc + select + interact
+        period_industry_effects.append(period_ind)
         periods.append(BrinsonAttribution(
             period_start=t_start.isoformat(), period_end=t_end.isoformat(),
             allocation_effect=alloc, selection_effect=select,
             interaction_effect=interact, total_excess=total,
         ))
 
-    cumulative = BrinsonAttribution(
-        period_start=periods[0].period_start if periods else "",
-        period_end=periods[-1].period_end if periods else "",
-        allocation_effect=sum(p.allocation_effect for p in periods),
-        selection_effect=sum(p.selection_effect for p in periods),
-        interaction_effect=sum(p.interaction_effect for p in periods),
-        total_excess=sum(p.total_excess for p in periods),
-    ) if periods else None
+    # Carino (1999) geometric linking for multi-period attribution
+    # k_t = ln(1+R_t) / R_t for each period, K = ln(1+R_total) / R_total
+    # adj_effect = effect_t * k_t / K, then sum across periods
+    cumulative: BrinsonAttribution | None = None
+    if periods:
+        # Compute per-period portfolio returns for linking factors
+        period_returns = [p.total_excess for p in periods]
+        total_return = 1.0
+        for r in period_returns:
+            total_return *= (1 + r)
+        total_return -= 1.0
+
+        def _carino_k(r: float) -> float:
+            if abs(r) < 1e-10:
+                return 1.0
+            return np.log(1 + r) / r
+
+        K = _carino_k(total_return)
+        if abs(K) < 1e-15:
+            K = 1.0  # degenerate: total return ≈ 0
+
+        cum_alloc, cum_select, cum_interact = 0.0, 0.0, 0.0
+        for p, r_t in zip(periods, period_returns):
+            k_t = _carino_k(r_t)
+            factor = k_t / K
+            cum_alloc += p.allocation_effect * factor
+            cum_select += p.selection_effect * factor
+            cum_interact += p.interaction_effect * factor
+
+        cumulative = BrinsonAttribution(
+            period_start=periods[0].period_start,
+            period_end=periods[-1].period_end,
+            allocation_effect=cum_alloc,
+            selection_effect=cum_select,
+            interaction_effect=cum_interact,
+            total_excess=cum_alloc + cum_select + cum_interact,
+        )
+
+        # Rebuild industry_accum with Carino linking
+        industry_accum: dict[str, dict[str, float]] = {}
+        for pie, r_t in zip(period_industry_effects, period_returns):
+            k_t = _carino_k(r_t)
+            factor = k_t / K
+            for ind, effects in pie.items():
+                if ind not in industry_accum:
+                    industry_accum[ind] = {"allocation": 0.0, "selection": 0.0, "interaction": 0.0}
+                industry_accum[ind]["allocation"] += effects["allocation"] * factor
+                industry_accum[ind]["selection"] += effects["selection"] * factor
+                industry_accum[ind]["interaction"] += effects["interaction"] * factor
+    else:
+        industry_accum = {}
 
     cost_drag = (
         sum(float(t.get("cost", 0)) for t in result.trades) / initial_cash

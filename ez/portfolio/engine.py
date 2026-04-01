@@ -381,6 +381,28 @@ def run_portfolio_backtest(
         prev_prices = dict(prices)
         prev_raw_close = dict(raw_close_today)
 
+    # Final liquidation: sell all remaining holdings at last day's prices
+    # (fixes Known Limitation #5: trade_count reflects full round-trip)
+    # Use "T+1" date (next calendar day after last trading day) to avoid
+    # same-day ordering conflict with rebalance trades.
+    if holdings and prices and trading_days:
+        liq_date = trading_days[-1] + __import__('datetime').timedelta(days=1)
+        for sym in list(holdings.keys()):
+            shares = holdings[sym]
+            if shares <= 0 or sym not in prices:
+                continue
+            sell_price = prices[sym] * (1 - cost_model.slippage_rate)
+            sell_amount = shares * sell_price
+            comm = _compute_commission(sell_amount, cost_model.sell_commission_rate, cost_model.min_commission)
+            stamp = sell_amount * cost_model.stamp_tax_rate
+            cash += sell_amount - comm - stamp
+            result.trades.append({
+                "date": liq_date.isoformat(),
+                "symbol": sym, "side": "sell",
+                "shares": shares, "price": sell_price, "cost": comm + stamp,
+            })
+        holdings.clear()
+
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
     # O(n) single-pass via pre-indexed prices
     if benchmark_symbol and benchmark_symbol in _sym_data and result.dates:

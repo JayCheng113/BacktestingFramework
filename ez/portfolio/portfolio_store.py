@@ -42,17 +42,26 @@ class PortfolioStore:
                 equity_curve    TEXT,
                 trade_count     INTEGER,
                 rebalance_count INTEGER,
-                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                rebalance_weights TEXT,
+                trades          TEXT
             )
         """)
+        # Migration: add columns for existing DBs
+        for col, typ in [("rebalance_weights", "TEXT"), ("trades", "TEXT")]:
+            try:
+                self._conn.execute(f"ALTER TABLE portfolio_runs ADD COLUMN {col} {typ}")
+            except Exception:
+                pass  # column already exists
 
     def save_run(self, data: dict) -> str:
         run_id = data.get("run_id") or uuid.uuid4().hex[:12]
         self._conn.execute(
             """INSERT OR IGNORE INTO portfolio_runs
                (run_id, strategy_name, strategy_params, symbols, start_date, end_date,
-                freq, initial_cash, metrics, equity_curve, trade_count, rebalance_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                freq, initial_cash, metrics, equity_curve, trade_count, rebalance_count,
+                rebalance_weights, trades)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 run_id,
                 data.get("strategy_name", ""),
@@ -66,6 +75,8 @@ class PortfolioStore:
                 json.dumps(data.get("equity_curve", []), ensure_ascii=False),
                 data.get("trade_count", 0),
                 data.get("rebalance_count", 0),
+                json.dumps(data.get("rebalance_weights", []), ensure_ascii=False),
+                json.dumps(data.get("trades", []), ensure_ascii=False),
             ],
         )
         return run_id
@@ -96,10 +107,12 @@ class PortfolioStore:
             return None
         cols = ["run_id", "strategy_name", "strategy_params", "symbols",
                 "start_date", "end_date", "freq", "initial_cash",
-                "metrics", "equity_curve", "trade_count", "rebalance_count", "created_at"]
-        d = dict(zip(cols, row))
-        for key in ("strategy_params", "symbols", "metrics", "equity_curve"):
-            if d[key] and isinstance(d[key], str):
+                "metrics", "equity_curve", "trade_count", "rebalance_count", "created_at",
+                "rebalance_weights", "trades"]
+        d = dict(zip(cols, row[:len(cols)]))
+        for key in ("strategy_params", "symbols", "metrics", "equity_curve",
+                     "rebalance_weights", "trades"):
+            if d.get(key) and isinstance(d[key], str):
                 d[key] = _sanitize_nans(json.loads(d[key]))
         if d["created_at"]:
             d["created_at"] = str(d["created_at"])
