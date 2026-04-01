@@ -24,12 +24,15 @@ logger = logging.getLogger(__name__)
 
 # In-memory event queues for SSE streaming
 _running_tasks: dict[str, dict] = {}
-# Serialization lock — ensures check-and-start is atomic
-_start_lock = asyncio.Lock()
+# Serialization lock — lazy-initialized to avoid creating Lock before event loop exists (Windows)
+_start_lock: asyncio.Lock | None = None
 
 
 def get_start_lock() -> asyncio.Lock:
-    """Public accessor for the task-start serialization lock."""
+    """Public accessor for the task-start serialization lock (lazy init)."""
+    global _start_lock
+    if _start_lock is None:
+        _start_lock = asyncio.Lock()
     return _start_lock
 
 

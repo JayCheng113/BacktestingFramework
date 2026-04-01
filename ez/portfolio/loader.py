@@ -45,7 +45,7 @@ def _scan_dir(path: Path, module_base: str) -> None:
         if module_name in sys.modules:
             continue  # already loaded
         try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod

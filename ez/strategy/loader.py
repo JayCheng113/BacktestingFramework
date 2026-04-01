@@ -33,7 +33,7 @@ def _load_py_files(directory: Path, module_prefix: str) -> None:
         if module_name in sys.modules:
             continue
         try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod
@@ -86,7 +86,7 @@ def load_all_strategies() -> None:
                     continue
                 module_name = f"{module_base}.{py_file.stem}"
                 try:
-                    spec = importlib.util.spec_from_file_location(module_name, py_file)
+                    spec = importlib.util.spec_from_file_location(module_name, str(py_file))
                     if spec and spec.loader:
                         mod = importlib.util.module_from_spec(spec)
                         sys.modules[module_name] = mod  # register before exec to prevent double-import
@@ -112,7 +112,7 @@ def load_user_factors() -> None:
         if module_name in sys.modules:
             continue
         try:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod

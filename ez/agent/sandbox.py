@@ -44,24 +44,31 @@ def _get_python_executable() -> str:
 
     In frozen mode (PyInstaller), sys.executable is the launcher exe.
     We need the bundled Python to run subprocesses correctly.
+    PyInstaller onedir puts Python at: _MEIPASS/_internal/python.exe (Windows)
     """
     if not getattr(sys, "frozen", False):
         return sys.executable
-    # PyInstaller bundles Python in _internal/ (onedir) or alongside exe
     base = Path(sys._MEIPASS)
-    # Windows: python.exe or python3.exe in base
-    for name in ("python.exe", "python3.exe", "python"):
-        candidate = base / name
-        if candidate.exists():
+    # Search order: _internal/ first (PyInstaller onedir), then base
+    candidates = [
+        base / "_internal" / "python.exe",     # Windows onedir
+        base / "_internal" / "python3",         # Linux/Mac onedir
+        base / "python.exe",                    # Windows onefile
+        base / "python3",                       # Linux/Mac onefile
+        base / "python",
+        Path(sys.executable).parent / "python.exe",   # next to launcher
+        Path(sys.executable).parent / "python3",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
             return str(candidate)
-    # Fallback: try system Python
-    import shutil
-    py = shutil.which("python3") or shutil.which("python")
-    if py:
-        return py
-    # Last resort: use sys.executable (will re-launch app but at least won't crash)
-    logger.warning("Cannot find Python interpreter in frozen mode, using sys.executable")
-    return sys.executable
+    # Do NOT fall back to sys.executable (would re-launch the app).
+    # Do NOT use shutil.which (would find a different Python version).
+    # Raise so the error is visible.
+    raise RuntimeError(
+        f"Cannot find Python interpreter in frozen mode. "
+        f"Searched: {[str(c) for c in candidates]}"
+    )
 
 _KIND_DIR_MAP = {
     "strategy": _STRATEGIES_DIR,
@@ -495,7 +502,7 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
         verify = subprocess.run(
             [_get_python_executable(), "-c",
              f"import importlib.util, sys; "
-             f"spec=importlib.util.spec_from_file_location('_check','{_STRATEGIES_DIR / filename}'); "
+             f"spec=importlib.util.spec_from_file_location('_check',{repr(str(_STRATEGIES_DIR / filename))}); "
              f"mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
              f"from ez.strategy.base import Strategy; "
              f"classes=[v for v in vars(mod).values() if isinstance(v,type) and issubclass(v,Strategy) and v is not Strategy]; "
@@ -575,11 +582,11 @@ def save_and_validate_code(
         module_name = f"{target_dir.name}.{stem}"
         try:
             # Subprocess import test with 10s timeout (code NEVER runs in main process)
-            safe_path = str(target).replace("\\", "/")  # Windows path fix
+            safe_path_repr = repr(str(target))  # Properly escaped for Python string literal
             # Subprocess: import + verify Factor subclass exists + print class names
             test_code = (
                 f"import importlib.util, sys\n"
-                f"spec = importlib.util.spec_from_file_location('{module_name}', '{safe_path}')\n"
+                f"spec = importlib.util.spec_from_file_location('{module_name}', {safe_path_repr})\n"
                 f"mod = importlib.util.module_from_spec(spec)\n"
                 f"spec.loader.exec_module(mod)\n"
                 f"from ez.factor.base import Factor\n"
@@ -669,12 +676,12 @@ def save_and_validate_code(
 def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> dict:
     """Contract test for portfolio strategies and cross-sectional factors."""
     # Use forward slashes for Windows compat (Python accepts them on all platforms)
-    safe_path = str(target_dir / filename).replace("\\", "/")
+    safe_path_repr = repr(str(target_dir / filename))
     if kind == "portfolio_strategy":
         test_code = f"""
 import importlib.util, sys, numpy as np, pandas as pd
 from datetime import datetime
-spec = importlib.util.spec_from_file_location('_check', '{safe_path}')
+spec = importlib.util.spec_from_file_location('_check', {safe_path_repr})
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 from ez.portfolio.portfolio_strategy import PortfolioStrategy
 classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, PortfolioStrategy) and v is not PortfolioStrategy]
@@ -699,7 +706,7 @@ print(f'OK: {{cls.__name__}} weights={{w}}')
         test_code = f"""
 import importlib.util, numpy as np, pandas as pd
 from datetime import datetime
-spec = importlib.util.spec_from_file_location('_check', '{safe_path}')
+spec = importlib.util.spec_from_file_location('_check', {safe_path_repr})
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 from ez.portfolio.cross_factor import CrossSectionalFactor
 classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, CrossSectionalFactor) and v is not CrossSectionalFactor]
