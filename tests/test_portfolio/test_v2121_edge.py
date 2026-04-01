@@ -36,3 +36,29 @@ class TestGramSchmidt:
         mat = np.array([[1], [2], [3]], dtype=float)
         orth = gram_schmidt_orthogonalize(mat)
         np.testing.assert_array_equal(orth, mat)
+
+
+class TestIndexData:
+    def test_cache_prevents_repeated_calls(self):
+        from ez.portfolio.index_data import IndexDataProvider
+        provider = IndexDataProvider()
+        # Set cache directly
+        import time as _time
+        provider._cache["cons_TEST"] = (_time.monotonic(), ["A.SH", "B.SZ"])
+        result = provider.get_constituents("TEST")
+        assert result == ["A.SH", "B.SZ"]
+
+    def test_fallback_to_equal_weight(self):
+        from ez.portfolio.index_data import IndexDataProvider
+        provider = IndexDataProvider()
+        weights = provider._build_weights(["A.SH", "B.SZ", "C.SZ"])
+        assert len(weights) == 3
+        assert abs(sum(weights.values()) - 1.0) < 1e-10
+        assert abs(weights["A.SH"] - 1 / 3) < 1e-10
+
+    def test_normalize_code(self):
+        from ez.portfolio.index_data import IndexDataProvider
+        assert IndexDataProvider._normalize_code("600519") == "600519.SH"
+        assert IndexDataProvider._normalize_code("000001") == "000001.SZ"
+        assert IndexDataProvider._normalize_code("300750") == "300750.SZ"
+        assert IndexDataProvider._normalize_code("600519.SH") == "600519.SH"
