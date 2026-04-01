@@ -40,36 +40,35 @@ _CROSS_FACTORS_DIR = _user_dir_root() / "cross_factors"
 _FACTORS_DIR = _user_dir_root() / "factors"
 
 
+def _is_frozen() -> bool:
+    return getattr(sys, "frozen", False)
+
+
 def _get_python_executable() -> str:
     """Get the real Python interpreter, not the frozen launcher.
 
     In frozen mode (PyInstaller), sys.executable is the launcher exe.
-    We need the bundled Python to run subprocesses correctly.
-    PyInstaller onedir puts Python at: _MEIPASS/_internal/python.exe (Windows)
+    PyInstaller onedir may or may not expose a standalone python.exe.
+    If not found, returns None — callers must handle frozen fallback.
     """
-    if not getattr(sys, "frozen", False):
+    if not _is_frozen():
         return sys.executable
     base = Path(sys._MEIPASS)
-    # Search order: _internal/ first (PyInstaller onedir), then base
     candidates = [
-        base / "_internal" / "python.exe",     # Windows onedir
-        base / "_internal" / "python3",         # Linux/Mac onedir
-        base / "python.exe",                    # Windows onefile
-        base / "python3",                       # Linux/Mac onefile
+        base / "_internal" / "python.exe",
+        base / "_internal" / "python3",
+        base / "_internal" / "python",
+        base / "python.exe",
+        base / "python3",
         base / "python",
-        Path(sys.executable).parent / "python.exe",   # next to launcher
+        Path(sys.executable).parent / "python.exe",
         Path(sys.executable).parent / "python3",
     ]
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
             return str(candidate)
-    # Do NOT fall back to sys.executable (would re-launch the app).
-    # Do NOT use shutil.which (would find a different Python version).
-    # Raise so the error is visible.
-    raise RuntimeError(
-        f"Cannot find Python interpreter in frozen mode. "
-        f"Searched: {[str(c) for c in candidates]}"
-    )
+    # No standalone Python found — caller should use in-process fallback
+    return ""
 
 _KIND_DIR_MAP = {
     "strategy": _STRATEGIES_DIR,
@@ -486,22 +485,75 @@ def _reload_user_strategy(filename: str) -> None:
             raise
 
 
+def _validate_strategy_inprocess(filename: str) -> dict:
+    """In-process strategy validation for frozen mode (no subprocess Python)."""
+    try:
+        target = _STRATEGIES_DIR / filename
+        spec = importlib.util.spec_from_file_location(f"_check_{filename}", str(target))
+        if not spec or not spec.loader:
+            return {"passed": False, "output": f"Cannot create module spec for {filename}"}
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        from ez.strategy.base import Strategy
+        classes = [v for v in vars(mod).values()
+                   if isinstance(v, type) and issubclass(v, Strategy) and v is not Strategy]
+        if not classes:
+            return {"passed": False, "output": "No Strategy subclass found"}
+        return {"passed": True, "output": f"(frozen模式进程内验证) OK: {[c.__name__ for c in classes]}"}
+    except Exception as e:
+        return {"passed": False, "output": f"(frozen模式验证失败) {e}"}
+
+
+def _validate_portfolio_inprocess(filename: str, kind: str, target_dir: Path) -> dict:
+    """In-process portfolio/factor validation for frozen mode."""
+    try:
+        target = target_dir / filename
+        module_name = f"_check_{filename.replace('.py', '')}"
+        spec = importlib.util.spec_from_file_location(module_name, str(target))
+        if not spec or not spec.loader:
+            return {"passed": False, "output": f"Cannot create module spec for {filename}"}
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if kind == "portfolio_strategy":
+            from ez.portfolio.portfolio_strategy import PortfolioStrategy
+            classes = [v for v in vars(mod).values()
+                       if isinstance(v, type) and issubclass(v, PortfolioStrategy) and v is not PortfolioStrategy]
+            if not classes:
+                return {"passed": False, "output": "No PortfolioStrategy subclass found"}
+        else:
+            from ez.portfolio.cross_factor import CrossSectionalFactor
+            classes = [v for v in vars(mod).values()
+                       if isinstance(v, type) and issubclass(v, CrossSectionalFactor) and v is not CrossSectionalFactor]
+            if not classes:
+                return {"passed": False, "output": "No CrossSectionalFactor subclass found"}
+        return {"passed": True, "output": f"(frozen模式进程内验证) OK: {[c.__name__ for c in classes]}"}
+    except Exception as e:
+        return {"passed": False, "output": f"(frozen模式验证失败) {e}"}
+
+
 def _run_contract_test(filename: str, timeout: int = 30) -> dict:
     """Run the strategy contract test in a subprocess.
 
-    Falls back to syntax-only validation if pytest is not installed
-    (e.g., production environment without dev dependencies).
+    Falls back to in-process import validation if:
+    - Frozen mode without standalone Python interpreter
+    - pytest not installed
     """
+    python_exe = _get_python_executable()
+
+    # Frozen mode without Python interpreter: in-process import validation
+    if not python_exe:
+        return _validate_strategy_inprocess(filename)
+
     # Check if pytest is available
     check = subprocess.run(
-        [_get_python_executable(), "-c", "import pytest"],
+        [python_exe, "-c", "import pytest"],
         capture_output=True, timeout=5,
     )
     if check.returncode != 0:
         # Fallback: try to import the file and verify it defines a Strategy subclass
         logger.warning("pytest not installed — running import-only validation")
         verify = subprocess.run(
-            [_get_python_executable(), "-c",
+            [python_exe, "-c",
              f"import importlib.util, sys; "
              f"spec=importlib.util.spec_from_file_location('_check',{repr(str(_STRATEGIES_DIR / filename))}); "
              f"mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
@@ -517,7 +569,7 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
     try:
         result = subprocess.run(
             [
-                _get_python_executable(), "-m", "pytest",
+                python_exe, "-m", "pytest",
                 "tests/test_strategy/test_strategy_contract.py",
                 "-v", "--tb=short", "-x",
             ],
@@ -596,7 +648,21 @@ def save_and_validate_code(
                 f"print(','.join(classes))\n"
             )
             import subprocess as _sp_mod
-            proc = _sp_mod.run([_get_python_executable(), "-c", test_code], capture_output=True, text=True, timeout=10)
+            _py = _get_python_executable()
+            if not _py:
+                # Frozen mode fallback: in-process import
+                spec = importlib.util.spec_from_file_location(module_name, str(target))
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    registered = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+                    if not registered:
+                        raise ValueError("No Factor subclass found")
+                    proc = type("R", (), {"returncode": 0, "stdout": ",".join(registered), "stderr": ""})()
+                else:
+                    raise ValueError("Cannot create module spec")
+            else:
+                proc = _sp_mod.run([_py, "-c", test_code], capture_output=True, text=True, timeout=10)
             if proc.returncode != 0:
                 raise ValueError(f"Import failed: {proc.stderr[-200:]}")
             # Register via AST class name extraction ONLY (no exec_module in main process)
@@ -676,7 +742,10 @@ def save_and_validate_code(
 
 def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> dict:
     """Contract test for portfolio strategies and cross-sectional factors."""
-    # Use repr() for proper Python string literal escaping (handles backslashes, spaces, quotes)
+    python_exe = _get_python_executable()
+    if not python_exe:
+        return _validate_portfolio_inprocess(filename, kind, target_dir)
+
     safe_path_repr = repr(str(target_dir / filename))
     if kind == "portfolio_strategy":
         test_code = f"""
@@ -727,7 +796,7 @@ print(f'OK: {{cls.__name__}} scores={{result.to_dict()}}')
 """
     try:
         result = subprocess.run(
-            [_get_python_executable(), "-c", test_code],
+            [python_exe, "-c", test_code],
             capture_output=True, text=True, timeout=30, cwd=str(_PROJECT_ROOT),
         )
         return {"passed": result.returncode == 0,

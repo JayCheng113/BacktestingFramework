@@ -109,3 +109,4 @@ No version tag without review pass. No push without critical issues resolved.
 - multi_select 参数搜索只搜单因子组合 (设计限制, 不是多因子组合空间)
 - AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log)
 - 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)
+- AI助手SSE流式输出无法前端强制中断 (需后端cancel机制, 当前只能等输出完成)
