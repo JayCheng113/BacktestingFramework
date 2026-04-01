@@ -1105,6 +1105,173 @@ class MyRotation(PortfolioStrategy):
           <div style={h3s}>持仓饼图</div>
           <p style={ps}>回测完成后显示最后一天的持仓分配比例。一眼看出资金分布是否过于集中。</p>
 
+          {/* ── 组合优化 ── */}
+          <div style={h2s}>组合优化</div>
+          <p style={ps}>等权分配是最简单的权重方案，但不够好：高波动股票会主导组合风险，低相关资产的分散化优势也没有用上。组合优化用数学方法计算最优权重，在收益和风险之间找平衡。</p>
+          <p style={ps}>系统内置三种优化方法，适用于不同的投资场景：</p>
+          <table style={tbl}><thead><tr><th style={ths}>优化器</th><th style={ths}>目标函数</th><th style={ths}>适用场景</th></tr></thead><tbody>
+            <tr><td style={{...tds, fontWeight:600}}>均值-方差</td><td style={tds}>最大化 收益 - lambda * 风险</td><td style={tds}>对预期收益有信心时使用，lambda 控制风险厌恶程度</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>最小方差</td><td style={tds}>最小化组合波动率</td><td style={tds}>不想预测收益、只想降低波动，防守型配置</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>风险平价</td><td style={tds}>每个资产贡献相同的风险</td><td style={tds}>不确定哪个资产更好、想要均衡风险暴露</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>操作步骤</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>组合回测 tab → 展开 <b>"组合优化"</b> 折叠面板</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>从下拉列表选择优化方法（均值-方差 / 最小方差 / 风险平价）</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>设置参数（风险厌恶系数、回看期等）</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>运行回测 → 优化器自动计算每期最优权重</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>参数说明</div>
+          <table style={tbl}><thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>含义</th></tr></thead><tbody>
+            <tr><td style={tds}>lambda（风险厌恶）</td><td style={tds}>1.0</td><td style={tds}>越大越保守。0 = 只看收益，10 = 极度厌恶风险。仅均值-方差使用</td></tr>
+            <tr><td style={tds}>协方差回看期</td><td style={tds}>60 天</td><td style={tds}>用过去多少天的数据估算资产之间的相关性。太短波动大，太长反应慢</td></tr>
+            <tr><td style={tds}>单股上限</td><td style={tds}>0.3 (30%)</td><td style={tds}>单只股票权重不超过此值，防止过于集中</td></tr>
+            <tr><td style={tds}>行业上限</td><td style={tds}>0.5 (50%)</td><td style={tds}>同行业股票总权重不超过此值，分散行业风险</td></tr>
+          </tbody></table>
+
+          <div style={note}>
+            <strong>为什么用 Ledoit-Wolf 协方差？</strong> 50 只股票有 1225 对相关性要估算，但可能只有 60 天数据。直接用样本协方差矩阵会很不稳定（每天权重剧烈变化）。Ledoit-Wolf 方法把样本协方差"收缩"到一个稳定的目标矩阵，在准确性和稳定性之间取折中。你不需要手动设置收缩参数，系统自动计算最优收缩系数。
+          </div>
+          <div style={note}>
+            <strong>Fallback 机制：</strong>如果数据不足（回看期内有效数据太少、协方差矩阵不可逆），优化器会自动回退到等权分配，不会报错。日志中会记录回退原因。
+          </div>
+
+          {/* ── 风险控制 ── */}
+          <div style={h2s}>风险控制</div>
+          <p style={ps}>回测/实盘中最怕的不是赚少了，而是回撤太深翻不了身。风险控制模块提供两个保护机制：回撤熔断和换手率限制。</p>
+
+          <div style={h3s}>回撤熔断</div>
+          <p style={ps}>当组合净值从最高点回撤超过阈值时，自动减仓保护。状态机如下：</p>
+          <pre style={code}>{`正常状态 (NORMAL)
+  ↓ 回撤 >= 回撤阈值 (如 10%)
+触发状态 (BREACHED) → 执行紧急减仓
+  ↓ 回撤 < 恢复阈值 (如 5%)
+正常状态 (NORMAL) → 恢复正常权重`}</pre>
+
+          <div style={h3s}>换手率限制</div>
+          <p style={ps}>限制每次调仓时的最大换手比例。如果策略要求大幅调仓，实际调仓会被截断到上限值，余下的调仓分摊到后续周期。防止一次调仓产生巨额交易成本。</p>
+
+          <div style={h3s}>操作步骤</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>组合回测 tab → 展开 <b>"风险控制"</b> 折叠面板</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>启用回撤熔断 / 换手率限制（可单独或同时启用）</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>设置回撤阈值、减仓比例、恢复阈值、换手率上限</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>运行回测 → 查看风控事件日志（黄色面板显示触发日期和事件）</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>参数说明</div>
+          <table style={tbl}><thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>含义</th></tr></thead><tbody>
+            <tr><td style={tds}>回撤阈值</td><td style={tds}>0.10 (10%)</td><td style={tds}>净值从高点回撤多少触发熔断</td></tr>
+            <tr><td style={tds}>减仓比例</td><td style={tds}>0.50 (50%)</td><td style={tds}>触发时把所有权重乘以此系数（0.5 = 仓位减半）</td></tr>
+            <tr><td style={tds}>恢复阈值</td><td style={tds}>0.05 (5%)</td><td style={tds}>回撤收窄到多少恢复正常权重</td></tr>
+            <tr><td style={tds}>换手率上限</td><td style={tds}>0.50 (50%)</td><td style={tds}>单次调仓最大换手比例</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>紧急减仓细节</div>
+          <p style={ps}>回撤熔断触发后，引擎在<strong>非再平衡日</strong>也会检查。如果触发减仓：</p>
+          <ol style={{ paddingLeft: '20px', margin: '6px 0', lineHeight: '1.8' }}>
+            <li>只在<strong>首次突破阈值</strong>时执行一次减仓（不会每天重复卖）</li>
+            <li>卖出时检查涨跌停限制 — 跌停的股票当天无法卖出，会保留</li>
+            <li>所有权重按比例缩小（如减仓 50%，则每只股票权重都乘 0.5）</li>
+          </ol>
+          <p style={ps}>如果在<strong>正常再平衡日</strong>处于 BREACHED 状态，策略输出的目标权重会自动乘以减仓比例（scale），不额外触发卖出操作。</p>
+          <div style={note}>
+            <strong>风控事件日志：</strong>回测完成后，结果面板下方会显示黄色的风控事件面板。每条记录包含日期和事件描述（如"回撤触发: -12.3%, 减仓至50%"或"回撤恢复: -4.2%"），方便复盘风控是否生效。
+          </div>
+
+          {/* ── 归因分析 ── */}
+          <div style={h2s}>归因分析</div>
+          <p style={ps}>回测完知道赚了 8%，但更重要的是<strong>为什么赚了 8%</strong>。归因分析把超额收益拆成三个来源，帮你理解收益从哪来，后续怎么优化。</p>
+
+          <div style={h3s}>Brinson 三因素分解</div>
+          <p style={ps}>把组合相对基准的超额收益分解为三个效应：</p>
+          <table style={tbl}><thead><tr><th style={ths}>效应</th><th style={ths}>直觉解释</th></tr></thead><tbody>
+            <tr><td style={{...tds, fontWeight:600}}>配置效应</td><td style={tds}>你超配了涨得好的行业（或低配了跌的行业）带来的收益。比如你比指数多配了 10% 的科技股，科技股当期涨了 5%，那这 0.5% 就是配置贡献</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>选股效应</td><td style={tds}>在每个行业内部，你选的股票比指数成分表现好。比如同样买科技股，你选了涨 8% 的龙头，指数平均只涨 5%，多出的 3% 就是选股贡献</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>交互效应</td><td style={tds}>配置和选股的乘积项。你不仅超配了科技股，还在科技股里选对了标的 — 这两个决策叠加产生的额外收益</td></tr>
+          </tbody></table>
+          <div style={note}>
+            <strong>恒等式：</strong>配置效应 + 选股效应 + 交互效应 = 总超额收益（组合收益 - 基准收益）。三项加起来严格等于超额，不多不少。
+          </div>
+
+          <div style={h3s}>操作步骤</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>运行一次组合回测（需设置基准，如 510300.SH）</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>回测完成后，展开 <b>"归因分析"</b> 折叠面板</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>查看三因素分解表：配置 / 选股 / 交互各贡献多少</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>多期链接</div>
+          <p style={ps}>回测通常跨越多个月。单期归因可以简单加总，但由于复利效应，直接累加会有误差。系统使用 <strong>Carino 几何链接</strong>方法，把各期归因结果正确链接成总归因，保证总和恒等式在全周期内成立。</p>
+
+          <div style={h3s}>交易成本归因</div>
+          <p style={ps}>归因结果中还包含交易成本项：<code>总交易成本 / 初始资金</code>。这是一个负收益贡献，帮你判断换手率是否过高、交易成本是否侵蚀了策略的超额收益。</p>
+
+          {/* ── 指数增强 ── */}
+          <div style={h2s}>指数增强</div>
+          <p style={ps}>指数增强 = 跟踪一个指数基准 + 在基准基础上做主动偏离获取超额收益。目标不是大幅跑赢基准，而是<strong>稳定地每年多赚几个点</strong>，同时控制跟踪误差不要太大。</p>
+
+          <div style={h3s}>支持的指数</div>
+          <table style={tbl}><thead><tr><th style={ths}>指数</th><th style={ths}>代码</th><th style={ths}>成分股数量</th></tr></thead><tbody>
+            <tr><td style={tds}>沪深 300</td><td style={{...tds, fontFamily:'monospace'}}>000300.SH</td><td style={tds}>300</td></tr>
+            <tr><td style={tds}>中证 500</td><td style={{...tds, fontFamily:'monospace'}}>000905.SH</td><td style={tds}>500</td></tr>
+            <tr><td style={tds}>中证 1000</td><td style={{...tds, fontFamily:'monospace'}}>000852.SH</td><td style={tds}>1000</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>两种使用模式</div>
+          <table style={tbl}><thead><tr><th style={ths}>模式</th><th style={ths}>前提条件</th><th style={ths}>效果</th></tr></thead><tbody>
+            <tr><td style={{...tds, fontWeight:600}}>有优化器</td><td style={tds}>选择了均值-方差或最小方差优化器</td><td style={tds}>优化器在求解时加入跟踪误差（TE）约束，确保主动权重偏离不超限</td></tr>
+            <tr><td style={{...tds, fontWeight:600}}>无优化器</td><td style={tds}>不使用优化器（等权/简单加权）</td><td style={tds}>仅在归因分析中显示相对指数基准的超额分解，不约束权重</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>操作步骤</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>展开 <b>"组合优化"</b> 面板 → 选择优化方法</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>在"指数基准"下拉框选择目标指数（沪深300/中证500/中证1000）</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>设置跟踪误差上限（如 0.05 = 年化 5%）</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>运行回测 → 查看主动权重表（组合权重 vs 指数权重 vs 偏离）</td></tr>
+          </tbody></table>
+
+          <div style={note}>
+            <strong>跟踪误差说明：</strong>跟踪误差衡量组合收益偏离基准收益的波动性。TE = 3% 意味着大约 68% 的时间里，组合年化收益与基准的差距在 3% 以内。由于实际持仓通常是基准的子集（active-universe 近似），系统用组合内资产的协方差估算 TE，这是一个近似值。
+          </div>
+          <div style={note}>
+            <strong>指数权重数据来源：</strong>通过 AKShare 免费 API 获取指数成分股和权重。如果获取失败（如网络问题），自动回退到成分股等权作为基准权重。
+          </div>
+
+          {/* ── 因子正交化 ── */}
+          <div style={h2s}>因子正交化</div>
+          <p style={ps}>多因子合成时的一个常见问题：EP（收益价格比）和 BP（账面价格比）高度相关 — 便宜的股票两个指标都低。直接等权合成时，"便宜"这个信息被重复计入了两次，相当于你以为用了两个因子，实际还是在赌同一件事。</p>
+          <p style={ps}>因子正交化用 <strong>Gram-Schmidt 残差法</strong>解决这个问题：按顺序处理每个因子，从后面的因子中减去前面因子能解释的部分，只留下独立的新信息。</p>
+          <pre style={code}>{`原始因子: EP, BP, ROE
+正交化后:
+  EP      → 不变（第一个因子作为基准）
+  BP*     → BP 中去掉"和 EP 相关"的部分，只留独立信息
+  ROE*    → ROE 中去掉"和 EP、BP* 相关"的部分`}</pre>
+
+          <div style={h3s}>操作步骤</div>
+          <table style={tbl}><thead><tr><th style={ths}>步骤</th><th style={ths}>操作</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>组合回测 tab → 多因子合成面板 → 选择多个子因子</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>勾选 <b>"因子正交化"</b> 选项</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>运行回测 → 合成时自动对选中因子做正交化处理</td></tr>
+          </tbody></table>
+          <div style={warn}>
+            <strong>注意：因子顺序影响结果。</strong>排在前面的因子保留完整信号，后面的因子只保留独立增量。建议把你最信任的因子放在第一位。可以试不同顺序对比结果。
+          </div>
+          <div style={note}>
+            <strong>适用场景：</strong>当因子相关性热力图显示两个因子相关系数 &gt; 0.7 时，强烈建议开启正交化。典型案例：EP 和 BP（估值类高度相关）、LnMarketCap 和 LnCircMV（规模类几乎相同）。
+          </div>
+
+          {/* ── 完整调仓历史 ── */}
+          <div style={h3s}>完整调仓历史</div>
+          <p style={ps}>默认情况下，回测结果只显示最近 20 期的调仓记录（权重变化表）。如果需要查看完整的历史调仓数据，点击调仓表下方的 <b>"加载完整历史"</b> 按钮，系统会从后端拉取全部调仓记录。</p>
+
+          {/* ── 期末强平 ── */}
+          <div style={h3s}>期末强平</div>
+          <p style={ps}>回测结束时，引擎会自动卖出所有剩余持仓（按最后一天的收盘价成交），将资金全部转回现金。这样 trade_count 包含完整的买入-卖出 round-trip，最终净值反映真实的可提取金额（扣除了卖出佣金和印花税）。</p>
+
           {/* ── API ── */}
           <div style={h2s}>API 端点</div>
           <table style={tbl}><thead><tr><th style={ths}>端点</th><th style={ths}>方法</th><th style={ths}>说明</th></tr></thead><tbody>
@@ -1115,6 +1282,7 @@ class MyRotation(PortfolioStrategy):
             <tr><td style={tds}>/api/portfolio/factor-correlation</td><td style={tds}>POST</td><td style={tds}>因子相关性矩阵</td></tr>
             <tr><td style={tds}>/api/portfolio/walk-forward</td><td style={tds}>POST</td><td style={tds}>前推验证 + 显著性</td></tr>
             <tr><td style={tds}>/api/portfolio/runs</td><td style={tds}>GET</td><td style={tds}>历史回测列表</td></tr>
+            <tr><td style={tds}>/api/portfolio/runs/{'{run_id}'}/weights</td><td style={tds}>GET</td><td style={tds}>获取完整调仓历史</td></tr>
             <tr><td style={tds}>/api/fundamental/fetch</td><td style={tds}>POST</td><td style={tds}>获取基本面数据</td></tr>
             <tr><td style={tds}>/api/fundamental/quality</td><td style={tds}>POST</td><td style={tds}>数据质量报告</td></tr>
             <tr><td style={tds}>/api/fundamental/factors</td><td style={tds}>GET</td><td style={tds}>基本面因子列表</td></tr>
