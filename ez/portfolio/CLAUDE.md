@@ -9,7 +9,10 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - `CrossSectionalFactor` — ABC: `compute(universe_data, date) → Series[rank]`, `compute_raw(universe_data, date) → Series[raw_value]` (V2.11.1)
 - `PortfolioStrategy` — ABC: `generate_weights(data, date, prev_w, prev_r) → dict[str, float]`
 - `Allocator` — ABC: `allocate(raw_weights) → dict[str, float]` (EqualWeight/MaxWeight/RiskParity)
-- `run_portfolio_backtest()` — Main engine function
+- `PortfolioOptimizer` — ABC: `set_context(date, data)` + `optimize(alpha_weights) → dict` (MeanVariance/MinVariance/RiskParity) (V2.12)
+- `RiskManager` — `check_drawdown(equity)` + `check_turnover(new, old)` — 每日回撤熔断 + 换手率限制 (V2.12)
+- `compute_attribution()` — Brinson 归因: 配置/选股/交互效应 + 行业维度 (V2.12)
+- `run_portfolio_backtest()` — Main engine function (V2.12: +optimizer +risk_manager 可选参数)
 - `CrossSectionalEvaluator` — Cross-sectional IC/RankIC/ICIR/IC decay/quintile returns (nanmean/nanstd)
 - `FactorCorrelationMatrix` — Pairwise Spearman rank correlation between factors
 - `PortfolioWalkForward` — Walk-forward validation for portfolio strategies
@@ -35,6 +38,9 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 | walk_forward.py | PortfolioWalkForward + PortfolioSignificance: Bootstrap CI + Monte Carlo |
 | neutralization.py | neutralize_by_industry(): coverage threshold, single-stock drop, no-industry fallback (V2.11.1) |
 | alpha_combiner.py | AlphaCombiner: z-score + weighted sum, equal/IC/ICIR, not auto-registered (V2.11.1) |
+| optimizer.py | PortfolioOptimizer ABC + MeanVariance/MinVariance/RiskParity + Ledoit-Wolf (V2.12) |
+| risk_manager.py | RiskConfig + RiskManager: drawdown state machine + turnover limiter (V2.12) |
+| attribution.py | BrinsonAttribution + compute_attribution(): Brinson decomposition (V2.12) |
 | loader.py | Startup scanner for portfolio_strategies/ and cross_factors/ |
 
 ## Key Design Decisions
@@ -64,3 +70,4 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - V2.10 post-release: T+1, directional slippage, __init_subclass__ auto-registration
 - V2.11.1: compute_raw() interface, neutralization, AlphaCombiner, parameter search, IC nanmean/nanstd, EP/BP/SP negative exclusion, PIT restatement fix, ann_date INDEX
 - V2.11.1 post-release: 会计assert改有意义(cash>=0+equity>0), WF不可达代码移除(test_end_idx>n_days), Bootstrap CI升级BCa(z0 clamp防±inf, jackknife加速)
+- V2.12: PortfolioOptimizer(MeanVariance/MinVariance/RiskParity, Ledoit-Wolf), RiskManager(drawdown+turnover), Brinson attribution, engine每日回撤+紧急减仓
