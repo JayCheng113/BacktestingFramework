@@ -123,7 +123,9 @@ def _list_factors() -> list[str]:
     import ez.factor.builtin.technical  # noqa: F401 — ensure loaded
     from ez.factor.base import Factor
 
-    return [cls.__name__ for cls in Factor.__subclasses__() if cls.__module__.startswith("ez.")]
+    # Include both builtin (ez.*) and user factors (factors.*)
+    return [cls.__name__ for cls in Factor.__subclasses__()
+            if cls.__module__.startswith("ez.") or cls.__module__.startswith("factors.")]
 
 
 @tool(
@@ -251,7 +253,9 @@ def _run_backtest(
         end_date=end_date,
         run_wfo=False,
     )
-    result = Runner().run(spec, df)
+    result = _run_with_timeout(lambda: Runner().run(spec, df), timeout=300)
+    if isinstance(result, dict) and "error" in result:
+        return result
     if result.status == "failed":
         return {"error": result.error}
     metrics = result.backtest.metrics if result.backtest else {}
@@ -263,6 +267,17 @@ def _run_backtest(
         "max_drawdown": metrics.get("max_drawdown"),
         "total_return": metrics.get("total_return"),
     }
+
+
+def _run_with_timeout(fn, timeout: int = 300):
+    """Run a function with timeout (seconds). Returns error dict on timeout."""
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            return {"error": f"执行超时 ({timeout}秒)，请缩短回测区间或减少股票数量"}
 
 
 @tool(
@@ -333,7 +348,9 @@ def _run_experiment(
     if existing:
         return {"status": "duplicate", "run_id": existing, "spec_id": spec.spec_id}
 
-    result = Runner().run(spec, df)
+    result = _run_with_timeout(lambda: Runner().run(spec, df), timeout=600)  # experiments get 10 min (WFO is slow)
+    if isinstance(result, dict) and "error" in result:
+        return result
     gate = ResearchGate()
     verdict = gate.evaluate(result)
     report = ExperimentReport.from_result(result, verdict)
