@@ -467,7 +467,10 @@ def _reload_user_strategy(filename: str) -> None:
             try:
                 tree = ast.parse(py_file.read_text(encoding="utf-8"))
                 class_names = {node.name for node in ast.walk(tree)
-                               if isinstance(node, ast.ClassDef)}
+                               if isinstance(node, ast.ClassDef)
+                               and any((isinstance(b, ast.Name) and b.id == "Strategy")
+                                       or (isinstance(b, ast.Attribute) and b.attr == "Strategy")
+                                       for b in node.bases)}
                 old_keys.update(k for k, v in Strategy._registry.items()
                                 if v.__name__ in class_names)
             except Exception:

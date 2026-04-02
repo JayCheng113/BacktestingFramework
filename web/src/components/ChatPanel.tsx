@@ -79,6 +79,7 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
   const [activeId, setActiveId] = useState<string>(() => localStorage.getItem(ACTIVE_KEY) || '')
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const aiCreatedFileRef = useRef(false)  // Distinguishes AI-created file from user-clicked file
   const [llmStatus, setLlmStatus] = useState<{ available: boolean; provider?: string; model?: string } | null>(null)
   const [showList, setShowList] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -111,10 +112,11 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
     if (existing) {
       if (activeId !== existing.id) setActiveId(existing.id)
     } else {
-      // Check if active conversation has no fileKey (unbound) — bind it instead of creating new
+      // Check if this fileKey change came from AI creating a file (not user clicking sidebar)
       const active = conversations.find(c => c.id === activeId)
-      if (active && !active.fileKey && active.messages.length > 0) {
-        // AI just created a file in this conversation — bind it
+      if (active && !active.fileKey && active.messages.length > 0 && aiCreatedFileRef.current) {
+        // AI just created a file in this conversation — bind it (don't create new conversation)
+        aiCreatedFileRef.current = false
         setConversations(prev => prev.map(c =>
           c.id === activeId ? { ...c, fileKey, title: fileKey.replace('.py', '') } : c
         ))
@@ -295,14 +297,15 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                       const fname = r.path.replace('strategies/', '').replace('portfolio_strategies/', '').replace('cross_factors/', '').replace('factors/', '')
                       // Bind current conversation to the new file BEFORE updating fileKey
                       // This prevents useEffect[fileKey] from creating a new conversation
+                      aiCreatedFileRef.current = true  // Mark: fileKey change is from AI, not user click
                       setConversations(prev => prev.map(c =>
                         c.id === activeId ? { ...c, fileKey: fname, title: fname.replace('.py', '') } : c
                       ))
                       fetch(`/api/code/files/${fname}`).then(resp => resp.json()).then(f => {
                         if (f.code) onCodeUpdate(f.code, fname)
                       }).catch(() => {
-                        // Fetch failed but file was created — still update filename to trigger sidebar refresh
-                        onCodeUpdate('', fname)
+                        // Fetch failed but file was created — update filename only (don't clear editor code)
+                        if (onCodeUpdate) onCodeUpdate(undefined as unknown as string, fname)
                       })
                     }
                   } catch {}
