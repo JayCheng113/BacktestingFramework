@@ -530,7 +530,9 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
                 setCode(c)
                 if (f) {
                   setFilename(f)
-                  // AI created/updated a file → refresh sidebar file list
+                  // AI creates strategies via create_strategy tool → kind is always 'strategy'
+                  setCurrentKind('strategy')
+                  // Refresh sidebar file list
                   loadAllFiles()
                 }
               }} />

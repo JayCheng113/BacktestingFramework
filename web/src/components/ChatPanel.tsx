@@ -111,18 +111,27 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
     if (existing) {
       if (activeId !== existing.id) setActiveId(existing.id)
     } else {
-      // Create new conversation bound to this file
-      const label = fileKey.replace('.py', '')
-      const conv: Conversation = {
-        id: newId(),
-        title: label,
-        messages: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        fileKey,
+      // Check if active conversation has no fileKey (unbound) — bind it instead of creating new
+      const active = conversations.find(c => c.id === activeId)
+      if (active && !active.fileKey && active.messages.length > 0) {
+        // AI just created a file in this conversation — bind it
+        setConversations(prev => prev.map(c =>
+          c.id === activeId ? { ...c, fileKey, title: fileKey.replace('.py', '') } : c
+        ))
+      } else {
+        // Truly new file opened by user — create new conversation
+        const label = fileKey.replace('.py', '')
+        const conv: Conversation = {
+          id: newId(),
+          title: label,
+          messages: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          fileKey,
+        }
+        setConversations(prev => [conv, ...prev])
+        setActiveId(conv.id)
       }
-      setConversations(prev => [conv, ...prev])
-      setActiveId(conv.id)
     }
   }, [fileKey])  // eslint-disable-line react-hooks/exhaustive-deps
 
