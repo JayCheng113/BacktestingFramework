@@ -458,6 +458,8 @@ def _reload_user_strategy(filename: str) -> None:
         # 3. By class name (prevents duplicates when user creates a class with same name as builtin)
         old_keys = set()
         old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == module_name)
+        # Two possible module paths: "strategies.xxx" (user) and "ez.strategy.builtin.xxx" (builtin).
+        # The startup loader uses the builtin prefix; hot-reload uses the user prefix.
         alt_module = f"ez.strategy.builtin.{stem}" if stem else ""
         if alt_module:
             old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == alt_module)

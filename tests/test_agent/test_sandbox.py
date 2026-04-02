@@ -163,6 +163,81 @@ class TestTemplate:
         assert "MyFactor" in code2
 
 
+class TestReloadUserStrategyDedup:
+    """Test AST-based class name dedup in _reload_user_strategy."""
+
+    def test_strategy_subclass_detected(self):
+        """Only classes inheriting Strategy should be matched."""
+        import ast
+        code = '''
+from ez.strategy.base import Strategy
+
+class MyHelper:
+    pass
+
+class MyStrat(Strategy):
+    pass
+'''
+        tree = ast.parse(code)
+        class_names = {node.name for node in ast.walk(tree)
+                       if isinstance(node, ast.ClassDef)
+                       and any((isinstance(b, ast.Name) and b.id == "Strategy")
+                               or (isinstance(b, ast.Attribute) and b.attr == "Strategy")
+                               for b in node.bases)}
+        assert "MyStrat" in class_names
+        assert "MyHelper" not in class_names
+
+    def test_attribute_base_detected(self):
+        """class Foo(ez.strategy.base.Strategy) should match."""
+        import ast
+        code = 'class Foo(ez.strategy.base.Strategy):\n    pass'
+        tree = ast.parse(code)
+        class_names = {node.name for node in ast.walk(tree)
+                       if isinstance(node, ast.ClassDef)
+                       and any((isinstance(b, ast.Name) and b.id == "Strategy")
+                               or (isinstance(b, ast.Attribute) and b.attr == "Strategy")
+                               for b in node.bases)}
+        assert "Foo" in class_names
+
+    def test_no_strategy_base_empty(self):
+        """File with no Strategy subclass should return empty set."""
+        import ast
+        code = 'class NotAStrategy:\n    pass'
+        tree = ast.parse(code)
+        class_names = {node.name for node in ast.walk(tree)
+                       if isinstance(node, ast.ClassDef)
+                       and any((isinstance(b, ast.Name) and b.id == "Strategy")
+                               or (isinstance(b, ast.Attribute) and b.attr == "Strategy")
+                               for b in node.bases)}
+        assert len(class_names) == 0
+
+
+class TestRunWithTimeout:
+    """Test _run_with_timeout utility."""
+
+    def test_fast_function_returns_result(self):
+        from ez.agent.tools import _run_with_timeout
+        result = _run_with_timeout(lambda: 42, timeout=5)
+        assert result == 42
+
+    def test_timeout_returns_error_dict(self):
+        import time
+        from ez.agent.tools import _run_with_timeout
+        result = _run_with_timeout(lambda: time.sleep(10) or "never", timeout=1)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "超时" in result["error"]
+
+    def test_exception_propagates(self):
+        from ez.agent.tools import _run_with_timeout
+        def raise_error():
+            raise ValueError("test error")
+        # _run_with_timeout re-raises exceptions (not caught internally)
+        import pytest
+        with pytest.raises(ValueError, match="test error"):
+            _run_with_timeout(raise_error, timeout=5)
+
+
 class TestListUserStrategies:
     def test_returns_list(self):
         result = list_user_strategies()
