@@ -452,15 +452,26 @@ def _reload_user_strategy(filename: str) -> None:
     module_name = f"strategies.{stem}"
 
     with _reload_lock:
-        # Find and remove old registry entries from this module
-        # Match both by module_name AND by class names defined in the file
-        # (prevents duplicates when loaded via different module paths)
+        # Find and remove old registry entries:
+        # 1. By module name (same module path)
+        # 2. By alternative module name (startup loader uses different prefix)
+        # 3. By class name (prevents duplicates when user creates a class with same name as builtin)
         old_keys = set()
         old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == module_name)
-        # Also check alternative module names (startup loader may use different prefix)
         alt_module = f"ez.strategy.builtin.{stem}" if stem else ""
         if alt_module:
             old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == alt_module)
+        # Extract class names from the file to catch cross-module name collisions
+        py_file = _STRATEGIES_DIR / filename
+        if py_file.exists():
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+                class_names = {node.name for node in ast.walk(tree)
+                               if isinstance(node, ast.ClassDef)}
+                old_keys.update(k for k, v in Strategy._registry.items()
+                                if v.__name__ in class_names)
+            except Exception:
+                pass
         for k in old_keys:
             Strategy._registry.pop(k, None)
 

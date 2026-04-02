@@ -300,7 +300,10 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                       ))
                       fetch(`/api/code/files/${fname}`).then(resp => resp.json()).then(f => {
                         if (f.code) onCodeUpdate(f.code, fname)
-                      }).catch(() => {})
+                      }).catch(() => {
+                        // Fetch failed but file was created — still update filename to trigger sidebar refresh
+                        onCodeUpdate('', fname)
+                      })
                     }
                   } catch {}
                 }
