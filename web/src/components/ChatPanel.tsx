@@ -149,6 +149,14 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
     setConversations(prev => prev.filter(c => c.id !== id))
   }
 
+  const clearAllConversations = () => {
+    if (!confirm('确定清空所有对话历史？此操作不可撤销。')) return
+    setConversations([])
+    setActiveId('')
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_KEY)
+  }
+
   const switchConversation = (id: string) => {
     setActiveId(id)
     setShowList(false)
@@ -360,6 +368,12 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                 style={{ color: '#ef4444' }}>x</button>
             </div>
           ))}
+          {conversations.length > 0 && (
+            <div className="px-3 py-2 text-center" style={{ borderTop: '1px solid var(--border)' }}>
+              <button onClick={clearAllConversations} className="text-xs px-2 py-0.5 rounded"
+                style={{ color: '#ef4444', border: '1px solid #ef4444' }}>清空所有对话</button>
+            </div>
+          )}
         </div>
       )}
 
