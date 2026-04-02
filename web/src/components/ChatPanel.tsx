@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 
 interface Props {
   editorCode?: string
-  onCodeUpdate?: (code: string, filename?: string) => void
+  onCodeUpdate?: (code: string | undefined, filename?: string, kind?: string) => void
   fileKey?: string  // Bound to a file — auto-switch/create conversation per file
 }
 
@@ -290,7 +290,8 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                   return updated
                 })
                 // Push code to editor when strategy is created/updated
-                if ((data.name === 'create_strategy' || data.name === 'update_strategy') && onCodeUpdate) {
+                if ((data.name === 'create_strategy' || data.name === 'update_strategy'
+                    || data.name === 'create_portfolio_strategy' || data.name === 'create_cross_factor') && onCodeUpdate) {
                   try {
                     const r = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
                     if (r.success && r.path) {
@@ -301,11 +302,15 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                       setConversations(prev => prev.map(c =>
                         c.id === activeId ? { ...c, fileKey: fname, title: fname.replace('.py', '') } : c
                       ))
-                      fetch(`/api/code/files/${fname}`).then(resp => resp.json()).then(f => {
-                        if (f.code) onCodeUpdate(f.code, fname)
+                      // Detect kind from path prefix for CodeEditor
+                      const detectedKind = r.path.startsWith('portfolio_strategies/') ? 'portfolio_strategy'
+                        : r.path.startsWith('cross_factors/') ? 'cross_factor'
+                        : r.path.startsWith('factors/') ? 'factor' : 'strategy'
+                      fetch(`/api/code/files/${fname}?kind=${detectedKind}`).then(resp => resp.json()).then(f => {
+                        if (f.code) onCodeUpdate(f.code, fname, detectedKind)
                       }).catch(() => {
                         // Fetch failed but file was created — update filename only (don't clear editor code)
-                        if (onCodeUpdate) onCodeUpdate(undefined as unknown as string, fname)
+                        if (onCodeUpdate) onCodeUpdate(undefined, fname, detectedKind)
                       })
                     }
                   } catch {}

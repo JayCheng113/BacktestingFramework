@@ -526,13 +526,11 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           </div>
           {showChat && (
             <div className="border-l" style={{ flex: '0 0 40%', borderColor: 'var(--border)', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-              <ChatPanel editorCode={code} fileKey={filename} onCodeUpdate={(c, f) => {
-                if (c !== undefined && c !== null) setCode(c)
+              <ChatPanel editorCode={code} fileKey={filename} onCodeUpdate={(c, f, kind) => {
+                if (c !== undefined && c !== null) setCode(c as string)
                 if (f) {
                   setFilename(f)
-                  // AI creates strategies via create_strategy tool → kind is always 'strategy'
-                  setCurrentKind('strategy')
-                  // Refresh sidebar file list
+                  setCurrentKind((kind as CodeKind) || 'strategy')
                   loadAllFiles()
                 }
               }} />

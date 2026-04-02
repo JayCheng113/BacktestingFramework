@@ -270,14 +270,21 @@ def _run_backtest(
 
 
 def _run_with_timeout(fn, timeout: int = 300):
-    """Run a function with timeout (seconds). Returns error dict on timeout."""
+    """Run a function with timeout. Returns error dict on timeout.
+
+    Note: Python threads cannot be force-killed. On timeout, the caller returns
+    immediately but the underlying thread continues until it finishes naturally.
+    cancel_futures=True prevents queued (not running) futures from starting.
+    """
     from concurrent.futures import ThreadPoolExecutor, TimeoutError
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(fn)
-        try:
-            return future.result(timeout=timeout)
-        except TimeoutError:
-            return {"error": f"执行超时 ({timeout}秒)，请缩短回测区间或减少股票数量"}
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(fn)
+    try:
+        return future.result(timeout=timeout)
+    except TimeoutError:
+        future.cancel()
+        pool.shutdown(wait=False, cancel_futures=True)
+        return {"error": f"执行超时 ({timeout}秒)，请缩短回测区间或减少股票数量"}
 
 
 @tool(
