@@ -275,7 +275,12 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                   try {
                     const r = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
                     if (r.success && r.path) {
-                      const fname = r.path.replace('strategies/', '')
+                      const fname = r.path.replace('strategies/', '').replace('portfolio_strategies/', '').replace('cross_factors/', '').replace('factors/', '')
+                      // Bind current conversation to the new file BEFORE updating fileKey
+                      // This prevents useEffect[fileKey] from creating a new conversation
+                      setConversations(prev => prev.map(c =>
+                        c.id === activeId ? { ...c, fileKey: fname, title: fname.replace('.py', '') } : c
+                      ))
                       fetch(`/api/code/files/${fname}`).then(resp => resp.json()).then(f => {
                         if (f.code) onCodeUpdate(f.code, fname)
                       }).catch(() => {})

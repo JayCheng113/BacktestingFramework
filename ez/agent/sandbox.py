@@ -453,13 +453,21 @@ def _reload_user_strategy(filename: str) -> None:
 
     with _reload_lock:
         # Find and remove old registry entries from this module
-        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
+        # Match both by module_name AND by class names defined in the file
+        # (prevents duplicates when loaded via different module paths)
+        old_keys = set()
+        old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == module_name)
+        # Also check alternative module names (startup loader may use different prefix)
+        alt_module = f"ez.strategy.builtin.{stem}" if stem else ""
+        if alt_module:
+            old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == alt_module)
         for k in old_keys:
-            del Strategy._registry[k]
+            Strategy._registry.pop(k, None)
 
-        # Remove old module from sys.modules
-        if module_name in sys.modules:
-            del sys.modules[module_name]
+        # Remove old module from sys.modules (both possible module names)
+        for mn in [module_name, alt_module]:
+            if mn and mn in sys.modules:
+                del sys.modules[mn]
 
         # Delete .pyc to defeat Python's mtime-based bytecode cache
         # (same-second writes produce same mtime → stale .pyc reuse)

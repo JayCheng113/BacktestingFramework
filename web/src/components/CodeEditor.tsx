@@ -297,8 +297,14 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         loadAllFiles()
       } else {
         const detail = data.detail || data
+        const errs = detail.errors || [JSON.stringify(detail)]
+        // Auto-retry with overwrite if file already exists (e.g., AI created it)
+        if (!overwrite && errs.some((e: string) => e.includes('already exists'))) {
+          setSaving(false)
+          return save(true)
+        }
         setStatus('保存失败')
-        setErrors(detail.errors || [JSON.stringify(detail)])
+        setErrors(errs)
         if (detail.test_output) setTestOutput(detail.test_output)
       }
     } catch (e: any) { setStatus(`Error: ${e.message}`) }
@@ -520,7 +526,14 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           </div>
           {showChat && (
             <div className="border-l" style={{ flex: '0 0 40%', borderColor: 'var(--border)', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-              <ChatPanel editorCode={code} fileKey={filename} onCodeUpdate={(c, f) => { setCode(c); if (f) setFilename(f) }} />
+              <ChatPanel editorCode={code} fileKey={filename} onCodeUpdate={(c, f) => {
+                setCode(c)
+                if (f) {
+                  setFilename(f)
+                  // AI created/updated a file → refresh sidebar file list
+                  loadAllFiles()
+                }
+              }} />
             </div>
           )}
         </div>
