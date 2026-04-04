@@ -35,6 +35,15 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **SSE Chinese formatting**: ResearchPanel formats events as readable Chinese (💡假设/✓成功/📊回测/🧠分析)
 - **Tool labels**: ChatPanel shows ⏳/✓ Chinese labels instead of raw JSON for tool calls
 
+## V2.12 / V2.12.1 Key Changes
+- **PortfolioPanel split**: 1281→574 行, 拆出 OptimizerPanel/RiskPanel/AttributionPanel/EventLogPanel 子组件 (V2.12.1 S5)
+- **Types 补全**: 0 处 as any, strict TypeScript 全覆盖 (V2.12.1 S6)
+- **ChatPanel 竞态修复**: aiCreatedFileRef 区分 AI 创建 vs 用户点击新建, 防止 conversation 丢失 (V2.12.1 post)
+- **ChatPanel onCodeUpdate**: AI 创建 strategy/portfolio/factor 后自动刷新 CodeEditor 侧栏, kind 从 path 前缀推断
+- **ChatPanel localStorage 清理**: "清空全部对话" 按钮防止重装残留
+- **CodeEditor auto-overwrite**: save() 遇 "already exists" 自动用 overwrite=true 重试 (AI 创建场景)
+- **指数增强 UI**: PortfolioPanel 组合 tab 添加 benchmark_index + max_tracking_error 表单字段 (V2.12.1 S4)
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000

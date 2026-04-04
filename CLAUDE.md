@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.1 | Tests: 1494 (1504 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.1 | Tests: 1500 (1510 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -90,7 +90,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.11**: 基本面数据层 — FundamentalStore(DuckDB fundamental_daily+fina_indicator表, PIT ann_date对齐, preload内存缓存), TushareProvider扩展(get_fina_indicator+dv_ratio), 18个FundamentalCrossFactor(Value: EP/BP/SP/DP, Quality: ROE/ROA/GrossMargin/NetProfitMargin, Growth: RevenueGrowthYoY/ProfitGrowthYoY/ROEChange, Size: LnMarketCap/LnCircMV反转, Liquidity: TurnoverRate/AmihudIlliquidity, Leverage: DebtToAssets反转/CurrentRatio, Industry: IndustryMomentum), 行业分类(复用symbols.industry), Fundamental API(fetch/quality/factors 3端点), 前端因子分类(optgroup+按类别分组+付费标注), 数据质量仪表板(覆盖率+财报期数), Tushare权限分层降级(daily_basic免费/fina_indicator付费), 1273 tests
 - **V2.11.1**: Alpha组合+研究工具+post-release稳定化 — compute_raw()接口, 行业中性化, AlphaCombiner(等权/IC/ICIR), 组合参数搜索(schema驱动+截断提示+seed可复现), IC nanmean修正, EP/BP/SP负值排除, PIT重报修正, Tushare ETF fund_daily, AKShare免费fallback(双fetch qfq+raw+线程安全节流), DataProviderChain覆盖率检查(bar数量), 基准曲线修复(_ensure_benchmark+idx clamp+warning链路闭环), 策略因子管理(registry侧栏+删除原子性+refresh全量重载+zombie清理), 研究助手取消(AbortController), Navbar状态指示灯, 会计assert改有意义(cash>=0+equity>0), WF不可达代码清理, Bootstrap CI升级BCa(z0 clamp), FundamentalStore LRU缓存(统一units+protect+ghost清理), 1304 tests
 - **V2.12**: 组合优化+归因+风控 — PortfolioOptimizer(MeanVariance/MinVariance/RiskParity, Ledoit-Wolf协方差SLSQP约束优化), RiskManager(每日回撤熔断状态机+紧急减仓+换手率混合), Brinson归因(配置/选股/交互效应+Carino几何链接+行业维度), 期末强平(完整round-trip), 归因数据持久化(rebalance_weights+trades存DB), /run扩展优化器/风控参数+内联归因, 前端折叠面板(优化器+风控+归因+事件日志), 1339 tests
-- **V2.12.1**: Stability — batch kline(单SQL批量查询), Gram-Schmidt因子正交化(AlphaCombiner orthogonalize), 指数增强F5(AKShare成分+TE约束+指数归因+主动权重), weights完整历史端点, TypeScript types补全(0处as any), 边缘测试(16个), 1494 tests
+- **V2.12.1**: Stability — batch kline(单SQL批量查询), Gram-Schmidt因子正交化(AlphaCombiner orthogonalize), 指数增强F5(AKShare成分+TE约束+指数归因+主动权重), weights完整历史端点, TypeScript types补全(0处as any), 边缘测试(16个), Windows冻结兼容(frozen mode Python探测+进程内fallback+Strategy子类AST去重+agent工具300s/600s超时), ChatPanel AI创建策略竞态修复(aiCreatedFileRef+onCodeUpdate+localStorage清理), V2.9+契约测试补全(CrossSectionalFactor/PortfolioStrategy/Allocator/PortfolioOptimizer共136个), 1500 tests
 - **Next: V2.13** — ML Alpha+多策略 → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)

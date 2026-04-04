@@ -101,6 +101,7 @@ pending → running → completed
 - Task-level serial: `asyncio.Lock` via `get_start_lock()` ensures only 1 task runs at a time (V2.8.1: public accessor)
 - Init failure safe: try/finally guarantees `done=True` + `finished_at` timestamp even on early exception
 - `register_task()` pre-registers in memory with `created_at` timestamp before background work (prevents SSE 404)
+- Lazy lock init (V2.12.1): `get_start_lock()` creates `asyncio.Lock` on first call — avoids `RuntimeError: no running event loop` on Windows `WindowsSelectorEventLoopPolicy` + module import order
 
 ### Persistence
 - research_tasks: task_id(PK), goal, config, status, stop_reason, summary
@@ -112,7 +113,7 @@ pending → running → completed
 - CodeEditor sidebar hides `research_` files
 - Promote workflow: POST /api/code/promote copies research_ file → removes prefix → renames class → contract test → registers globally
 
-## Sandbox Security (V2.7+V2.10)
+## Sandbox Security (V2.7+V2.10+V2.12.1)
 - **Forbidden imports**: os, sys, subprocess, socket, shutil, pathlib, importlib, ctypes, multiprocessing, threading, signal, pickle, http, urllib, requests, httpx, duckdb, etc.
 - **Dunder access**: AST check for `__attr__` attribute access; only _SAFE_DUNDERS allowed (__init__, __getitem__, __setitem__, __contains__, __call__, etc.)
 - **Dict-style dunder access**: Blocks `vars()["__import__"]`, `type.__dict__["__subclasses__"]` and similar string-key dunder subscripts (V2.10)
@@ -120,6 +121,10 @@ pending → running → completed
 - **Filename validation**: No path traversal, no hidden files, no underscore prefix
 - **Contract test**: Runs in subprocess with 30s timeout
 - **Failed test cleanup**: File is deleted if contract test fails
+- **Windows frozen mode (V2.12.1)**: `_get_python_executable()` searches `_internal/python.exe` under `sys._MEIPASS`; returns `""` (empty) when unavailable to trigger in-process fallback; **never** falls back to `sys.executable` (would be ez-trading.exe, causing subprocess recursion)
+- **In-process fallback (V2.12.1)**: `_validate_strategy_inprocess()` / `_validate_portfolio_inprocess()` validate code via `importlib.util.spec_from_file_location` + contract test in-process when no real Python bundled
+- **AST class-name dedup (V2.12.1)**: `_reload_user_strategy()` filters to Strategy-subclass ClassDef nodes only (not all ClassDef) via `ast.walk` — prevents accidental deletion of unrelated helper classes
+- **Agent tool timeouts (V2.12.1)**: `_run_with_timeout` wraps `run_backtest` (300s) and `run_experiment` (600s) via `ThreadPoolExecutor` with `shutdown(wait=False, cancel_futures=True)` — Python threads can't be force-killed but controller is unblocked on timeout
 
 ## Gate Rules (configurable via GateConfig)
 | Rule | Default | Description |
