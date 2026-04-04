@@ -275,16 +275,26 @@ def _run_with_timeout(fn, timeout: int = 300):
     Note: Python threads cannot be force-killed. On timeout, the caller returns
     immediately but the underlying thread continues until it finishes naturally.
     cancel_futures=True prevents queued (not running) futures from starting.
+
+    Resource safety: pool.shutdown() is called in BOTH success and timeout paths
+    via try/finally — prior versions only cleaned up on timeout, leaking one
+    ThreadPoolExecutor per successful run_backtest/run_experiment call.
     """
     from concurrent.futures import ThreadPoolExecutor, TimeoutError
     pool = ThreadPoolExecutor(max_workers=1)
     future = pool.submit(fn)
+    timed_out = False
     try:
-        return future.result(timeout=timeout)
-    except TimeoutError:
-        future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
-        return {"error": f"执行超时 ({timeout}秒)，请缩短回测区间或减少股票数量"}
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            timed_out = True
+            future.cancel()
+            return {"error": f"执行超时 ({timeout}秒)，请缩短回测区间或减少股票数量"}
+    finally:
+        # Success path: wait for worker to finish (it already did — result() returned)
+        # Timeout path: don't wait; let orphaned thread die naturally (Python can't kill threads)
+        pool.shutdown(wait=not timed_out, cancel_futures=True)
 
 
 @tool(

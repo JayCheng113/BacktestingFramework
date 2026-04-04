@@ -105,12 +105,16 @@ async def generate_strategy_code(
     ]
 
     last_error = ""
+    # Allowed tools are locked to what _find_latest_strategy() can observe (strategies/ dir).
+    # Including create_portfolio_strategy / create_cross_factor here causes retry waste:
+    # LLM may legitimately call them, file IS created, but _find_latest_strategy() misses it
+    # because it only scans list_user_strategies() → "策略文件未创建" → retry → budget burn.
+    _STRATEGY_ONLY_TOOLS = ["create_strategy", "read_source", "list_factors"]
     for attempt in range(max_retries):
         try:
             await asyncio.to_thread(
                 chat_sync, provider, messages,
-                allowed_tools=["create_strategy", "read_source", "list_factors",
-                               "list_portfolio_strategies", "create_portfolio_strategy", "create_cross_factor"])
+                allowed_tools=_STRATEGY_ONLY_TOOLS)
             filename, class_name = _find_latest_strategy(before)
             if filename and class_name:
                 logger.info("Code gen success: %s (%s)", filename, class_name)

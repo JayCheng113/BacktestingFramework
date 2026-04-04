@@ -694,21 +694,19 @@ def save_and_validate_code(
                 registered = [c.strip() for c in proc.stdout.strip().split(",") if c.strip()]
             if not registered:
                 raise ValueError("No Factor subclass found in code")
-            # Register class stubs in main process registry (for API visibility)
-            # Skip if frozen in-process: exec_module already registered real classes
+            # Hot-reload the actual factor implementation into the main process.
+            # Before V2.12.1 post-review, this path only registered a stub that raised
+            # NotImplementedError on compute() — users saw their factor in the registry
+            # but any evaluation crashed until a manual /api/code/refresh or restart.
+            # Skip if frozen in-process: exec_module above already registered real classes.
             if not _frozen_inprocess:
-                _tree = ast.parse(code)
-                for node in ast.walk(_tree):
-                    if isinstance(node, ast.ClassDef) and node.name in registered:
-                        # Create a minimal class stub that records module origin
-                        # type() with Factor base triggers __init_subclass__ → auto-registers
-                        type(node.name, (Factor,), {
-                            "name": property(lambda self, n=node.name: n.lower()),
-                            "warmup_period": property(lambda self: 0),
-                            "compute": lambda self, data: (_ for _ in ()).throw(NotImplementedError("Stub factor — re-save to use")),
-                            "__module__": module_name,
-                        })
-                        # __init_subclass__ already registered it in Factor._registry
+                _reload_factor_code(safe_name, target_dir)
+                # Verify the reload actually placed real (non-stub) classes in the registry
+                live = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+                if not live:
+                    raise ValueError(
+                        f"Factor hot-reload succeeded but registry has no entries for {module_name}"
+                    )
         except Exception as e:
             # Clean up any dirty registry entries
             dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
