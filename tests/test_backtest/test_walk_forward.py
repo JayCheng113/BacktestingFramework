@@ -37,40 +37,21 @@ def _make_df(n: int, seed: int = 0) -> pd.DataFrame:
 class TestWalkForwardValidation:
     """Parameter validation: V2.10 added n_splits/train_ratio bounds."""
 
-    def test_n_splits_below_2_rejected(self):
+    @pytest.mark.parametrize("bad_n", [0, 1, -5])
+    def test_n_splits_below_2_rejected(self, bad_n):
         validator = WalkForwardValidator()
         strategy = MACrossStrategy(short_period=3, long_period=5)
         df = _make_df(500)
         with pytest.raises(ValueError, match="n_splits must be >= 2"):
-            validator.validate(df, strategy, n_splits=1)
+            validator.validate(df, strategy, n_splits=bad_n)
 
-    def test_n_splits_zero_rejected(self):
-        validator = WalkForwardValidator()
-        strategy = MACrossStrategy(short_period=3, long_period=5)
-        df = _make_df(500)
-        with pytest.raises(ValueError, match="n_splits must be >= 2"):
-            validator.validate(df, strategy, n_splits=0)
-
-    def test_train_ratio_zero_rejected(self):
+    @pytest.mark.parametrize("bad_ratio", [0.0, 1.0, -0.1, 1.5])
+    def test_train_ratio_out_of_bounds_rejected(self, bad_ratio):
         validator = WalkForwardValidator()
         strategy = MACrossStrategy(short_period=3, long_period=5)
         df = _make_df(500)
         with pytest.raises(ValueError, match="train_ratio must be in"):
-            validator.validate(df, strategy, n_splits=3, train_ratio=0.0)
-
-    def test_train_ratio_one_rejected(self):
-        validator = WalkForwardValidator()
-        strategy = MACrossStrategy(short_period=3, long_period=5)
-        df = _make_df(500)
-        with pytest.raises(ValueError, match="train_ratio must be in"):
-            validator.validate(df, strategy, n_splits=3, train_ratio=1.0)
-
-    def test_train_ratio_negative_rejected(self):
-        validator = WalkForwardValidator()
-        strategy = MACrossStrategy(short_period=3, long_period=5)
-        df = _make_df(500)
-        with pytest.raises(ValueError, match="train_ratio must be in"):
-            validator.validate(df, strategy, n_splits=3, train_ratio=-0.1)
+            validator.validate(df, strategy, n_splits=3, train_ratio=bad_ratio)
 
 
 class TestWalkForwardDataIsolation:

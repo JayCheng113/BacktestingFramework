@@ -9,9 +9,15 @@ import pytest
 from ez.portfolio.cross_factor import CrossSectionalFactor
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def fund_store():
-    """FundamentalStore with synthetic fundamental data for 5 stocks."""
+    """FundamentalStore with synthetic fundamental data for 5 stocks.
+
+    Module-scoped: 198 parameterized contract tests share one fixture to avoid
+    rebuilding the 1825-row daily_basic snapshot per test. The fixture is read-only
+    w.r.t. test state (no mutation in contract tests).
+    """
+    from datetime import timedelta
     conn = duckdb.connect(":memory:")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS symbols (
@@ -33,6 +39,8 @@ def fund_store():
     store = FundamentalStore(conn)
 
     # Insert daily basic data: different PE/PB/MV for each stock
+    # Full-year coverage (2024-01 to 2024-12) so contract tests on 2024-05-15 find data.
+    # Batch insert: collect all rows first, then single save_daily_basic() call.
     daily_data = [
         ("000001.SZ", 5.0, 0.5, 10.0, 2.0, 5000, 300000, 200000, 0.8),
         ("600519.SH", 35.0, 12.0, 15.0, 1.5, 2000, 2000000, 1800000, 0.3),
@@ -40,16 +48,22 @@ def fund_store():
         ("601318.SH", 10.0, 1.5, 8.0, 3.0, 4000, 800000, 600000, 0.6),
         ("000333.SZ", 15.0, 3.0, 10.0, 1.0, 6000, 400000, 350000, 0.7),
     ]
+    daily_rows = []
     for sym, pe, pb, ps, dv, turnover, mv, cmv, vol_ratio in daily_data:
-        for d in range(2, 25):
-            store.save_daily_basic([{
-                "symbol": sym, "trade_date": date(2024, 1, d),
+        d0 = date(2024, 1, 2)
+        for offset in range(0, 365):
+            trade_d = d0 + timedelta(days=offset)
+            if trade_d.weekday() >= 5:
+                continue
+            daily_rows.append({
+                "symbol": sym, "trade_date": trade_d,
                 "pe_ttm": pe, "pb": pb, "ps_ttm": ps, "dv_ratio": dv,
                 "turnover_rate": turnover / 100, "total_mv": mv, "circ_mv": cmv,
                 "volume_ratio": vol_ratio,
-            }])
+            })
+    store.save_daily_basic(daily_rows)  # single batch call
 
-    # Insert fina_indicator data
+    # Insert fina_indicator data (also batched)
     fina_data = [
         ("000001.SZ", date(2024, 4, 28), date(2024, 3, 31), 12.5, 1.2, 45.0, 30.0, 88.0, 1.1, 15.0, 20.0, 5.0),
         ("600519.SH", date(2024, 4, 25), date(2024, 3, 31), 30.0, 15.0, 90.0, 60.0, 25.0, 3.5, 18.0, 22.0, -2.0),
@@ -57,14 +71,16 @@ def fund_store():
         ("601318.SH", date(2024, 4, 26), date(2024, 3, 31), 18.0, 5.0, 55.0, 25.0, 75.0, 1.5, 10.0, 12.0, 1.0),
         ("000333.SZ", date(2024, 4, 27), date(2024, 3, 31), 25.0, 12.0, 35.0, 20.0, 50.0, 2.5, 25.0, 30.0, 8.0),
     ]
+    fina_rows = []
     for sym, ann, end, roe, roa, gm, npm, dta, cr, rev_yoy, prof_yoy, roe_yoy in fina_data:
-        store.save_fina_indicator([{
+        fina_rows.append({
             "symbol": sym, "ann_date": ann, "end_date": end,
             "roe": roe, "roe_waa": roe, "roa": roa,
             "grossprofit_margin": gm, "netprofit_margin": npm,
             "debt_to_assets": dta, "current_ratio": cr,
             "revenue_yoy": rev_yoy, "profit_yoy": prof_yoy, "roe_yoy": roe_yoy,
-        }])
+        })
+    store.save_fina_indicator(fina_rows)
 
     syms = [s[0] for s in stocks]
     store.preload(syms, date(2024, 1, 1), date(2024, 12, 31))
@@ -229,81 +245,136 @@ class TestFactorOutputProperties:
         assert len(scores) == 0
 
 
+_FUNDAMENTAL_NAMES = [
+    "EP", "BP", "SP", "DP",
+    "ROE", "ROA", "GrossMargin", "NetProfitMargin",
+    "RevenueGrowthYoY", "ProfitGrowthYoY", "ROEChange",
+    "LnMarketCap", "LnCircMV",
+    "TurnoverRate", "AmihudIlliquidity",
+    "DebtToAssets", "CurrentRatio",
+    "IndustryMomentum",
+]
+
+
+@pytest.fixture
+def fundamental_factory(fund_store):
+    """Map of factor name → constructor bound to fund_store."""
+    from ez.factor.builtin.fundamental import get_fundamental_factors
+    registry = get_fundamental_factors()
+    return {name: (lambda cls=cls: cls(store=fund_store)) for name, cls in registry.items()}
+
+
+@pytest.fixture
+def make_factor(fundamental_factory):
+    def _make(name: str):
+        return fundamental_factory[name]()
+    return _make
+
+
 class TestFundamentalContractInvariants:
     """Contract invariants that ALL 18 FundamentalCrossFactor subclasses must satisfy.
-    Mirrors TestCrossSectionalFactorContract in test_cross_factor_contract.py but with
-    fund_store injection. Ensures new fundamental factors conform to CrossSectionalFactor ABC.
+
+    Truly parameterized: each factor × each invariant is a separate pytest test case.
+    Failures report as `test_compute_no_nan[ROE]` — selective rerun + clear attribution.
+
+    This catches regressions when a new fundamental factor is added but forgets to
+    conform to the CrossSectionalFactor ABC contract.
     """
 
-    @pytest.fixture
-    def all_fundamental_instances(self, fund_store):
+    def test_registry_has_all_18(self):
+        """The 18 canonical fundamental factors must all be in the registry."""
         from ez.factor.builtin.fundamental import get_fundamental_factors
-        return [(name, cls(store=fund_store)) for name, cls in get_fundamental_factors().items()]
+        registry = get_fundamental_factors()
+        missing = set(_FUNDAMENTAL_NAMES) - set(registry.keys())
+        extra = set(registry.keys()) - set(_FUNDAMENTAL_NAMES)
+        assert not missing, f"Missing fundamental factors from registry: {missing}"
+        assert len(registry) == 18, f"Expected 18 factors, got {len(registry)}: {extra}"
 
-    def test_all_have_name(self, all_fundamental_instances):
-        for name, factor in all_fundamental_instances:
-            assert isinstance(factor.name, str), f"{name} has non-string name"
-            assert len(factor.name) > 0, f"{name} has empty name"
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_has_name(self, factor_name, make_factor):
+        f = make_factor(factor_name)
+        assert isinstance(f.name, str)
+        assert len(f.name) > 0
 
-    def test_all_have_warmup_period(self, all_fundamental_instances):
-        for name, factor in all_fundamental_instances:
-            assert isinstance(factor.warmup_period, int), f"{name} warmup is not int"
-            assert factor.warmup_period >= 0, f"{name} warmup < 0"
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_has_warmup_period(self, factor_name, make_factor):
+        f = make_factor(factor_name)
+        assert isinstance(f.warmup_period, int)
+        assert f.warmup_period >= 0
 
-    def test_all_have_category(self, all_fundamental_instances):
-        for name, factor in all_fundamental_instances:
-            assert isinstance(factor.category, str), f"{name} category is not str"
-            assert factor.category in ("value", "quality", "growth", "size", "liquidity", "leverage", "industry"), (
-                f"{name} has unknown category: {factor.category}"
-            )
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_has_category(self, factor_name, make_factor):
+        f = make_factor(factor_name)
+        assert isinstance(f.category, str)
+        assert f.category in (
+            "value", "quality", "growth", "size",
+            "liquidity", "leverage", "industry",
+        ), f"{factor_name} has unknown category: {f.category}"
 
-    def test_all_have_description(self, all_fundamental_instances):
-        for name, factor in all_fundamental_instances:
-            assert isinstance(factor.description, str), f"{name} description is not str"
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_has_non_empty_description(self, factor_name, make_factor):
+        f = make_factor(factor_name)
+        assert isinstance(f.description, str)
+        assert len(f.description) > 0, f"{factor_name} has empty description"
 
-    def test_compute_returns_series(self, all_fundamental_instances, universe_data):
-        for name, factor in all_fundamental_instances:
-            result = factor.compute(universe_data, datetime(2024, 5, 15))
-            assert isinstance(result, pd.Series), f"{name} compute() did not return Series"
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_returns_series(self, factor_name, make_factor, universe_data):
+        f = make_factor(factor_name)
+        result = f.compute(universe_data, datetime(2024, 5, 15))
+        assert isinstance(result, pd.Series)
 
-    def test_compute_raw_returns_series(self, all_fundamental_instances, universe_data):
-        for name, factor in all_fundamental_instances:
-            result = factor.compute_raw(universe_data, datetime(2024, 5, 15))
-            assert isinstance(result, pd.Series), f"{name} compute_raw() did not return Series"
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_raw_returns_series(self, factor_name, make_factor, universe_data):
+        f = make_factor(factor_name)
+        result = f.compute_raw(universe_data, datetime(2024, 5, 15))
+        assert isinstance(result, pd.Series)
 
-    def test_compute_no_nan(self, all_fundamental_instances, universe_data):
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_returns_non_empty(self, factor_name, make_factor, universe_data):
+        """After the fund_store fixture preloads data for all 5 stocks, every fundamental
+        factor should produce a non-empty result on 2024-05-15 (after all ann_dates)."""
+        f = make_factor(factor_name)
+        result = f.compute(universe_data, datetime(2024, 5, 15))
+        assert len(result) > 0, (
+            f"{factor_name} returned empty — fixture data may be missing. "
+            f"This prevents vacuous invariant assertions."
+        )
+
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_no_nan(self, factor_name, make_factor, universe_data):
         """compute() must drop NaN (contract requirement)."""
-        for name, factor in all_fundamental_instances:
-            result = factor.compute(universe_data, datetime(2024, 5, 15))
-            if len(result) > 0:
-                assert not result.isna().any(), f"{name} compute() contains NaN"
+        f = make_factor(factor_name)
+        result = f.compute(universe_data, datetime(2024, 5, 15))
+        assert not result.isna().any(), f"{factor_name} compute() contains NaN"
 
-    def test_compute_raw_no_nan(self, all_fundamental_instances, universe_data):
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_raw_no_nan(self, factor_name, make_factor, universe_data):
         """compute_raw() must drop NaN (V2.11.1 contract)."""
-        for name, factor in all_fundamental_instances:
-            result = factor.compute_raw(universe_data, datetime(2024, 5, 15))
-            if len(result) > 0:
-                assert not result.isna().any(), f"{name} compute_raw() contains NaN"
+        f = make_factor(factor_name)
+        result = f.compute_raw(universe_data, datetime(2024, 5, 15))
+        assert not result.isna().any(), f"{factor_name} compute_raw() contains NaN"
 
-    def test_compute_values_in_0_1(self, all_fundamental_instances, universe_data):
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_values_in_0_1(self, factor_name, make_factor, universe_data):
         """Percentile ranks must be in [0, 1]."""
-        for name, factor in all_fundamental_instances:
-            result = factor.compute(universe_data, datetime(2024, 5, 15))
-            if len(result) > 0:
-                assert result.min() >= -1e-9, f"{name}: min {result.min()} < 0"
-                assert result.max() <= 1.0 + 1e-9, f"{name}: max {result.max()} > 1"
+        f = make_factor(factor_name)
+        result = f.compute(universe_data, datetime(2024, 5, 15))
+        assert result.min() >= -1e-9, f"{factor_name}: min {result.min()} < 0"
+        assert result.max() <= 1.0 + 1e-9, f"{factor_name}: max {result.max()} > 1"
 
-    def test_empty_universe_returns_empty(self, all_fundamental_instances):
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_empty_universe_returns_empty(self, factor_name, make_factor):
         """Empty universe should yield empty series, not crash."""
-        for name, factor in all_fundamental_instances:
-            result = factor.compute({}, datetime(2024, 5, 15))
-            assert len(result) == 0, f"{name} did not return empty for empty universe"
+        f = make_factor(factor_name)
+        result = f.compute({}, datetime(2024, 5, 15))
+        assert len(result) == 0
 
-    def test_compute_and_raw_same_index(self, all_fundamental_instances, universe_data):
+    @pytest.mark.parametrize("factor_name", _FUNDAMENTAL_NAMES)
+    def test_compute_and_raw_same_index(self, factor_name, make_factor, universe_data):
         """compute() and compute_raw() must cover the same symbols (after dropna)."""
-        for name, factor in all_fundamental_instances:
-            ranked = factor.compute(universe_data, datetime(2024, 5, 15))
-            raw = factor.compute_raw(universe_data, datetime(2024, 5, 15))
-            assert set(ranked.index) == set(raw.index), (
-                f"{name}: compute={set(ranked.index)} vs compute_raw={set(raw.index)}"
-            )
+        f = make_factor(factor_name)
+        ranked = f.compute(universe_data, datetime(2024, 5, 15))
+        raw = f.compute_raw(universe_data, datetime(2024, 5, 15))
+        assert set(ranked.index) == set(raw.index), (
+            f"{factor_name}: compute={set(ranked.index)} vs compute_raw={set(raw.index)}"
+        )
