@@ -127,3 +127,90 @@ class TestPortfolioOptimizerContract:
         # Cleanup
         optimizer._benchmark_weights = None
         optimizer._max_te = None
+
+
+def _make_singular_universe(n_symbols: int = 5, n_days: int = 60, seed: int = 42):
+    """Build a universe where some stocks are perfectly collinear → singular covariance."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2023-01-02", periods=n_days, freq="B")
+    base_prices = 10 * np.cumprod(1 + rng.normal(0.001, 0.01, n_days))
+    data = {}
+    for i in range(n_symbols):
+        sym = f"S{i:03d}"
+        # All stocks share the same price series → perfect correlation → singular cov
+        prices = base_prices * (i + 1)  # scale only, same direction
+        data[sym] = pd.DataFrame({
+            "close": prices, "adj_close": prices,
+            "volume": rng.integers(100_000, 5_000_000, n_days),
+        }, index=dates)
+    return data
+
+
+def _make_tiny_universe(n_symbols: int = 3, n_days: int = 5, seed: int = 42):
+    """Tiny universe that forces Ledoit-Wolf with T≈N (degenerate case)."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2023-01-02", periods=n_days, freq="B")
+    data = {}
+    for i in range(n_symbols):
+        sym = f"S{i:03d}"
+        prices = 10 * np.cumprod(1 + rng.normal(0.001, 0.01, n_days))
+        data[sym] = pd.DataFrame({
+            "close": prices, "adj_close": prices,
+            "volume": rng.integers(100_000, 5_000_000, n_days),
+        }, index=dates)
+    return data
+
+
+class TestPortfolioOptimizerEdgeCases:
+    """Edge cases that are not covered by the parametrized contract tests."""
+
+    def test_singular_covariance_does_not_crash(self):
+        """Perfectly collinear assets → singular cov matrix. Ledoit-Wolf shrinkage should handle it."""
+        c = OptimizationConstraints(max_weight=0.30)
+        opt = MeanVarianceOptimizer(risk_aversion=1.0, constraints=c, cov_lookback=60)
+        universe = _make_singular_universe(n_symbols=5, n_days=60)
+        opt.set_context(date(2023, 3, 15), universe)
+        result = opt.optimize({f"S{i:03d}": 0.1 for i in range(5)})
+        assert isinstance(result, dict)
+        assert all(w >= -1e-9 for w in result.values())
+        assert all(np.isfinite(w) for w in result.values()), (
+            f"Non-finite weights in singular cov case: {result}"
+        )
+
+    def test_min_variance_singular_covariance(self):
+        """MinVariance should still produce valid weights under singular cov."""
+        c = OptimizationConstraints(max_weight=0.50)
+        opt = MinVarianceOptimizer(constraints=c, cov_lookback=60)
+        universe = _make_singular_universe(n_symbols=5, n_days=60)
+        opt.set_context(date(2023, 3, 15), universe)
+        result = opt.optimize({f"S{i:03d}": 0.1 for i in range(5)})
+        assert all(w >= -1e-9 for w in result.values())
+        assert all(np.isfinite(w) for w in result.values())
+
+    def test_risk_parity_singular_covariance(self):
+        """RiskParity falls back to inverse-vol under singular cov."""
+        c = OptimizationConstraints(max_weight=0.50)
+        opt = RiskParityOptimizer(constraints=c, cov_lookback=60)
+        universe = _make_singular_universe(n_symbols=5, n_days=60)
+        opt.set_context(date(2023, 3, 15), universe)
+        result = opt.optimize({f"S{i:03d}": 0.1 for i in range(5)})
+        assert all(w >= -1e-9 for w in result.values())
+        assert all(np.isfinite(w) for w in result.values())
+
+    def test_tiny_sample_T_close_to_N(self):
+        """Ledoit-Wolf shrinkage with very small T (T≈N) should not crash."""
+        c = OptimizationConstraints(max_weight=0.50)
+        opt = MeanVarianceOptimizer(risk_aversion=1.0, constraints=c, cov_lookback=5)
+        universe = _make_tiny_universe(n_symbols=3, n_days=5)
+        opt.set_context(date(2023, 1, 9), universe)
+        # May return empty or valid weights — must not crash
+        result = opt.optimize({f"S{i:03d}": 0.3 for i in range(3)})
+        assert isinstance(result, dict)
+
+    def test_all_zero_alpha(self):
+        """All-zero alpha: optimizer should return empty or fallback weights without crashing."""
+        c = OptimizationConstraints(max_weight=0.30)
+        opt = MeanVarianceOptimizer(risk_aversion=1.0, constraints=c, cov_lookback=60)
+        result = opt.optimize({"A": 0.0, "B": 0.0, "C": 0.0})
+        # All non-positive → filtered
+        assert result == {} or all(w == 0 for w in result.values())

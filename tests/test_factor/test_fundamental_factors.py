@@ -227,3 +227,83 @@ class TestFactorOutputProperties:
         factor = EP()  # no store
         scores = factor.compute(universe_data, datetime(2024, 1, 15))
         assert len(scores) == 0
+
+
+class TestFundamentalContractInvariants:
+    """Contract invariants that ALL 18 FundamentalCrossFactor subclasses must satisfy.
+    Mirrors TestCrossSectionalFactorContract in test_cross_factor_contract.py but with
+    fund_store injection. Ensures new fundamental factors conform to CrossSectionalFactor ABC.
+    """
+
+    @pytest.fixture
+    def all_fundamental_instances(self, fund_store):
+        from ez.factor.builtin.fundamental import get_fundamental_factors
+        return [(name, cls(store=fund_store)) for name, cls in get_fundamental_factors().items()]
+
+    def test_all_have_name(self, all_fundamental_instances):
+        for name, factor in all_fundamental_instances:
+            assert isinstance(factor.name, str), f"{name} has non-string name"
+            assert len(factor.name) > 0, f"{name} has empty name"
+
+    def test_all_have_warmup_period(self, all_fundamental_instances):
+        for name, factor in all_fundamental_instances:
+            assert isinstance(factor.warmup_period, int), f"{name} warmup is not int"
+            assert factor.warmup_period >= 0, f"{name} warmup < 0"
+
+    def test_all_have_category(self, all_fundamental_instances):
+        for name, factor in all_fundamental_instances:
+            assert isinstance(factor.category, str), f"{name} category is not str"
+            assert factor.category in ("value", "quality", "growth", "size", "liquidity", "leverage", "industry"), (
+                f"{name} has unknown category: {factor.category}"
+            )
+
+    def test_all_have_description(self, all_fundamental_instances):
+        for name, factor in all_fundamental_instances:
+            assert isinstance(factor.description, str), f"{name} description is not str"
+
+    def test_compute_returns_series(self, all_fundamental_instances, universe_data):
+        for name, factor in all_fundamental_instances:
+            result = factor.compute(universe_data, datetime(2024, 5, 15))
+            assert isinstance(result, pd.Series), f"{name} compute() did not return Series"
+
+    def test_compute_raw_returns_series(self, all_fundamental_instances, universe_data):
+        for name, factor in all_fundamental_instances:
+            result = factor.compute_raw(universe_data, datetime(2024, 5, 15))
+            assert isinstance(result, pd.Series), f"{name} compute_raw() did not return Series"
+
+    def test_compute_no_nan(self, all_fundamental_instances, universe_data):
+        """compute() must drop NaN (contract requirement)."""
+        for name, factor in all_fundamental_instances:
+            result = factor.compute(universe_data, datetime(2024, 5, 15))
+            if len(result) > 0:
+                assert not result.isna().any(), f"{name} compute() contains NaN"
+
+    def test_compute_raw_no_nan(self, all_fundamental_instances, universe_data):
+        """compute_raw() must drop NaN (V2.11.1 contract)."""
+        for name, factor in all_fundamental_instances:
+            result = factor.compute_raw(universe_data, datetime(2024, 5, 15))
+            if len(result) > 0:
+                assert not result.isna().any(), f"{name} compute_raw() contains NaN"
+
+    def test_compute_values_in_0_1(self, all_fundamental_instances, universe_data):
+        """Percentile ranks must be in [0, 1]."""
+        for name, factor in all_fundamental_instances:
+            result = factor.compute(universe_data, datetime(2024, 5, 15))
+            if len(result) > 0:
+                assert result.min() >= -1e-9, f"{name}: min {result.min()} < 0"
+                assert result.max() <= 1.0 + 1e-9, f"{name}: max {result.max()} > 1"
+
+    def test_empty_universe_returns_empty(self, all_fundamental_instances):
+        """Empty universe should yield empty series, not crash."""
+        for name, factor in all_fundamental_instances:
+            result = factor.compute({}, datetime(2024, 5, 15))
+            assert len(result) == 0, f"{name} did not return empty for empty universe"
+
+    def test_compute_and_raw_same_index(self, all_fundamental_instances, universe_data):
+        """compute() and compute_raw() must cover the same symbols (after dropna)."""
+        for name, factor in all_fundamental_instances:
+            ranked = factor.compute(universe_data, datetime(2024, 5, 15))
+            raw = factor.compute_raw(universe_data, datetime(2024, 5, 15))
+            assert set(ranked.index) == set(raw.index), (
+                f"{name}: compute={set(ranked.index)} vs compute_raw={set(raw.index)}"
+            )

@@ -56,8 +56,13 @@ class FactorEvaluator:
             shifted_returns = forward_returns.shift(-p).reindex(common_idx).dropna()
             overlap = fv.index.intersection(shifted_returns.index)
             if len(overlap) > 10:
-                corr, _ = stats.spearmanr(fv.loc[overlap], shifted_returns.loc[overlap])
-                ic_decay[p] = float(corr)
+                # Suppress constant-input warning when factor or returns have zero variance
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=stats.ConstantInputWarning)
+                    corr, _ = stats.spearmanr(fv.loc[overlap], shifted_returns.loc[overlap])
+                # NaN guard: spearmanr returns NaN for constant input
+                ic_decay[p] = float(corr) if corr == corr else 0.0
             else:
                 ic_decay[p] = 0.0
 
@@ -80,14 +85,19 @@ class FactorEvaluator:
     def _rolling_corr(
         a: pd.Series, b: pd.Series, window: int, method: str = "pearson",
     ) -> pd.Series:
+        import warnings
         results = []
-        for i in range(window, len(a) + 1):
-            chunk_a = a.iloc[i - window : i]
-            chunk_b = b.iloc[i - window : i]
-            if method == "spearman":
-                corr, _ = stats.spearmanr(chunk_a, chunk_b)
-            else:
-                corr = chunk_a.corr(chunk_b)
-            results.append(corr)
+        with warnings.catch_warnings():
+            # Constant-input warnings are expected for degenerate windows; caller handles NaN
+            warnings.simplefilter("ignore", category=stats.ConstantInputWarning)
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            for i in range(window, len(a) + 1):
+                chunk_a = a.iloc[i - window : i]
+                chunk_b = b.iloc[i - window : i]
+                if method == "spearman":
+                    corr, _ = stats.spearmanr(chunk_a, chunk_b)
+                else:
+                    corr = chunk_a.corr(chunk_b)
+                results.append(corr)
         idx = a.index[window - 1 :]
         return pd.Series(results, index=idx[: len(results)], name=f"{method}_ic")
