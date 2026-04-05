@@ -28,7 +28,10 @@ dev = [
 ]
 tushare = ["tushare>=1.4"]
 akshare = ["akshare>=1.14"]
-all = ["tushare>=1.4", "akshare>=1.14"]
+# V2.13 ML Alpha: sklearn>=1.5 is the minimum version with numpy>=2.0
+# binary compatibility (project depends on numpy>=2.0 directly).
+ml = ["scikit-learn>=1.5"]
+all = ["tushare>=1.4", "akshare>=1.14", "scikit-learn>=1.5"]
 
 [tool.scikit-build]
 wheel.packages = ["ez"]
