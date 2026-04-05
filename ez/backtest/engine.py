@@ -152,18 +152,17 @@ class VectorizedBacktestEngine:
         peak_shares: float = 0.0       # total shares at peak (for pnl_pct)
         partial_pnl: float = 0.0       # accumulated PnL from partial sells
         partial_comm: float = 0.0      # accumulated commission from partial sells
-        # V2.12.2 codex round 6: track cumulative cash invested and peak
+        # V2.12.2 codex round 6: track cumulative net invested and peak
         # at-risk capital across a holding cycle. Prior version computed
         # cost_basis as `entry_price * peak_shares + entry_comm`, which is
         # wrong for strategies that reinforce a position (buy → partial
         # sell → buy again): peak_shares × VWAP-entry does not equal the
-        # actual capital deployed. `cycle_cash_in` tracks gross cash out
-        # (buy fills + commission) and `cycle_peak_invested` tracks the
-        # maximum net capital at risk during the cycle. The cost basis
+        # actual capital deployed. `cycle_net_invested` tracks running
+        # (buys − partial_sell_proceeds) and `cycle_peak_invested` tracks
+        # the maximum net capital at risk during the cycle. The cost basis
         # used for pnl_pct is `cycle_peak_invested` which represents the
         # maximum capital the strategy ever had tied up in this position.
-        cycle_cash_in: float = 0.0         # running gross cash deployed (buys only)
-        cycle_net_invested: float = 0.0    # running net (cash_in - partial_sell_proceeds)
+        cycle_net_invested: float = 0.0    # running net (buys - partial_sell_proceeds)
         cycle_peak_invested: float = 0.0   # max cycle_net_invested seen during cycle
         daily_ret = np.zeros(n)
 
@@ -187,7 +186,17 @@ class VectorizedBacktestEngine:
             if hasattr(matcher, 'on_bar'):
                 matcher.on_bar(bar_index=i, prev_close=raw_close[i - 1])
 
-            if abs(target_weight - prev_weight) > 1e-6:
+            # V2.12.2 codex round 6 reviewer: raise threshold from 1e-6 to
+            # 1e-3. Round 6 changed prev_weight to reflect the ACTUAL
+            # achieved weight (not target), which correctly fixes the
+            # lot-rounding residual gap retry but introduced a secondary
+            # issue: commission-induced drift (~7.5e-5 for standard rates)
+            # exceeds 1e-6, triggering a phantom retry every bar that
+            # pays min_commission for a ~0.05-share tiny trade. 1e-3 is
+            # well above float-precision noise but below any meaningful
+            # weight change, so real rebalancing still fires while
+            # fractional drift is tolerated.
+            if abs(target_weight - prev_weight) > 1e-3:
                 current_equity = cash + shares * exec_price
                 target_value = current_equity * target_weight
                 current_value = shares * exec_price
@@ -237,7 +246,6 @@ class VectorizedBacktestEngine:
                             partial_pnl = 0.0
                             partial_comm = 0.0
                             peak_shares = 0.0
-                            cycle_cash_in = 0.0
                             cycle_net_invested = 0.0
                             cycle_peak_invested = 0.0
                         elif entry_time is not None:
@@ -259,7 +267,6 @@ class VectorizedBacktestEngine:
                                 partial_pnl = 0.0
                                 partial_comm = 0.0
                                 # Reset cycle tracking at start of new position
-                                cycle_cash_in = 0.0
                                 cycle_net_invested = 0.0
                                 cycle_peak_invested = 0.0
                             else:
@@ -272,7 +279,6 @@ class VectorizedBacktestEngine:
                             # (buy cost + commission) for accurate pnl_pct
                             # cost basis on reinforced positions.
                             buy_cash_out = -fill.net_amount  # net_amount < 0 for buys
-                            cycle_cash_in += buy_cash_out
                             cycle_net_invested += buy_cash_out
                             if cycle_net_invested > cycle_peak_invested:
                                 cycle_peak_invested = cycle_net_invested
@@ -341,9 +347,17 @@ class VectorizedBacktestEngine:
                     virtual_pnl = (fill.fill_price - entry_price) * fill.shares - fill.commission
                     total_pnl = partial_pnl + virtual_pnl - entry_comm
                     total_comm = entry_comm + partial_comm + fill.commission
-                    cost_basis = (
-                        (entry_price * peak_shares + entry_comm)
-                        if peak_shares > 0
+                    # V2.12.2 codex round 6 reviewer sibling miss: use
+                    # cycle_peak_invested here too. Prior version used the
+                    # stale `entry_price * peak_shares + entry_comm` formula
+                    # which diverges from the main-loop close path for
+                    # held-to-end strategies that reinforced their position
+                    # before the terminal bar (buy → partial sell → buy →
+                    # held to end). The main-loop close path got fixed in
+                    # round 6 but this terminal path was not updated in the
+                    # same commit — reviewer caught it.
+                    cost_basis = cycle_peak_invested if cycle_peak_invested > 0 else (
+                        (entry_price * peak_shares + entry_comm) if peak_shares > 0
                         else (entry_price * fill.shares + entry_comm)
                     )
                     trades.append(TradeRecord(
