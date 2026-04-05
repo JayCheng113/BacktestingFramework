@@ -635,3 +635,92 @@ class TestMLAlphaAntiLookahead:
                     f"purge={purge}, pred_idx={pred_idx}: "
                     f"panel max={max_panel_date}, cutoff={cutoff}"
                 )
+
+
+class TestMLAlphaDeterminism:
+    """Same data + same random_state → identical predictions.
+
+    This is critical for:
+    1. Debuggability — users can trust that a test failure reproduces.
+    2. Regression testing — byte-identical predictions across runs let us
+       detect accidental behavior changes via equality assertions.
+    3. Walk-forward reproducibility — the same backtest should produce
+       the same equity curve every time.
+    """
+
+    def test_ridge_is_deterministic(self):
+        """Ridge has no random component — two identical instances trained
+        on the same data must produce identical predictions."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=4)
+
+        def make_alpha():
+            return MLAlpha(
+                name="t",
+                model_factory=lambda: Ridge(alpha=1.0),
+                feature_fn=lambda df: pd.DataFrame({
+                    "ret1": df["adj_close"].pct_change(1),
+                    "ret5": df["adj_close"].pct_change(5),
+                }).dropna(),
+                target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+        alpha1 = make_alpha()
+        alpha2 = make_alpha()
+        scores1 = alpha1.compute(data, datetime(2022, 8, 1))
+        scores2 = alpha2.compute(data, datetime(2022, 8, 1))
+        pd.testing.assert_series_equal(scores1, scores2)
+
+    def test_random_forest_deterministic_with_fixed_random_state(self):
+        """RandomForest has random tree sampling, but with random_state=0
+        and n_jobs=1 it must be fully deterministic."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.ensemble import RandomForestRegressor
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=4)
+
+        def make_alpha():
+            return MLAlpha(
+                name="rf_t",
+                model_factory=lambda: RandomForestRegressor(
+                    n_estimators=10, max_depth=3, n_jobs=1, random_state=0,
+                ),
+                feature_fn=lambda df: pd.DataFrame({
+                    "ret1": df["adj_close"].pct_change(1),
+                    "ret5": df["adj_close"].pct_change(5),
+                }).dropna(),
+                target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+        alpha1 = make_alpha()
+        alpha2 = make_alpha()
+        scores1 = alpha1.compute(data, datetime(2022, 8, 1))
+        scores2 = alpha2.compute(data, datetime(2022, 8, 1))
+        pd.testing.assert_series_equal(scores1, scores2)
+
+    def test_compute_multiple_calls_same_result(self):
+        """Calling compute() twice at the same date on the same instance
+        must return byte-identical results. This ensures idempotency
+        within a rebalance."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=4)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret5": df["adj_close"].pct_change(5),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        scores1 = alpha.compute(data, datetime(2022, 8, 1))
+        scores2 = alpha.compute(data, datetime(2022, 8, 1))
+        pd.testing.assert_series_equal(scores1, scores2)
+        # Only one retrain should have happened (second call is cached)
+        assert alpha._retrain_count == 1
