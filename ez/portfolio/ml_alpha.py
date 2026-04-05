@@ -415,3 +415,84 @@ class MLAlpha(CrossSectionalFactor):
 CrossSectionalFactor._registry.pop("MLAlpha", None)
 _mla_key = f"{MLAlpha.__module__}.MLAlpha"
 CrossSectionalFactor._registry_by_key.pop(_mla_key, None)
+
+
+# ─── User template (consumed by Phase 4 sandbox new-file button) ─────
+#
+# This template is a str.format() template with three placeholders:
+#   {class_name} — the Python class name (used in `class ...(MLAlpha)`)
+#   {name}       — the factor instance name
+#   {description} — free-form description shown in the UI
+#
+# We use a literal template so that calling format() only substitutes the
+# three tagged fields and leaves Python-syntax braces (e.g., dict/set
+# literals) alone. In Python str.format() semantics, "{{" → "{" and
+# "}}" → "}", so any genuine code braces must be doubled.
+ML_ALPHA_TEMPLATE = '''"""User ML Alpha: {class_name}
+
+V2.13 ML Alpha with walk-forward framework. The framework enforces
+anti-lookahead via purge/embargo. You provide:
+- model_factory: returns a fresh unfit sklearn-compatible estimator
+- feature_fn: extracts features from a single-symbol DataFrame
+- target_fn: extracts the forward-looking label
+
+IMPORTANT:
+- V1 supports only a small whitelist of sklearn estimator classes
+  (Ridge, Lasso, LinearRegression, ElasticNet, DecisionTreeRegressor,
+  RandomForestRegressor, GradientBoostingRegressor). Adding others
+  requires explicit plan-file approval. If you try to use, e.g., SVR,
+  MLAlpha construction will raise UnsupportedEstimatorError.
+- Set n_jobs=1 on all estimators. The sandbox blocks multiprocessing,
+  and MLAlpha enforces this at construction by inspecting the estimator
+  instance — n_jobs=-1 / n_jobs=2 will raise immediately.
+- Set random_state for reproducibility (required for deterministic
+  regression tests).
+- DO NOT use joblib/pickle to save models to disk — the sandbox blocks
+  pickle. V1 keeps models in-memory only; cross-run cache is V2.13.1.
+- Target horizon (e.g., 5-day forward return) dictates purge_days —
+  keep them equal or larger than the horizon to prevent label leakage.
+"""
+from __future__ import annotations
+
+import pandas as pd
+
+from sklearn.linear_model import Ridge
+from ez.portfolio.ml_alpha import MLAlpha
+
+
+def _feature_fn(df: pd.DataFrame) -> pd.DataFrame:
+    """Extract features from a single-symbol DataFrame.
+
+    The engine slices ``df`` to anti-lookahead-safe history before
+    passing it here. You only need to compute features; do not worry
+    about the current-date exclusion.
+    """
+    return pd.DataFrame({{
+        "ret1": df["adj_close"].pct_change(1),
+        "ret5": df["adj_close"].pct_change(5),
+        "ret20": df["adj_close"].pct_change(20),
+        "vol20": df["adj_close"].pct_change(1).rolling(20).std(),
+    }}).dropna()
+
+
+def _target_fn(df: pd.DataFrame) -> pd.Series:
+    """5-day forward return. MUST use .shift(-k) to look forward."""
+    return df["adj_close"].pct_change(5).shift(-5)
+
+
+class {class_name}(MLAlpha):
+    """{description}"""
+
+    def __init__(self):
+        super().__init__(
+            name="{name}",
+            # Deterministic Ridge — no randomness, stable across runs.
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=_feature_fn,
+            target_fn=_target_fn,
+            train_window=120,  # ~6 months of daily data
+            retrain_freq=21,   # ~monthly retraining
+            purge_days=5,      # matches target's 5-day forward horizon
+            embargo_days=2,    # safety buffer
+        )
+'''

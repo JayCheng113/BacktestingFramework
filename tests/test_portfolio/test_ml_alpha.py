@@ -881,3 +881,81 @@ class TestMLAlphaFeatureErrorHandling:
         # on whether the iteration order made the buggy call happen
         # during _build_training_panel OR during _predict)
         assert isinstance(scores, pd.Series)
+
+
+class TestMLAlphaPackageExports:
+    """V2.13 Phase 1 Task 1.14 — verify package-level exports."""
+
+    def test_mlalpha_accessible_from_ez_portfolio(self):
+        """Users should be able to ``from ez.portfolio import MLAlpha``."""
+        from ez.portfolio import MLAlpha
+        assert MLAlpha is not None
+        # Confirm it's the same class as the direct import
+        from ez.portfolio.ml_alpha import MLAlpha as DirectMLAlpha
+        assert MLAlpha is DirectMLAlpha
+
+    def test_unsupported_estimator_error_accessible(self):
+        from ez.portfolio import UnsupportedEstimatorError
+        assert issubclass(UnsupportedEstimatorError, TypeError)
+
+    def test_ml_alpha_template_accessible(self):
+        from ez.portfolio import ML_ALPHA_TEMPLATE
+        assert isinstance(ML_ALPHA_TEMPLATE, str)
+        assert len(ML_ALPHA_TEMPLATE) > 500  # sanity: non-trivial template
+
+
+class TestMLAlphaTemplate:
+    """V2.13 Phase 1 Task 1.13 — ML_ALPHA_TEMPLATE must render and
+    produce syntactically valid Python code that defines a usable
+    subclass when executed."""
+
+    def test_template_renders_with_format_substitution(self):
+        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE
+        rendered = ML_ALPHA_TEMPLATE.format(
+            class_name="MyTestRidge",
+            name="my_test_ridge",
+            description="Test Ridge alpha.",
+        )
+        assert "class MyTestRidge(MLAlpha)" in rendered
+        assert '"my_test_ridge"' in rendered
+        assert "Test Ridge alpha." in rendered
+
+    def test_rendered_template_is_valid_python(self):
+        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE
+        rendered = ML_ALPHA_TEMPLATE.format(
+            class_name="FooRidge",
+            name="foo_ridge",
+            description="Foo.",
+        )
+        # compile() raises SyntaxError if the rendered template has
+        # unbalanced braces or similar
+        compile(rendered, "<rendered>", "exec")
+
+    def test_rendered_template_produces_usable_mlalpha(self):
+        """Execute the rendered template in a sandbox namespace and
+        verify the resulting class can be instantiated + inherits
+        MLAlpha."""
+        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE, MLAlpha
+        rendered = ML_ALPHA_TEMPLATE.format(
+            class_name="BarRidge",
+            name="bar_ridge",
+            description="Bar.",
+        )
+        ns: dict = {}
+        try:
+            exec(rendered, ns)
+        finally:
+            # Clean up any auto-registered class to prevent cross-test pollution
+            from ez.portfolio.cross_factor import CrossSectionalFactor
+            CrossSectionalFactor._registry.pop("BarRidge", None)
+            for key in list(CrossSectionalFactor._registry_by_key.keys()):
+                if key.endswith(".BarRidge"):
+                    del CrossSectionalFactor._registry_by_key[key]
+
+        cls = ns.get("BarRidge")
+        assert cls is not None
+        assert issubclass(cls, MLAlpha)
+
+        instance = cls()
+        assert instance.name == "bar_ridge"
+        assert instance.warmup_period == 120 + 5 + 2  # train_window + purge + embargo
