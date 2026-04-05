@@ -152,6 +152,19 @@ class VectorizedBacktestEngine:
         peak_shares: float = 0.0       # total shares at peak (for pnl_pct)
         partial_pnl: float = 0.0       # accumulated PnL from partial sells
         partial_comm: float = 0.0      # accumulated commission from partial sells
+        # V2.12.2 codex round 6: track cumulative cash invested and peak
+        # at-risk capital across a holding cycle. Prior version computed
+        # cost_basis as `entry_price * peak_shares + entry_comm`, which is
+        # wrong for strategies that reinforce a position (buy → partial
+        # sell → buy again): peak_shares × VWAP-entry does not equal the
+        # actual capital deployed. `cycle_cash_in` tracks gross cash out
+        # (buy fills + commission) and `cycle_peak_invested` tracks the
+        # maximum net capital at risk during the cycle. The cost basis
+        # used for pnl_pct is `cycle_peak_invested` which represents the
+        # maximum capital the strategy ever had tied up in this position.
+        cycle_cash_in: float = 0.0         # running gross cash deployed (buys only)
+        cycle_net_invested: float = 0.0    # running net (cash_in - partial_sell_proceeds)
+        cycle_peak_invested: float = 0.0   # max cycle_net_invested seen during cycle
         daily_ret = np.zeros(n)
 
         times = df.index if hasattr(df.index, "__iter__") else range(n)
@@ -196,12 +209,19 @@ class VectorizedBacktestEngine:
                         shares -= fill.shares
                         if shares < 1e-10:
                             shares = 0.0
+                        # Update cycle net invested (sell proceeds reduce it)
+                        cycle_net_invested -= fill.net_amount  # net_amount > 0 for sells
                         # Record trade when fully closing; include partial sell PnL
                         if old_shares > 0 and shares < 1e-10 and entry_time is not None:
                             final_pnl = (fill.fill_price - entry_price) * old_shares - fill.commission
                             total_pnl = partial_pnl + final_pnl - entry_comm
                             total_comm = entry_comm + partial_comm + fill.commission
-                            cost_basis = (entry_price * peak_shares + entry_comm) if peak_shares > 0 else (entry_price * old_shares + entry_comm)
+                            # V2.12.2 codex round 6: use tracked cycle_peak_invested
+                            # as cost basis. This is the max capital at risk during
+                            # the cycle, accurately reflecting reinforce patterns
+                            # (buy → partial sell → buy again) that break the prior
+                            # `entry_price * peak_shares` approximation.
+                            cost_basis = cycle_peak_invested if cycle_peak_invested > 0 else (entry_price * old_shares + entry_comm)
                             trades.append(TradeRecord(
                                 entry_time=entry_time,
                                 exit_time=time_list[i],
@@ -217,6 +237,9 @@ class VectorizedBacktestEngine:
                             partial_pnl = 0.0
                             partial_comm = 0.0
                             peak_shares = 0.0
+                            cycle_cash_in = 0.0
+                            cycle_net_invested = 0.0
+                            cycle_peak_invested = 0.0
                         elif entry_time is not None:
                             # Partial sell — accumulate realized PnL for later
                             partial_pnl += (fill.fill_price - entry_price) * fill.shares - fill.commission
@@ -235,18 +258,40 @@ class VectorizedBacktestEngine:
                                 entry_comm = fill.commission
                                 partial_pnl = 0.0
                                 partial_comm = 0.0
+                                # Reset cycle tracking at start of new position
+                                cycle_cash_in = 0.0
+                                cycle_net_invested = 0.0
+                                cycle_peak_invested = 0.0
                             else:
                                 entry_comm += fill.commission
                                 entry_price = (entry_price * shares + fill.fill_price * fill.shares) / (shares + fill.shares)
                             shares += fill.shares
                             peak_shares = max(peak_shares, shares)
                             cash += fill.net_amount
+                            # V2.12.2 codex round 6: track cumulative cash out
+                            # (buy cost + commission) for accurate pnl_pct
+                            # cost basis on reinforced positions.
+                            buy_cash_out = -fill.net_amount  # net_amount < 0 for buys
+                            cycle_cash_in += buy_cash_out
+                            cycle_net_invested += buy_cash_out
+                            if cycle_net_invested > cycle_peak_invested:
+                                cycle_peak_invested = cycle_net_invested
 
-                # Only update prev_weight if fill succeeded.
-                # If fill was rejected (e.g., T+1, price limit), keep prev_weight
-                # so engine retries on the next bar.
+                # V2.12.2 codex round 6: update prev_weight to reflect the
+                # ACTUAL achieved weight after a (possibly partial) fill,
+                # not the target. Prior version set prev_weight=target_weight
+                # whenever fill.shares > 0, so lot_size rounding (A-share
+                # 100 shares) silently left residual weight gaps — engine
+                # saw "already at target" on the next bar and refused to
+                # top up. With actual-weight tracking, the next bar's
+                # `abs(target - prev)` check correctly detects the gap
+                # and retries.
                 if filled:
-                    prev_weight = target_weight
+                    current_equity_after = cash + shares * exec_price
+                    if current_equity_after > 0:
+                        prev_weight = (shares * exec_price) / current_equity_after
+                    else:
+                        prev_weight = 0.0
 
             position_value = shares * prices[i]
             equity_arr[i] = cash + position_value

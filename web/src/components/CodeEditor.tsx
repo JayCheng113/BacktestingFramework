@@ -168,6 +168,13 @@ const api = (path: string, opts?: RequestInit) =>
 export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [code, setCode] = useState('')
   const [filename, setFilename] = useState('')
+  // V2.12.2 codex round 6: `committedFilename` is the last filename that
+  // was actually loaded, created via template, or successfully saved —
+  // NOT the live input field value. ChatPanel.fileKey is derived from
+  // this so half-typed names ("strategy:m" during rename) don't fragment
+  // conversations. `filename` remains the editable input for display
+  // and rename UX; commit happens only when the user actually persists.
+  const [committedFilename, setCommittedFilename] = useState('')
   const [currentKind, setCurrentKind] = useState<CodeKind>('strategy')
   const [files, setFiles] = useState<FileInfo[]>([])
   const [factorFiles, setFactorFiles] = useState<FileInfo[]>([])
@@ -220,6 +227,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         const data = await res.json()
         setCode(data.code)
         setFilename(fname)
+        setCommittedFilename(fname)
         setCurrentKind(kind)
         setStatus(`已加载 ${fname}`)
         setErrors([])
@@ -234,8 +242,18 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
       portfolio_strategy: 'MyPortfolioStrategy', cross_factor: 'MyCrossFactor',
     }
     const prefix = prefixMap[kind]
-    const allFiles = [...files, ...factorFiles, ...portfolioFiles, ...crossFactorFiles]
-    const existing = allFiles.map(f => f.filename)
+    // V2.12.2 codex round 6: only check conflicts within the SAME kind.
+    // Prior version merged all four kind lists, so `my_factor.py` under
+    // strategies/ would block `my_factor.py` under factors/ even though
+    // they're stored in separate directories and resolved by different
+    // registries.
+    const kindFiles = (
+      kind === 'strategy' ? files :
+      kind === 'factor' ? factorFiles :
+      kind === 'portfolio_strategy' ? portfolioFiles :
+      crossFactorFiles
+    )
+    const existing = kindFiles.map(f => f.filename)
     let name = prefix
     let n = 1
     while (existing.includes(name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py')) {
@@ -248,6 +266,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setCode(data.code)
         const fn = name.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '') + '.py'
         setFilename(fn)
+        setCommittedFilename(fn)
         setCurrentKind(kind)
         setStatus(`新建${KIND_LABELS[kind]}: ${fn}`)
         setErrors([])
@@ -294,6 +313,11 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setStatus(`已保存至 ${data.path} — 合约测试通过!`)
         setErrors([])
         setTestOutput(data.test_output || '')
+        // V2.12.2 codex round 6: commit the filename now that the save
+        // succeeded — ChatPanel's fileKey will update and a new
+        // conversation (or switch to existing) will happen exactly once,
+        // not on every keystroke.
+        setCommittedFilename(filename)
         loadAllFiles()
       } else {
         const detail = data.detail || data
@@ -325,6 +349,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         if (fname === filename && kind === currentKind) {
           setCode('')
           setFilename('')
+          setCommittedFilename('')
         }
         setStatus(data.warning ? `已删除 ${fname}（${data.warning}）` : `已删除 ${fname}`)
       } else {
@@ -536,12 +561,17 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
               {/* V2.12.1 codex follow-up: fileKey is {kind}:{filename} so
                   different kinds with the same filename (e.g. strategies/foo.py
                   vs cross_factors/foo.py) don't share conversation anchors.
-                  Also: we only update fileKey when there IS a filename (user
-                  still editing a new file passes fileKey="" to avoid binding
-                  conversations to half-typed names). */}
+
+                  V2.12.2 codex round 6: fileKey now derives from
+                  `committedFilename` (last loaded / new / saved name),
+                  NOT the live input. Prior version used the editable
+                  input value, so every keystroke in the filename field
+                  fired ChatPanel's useEffect([fileKey]) and bound the
+                  half-typed name ("strategy:m") as a new conversation.
+               */}
               <ChatPanel
                 editorCode={code}
-                fileKey={filename ? `${currentKind}:${filename}` : ''}
+                fileKey={committedFilename ? `${currentKind}:${committedFilename}` : ''}
                 onCodeUpdate={(c, f, kind) => {
                   // V2.12.2 codex: on fetch-failure branch, ChatPanel calls
                   // with (undefined, undefined, undefined) to refresh the
@@ -552,6 +582,9 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
                   if (c !== undefined && c !== null) setCode(c as string)
                   if (f) {
                     setFilename(f)
+                    // V2.12.2 round 6: AI-created file is a committed event
+                    // (file exists on disk post-tool-result), so commit it.
+                    setCommittedFilename(f)
                     setCurrentKind((kind as CodeKind) || 'strategy')
                   }
                   // Always refresh file list so AI-created files appear in
