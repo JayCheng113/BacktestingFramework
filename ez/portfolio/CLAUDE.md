@@ -90,10 +90,11 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
   - **CrossSectionalFactor dual-dict registry**: 补齐 `_registry_by_key` + `_registry` + `resolve_class()` + 冲突 warning (对齐 PortfolioStrategy V2.12.1). `AlphaCombiner` pop 同步清理 `_registry_by_key` (reviewer sibling miss fix).
   - **portfolio_store 上下文完整**: 新增 `config` / `warnings` / `dates` 三列 + ALTER 迁移, `/run` 打包 market/optimizer/risk/index/cost 到 `config`, 历史对比图表用真实交易日 time axis 对齐 (legacy 空 dates 行降级 index 轴 + 警告 banner).
   - **alpha_combiner 训练 lookback 正确传递**: `_compute_alpha_weights` 的 `dynamic_lb` 之前只传 fetch, 现在也传 `evaluate_cross_sectional_factor()`, 避免长 warmup 因子训练窗被默认 252 截断.
-- **V2.13 Phase 1 — MLAlpha Core** (`ml_alpha.py`, plan `docs/superpowers/plans/2026-04-06-v213-ml-alpha.md`): 走完 F8 第 1 阶段 (14 tasks + **2 轮 code review**). 见根 CLAUDE.md V2.13 条目详细描述. 模块相关关键点:
-  - **MLAlpha(CrossSectionalFactor)** + 构造器 callable 校验 + lazy retrain + positional purge/embargo (trading days) + anti-lookahead 两层防御
-  - **V1 safety**: 7 类 sklearn whitelist + n_jobs=1 运行时强制 + `type` 身份比对 + 每次 `_retrain()` re-validate
-  - **状态隔离**: portfolio walk-forward 走 `strategy_factory()` 每折 fresh instance (非 `copy.deepcopy`); 单票 WalkForwardValidator 走 deepcopy
-  - **end-to-end 验证**: Ridge + RF + GBR 都有 `run_portfolio_backtest` 集成测试, Ridge + RF 另有 `portfolio_walk_forward` 集成测试. Lasso/LinearRegression/ElasticNet/DecisionTree 只有单元层 whitelist 测试.
-  - **容错 + 诊断**: feature_fn/target_fn/predict 异常 + model_factory 运行时异常 + fit 异常都 catch + 一次性 warning log; 空 panel / 空 predict 也发诊断 warning; inf 特征 `np.isfinite` 过滤
-  - **97 tests** (1813 → 1910).
+- **V2.13 Phase 1 — MLAlpha Core** (`ml_alpha.py`, 6 轮独立审查). 见根 CLAUDE.md V2.13 条目完整描述.
+  - `MLAlpha(CrossSectionalFactor)` + 构造器 callable/singleton 校验 + lazy retrain + positional purge/embargo (trading days) + anti-lookahead 两层防御
+  - V1 whitelist 7 类 + `n_jobs=1` runtime + `type` 身份比对 + probe2 validation
+  - `feature_warmup_days` 参数 + runtime shortfall detection + 非数值 dtype 主动白名单 (datetime64/timedelta64 防 silent coerce)
+  - feature schema 列顺序校验 + index 契约验证 (非 DatetimeIndex skip / 乱序自动 sort)
+  - TopNRotation/MultiFactorRotation: `factor`/`factors` 公开 property + `lookback_days` 从 `factor.warmup_period` 推
+  - 15 一次性 warning flags + 容错: feature_fn/target_fn/predict/model_factory/fit 异常全 catch + log
+  - **123 tests** (1813 → 1936), Ridge/RF/GBR 三个 estimator × backtest + walk_forward 端到端.
