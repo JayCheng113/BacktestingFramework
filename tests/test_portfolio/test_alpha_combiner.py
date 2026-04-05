@@ -26,8 +26,10 @@ class MockFactor(CrossSectionalFactor):
         raw = self.compute_raw(universe_data, date)
         return raw.rank(pct=True) if len(raw) > 0 else raw
 
-# Remove MockFactor from registry
+# Remove MockFactor from registry.
+# V2.12.2 codex reviewer: dual-dict registry — pop from BOTH dicts.
 CrossSectionalFactor._registry.pop("MockFactor", None)
+CrossSectionalFactor._registry_by_key.pop(f"{MockFactor.__module__}.MockFactor", None)
 
 
 DUMMY_UNIVERSE = {"A": pd.DataFrame(), "B": pd.DataFrame(), "C": pd.DataFrame(), "D": pd.DataFrame()}
@@ -137,6 +139,7 @@ class TestBackwardCompat:
                 return pd.Series({"A": 0.8, "B": 0.5, "C": 0.2})
 
         CrossSectionalFactor._registry.pop("LegacyFactor", None)
+        CrossSectionalFactor._registry_by_key.pop(f"{LegacyFactor.__module__}.LegacyFactor", None)
 
         f = LegacyFactor()
         combiner = AlphaCombiner(factors=[f])

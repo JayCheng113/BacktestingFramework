@@ -44,6 +44,7 @@ class TestICAllNaN:
                 return pd.Series(dtype=float)
 
         CrossSectionalFactor._registry.pop("NaNFactor", None)
+        CrossSectionalFactor._registry_by_key.pop(f"{NaNFactor.__module__}.NaNFactor", None)
 
         from ez.portfolio.cross_evaluator import evaluate_cross_sectional_factor
         from ez.portfolio.calendar import TradingCalendar
