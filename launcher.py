@@ -67,7 +67,7 @@ def main():
 
     print(f"""
     ╔══════════════════════════════════════╗
-    ║      ez-trading v0.2.12.1            ║
+    ║      ez-trading v0.2.12.2            ║
     ║  Agent-Native Quant Platform         ║
     ╠══════════════════════════════════════╣
     ║  Starting on http://localhost:{port}   ║
