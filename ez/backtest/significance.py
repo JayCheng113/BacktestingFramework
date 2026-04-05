@@ -67,11 +67,17 @@ def compute_significance(
         ar_vals = ar_vals[:n]
 
         # Skip permutation for constant signals (e.g., buy-and-hold):
-        # shuffling a constant array produces the same result → p≈0 (false positive)
+        # shuffling a constant array produces the same result → p≈0 false
+        # positive. V2.12.2 codex round 7: return p_value=1.0 (conventional
+        # "fail to reject null" = not significant) instead of NaN. NaN
+        # propagates through .toFixed(3) in the frontend and displays
+        # literally as "NaN", confusing users on legitimate edge cases like
+        # full-long buy-and-hold. 1.0 is the semantically correct value for
+        # "no timing information" and renders as "1.000" cleanly.
         if np.std(sig_vals) < 1e-10:
             return SignificanceTest(
                 sharpe_ci_lower=ci_lower, sharpe_ci_upper=ci_upper,
-                monte_carlo_p_value=float("nan"), is_significant=False,
+                monte_carlo_p_value=1.0, is_significant=False,
             )
 
         perm_sharpes = np.array([

@@ -843,20 +843,25 @@ def run_portfolio(req: PortfolioRunRequest):
         "symbols_skipped": skipped,
         # V2.12.1 codex follow-up: return the LAST NON-EMPTY weights entry,
         # not simply [-1]. The engine appends {} after final liquidation
-        # (#10 attribution fix), so weights_history[-1] is usually empty for
-        # backtests whose final period still held positions. Users want to
-        # see the last actual rebalance weights.
+        # so weights_history[-1] is usually empty for backtests whose
+        # final period still held positions. Users want to see the last
+        # actual held-position weights.
+        #
+        # V2.12.2 codex round 5+7: after the daily-drift fix, this is the
+        # LAST DAILY ACTUAL holdings (drift-adjusted by end-of-day price),
+        # NOT necessarily a rebalance target. Frontend labels it as "最新
+        # 持仓分布" for normal runs and "期末前最后持仓 (次日已全部清仓)"
+        # for terminal-liquidation runs, matching the true semantic.
         "latest_weights": next(
             (w for w in reversed(result.weights_history) if w),
             {}
         ),
         # V2.12.2 codex: flag terminal liquidation state so the UI can
-        # distinguish "last rebalance target" (positions still held at
-        # period end) from "all cash" (final liquidation was executed —
-        # latest_weights in that case is the last rebalance BEFORE
-        # liquidation, not the truly terminal state). Prior version
-        # silently showed last-rebalance weights under the label "最新持仓
-        # 分布" even when the backtest had ended with everything sold.
+        # distinguish "positions still held at period end" from "all
+        # cash after final liquidation". When True, latest_weights is
+        # the last pre-liquidation daily snapshot (not a rebalance
+        # target, just the final held position before the T+1 force
+        # close). UI uses this flag to adjust its pie chart label.
         "terminal_liquidated": (
             bool(result.weights_history)
             and not result.weights_history[-1]

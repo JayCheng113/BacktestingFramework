@@ -308,7 +308,18 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
               {result.significance.is_significant ? '显著' : '不显著'}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              显著性 p={result.significance.p_value.toFixed(3)} | 夏普置信区间 [{result.significance.sharpe_ci_lower.toFixed(2)}, {result.significance.sharpe_ci_upper.toFixed(2)}]
+              {/* V2.12.2 codex round 7: isFinite guard on p_value and CI
+                  bounds. Prior version did .toFixed(3) directly which
+                  renders NaN (from constant-signal edge case or degenerate
+                  data) as literal "NaN" text. Backend now returns 1.0 for
+                  constant signals but this guard is defense-in-depth for
+                  any future path that might return NaN. */}
+              显著性 p={Number.isFinite(result.significance.p_value) ? result.significance.p_value.toFixed(3) : '—'}
+              {' | '}夏普置信区间 [
+                {Number.isFinite(result.significance.sharpe_ci_lower) ? result.significance.sharpe_ci_lower.toFixed(2) : '—'}
+                ,{' '}
+                {Number.isFinite(result.significance.sharpe_ci_upper) ? result.significance.sharpe_ci_upper.toFixed(2) : '—'}
+              ]
             </span>
           </div>
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}

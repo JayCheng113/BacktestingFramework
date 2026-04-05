@@ -512,18 +512,25 @@ export default function PortfolioRunContent(props: Props) {
           </div>
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
           {/* 持仓分布饼图.
-              V2.12.2 codex: title label changes based on terminal_liquidated
-              flag. If the backtest ended with final liquidation, `latest_weights`
-              is the LAST REBALANCE TARGET before liquidation, not the terminal
-              state (which is all cash). Prior label "最新持仓分布" misled users
-              into believing these positions were still held at period end. */}
+              V2.12.2 codex round 7: after round 5 weights_history is daily
+              drift-adjusted actual holdings (not rebalance target snapshots).
+              `latest_weights` = the LAST NON-EMPTY daily entry, which is
+              the actual held positions at market close on the last trading
+              day before any terminal liquidation. Prior label "最后一次
+              调仓目标 (期末已清仓)" implied this was the last rebalance
+              target — misleading because the last non-empty day may not
+              be a rebalance day, and the data is drift-adjusted actual,
+              not target. New labels accurately describe the semantic:
+              - Normal: "最新持仓分布" (last day of backtest = current)
+              - Terminal liquidation: "期末前最后持仓 (次日已全部清仓)"
+                — explicitly signals this is the pre-liquidation snapshot. */}
           {result.latest_weights && Object.keys(result.latest_weights).length > 0 && (
             <div className="mt-3">
               <ReactECharts option={{
                 backgroundColor: '#0d1117',
                 title: {
                   text: result.terminal_liquidated
-                    ? '最后一次调仓目标 (期末已清仓)'
+                    ? '期末前最后持仓 (次日已全部清仓)'
                     : '最新持仓分布',
                   textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center',
                 },
@@ -646,7 +653,11 @@ export default function PortfolioRunContent(props: Props) {
           )}
           {result.trades.length > 0 && (
             <div className="mt-4">
-              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>交易记录 ({result.trades.length}{result.trades.length >= 100 ? '+' : ''})</h4>
+              {/* V2.12.2 codex round 7: drop the "100+" suffix. /run now
+                  returns the full trade list (round 3 fix), so the count
+                  is exact and the "+" indicator falsely suggested
+                  truncation that no longer happens. */}
+              <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>交易记录 ({result.trades.length})</h4>
               <div className="overflow-x-auto max-h-48 overflow-y-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                 <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                   <thead><tr style={{ backgroundColor: 'var(--bg-primary)', position: 'sticky', top: 0 }}>

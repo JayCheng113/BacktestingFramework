@@ -63,3 +63,34 @@ def test_signal_permutation_no_edge():
     )
     # Random signals → high p-value
     assert result.monte_carlo_p_value > 0.05
+
+
+def test_constant_signal_returns_finite_p_value():
+    """V2.12.2 codex round 7: constant signals (buy-and-hold, all-short,
+    no-trade) must return a finite p_value, not NaN. Prior version
+    returned float('nan') which propagated through .toFixed(3) and
+    displayed as literal "NaN" in the frontend. Fix: return 1.0
+    (conventional "fail to reject null = not significant").
+    """
+    import math
+    np.random.seed(42)
+    n = 200
+    asset_returns = pd.Series(np.random.normal(0.001, 0.01, n))
+    # Constant signal: always fully long
+    signals = pd.Series([1.0] * n)
+    strategy_returns = signals * asset_returns
+
+    result = compute_significance(
+        strategy_returns, signals=signals, asset_returns=asset_returns,
+        n_bootstrap=200, n_permutations=500, seed=42,
+    )
+    assert math.isfinite(result.monte_carlo_p_value), (
+        f"Constant signal returned non-finite p_value "
+        f"{result.monte_carlo_p_value} — prior version returned NaN which "
+        f"rendered as literal 'NaN' in frontend. Fix returns 1.0."
+    )
+    assert result.monte_carlo_p_value == 1.0
+    assert result.is_significant is False
+    # Bootstrap CI should still be computed
+    assert math.isfinite(result.sharpe_ci_lower)
+    assert math.isfinite(result.sharpe_ci_upper)

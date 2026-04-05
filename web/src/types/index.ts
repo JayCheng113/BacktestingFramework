@@ -137,9 +137,10 @@ export interface PortfolioRunResult {
   latest_weights?: Record<string, number>
   // V2.12.2 codex: when true, the backtest ended with final liquidation
   // (all positions sold). `latest_weights` in this case is the last
-  // rebalance target BEFORE liquidation, not the truly terminal state.
-  // UI should label the pie chart as "最后持仓 (期末已清仓)" to avoid
-  // misleading users into thinking positions are still held.
+  // pre-liquidation daily snapshot (drift-adjusted actual holdings on
+  // the last trading day before the T+1 force close), NOT a rebalance
+  // target. UI labels the pie chart accordingly to avoid misleading
+  // users about the nature of the data shown.
   terminal_liquidated?: boolean
   warnings?: string[] | null
   risk_events?: RiskEvent[]
