@@ -56,14 +56,25 @@ class SimpleMatcher(Matcher):
     Commission = max(trade_value * rate, min_commission).
     Buy: commission capped — skip if comm >= amount.
     Sell: commission capped at sell value to prevent negative cash.
+
+    V2.12.2 codex: optional `sell_commission_rate` allows asymmetric
+    buy/sell commission. When None, `commission_rate` is used for both
+    sides (backward-compat). Prior version had a single rate, so the
+    frontend's "sell commission" input was silently dropped.
     """
 
     def __init__(
-        self, commission_rate: float = 0.0003, min_commission: float = 5.0
+        self,
+        commission_rate: float = 0.0003,
+        min_commission: float = 5.0,
+        sell_commission_rate: float | None = None,
     ) -> None:
         if commission_rate < 0 or min_commission < 0:
             raise ValueError("commission_rate and min_commission must be >= 0")
+        if sell_commission_rate is not None and sell_commission_rate < 0:
+            raise ValueError("sell_commission_rate must be >= 0")
         self._rate = commission_rate
+        self._sell_rate = sell_commission_rate if sell_commission_rate is not None else commission_rate
         self._min_comm = min_commission
 
     def fill_buy(self, price: float, amount: float) -> FillResult:
@@ -87,7 +98,7 @@ class SimpleMatcher(Matcher):
             return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
 
         value = shares * price
-        comm = max(value * self._rate, self._min_comm)
+        comm = max(value * self._sell_rate, self._min_comm)
         if comm > value:
             comm = value
         return FillResult(
@@ -112,6 +123,10 @@ class SlippageMatcher(Matcher):
         slippage_rate: fraction of price impact (e.g., 0.001 = 0.1% = 万一).
         commission_rate: fraction of trade value as commission.
         min_commission: minimum commission per trade.
+        sell_commission_rate: optional asymmetric sell-side rate (V2.12.2).
+            When None, `commission_rate` is used for both sides. Prior
+            version had a single rate, so the frontend's "sell commission"
+            input was silently dropped on single-stock backtests.
     """
 
     def __init__(
@@ -119,11 +134,15 @@ class SlippageMatcher(Matcher):
         slippage_rate: float = 0.001,
         commission_rate: float = 0.0003,
         min_commission: float = 5.0,
+        sell_commission_rate: float | None = None,
     ) -> None:
         if slippage_rate < 0 or commission_rate < 0 or min_commission < 0:
             raise ValueError("slippage_rate, commission_rate, min_commission must be >= 0")
+        if sell_commission_rate is not None and sell_commission_rate < 0:
+            raise ValueError("sell_commission_rate must be >= 0")
         self._slip = slippage_rate
         self._rate = commission_rate
+        self._sell_rate = sell_commission_rate if sell_commission_rate is not None else commission_rate
         self._min_comm = min_commission
 
     def fill_buy(self, price: float, amount: float) -> FillResult:
@@ -151,7 +170,7 @@ class SlippageMatcher(Matcher):
         if fill_price <= 0:
             fill_price = 0.0
         value = shares * fill_price
-        comm = max(value * self._rate, self._min_comm)
+        comm = max(value * self._sell_rate, self._min_comm)
         if comm > value:
             comm = value
         return FillResult(

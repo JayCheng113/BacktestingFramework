@@ -40,29 +40,46 @@ export default function PortfolioHistoryContent(props: Props) {
         <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
           <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
             <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-              {['选择', '策略', '区间', '频率', '夏普比率', '总收益率', '最大回撤', '交易次数', '创建时间', '操作'].map(h => (
+              {['选择', '策略', '市场', '配置', '区间', '频率', '夏普比率', '总收益率', '最大回撤', '交易次数', '⚠', '创建时间', '操作'].map(h => (
                 <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
               ))}
             </tr></thead>
-            <tbody>{history.map(r => (
+            <tbody>{history.map(r => {
+              // V2.12.2 codex: surface config summary (market, optimizer,
+              // risk, index benchmark) + warning count directly in list so
+              // users can audit past runs without drilling into each detail.
+              const cs = r.config_summary || {}
+              const marketLabel = cs.market === 'us_stock' ? '美股' : cs.market === 'hk_stock' ? '港股' : cs.market === 'cn_stock' ? 'A股' : (cs.market || '-')
+              const configPieces: string[] = []
+              if (cs.optimizer && cs.optimizer !== 'none') configPieces.push(`优化:${cs.optimizer}`)
+              if (cs.risk_control) configPieces.push('风控')
+              if (cs.index_benchmark) configPieces.push(`指数:${cs.index_benchmark}`)
+              const configLabel = configPieces.length > 0 ? configPieces.join(' ') : '默认'
+              return (
               <tr key={r.run_id} style={{ borderBottom: '1px solid var(--border)', backgroundColor: selectedRuns.has(r.run_id) ? '#1e3a5f20' : 'transparent' }}>
                 <td className="px-3 py-1.5">
                   <input type="checkbox" checked={selectedRuns.has(r.run_id)} onChange={() => toggleRunSelection(r.run_id)} />
                 </td>
                 <td className="px-3 py-1.5">{r.strategy_name}</td>
+                <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{marketLabel}</td>
+                <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)', fontSize: '10px' }} title={configLabel}>{configLabel}</td>
                 <td className="px-3 py-1.5">{r.start_date?.slice(0, 10)}~{r.end_date?.slice(0, 10)}</td>
                 <td className="px-3 py-1.5">{r.freq}</td>
                 <td className="px-3 py-1.5">{fmt(r.metrics?.sharpe_ratio)}</td>
                 <td className="px-3 py-1.5">{fmt(r.metrics?.total_return, true)}</td>
                 <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{fmt(r.metrics?.max_drawdown, true)}</td>
                 <td className="px-3 py-1.5">{r.trade_count}</td>
+                <td className="px-3 py-1.5" style={{ color: (r.warning_count || 0) > 0 ? '#d29922' : 'var(--text-muted)' }} title={(r.warning_count || 0) > 0 ? `${r.warning_count} 条警告` : '无警告'}>
+                  {(r.warning_count || 0) > 0 ? r.warning_count : '-'}
+                </td>
                 <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{r.created_at?.slice(0, 16)}</td>
                 <td className="px-3 py-1.5">
                   <button onClick={() => handleDeleteRun(r.run_id)} className="text-xs px-1.5 py-0.5 rounded hover:opacity-80"
                     style={{ color: '#ef4444', border: '1px solid #7f1d1d' }}>删除</button>
                 </td>
               </tr>
-            ))}</tbody>
+              )
+            })}</tbody>
           </table>
         </div>
       )}

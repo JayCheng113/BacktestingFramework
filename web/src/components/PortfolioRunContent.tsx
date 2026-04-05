@@ -85,6 +85,13 @@ interface Props {
   searchGrid: Record<string, string>; setSearchGrid: (v: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void
   expandedParams: Record<string, boolean>; setExpandedParams: (v: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void
   searchLoading: boolean; searchResults: any[]
+  // V2.12.2 codex: search counts + failed combos so UI surfaces failures
+  // that prior version silently dropped from results.
+  searchMeta?: {
+    sampled: number; completed: number; failed: number;
+    total_combinations: number;
+    failed_combos: Array<{ combo_index: number; params: any; error: string }>;
+  } | null
   // Handlers
   handleRun: () => void
   handleWalkForward: () => void
@@ -109,7 +116,7 @@ export default function PortfolioRunContent(props: Props) {
     drawdownRecovery, setDrawdownRecovery, maxTurnover, setMaxTurnover,
     showOptimizer, setShowOptimizer, showRiskControl, setShowRiskControl, showAttribution, setShowAttribution,
     searchMode, setSearchMode, searchGrid, setSearchGrid,
-    searchLoading, searchResults,
+    searchLoading, searchResults, searchMeta,
     handleRun, handleWalkForward, handleSearch, exportEquityCurve, exportTrades,
     renderParamInput,
   } = props
@@ -359,7 +366,9 @@ export default function PortfolioRunContent(props: Props) {
                 const useCategories = !schema.options && factorCategories.length > 0
                 return (
                   <div key={key}>
-                    <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>{label} (多选)</label>
+                    <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>
+                      {label} {schema.type === 'multi_select' ? '(多选，所有勾选作为一个组合)' : '(多选)'}
+                    </label>
                     {useCategories ? factorCategories.map(cat => {
                       const catFactors = (Array.isArray(cat.factors) ? cat.factors : [])
                         .map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
@@ -409,6 +418,36 @@ export default function PortfolioRunContent(props: Props) {
             className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: searchLoading ? '#30363d' : '#1e6b3a' }}>
             {searchLoading ? '搜索中...' : '开始搜索'}
           </button>
+          {/* V2.12.2 codex: show sampled/completed/failed counts so users
+              can see when combos were silently dropped due to errors. */}
+          {searchMeta && (searchMeta.sampled > 0 || searchMeta.failed > 0) && (
+            <div className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              共 {searchMeta.total_combinations} 种组合, 采样 {searchMeta.sampled},
+              成功 <span style={{ color: '#22c55e' }}>{searchMeta.completed}</span>
+              {searchMeta.failed > 0 && (
+                <>
+                  , 失败 <span style={{ color: '#ef4444', fontWeight: 600 }}>{searchMeta.failed}</span>
+                </>
+              )}
+            </div>
+          )}
+          {searchMeta && searchMeta.failed > 0 && searchMeta.failed_combos.length > 0 && (
+            <details className="mt-1">
+              <summary className="text-xs cursor-pointer" style={{ color: '#f59e0b' }}>
+                展开失败详情 ({searchMeta.failed} 条)
+              </summary>
+              <div className="mt-1 px-2 py-1 rounded text-xs" style={{ backgroundColor: '#3b2a1a', border: '1px solid #6b4c2a', maxHeight: 200, overflowY: 'auto' }}>
+                {searchMeta.failed_combos.slice(0, 20).map((fc, i) => (
+                  <div key={i} style={{ color: '#f59e0b', marginBottom: 4 }}>
+                    <span style={{ color: 'var(--text-muted)' }}>#{fc.combo_index + 1}</span> {JSON.stringify(fc.params)}: {fc.error}
+                  </div>
+                ))}
+                {searchMeta.failed_combos.length > 20 && (
+                  <div style={{ color: 'var(--text-muted)' }}>... 还有 {searchMeta.failed_combos.length - 20} 条</div>
+                )}
+              </div>
+            </details>
+          )}
           {searchResults.length > 0 && (
             <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
               <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
@@ -466,12 +505,22 @@ export default function PortfolioRunContent(props: Props) {
             ))}
           </div>
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
-          {/* 持仓分布饼图 */}
+          {/* 持仓分布饼图.
+              V2.12.2 codex: title label changes based on terminal_liquidated
+              flag. If the backtest ended with final liquidation, `latest_weights`
+              is the LAST REBALANCE TARGET before liquidation, not the terminal
+              state (which is all cash). Prior label "最新持仓分布" misled users
+              into believing these positions were still held at period end. */}
           {result.latest_weights && Object.keys(result.latest_weights).length > 0 && (
             <div className="mt-3">
               <ReactECharts option={{
                 backgroundColor: '#0d1117',
-                title: { text: '最新持仓分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                title: {
+                  text: result.terminal_liquidated
+                    ? '最后一次调仓目标 (期末已清仓)'
+                    : '最新持仓分布',
+                  textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center',
+                },
                 tooltip: { trigger: 'item' as const, formatter: '{b}: {d}%' },
                 series: [{
                   type: 'pie', radius: ['30%', '55%'], center: ['50%', '55%'],

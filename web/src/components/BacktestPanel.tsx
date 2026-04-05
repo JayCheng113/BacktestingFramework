@@ -73,8 +73,12 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     // kept drawing the last single-backtest trades — misleading the user.
     onTradesUpdate?.([])
     try {
+      // V2.12.2 codex: pass both buy and sell rates. Prior version only
+      // sent `commission_rate: buy_rate`, silently dropping the UI's
+      // "sell commission" input.
       const costParams = {
-        commission_rate: costSettings.buy_commission_rate,
+        buy_commission_rate: costSettings.buy_commission_rate,
+        sell_commission_rate: costSettings.sell_commission_rate,
         min_commission: costSettings.min_commission,
         slippage_rate: costSettings.slippage_rate,
         stamp_tax_rate: costSettings.stamp_tax_rate,

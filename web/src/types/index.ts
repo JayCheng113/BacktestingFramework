@@ -135,6 +135,12 @@ export interface PortfolioRunResult {
   symbols_fetched?: number; symbols_skipped?: string[]
   weights_history?: { date: string; weights: Record<string, number> }[]
   latest_weights?: Record<string, number>
+  // V2.12.2 codex: when true, the backtest ended with final liquidation
+  // (all positions sold). `latest_weights` in this case is the last
+  // rebalance target BEFORE liquidation, not the truly terminal state.
+  // UI should label the pie chart as "最后持仓 (期末已清仓)" to avoid
+  // misleading users into thinking positions are still held.
+  terminal_liquidated?: boolean
   warnings?: string[] | null
   risk_events?: RiskEvent[]
   attribution?: AttributionResult
@@ -144,6 +150,16 @@ export interface PortfolioRunResult {
 export interface HistoryRun {
   run_id: string; strategy_name: string; start_date: string; end_date: string
   freq: string; metrics: PortfolioMetrics; trade_count: number; created_at: string
+  // V2.12.2 codex: config summary + warning count from list_runs so the
+  // history page surfaces optimizer/risk/market/warning-count without a
+  // per-row drill into detail endpoint.
+  config_summary?: {
+    market?: string
+    optimizer?: string
+    risk_control?: boolean
+    index_benchmark?: string
+  }
+  warning_count?: number
 }
 
 export interface ParamSchema {

@@ -118,3 +118,42 @@ class TestMatcherContract:
             cash_change = buy.net_amount + sell.net_amount
             # cash_change should be negative (lost commission) or zero (zero-commission)
             assert cash_change <= 1e-10
+
+
+class TestAsymmetricCommission:
+    """V2.12.2 codex: sell_commission_rate is applied on sells when set."""
+
+    def test_simple_asymmetric_sell_rate(self):
+        m = SimpleMatcher(commission_rate=0.001, min_commission=0.0,
+                          sell_commission_rate=0.003)
+        buy = m.fill_buy(price=100.0, amount=10000.0)
+        sell = m.fill_sell(price=100.0, shares=buy.shares)
+        # buy commission: 10000 * 0.001 = 10
+        # sell value: shares * 100 ≈ (10000 - 10)/100 * 100 = 9990
+        # sell commission: 9990 * 0.003 = 29.97
+        assert abs(buy.commission - 10.0) < 0.01
+        assert abs(sell.commission - 29.97) < 0.01
+
+    def test_simple_none_defaults_to_buy_rate(self):
+        """When sell_commission_rate is None, both sides use commission_rate."""
+        m = SimpleMatcher(commission_rate=0.002, min_commission=0.0)
+        buy = m.fill_buy(price=100.0, amount=10000.0)
+        sell = m.fill_sell(price=100.0, shares=buy.shares)
+        # Both sides use 0.002
+        assert abs(buy.commission - 20.0) < 0.01
+        # sell value ≈ 9980, commission ≈ 19.96
+        assert abs(sell.commission - 19.96) < 0.02
+
+    def test_slippage_asymmetric_sell_rate(self):
+        m = SlippageMatcher(slippage_rate=0.0, commission_rate=0.001,
+                            min_commission=0.0, sell_commission_rate=0.005)
+        sell = m.fill_sell(price=100.0, shares=100.0)
+        # value = 10000, commission = 10000 * 0.005 = 50
+        assert abs(sell.commission - 50.0) < 0.01
+
+    def test_negative_sell_rate_rejected(self):
+        with pytest.raises(ValueError):
+            SimpleMatcher(commission_rate=0.001, sell_commission_rate=-0.001)
+        with pytest.raises(ValueError):
+            SlippageMatcher(slippage_rate=0.001, commission_rate=0.001,
+                            sell_commission_rate=-0.001)

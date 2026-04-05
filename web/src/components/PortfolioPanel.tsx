@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward, fetchFundamentalData, fundamentalDataQuality, portfolioSearch } from '../api'
-import { DEFAULT_SETTINGS } from './BacktestSettings'
+import { DEFAULT_SETTINGS, getDefaultSettings } from './BacktestSettings'
 import type { PortfolioRunResult, HistoryRun, ParamSchema } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import PortfolioRunContent from './PortfolioRunContent'
@@ -72,6 +72,51 @@ export default function PortfolioPanel() {
   const [qualityReport, setQualityReport] = useState<any[]>([])
   // Clear stale quality report when inputs change
   useEffect(() => { setQualityReport([]); setFundaStatus('') }, [symbols, startDate, endDate])
+
+  // V2.12.2 codex: clear stale result/wfResult when any run input changes.
+  // Prior version only the market-change useEffect did this, so symbol /
+  // date / strategy / freq changes left the previous run's curve and
+  // metrics visible. Users could believe they had already run the current
+  // configuration when they hadn't. This mirrors BacktestPanel's pattern.
+  useEffect(() => {
+    setResult(null)
+    setWfResult(null)
+    setSearchResults([])
+    setSearchMeta(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbols, startDate, endDate, freq, selected])
+
+  // V2.12.2 codex: market change must fully reset market-sensitive state.
+  // Prior version only set `market` and let all downstream state (settings
+  // cost model, index benchmark, tracking error, eval/corr/search/quality
+  // results) leak from the previous market. Backend silently accepted the
+  // stale A-share cost model and index benchmark when user ran US/HK runs.
+  useEffect(() => {
+    // Re-apply market-appropriate cost model + rules
+    setSettings(getDefaultSettings(market))
+    // Non-cn_stock has no A-share index benchmark — reset to "none"
+    // AND reset tracking error to default, since TE is A-share specific
+    // (CSI300/500/1000 index enhancement).
+    if (market !== 'cn_stock') {
+      setIndexBenchmark('')
+      setTrackingError(5)
+    }
+    // Clear stale evaluation / search / quality results from previous market
+    setEvalResult(null)
+    setCorrResult(null)
+    setSearchResults([])
+    setQualityReport([])
+    setFundaStatus('')
+    // Clear backtest result + WF result + full-weights snapshot — they
+    // were computed under the previous market's rules.
+    setResult(null)
+    setWfResult(null)
+    // Clear cross-run compare data — comparing runs from different
+    // markets would yield meaningless overlays.
+    setCompareData([])
+    setSelectedRuns(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [market])
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
@@ -98,6 +143,14 @@ export default function PortfolioPanel() {
   const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({})
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchResults, setSearchResults] = useState<any[]>([])
+  // V2.12.2 codex: track sampled/completed/failed counts + failed combos
+  // so the UI can show "N of M combos failed" banner instead of silently
+  // dropping failures from the results list.
+  const [searchMeta, setSearchMeta] = useState<{
+    sampled: number; completed: number; failed: number;
+    total_combinations: number;
+    failed_combos: Array<{ combo_index: number; params: any; error: string }>;
+  } | null>(null)
 
   // Current strategy's parameter schema
   const currentSchema = useMemo(() => {
@@ -119,6 +172,7 @@ export default function PortfolioPanel() {
     setStrategyParams(defaults)
     setSearchGrid({})
     setSearchResults([])
+    setSearchMeta(null)
     setExpandedParams({})
   }, [currentSchema])
 
@@ -309,6 +363,12 @@ export default function PortfolioPanel() {
     setWfLoading(true); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+      // V2.12.2 codex: propagate optimizer / risk_control / index_benchmark /
+      // tracking_error / market to walk-forward. Prior version only /run
+      // passed these, so WF results were computed under a different
+      // execution environment than the main backtest — silently equal-weight
+      // instead of user's optimizer, A-share cost model instead of selected,
+      // etc. Backend already supports all these via PortfolioCommonConfig.
       const res = await portfolioWalkForward({
         strategy_name: selected, symbols: symbolList,
         market,
@@ -323,6 +383,18 @@ export default function PortfolioPanel() {
         stamp_tax_rate: settings.stamp_tax_rate,
         slippage_rate: settings.slippage_rate,
         lot_size: settings.lot_size, limit_pct: settings.limit_pct,
+        optimizer,
+        risk_aversion: riskAversion,
+        max_weight: maxWeight / 100,
+        max_industry_weight: maxIndustryWeight / 100,
+        cov_lookback: covLookback,
+        risk_control: riskControl,
+        max_drawdown: maxDrawdown / 100,
+        drawdown_reduce: drawdownReduce / 100,
+        drawdown_recovery: drawdownRecovery / 100,
+        max_turnover: maxTurnover / 100,
+        index_benchmark: indexBenchmark,
+        max_tracking_error: trackingError / 100,
       })
       setWfResult(res.data)
       if (res.data.warnings?.length) alert('前推验证提示: ' + res.data.warnings.join('\n'))
@@ -344,8 +416,19 @@ export default function PortfolioPanel() {
         const vals = raw.split(',').filter(Boolean)
         if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
       } else if (schema.type === 'multi_select') {
-        const vals = raw.split(',').filter(Boolean)
-        if (vals.length > 0) { paramGrid[key] = vals.map(v => [v]); totalCombos *= vals.length }
+        // V2.12.2 codex: `|` separates subsets, `,` separates items within a
+        // subset. User input "ep,bp,sp" → ONE combo with the 3-factor list.
+        // User input "ep,bp|ep,sp" → 2 subsets. Prior version mapped each
+        // comma-separated value to its own single-element list, producing
+        // N single-factor combos — yielding N single-factor backtest runs
+        // instead of the user's intended multi-factor composition.
+        const subsets = raw.split('|')
+          .map(s => s.split(',').map(x => x.trim()).filter(Boolean))
+          .filter(a => a.length > 0)
+        if (subsets.length > 0) {
+          paramGrid[key] = subsets
+          totalCombos *= subsets.length
+        }
       } else if (schema.type === 'int') {
         const vals = raw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
         if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
@@ -358,6 +441,10 @@ export default function PortfolioPanel() {
 
     setSearchLoading(true); setSearchResults([])
     try {
+      // V2.12.2 codex: propagate optimizer/risk/index to search so each
+      // candidate runs under the same execution environment as /run. Prior
+      // version silently ran all candidates with default (none) optimizer
+      // regardless of user's UI selection.
       const res = await portfolioSearch({
         strategy_name: selected, symbols: symbolList,
         market,
@@ -367,10 +454,28 @@ export default function PortfolioPanel() {
         min_commission: settings.min_commission, stamp_tax_rate: settings.stamp_tax_rate,
         slippage_rate: settings.slippage_rate, lot_size: settings.lot_size, limit_pct: settings.limit_pct,
         initial_cash: settings.initial_cash, benchmark_symbol: settings.benchmark,
+        optimizer,
+        risk_aversion: riskAversion,
+        max_weight: maxWeight / 100,
+        max_industry_weight: maxIndustryWeight / 100,
+        cov_lookback: covLookback,
+        risk_control: riskControl,
+        max_drawdown: maxDrawdown / 100,
+        drawdown_reduce: drawdownReduce / 100,
+        drawdown_recovery: drawdownRecovery / 100,
+        max_turnover: maxTurnover / 100,
+        index_benchmark: indexBenchmark,
+        max_tracking_error: trackingError / 100,
       })
       setSearchResults(res.data.results || [])
+      setSearchMeta({
+        sampled: res.data.sampled || 0,
+        completed: res.data.completed || 0,
+        failed: res.data.failed || 0,
+        total_combinations: res.data.total_combinations || 0,
+        failed_combos: res.data.failed_combos || [],
+      })
       const tc = res.data.total_combinations || 0
-      void res.data.completed
       let searchMsg = res.data.warnings?.length ? res.data.warnings.join('\n') + '\n' : ''
       if (tc > 50) searchMsg += `共 ${tc} 种组合，随机采样 50 个展示（可能不完整）`
       if (searchMsg) alert(searchMsg.trim())
@@ -561,6 +666,7 @@ export default function PortfolioPanel() {
           searchGrid={searchGrid} setSearchGrid={setSearchGrid}
           expandedParams={expandedParams} setExpandedParams={setExpandedParams}
           searchLoading={searchLoading} searchResults={searchResults}
+          searchMeta={searchMeta}
           handleRun={handleRun} handleWalkForward={handleWalkForward}
           handleSearch={handleSearch}
           exportEquityCurve={exportEquityCurve} exportTrades={exportTrades}

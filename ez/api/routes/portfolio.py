@@ -808,15 +808,29 @@ def run_portfolio(req: PortfolioRunRequest):
         # equity_curve and the frontend fell back to index-based x-axis,
         # misleading users when compared runs had different date ranges.
         "dates": [d.isoformat() for d in result.dates],
+        # V2.12.2 codex: persist per-day actual post-execution holdings
+        # (sparse — only non-empty days). Distinct from `rebalance_weights`
+        # which is the per-rebalance target. History page uses this for
+        # "latest holdings" so it matches what /run response showed.
+        "weights_history": [
+            {"date": result.dates[i].isoformat(), "weights": result.weights_history[i]}
+            for i in range(len(result.weights_history))
+            if i < len(result.dates) and result.weights_history[i]
+        ],
     })
 
+    # V2.12.2 codex: return full trade list instead of truncating at 100.
+    # Prior version lost half the trade history for long / frequent-
+    # rebalancing strategies, and the frontend's "100+" indicator exposed
+    # the bug without offering a drill-down. The persisted store always
+    # held the full list; the truncation only existed in the API response.
     return {
         "run_id": run_id,
         "metrics": metrics,
         "equity_curve": [round(v, 2) for v in result.equity_curve],
         "benchmark_curve": [round(v, 2) for v in result.benchmark_curve],
         "dates": [d.isoformat() for d in result.dates],
-        "trades": result.trades[:100],
+        "trades": result.trades,
         "rebalance_dates": [d.isoformat() for d in result.rebalance_dates],
         "symbols_fetched": fetched_count,
         "symbols_skipped": skipped,
@@ -828,6 +842,17 @@ def run_portfolio(req: PortfolioRunRequest):
         "latest_weights": next(
             (w for w in reversed(result.weights_history) if w),
             {}
+        ),
+        # V2.12.2 codex: flag terminal liquidation state so the UI can
+        # distinguish "last rebalance target" (positions still held at
+        # period end) from "all cash" (final liquidation was executed —
+        # latest_weights in that case is the last rebalance BEFORE
+        # liquidation, not the truly terminal state). Prior version
+        # silently showed last-rebalance weights under the label "最新持仓
+        # 分布" even when the backtest had ended with everything sold.
+        "terminal_liquidated": (
+            bool(result.weights_history)
+            and not result.weights_history[-1]
         ),
         "weights_history": [
             {"date": result.dates[i].isoformat() if i < len(result.dates) else "",
@@ -1065,6 +1090,13 @@ def portfolio_search(req: PortfolioSearchRequest):
     # weight across many combos.
     search_optimizer_fallback_events: list[dict] = []
     search_risk_events: list[dict] = []
+    # V2.12.2 codex: track failed combos with reasons. Prior version logged
+    # a warning and silently dropped them, so the user saw fewer results
+    # than combos tried without being told why. `failed_combos` surfaces
+    # (combo_index, params, error) triples so the UI can display a clear
+    # "N combos failed" banner with the specific parameter sets and error
+    # messages that broke.
+    failed_combos: list[dict] = []
     for i, params in enumerate(combos):
         # Allocate combo-scoped references outside try/except so finally can
         # reach them (V2.12.1 round 8 M3: prior version lost partial
@@ -1099,7 +1131,13 @@ def portfolio_search(req: PortfolioSearchRequest):
                 "trade_count": m.get("trade_count", 0),
             })
         except Exception as e:
+            err_msg = str(e)[:300]
             logger.warning("Search combo %d/%d failed: %s", i + 1, len(combos), e)
+            failed_combos.append({
+                "combo_index": i,
+                "params": params,
+                "error": err_msg,
+            })
         finally:
             # V2.12.1 round 8 M3: aggregate events in finally so partial
             # events from a crashed combo are still surfaced to users.
@@ -1119,7 +1157,18 @@ def portfolio_search(req: PortfolioSearchRequest):
     for i, r in enumerate(results):
         r["rank"] = i + 1
 
-    resp = {"results": results, "total_combinations": total_before_truncation, "sampled": len(combos), "completed": len(results)}
+    # V2.12.2 codex: expose failed count + detail so the UI can display a
+    # clear "N combos failed" badge. Prior version silently dropped failed
+    # combos from `results`, leaving users unable to distinguish "fewer
+    # results because of failures" from "fewer because grid was smaller".
+    resp = {
+        "results": results,
+        "total_combinations": total_before_truncation,
+        "sampled": len(combos),
+        "completed": len(results),
+        "failed": len(failed_combos),
+        "failed_combos": failed_combos,
+    }
     all_search_warns = (
         (search_funda_warn or [])
         + ([search_bench_warn] if search_bench_warn else [])
@@ -1132,6 +1181,14 @@ def portfolio_search(req: PortfolioSearchRequest):
         all_search_warns.append(
             f"优化器在参数搜索中共 {n} 次退化为等权 "
             f"(原因: {', '.join(sorted(reasons))[:200]})"
+        )
+    # V2.12.2 codex: add a prominent warning summarizing how many combos
+    # failed so even users who don't inspect `failed_combos` detail see it.
+    if failed_combos:
+        unique_errors = list({fc["error"] for fc in failed_combos})[:3]
+        all_search_warns.append(
+            f"⚠️ {len(failed_combos)}/{len(combos)} 个参数组合执行失败 "
+            f"(示例错误: {'; '.join(unique_errors)[:300]})"
         )
     if all_search_warns:
         resp["warnings"] = all_search_warns
@@ -1163,6 +1220,42 @@ def get_run_weights(run_id: str):
     if not run:
         raise HTTPException(404, f"Run '{run_id}' not found")
     return {"rebalance_weights": run.get("rebalance_weights", [])}
+
+
+@router.get("/runs/{run_id}/trades")
+def get_run_trades(run_id: str):
+    """Return the full trade list for a persisted run (V2.12.2).
+
+    History page uses this to drill into a past run's full trade record.
+    Prior to V2.12.2 the /run response truncated trades to 100 and there
+    was no drill-down endpoint, so history runs could not display their
+    post-rebalance execution detail.
+    """
+    run = _get_store().get_run(run_id)
+    if not run:
+        raise HTTPException(404, f"Run '{run_id}' not found")
+    return {"trades": run.get("trades", [])}
+
+
+@router.get("/runs/{run_id}/holdings")
+def get_run_holdings(run_id: str):
+    """Return per-day actual post-execution holdings for a persisted run.
+
+    V2.12.2 codex: distinct from /runs/{run_id}/weights which returns the
+    per-rebalance target weights. This endpoint returns the realized
+    holdings after lot rounding and risk-manager turnover caps. Prior to
+    V2.12.2 this data was only available in the /run response and was
+    lost on reload from history.
+    """
+    run = _get_store().get_run(run_id)
+    if not run:
+        raise HTTPException(404, f"Run '{run_id}' not found")
+    weights_history = run.get("weights_history") or []
+    latest = next((w for w in reversed(weights_history) if w.get("weights")), {})
+    return {
+        "weights_history": weights_history,
+        "latest_weights": latest.get("weights", {}) if isinstance(latest, dict) else {},
+    }
 
 
 @router.delete("/runs/{run_id}")

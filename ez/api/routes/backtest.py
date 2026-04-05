@@ -56,7 +56,14 @@ class BacktestRequest(BaseModel):
     start_date: date
     end_date: date
     initial_capital: float = 100000.0
-    commission_rate: float | None = Field(default=None, ge=0, description="Commission rate; None = use config default")
+    # V2.12.2 codex: prior version had only `commission_rate` (single value),
+    # silently dropping the frontend's "sell commission" UI input.
+    # New fields `buy_commission_rate` and `sell_commission_rate` allow
+    # asymmetric rates; when both are None, falls back to `commission_rate`
+    # for backward compat with external callers.
+    commission_rate: float | None = Field(default=None, ge=0, description="Legacy single commission rate; overridden by buy/sell rates when set")
+    buy_commission_rate: float | None = Field(default=None, ge=0, description="Buy-side commission rate; None = use commission_rate")
+    sell_commission_rate: float | None = Field(default=None, ge=0, description="Sell-side commission rate; None = use commission_rate")
     min_commission: float | None = Field(default=None, ge=0, description="Min commission per trade; None = use config default")
     slippage_rate: float = Field(default=0.0, ge=0, le=0.1, description="Slippage rate (e.g., 0.001 = 0.1%)")
     stamp_tax_rate: float = Field(default=0.0, ge=0, description="Sell-side stamp tax (A-share: 0.0005)")
@@ -108,16 +115,28 @@ def _build_matcher(req: BacktestRequest) -> Matcher:
       cases will NOT incorrectly apply T+1
     """
     config = load_config()
-    comm_rate = req.commission_rate if req.commission_rate is not None else config.backtest.default_commission_rate
+    # V2.12.2 codex: resolve buy + sell rates independently. Order of
+    # precedence per side: explicit buy/sell field → legacy commission_rate
+    # → config default. Prior version only used `commission_rate` and
+    # dropped the frontend's sell-side input.
+    default_rate = config.backtest.default_commission_rate
+    legacy_rate = req.commission_rate if req.commission_rate is not None else default_rate
+    buy_rate = req.buy_commission_rate if req.buy_commission_rate is not None else legacy_rate
+    sell_rate = req.sell_commission_rate if req.sell_commission_rate is not None else legacy_rate
     min_comm = req.min_commission if req.min_commission is not None else config.backtest.default_min_commission
     if req.slippage_rate > 0:
         inner: Matcher = SlippageMatcher(
             slippage_rate=req.slippage_rate,
-            commission_rate=comm_rate,
+            commission_rate=buy_rate,
+            sell_commission_rate=sell_rate,
             min_commission=min_comm,
         )
     else:
-        inner = SimpleMatcher(commission_rate=comm_rate, min_commission=min_comm)
+        inner = SimpleMatcher(
+            commission_rate=buy_rate,
+            sell_commission_rate=sell_rate,
+            min_commission=min_comm,
+        )
     # Sell-side stamp tax wrapper (A-share: 0.05%)
     if req.stamp_tax_rate > 0:
         inner = _SellSideTaxMatcher(inner, stamp_tax_rate=req.stamp_tax_rate)

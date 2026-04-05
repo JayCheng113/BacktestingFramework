@@ -106,7 +106,12 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
 
   // Auto-switch/create conversation when fileKey changes
   useEffect(() => {
-    if (!fileKey) return
+    if (!fileKey) {
+      // V2.12.2 codex: clear the AI signal even when fileKey becomes empty,
+      // so a subsequent fileKey change isn't mis-attributed to AI.
+      aiCreatedFileRef.current = false
+      return
+    }
     // Find existing conversation for this file
     const existing = conversations.find(c => c.fileKey === fileKey)
     if (existing) {
@@ -116,7 +121,6 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
       const active = conversations.find(c => c.id === activeId)
       if (active && !active.fileKey && active.messages.length > 0 && aiCreatedFileRef.current) {
         // AI just created a file in this conversation — bind it (don't create new conversation)
-        aiCreatedFileRef.current = false
         setConversations(prev => prev.map(c =>
           c.id === activeId ? { ...c, fileKey, title: fileKey.replace('.py', '') } : c
         ))
@@ -135,6 +139,14 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
         setActiveId(conv.id)
       }
     }
+    // V2.12.2 codex: ALWAYS consume the AI signal at the end of this effect,
+    // regardless of which branch ran. Prior version only cleared it inside
+    // the AI-branch, so scenarios where the signal was set but the effect
+    // took a different branch (e.g. AI created a file that was already in
+    // conversations, or the fileKey didn't actually change) leaked the
+    // signal to the next user-initiated fileKey change, binding a manual
+    // file click to the wrong conversation.
+    aiCreatedFileRef.current = false
   }, [fileKey])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const createConversation = (boundFileKey?: string) => {
@@ -337,6 +349,12 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                         // Only refresh the sidebar (file list) — do not
                         // touch filename / kind / code.
                         onCodeUpdate(undefined, undefined, undefined)
+                        // V2.12.2 codex: fetch failed means fileKey in
+                        // CodeEditor WON'T change, so the useEffect[fileKey]
+                        // consumer of `aiCreatedFileRef` never fires. Clear
+                        // the signal here so it doesn't leak to the user's
+                        // next manual file click.
+                        aiCreatedFileRef.current = false
                         updateMsgs(prev => [...prev, {
                           role: 'assistant',
                           content: `⚠️ 文件 ${bareName} 已创建但内容读取失败，请从左侧文件列表手动打开。`
