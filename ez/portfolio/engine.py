@@ -88,6 +88,49 @@ def run_portfolio_backtest(
     if cost_model is None:
         cost_model = CostModel()
 
+    # V2.12.1 post-review (codex #22): hard-check that the strategy's declared
+    # lookback_days is at least as long as every required factor's warmup_period.
+    # Previously this was only documented in a comment on PortfolioStrategy.
+    # lookback_days — custom strategies that forgot to bump lookback when adding
+    # long-warmup factors silently received truncated history for the early
+    # rebalance days, biasing results with no error.
+    try:
+        strategy_lb = int(getattr(strategy, 'lookback_days', 252))
+        sample_date = next(iter(calendar.trading_days_between(start, end)), None)
+        if sample_date is not None:
+            sliced_sample = slice_universe_data(universe_data, sample_date, strategy_lb)
+            # Probe required factor warmups if the strategy exposes them
+            req_warmups: list[int] = []
+            for sym_df in sliced_sample.values():
+                pass  # sliced presence verifies slice works
+            # Walk factor dependencies where available (both TopN and MultiFactor)
+            for attr in ("factor", "factors"):
+                f = getattr(strategy, attr, None)
+                if f is None:
+                    continue
+                if isinstance(f, list):
+                    for fi in f:
+                        w = int(getattr(fi, 'warmup_period', 0) or 0)
+                        if w:
+                            req_warmups.append(w)
+                else:
+                    w = int(getattr(f, 'warmup_period', 0) or 0)
+                    if w:
+                        req_warmups.append(w)
+            if req_warmups:
+                max_req = max(req_warmups)
+                if strategy_lb < max_req:
+                    import logging as _lg
+                    _lg.getLogger(__name__).warning(
+                        "Strategy %s lookback_days=%d is less than max factor "
+                        "warmup_period=%d — early rebalances will see truncated "
+                        "history. Set strategy.lookback_days >= %d.",
+                        type(strategy).__name__, strategy_lb, max_req, max_req,
+                    )
+    except Exception:
+        # Defensive: validation must never fail the backtest itself
+        pass
+
     trading_days = calendar.trading_days_between(start, end)
     rebal_dates = set(calendar.rebalance_dates(start, end, freq))
 

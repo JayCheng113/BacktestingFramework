@@ -346,6 +346,134 @@ class TestCodeGenAllowedTools:
         )
 
 
+class TestReloadSafety:
+    """Regression tests for codex round 4 P2: reload must not delete unrelated
+    registry entries just because class names happen to match.
+    """
+
+    def test_user_strategy_reload_does_not_delete_builtin_with_same_stem(self, tmp_path, monkeypatch):
+        """Codex #11: saving a user file `ma_cross.py` previously triggered
+        deletion of `ez.strategy.builtin.ma_cross` entries because the reload
+        code also cleaned `alt_module = ez.strategy.builtin.{stem}`. Now only
+        the user module path is cleaned.
+        """
+        from ez.strategy.base import Strategy
+        from ez.agent.sandbox import _reload_user_strategy
+
+        # Ensure builtin MACrossStrategy is registered
+        import ez.strategy.builtin.ma_cross  # noqa: F401
+        builtin_key = "ez.strategy.builtin.ma_cross.MACrossStrategy"
+        assert builtin_key in Strategy._registry, "fixture precondition"
+
+        # Patch _STRATEGIES_DIR to tmp_path so we don't touch real strategies/
+        monkeypatch.setattr("ez.agent.sandbox._STRATEGIES_DIR", tmp_path)
+
+        # Create a user file with the same stem as the builtin
+        user_file = tmp_path / "ma_cross.py"
+        user_file.write_text(
+            "from ez.strategy.base import Strategy\n"
+            "import pandas as pd\n"
+            "class UserMaStrat(Strategy):\n"
+            "    def required_factors(self): return []\n"
+            "    def generate_signals(self, data):\n"
+            "        return pd.Series([0.0] * len(data), index=data.index)\n"
+        )
+
+        # Trigger the reload
+        try:
+            _reload_user_strategy("ma_cross.py")
+        except Exception:
+            pass  # may fail in sandbox, but the registry cleanup happens first
+
+        # Builtin MACrossStrategy must still be registered
+        assert builtin_key in Strategy._registry, (
+            "Builtin MACrossStrategy was erased by user file reload — "
+            "codex #11 regression"
+        )
+
+    def test_user_strategy_reload_does_not_delete_cross_module_same_name(self, monkeypatch, tmp_path):
+        """Codex #17: reload previously deleted ANY registry entry whose class
+        __name__ matched a class defined in the file, globally, across all
+        modules. Now only the user module path is cleaned.
+        """
+        from ez.strategy.base import Strategy
+        from ez.agent.sandbox import _reload_user_strategy
+        import pandas as pd
+
+        # Create a fake "other module" class with name ResultTestStrat
+        class ResultTestStrat(Strategy):
+            def required_factors(self):
+                return []
+            def generate_signals(self, data):
+                return pd.Series([0.0] * len(data), index=data.index)
+        # Manually register under a synthetic key to simulate "another module"
+        other_key = "tests.other_module.ResultTestStrat"
+        Strategy._registry[other_key] = ResultTestStrat
+
+        try:
+            monkeypatch.setattr("ez.agent.sandbox._STRATEGIES_DIR", tmp_path)
+            # User file declares a class with the same __name__
+            (tmp_path / "my_strat.py").write_text(
+                "from ez.strategy.base import Strategy\n"
+                "import pandas as pd\n"
+                "class ResultTestStrat(Strategy):\n"
+                "    def required_factors(self): return []\n"
+                "    def generate_signals(self, data):\n"
+                "        return pd.Series([0.0] * len(data), index=data.index)\n"
+            )
+            try:
+                _reload_user_strategy("my_strat.py")
+            except Exception:
+                pass
+            # The other module's ResultTestStrat must still be registered
+            assert other_key in Strategy._registry, (
+                "Cross-module ResultTestStrat was deleted by user file reload — "
+                "codex #17 regression"
+            )
+        finally:
+            Strategy._registry.pop(other_key, None)
+
+
+class TestHotReloadFailureSignal:
+    """Regression tests for codex #16: hot-reload failure must be reported as
+    success=False, not success=True with a warning string.
+    """
+
+    def test_reload_failure_returns_success_false(self, monkeypatch, tmp_path):
+        """save_and_validate_strategy previously returned success=True even
+        when _reload_user_strategy raised. Now returns success=False.
+        """
+        from ez.agent import sandbox
+
+        def _raise_reload(filename):
+            raise RuntimeError("simulated reload failure")
+
+        monkeypatch.setattr(sandbox, "_reload_user_strategy", _raise_reload)
+        monkeypatch.setattr(sandbox, "_STRATEGIES_DIR", tmp_path)
+        # Mock contract test to pass so we reach the reload step
+        monkeypatch.setattr(
+            sandbox, "_run_contract_test",
+            lambda fn: {"passed": True, "output": "ok"},
+        )
+
+        code = (
+            "from ez.strategy.base import Strategy\n"
+            "import pandas as pd\n"
+            "class HRFailTest(Strategy):\n"
+            "    def required_factors(self): return []\n"
+            "    def generate_signals(self, data):\n"
+            "        return pd.Series([0.0] * len(data), index=data.index)\n"
+        )
+        result = sandbox.save_and_validate_strategy("hr_fail_test.py", code)
+        assert result["success"] is False, (
+            "Hot-reload failure must surface as success=False "
+            "(codex #16 regression)"
+        )
+        assert "hot-reload failed" in (result.get("errors", [""])[0].lower()), (
+            f"Error message should mention hot-reload failure: {result}"
+        )
+
+
 class TestListUserStrategies:
     def test_returns_list(self):
         result = list_user_strategies()

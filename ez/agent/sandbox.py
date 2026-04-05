@@ -415,16 +415,25 @@ def save_and_validate_strategy(
             "test_output": test_result["output"],
         }
 
-    # Hot-reload: make the strategy available immediately
+    # Hot-reload: make the strategy available immediately.
+    # V2.12.1 post-review (codex): prior version returned success=True even
+    # when _reload_user_strategy raised, hiding the fact that the main
+    # process registry still held the old implementation. Editor showed
+    # "保存成功" but subsequent backtests ran the previous version.
+    # Now reload failure surfaces as success=False with a clear reason.
     try:
         _reload_user_strategy(safe_name)
     except Exception as e:
         logger.warning("Strategy saved but hot-reload failed: %s", e)
-        # File saved + contract test passed, but reload failed — still report success with warning
         return {
-            "success": True, "errors": [],
+            "success": False,
+            "errors": [
+                f"File saved but hot-reload failed — live registry still holds "
+                f"the previous version. Details: {e}. Please restart the server "
+                f"or use /api/code/refresh to force a full rescan."
+            ],
             "path": f"strategies/{safe_name}",
-            "test_output": f"Contract test passed. Hot-reload warning: {e}",
+            "test_output": f"Contract test passed. Hot-reload failed: {e}",
         }
 
     return {
@@ -442,9 +451,19 @@ def _reload_user_strategy(filename: str) -> None:
     """Hot-reload a user strategy after save (thread-safe).
 
     Steps:
-    1. Remove old module from sys.modules (so re-import is fresh)
-    2. Remove old class from Strategy._registry (avoid duplicate error)
+    1. Remove old registry entries for THIS user module only
+    2. Remove old module from sys.modules
     3. Re-import the module, triggering __init_subclass__ auto-registration
+
+    V2.12.1 post-review (codex #11 + #17): prior version also deleted
+    registry entries where `__module__ == "ez.strategy.builtin.{stem}"`
+    (erasing built-in strategies whose filename stem matched — e.g.,
+    saving a user file `ma_cross.py` wiped the built-in MACrossStrategy)
+    AND deleted any class with the same `__name__` globally (erasing
+    unrelated modules' strategies just because they shared a class name).
+    Both paths are removed: Strategy registry uses `module.class` keys, so
+    two different modules with the same class name coexist safely — we
+    only need to clean entries belonging to THIS user module.
     """
     from ez.strategy.base import Strategy
 
@@ -452,38 +471,16 @@ def _reload_user_strategy(filename: str) -> None:
     module_name = f"strategies.{stem}"
 
     with _reload_lock:
-        # Find and remove old registry entries:
-        # 1. By module name (same module path)
-        # 2. By alternative module name (startup loader uses different prefix)
-        # 3. By class name (prevents duplicates when user creates a class with same name as builtin)
-        old_keys = set()
-        old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == module_name)
-        # Two possible module paths: "strategies.xxx" (user) and "ez.strategy.builtin.xxx" (builtin).
-        # The startup loader uses the builtin prefix; hot-reload uses the user prefix.
-        alt_module = f"ez.strategy.builtin.{stem}" if stem else ""
-        if alt_module:
-            old_keys.update(k for k, v in Strategy._registry.items() if v.__module__ == alt_module)
-        # Extract class names from the file to catch cross-module name collisions
-        py_file = _STRATEGIES_DIR / filename
-        if py_file.exists():
-            try:
-                tree = ast.parse(py_file.read_text(encoding="utf-8"))
-                class_names = {node.name for node in ast.walk(tree)
-                               if isinstance(node, ast.ClassDef)
-                               and any((isinstance(b, ast.Name) and b.id == "Strategy")
-                                       or (isinstance(b, ast.Attribute) and b.attr == "Strategy")
-                                       for b in node.bases)}
-                old_keys.update(k for k, v in Strategy._registry.items()
-                                if v.__name__ in class_names)
-            except Exception:
-                pass
+        # Only clean entries from the user module being reloaded.
+        # DO NOT touch ez.strategy.builtin.* or cross-module name matches —
+        # they belong to different classes that should coexist with user code.
+        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
         for k in old_keys:
             Strategy._registry.pop(k, None)
 
-        # Remove old module from sys.modules (both possible module names)
-        for mn in [module_name, alt_module]:
-            if mn and mn in sys.modules:
-                del sys.modules[mn]
+        # Remove old module from sys.modules (user module only)
+        if module_name in sys.modules:
+            del sys.modules[module_name]
 
         # Delete .pyc to defeat Python's mtime-based bytecode cache
         # (same-second writes produce same mtime → stale .pyc reuse)
@@ -714,11 +711,23 @@ def save_and_validate_code(
                 del Factor._registry[k]
             if module_name in sys.modules:
                 del sys.modules[module_name]
-            # Rollback file (no exec_module — just restore file, no re-registration)
+            # Rollback file AND re-register the previous version so users
+            # don't lose a working factor just because a save failed.
+            # V2.12.1 post-review (codex #12): prior version restored the
+            # backup file but never re-executed it, so the factor vanished
+            # from the live registry until the user manually hit /refresh.
             if backup is not None:
                 target.write_text(backup, encoding="utf-8")
-                # Old version was previously registered; registry was cleaned above.
-                # User must re-save to re-register. This is safer than exec_module on rollback.
+                # Best-effort re-register: if the backup itself fails to
+                # import (shouldn't happen, but defend against environment
+                # drift), leave the registry empty rather than crashing.
+                try:
+                    _reload_factor_code(safe_name, target_dir)
+                except Exception as restore_err:
+                    logger.warning(
+                        "Factor rollback succeeded but re-register failed: %s",
+                        restore_err,
+                    )
             else:
                 target.unlink(missing_ok=True)
             return {"success": False, "errors": [f"Factor validation failed: {e}"]}
@@ -751,14 +760,24 @@ def save_and_validate_code(
         return {"success": False, "errors": [f"Contract test failed: {test_result['output']}"],
                 "test_output": test_result["output"]}
 
-    # Hot-reload: register in main process
+    # Hot-reload: register in main process.
+    # V2.12.1 post-review (codex): prior version returned success=True even
+    # on reload failure, hiding stale-registry state. Now reload failure is
+    # reported as success=False (matches strategy save behavior).
     try:
         _reload_portfolio_code(safe_name, kind, target_dir)
     except Exception as e:
         logger.warning("Portfolio code saved but hot-reload failed: %s", e)
-        return {"success": True, "errors": [],
-                "path": f"{target_dir.name}/{safe_name}",
-                "test_output": f"Contract test passed. Hot-reload warning: {e}"}
+        return {
+            "success": False,
+            "errors": [
+                f"File saved but hot-reload failed — live registry still holds "
+                f"the previous version. Details: {e}. Please use /api/code/refresh "
+                f"or restart the server."
+            ],
+            "path": f"{target_dir.name}/{safe_name}",
+            "test_output": f"Contract test passed. Hot-reload failed: {e}",
+        }
 
     return {"success": True, "errors": [], "path": f"{target_dir.name}/{safe_name}",
             "test_output": test_result["output"]}

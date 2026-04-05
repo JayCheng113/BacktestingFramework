@@ -3,7 +3,7 @@ import type { PortfolioRunResult, ParamSchema, ActiveWeight } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import BacktestSettings from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { getPortfolioRunWeights } from '../api'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -115,6 +115,15 @@ export default function PortfolioRunContent(props: Props) {
   // Local state for full weights loading
   const [fullWeights, setFullWeights] = useState<{ date: string; weights: Record<string, number> }[] | null>(null)
   const [weightsLoading, setWeightsLoading] = useState(false)
+
+  // V2.12.1 post-review (codex #21): clear stale fullWeights whenever the
+  // underlying run changes. Prior version only set fullWeights on manual
+  // "load full history" click and never reset it, so a new run inherited
+  // the previous run's full-weights snapshot (weightsToShow would still
+  // point to the old run's data).
+  useEffect(() => {
+    setFullWeights(null)
+  }, [result?.run_id])
 
   const handleLoadFullWeights = async () => {
     if (!result?.run_id) return

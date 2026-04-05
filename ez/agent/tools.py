@@ -505,6 +505,8 @@ def create_cross_factor(filename: str, code: str) -> dict:
             "end_date": {"type": "string", "description": "End date YYYY-MM-DD"},
             "freq": {"type": "string", "description": "Rebalance frequency: daily/weekly/monthly/quarterly", "default": "monthly"},
             "strategy_params": {"type": "object", "description": "Strategy parameters (e.g. {top_n: 10, factor: 'momentum_rank_20'})", "default": {}},
+            "market": {"type": "string", "description": "Market code (cn_stock/hk_stock/us_stock)", "default": "cn_stock"},
+            "period": {"type": "string", "description": "Bar period: daily/weekly/monthly", "default": "daily"},
         },
         "required": ["strategy_name", "symbols", "start_date", "end_date"],
     },
@@ -513,6 +515,7 @@ def run_portfolio_backtest_tool(
     strategy_name: str, symbols: list[str],
     start_date: str, end_date: str,
     freq: str = "monthly", strategy_params: dict | None = None,
+    market: str = "cn_stock", period: str = "daily",
 ) -> dict:
     valid_freqs = {"daily", "weekly", "monthly", "quarterly"}
     if freq not in valid_freqs:
@@ -562,9 +565,12 @@ def run_portfolio_backtest_tool(
 
     universe_data = {}
     all_dates = set()
+    # V2.12.1 post-review (codex): market/period come from caller, not hardcoded.
+    # Prior version always fetched cn_stock/daily, so US/HK or weekly portfolios
+    # couldn't run via the chat assistant.
     for sym in symbols:
         try:
-            bars = chain.get_kline(sym, "cn_stock", "daily", fetch_start, end)
+            bars = chain.get_kline(sym, market, period, fetch_start, end)
             if not bars:
                 continue
             df = pd.DataFrame([{
@@ -583,9 +589,14 @@ def run_portfolio_backtest_tool(
     calendar = TradingCalendar.from_dates(sorted(all_dates))
     universe = Universe(symbols)
 
+    # A-share rules gated on market (lot_size / T+1 / limit_pct only for cn_stock)
+    is_cn = market == "cn_stock"
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,
         calendar=calendar, start=start, end=end, freq=freq,
+        lot_size=100 if is_cn else 1,
+        limit_pct=0.10 if is_cn else 0.0,
+        t_plus_1=is_cn,
     )
 
     # Sanitize metrics

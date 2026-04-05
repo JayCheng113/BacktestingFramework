@@ -172,6 +172,36 @@ def _create_alpha_combiner(params: dict, symbols=None, start=None, end=None, mar
     return AlphaCombiner(factors=sub_factors, weights=weights, orthogonalize=orthogonalize), warnings
 
 
+def _max_factor_warmup(items, default: int = 300) -> int:
+    """Compute max warmup_period across factor instances or names, with 50-day buffer.
+
+    V2.12.1 post-review (codex #9): portfolio search / factor eval / factor
+    correlation / alpha training previously hardcoded lookback_days=300. For
+    long-warmup custom factors (e.g., 250-day momentum, annualized stats) this
+    fed the compute() routine insufficient history, silently biasing the
+    result. This helper is called at each fetch site to adapt the lookback
+    to the actual factors in use.
+    """
+    factor_map = _get_factor_map()
+    max_w = int(default)
+    for item in items or []:
+        w = 0
+        if hasattr(item, 'warmup_period'):
+            w = int(getattr(item, 'warmup_period', 0) or 0)
+        elif isinstance(item, str):
+            factory = factor_map.get(item)
+            if factory:
+                try:
+                    inst = factory() if callable(factory) else factory
+                    w = int(getattr(inst, 'warmup_period', 0) or 0)
+                except Exception:
+                    continue
+        if w > 0:
+            # +50 days so rolling-window factors have clean post-warmup data
+            max_w = max(max_w, w + 50)
+    return max_w
+
+
 def _compute_alpha_weights(factors, symbols, market, start, end, method,
                            forward_days: int = 5) -> dict[str, float] | None:
     """Pre-compute IC/ICIR weights from training data before backtest start.
@@ -185,7 +215,9 @@ def _compute_alpha_weights(factors, symbols, market, start, end, method,
     train_start = start - timedelta(days=365)
 
     try:
-        universe_data, calendar = _fetch_data(symbols, market, train_start, train_end, lookback_days=300)
+        # Dynamic lookback: respect factor warmup instead of hardcoded 300
+        dynamic_lb = _max_factor_warmup(factors)
+        universe_data, calendar = _fetch_data(symbols, market, train_start, train_end, lookback_days=dynamic_lb)
     except Exception as e:
         logger.warning("AlphaCombiner training data fetch failed: %s", e)
         return None
@@ -811,9 +843,21 @@ def portfolio_search(req: PortfolioSearchRequest):
         raise HTTPException(400, "参数网格为空")
     search_funda_warn: list[str] = []
 
+    # Dynamic lookback: walk the combos and find the max factor warmup so
+    # long-warmup factors don't get fed short history (codex #9).
+    all_factor_names: list[str] = []
+    for combo in combos:
+        fn = combo.get("factor")
+        if fn:
+            all_factor_names.append(fn)
+            if fn == "alpha_combiner":
+                all_factor_names.extend(combo.get("alpha_factors", []))
+        all_factor_names.extend(combo.get("factors", []))
+    dynamic_lb = _max_factor_warmup(all_factor_names)
+
     # Fetch data once (E1: shared across all combinations)
-    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
-    search_bench_warn = _ensure_benchmark(req.benchmark_symbol, universe_data, req.market, start, end, lookback_days=300)
+    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=dynamic_lb)
+    search_bench_warn = _ensure_benchmark(req.benchmark_symbol, universe_data, req.market, start, end, lookback_days=dynamic_lb)
 
     # Pre-load fundamental data once if any combo uses fundamental factors (E1+I2)
     from ez.factor.builtin.fundamental import FundamentalCrossFactor, NEEDS_FINA
@@ -1026,7 +1070,10 @@ def evaluate_factors(req: FactorEvalRequest):
     start = req.start_date or (end - timedelta(days=365 * 3))
     factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
-    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+    # Dynamic lookback: adapt to the factors actually being evaluated (codex #9)
+    universe_data, calendar = _fetch_data(
+        req.symbols, req.market, start, end, lookback_days=_max_factor_warmup(factors),
+    )
 
     # V2.11.1: Apply industry neutralization if requested
     neutralize_warnings = []
@@ -1090,7 +1137,10 @@ def factor_correlation(req: FactorCorrelationRequest):
     start = req.start_date or (end - timedelta(days=365 * 3))
     factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
-    universe_data, calendar = _fetch_data(req.symbols, req.market, start, end, lookback_days=300)
+    # Dynamic lookback: adapt to the factors actually being evaluated (codex #9)
+    universe_data, calendar = _fetch_data(
+        req.symbols, req.market, start, end, lookback_days=_max_factor_warmup(factors),
+    )
 
     corr_df = compute_factor_correlation(
         factors=factors, universe_data=universe_data, calendar=calendar,
