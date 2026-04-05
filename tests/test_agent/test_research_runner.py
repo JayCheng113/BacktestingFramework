@@ -509,3 +509,100 @@ class TestRunResearchTask:
         spec_ids = json.loads(iters[0]["spec_ids"])
         assert spec_ids == ["spec_abc_123"]
         conn.close()
+
+    @pytest.mark.asyncio
+    async def test_batch_timeout_breaks_loop(self):
+        """Regression test for codex finding: research pipeline previously had
+        no timeout on run_batch, so a stuck user strategy would hang the task
+        indefinitely. Now wrapped in asyncio.wait_for with per-batch timeout.
+        """
+        import threading
+        import time as _time
+        mock_provider = MagicMock()
+        mock_provider.achat = AsyncMock(side_effect=[
+            LLMResponse(content='["策略"]'),  # E1
+            LLMResponse(content="总结"),  # E6 (skipped since not cancelled)
+        ])
+        conn = duckdb.connect(":memory:")
+        rs = ResearchStore(conn)
+
+        # Signal event so the stuck thread can be released when the test is done,
+        # letting pytest exit cleanly (Python can't force-kill threads).
+        release = threading.Event()
+        def _stuck_batch(*args, **kwargs):
+            # Wait on event with a hard upper bound so the thread eventually dies
+            # even if the test forgets to set it.
+            release.wait(timeout=10)
+            return (_mock_batch(), [])
+
+        with patch.multiple("ez.agent.research_runner",
+                            create_provider=MagicMock(return_value=mock_provider),
+                            get_research_store=MagicMock(return_value=rs),
+                            get_experiment_store=MagicMock(),
+                            _fetch_data=MagicMock(return_value=_make_test_data()),
+                            generate_strategy_code=AsyncMock(return_value=("s.py", "Strat", None)),
+                            _run_batch_for_strategies=MagicMock(side_effect=_stuck_batch),
+                            # Shrink batch timeout to 1s for fast test
+                            _batch_timeout_sec=MagicMock(return_value=1)):
+            start = _time.time()
+            task_id = await run_research_task(
+                ResearchGoal(description="test", n_hypotheses=1),
+                LoopConfig(max_iterations=1),
+            )
+            elapsed = _time.time() - start
+
+        # Release the stuck thread so pytest can exit cleanly
+        release.set()
+
+        task = rs.get_task(task_id)
+        assert "batch_timeout" in (task.get("stop_reason") or ""), (
+            f"Expected batch_timeout in stop_reason, got: {task.get('stop_reason')}"
+        )
+        # The key invariant: the task returned in seconds, not minutes
+        assert elapsed < 10, f"Task hung for {elapsed:.1f}s (expected <10s via batch_timeout=1)"
+        conn.close()
+
+    @pytest.mark.asyncio
+    async def test_cancel_skips_e6_llm_summary(self):
+        """Regression test for codex finding: cancelled tasks should skip the
+        E6 LLM summary call to make cancel take effect promptly.
+
+        When state.cancelled is True, build_report is called with provider=None
+        which causes it to skip the LLM summary generation.
+        """
+        mock_provider = MagicMock()
+        mock_provider.achat = AsyncMock(side_effect=[
+            LLMResponse(content='["策略"]'),  # E1 iter 0
+        ])
+        conn = duckdb.connect(":memory:")
+        rs = ResearchStore(conn)
+
+        # Cancel the task immediately on first cancel check (before E2 starts)
+        with patch.multiple("ez.agent.research_runner",
+                            create_provider=MagicMock(return_value=mock_provider),
+                            get_research_store=MagicMock(return_value=rs),
+                            get_experiment_store=MagicMock(),
+                            _fetch_data=MagicMock(return_value=_make_test_data()),
+                            generate_strategy_code=AsyncMock(return_value=(None, None, "skip")),
+                            _run_batch_for_strategies=MagicMock(return_value=(_mock_batch(), []))):
+            task_id = "cancel_skip_e6"
+            register_task(task_id)
+            # Cancel right away
+            _running_tasks[task_id]["cancel"] = True
+            await run_research_task(
+                ResearchGoal(description="test", n_hypotheses=1),
+                LoopConfig(max_iterations=10),
+                task_id=task_id,
+            )
+
+        # E6 LLM summary call count: should be 0 (only E1 consumed side_effect[0])
+        # If E6 had been called with provider, it would consume another side_effect
+        # and raise StopIteration. No StopIteration means E6 skipped LLM correctly.
+        task = rs.get_task(task_id)
+        assert task["status"] == "cancelled"
+        # mock_provider.achat should have been called exactly 1 time (E1 only, E6 skipped)
+        # Note: E1 may be called 0 times too, depending on how fast cancel propagates
+        assert mock_provider.achat.call_count <= 1, (
+            f"E6 LLM summary not skipped on cancel — achat called {mock_provider.achat.call_count} times"
+        )
+        conn.close()

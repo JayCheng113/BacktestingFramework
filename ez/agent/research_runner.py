@@ -59,6 +59,19 @@ def _fetch_data(goal: ResearchGoal) -> pd.DataFrame:
     } for b in bars]).set_index("time")
 
 
+def _batch_timeout_sec(n_strategies: int) -> int:
+    """Per-batch timeout for E3 research pipeline.
+
+    Codex finding (V2.12.1 post-review): prior version had no timeout on
+    run_batch/prefilter, so a stuck user strategy (infinite loop in
+    generate_signals, blocking compute(), etc.) would hang the entire
+    research task and hold the asyncio.Lock indefinitely.
+
+    Module-level so tests can patch it to a shorter value.
+    """
+    return max(120, 60 * max(1, n_strategies))
+
+
 def _run_batch_for_strategies(
     strategy_names: list[str],
     goal: ResearchGoal,
@@ -132,13 +145,23 @@ async def run_research_task(
         data = await asyncio.to_thread(_fetch_data, goal)
         previous_analysis = ""
 
-        while True:
-            # Check cancel
+        # Helper: mid-iteration cancel check. Codex finding: prior version only
+        # checked cancel at loop top, so E1/E2/E3 stages could run 5-60s before
+        # a user's cancel click took effect. Now checked between every stage.
+        def _check_cancel() -> bool:
             if task_id in _running_tasks and _running_tasks[task_id].get("cancel"):
                 state.cancelled = True
+                return True
+            return False
+
+        while True:
+            # Check cancel
+            if _check_cancel():
+                stop_reason = "用户取消"
             ok, reason = controller.should_continue(state)
             if not ok:
-                stop_reason = reason
+                if not stop_reason:
+                    stop_reason = reason
                 break
 
             _emit(task_id, "iteration_start", {
@@ -151,11 +174,17 @@ async def run_research_task(
             for i, h in enumerate(hypotheses):
                 _emit(task_id, "hypothesis", {"index": i, "total": len(hypotheses), "text": h})
 
+            if _check_cancel():
+                stop_reason = "用户取消"
+                break
+
             # E2: Code generation — approximate: count each hypothesis as ~2 LLM calls
             # (chat_sync may do 1-3 rounds internally; 2 is a conservative estimate)
             strategy_names: list[str] = []
             strategy_files: list[str] = []
             for i, hypothesis in enumerate(hypotheses):
+                if _check_cancel():
+                    break  # exit inner loop; outer will break too
                 filename, class_name, error = await generate_strategy_code(provider, hypothesis)
                 llm_calls += 2  # approximate: chat_sync internal rounds vary
                 if class_name:
@@ -167,6 +196,10 @@ async def run_research_task(
                 else:
                     _emit(task_id, "code_failed", {
                         "index": i, "hypothesis": hypothesis[:100], "error": error or "unknown"})
+
+            if state.cancelled:
+                stop_reason = "用户取消"
+                break
 
             # Budget check before batch (P1-5: prevent overshooting)
             state_preview = LoopState(
@@ -184,14 +217,43 @@ async def run_research_task(
                     "cumulative_specs": state.specs_executed, "skipped": "budget"})
                 break
 
-            # E3: Batch execution
+            # E3: Batch execution — with timeout protection
             _emit(task_id, "batch_start", {"total_specs": len(strategy_names)})
-            batch_result, spec_ids = await asyncio.to_thread(
-                _run_batch_for_strategies, strategy_names, goal, data, gate_config)
+            batch_timeout = _batch_timeout_sec(len(strategy_names))
+            try:
+                batch_result, spec_ids = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _run_batch_for_strategies, strategy_names, goal, data, gate_config),
+                    timeout=batch_timeout,
+                )
+            except asyncio.TimeoutError:
+                # A user strategy is stuck. Can't kill the thread, but we can
+                # exit the orchestrator so asyncio.Lock is released and the
+                # user gets a response. The orphan thread dies naturally when
+                # Python exits (or the stuck function finally returns).
+                logger.warning("Research batch timed out after %ds (stuck strategy?)", batch_timeout)
+                stop_reason = f"batch_timeout ({batch_timeout}s)"
+                _emit(task_id, "batch_timeout", {"timeout_sec": batch_timeout, "n_specs": len(strategy_names)})
+                break
             best_sharpe = max((c.sharpe for c in batch_result.passed), default=0.0)
             _emit(task_id, "batch_complete", {
                 "executed": batch_result.executed, "passed": len(batch_result.passed),
                 "best_sharpe": round(best_sharpe, 4)})
+
+            if _check_cancel():
+                stop_reason = "用户取消"
+                # Persist what we have before breaking
+                research_store.save_iteration({
+                    "task_id": task_id,
+                    "iteration": state.iteration,
+                    "hypotheses": json.dumps(hypotheses),
+                    "strategies_tried": len(strategy_names),
+                    "strategies_passed": len(batch_result.passed),
+                    "best_sharpe": best_sharpe,
+                    "analysis": json.dumps({"direction": "cancelled", "suggestions": [], "strategy_files": strategy_files}),
+                    "spec_ids": json.dumps(spec_ids),
+                })
+                break
 
             # E4: Analyze
             analysis = await analyze_results(provider, batch_result, goal, hypotheses)
@@ -227,9 +289,13 @@ async def run_research_task(
         else:
             final_status = "completed"
 
-        # E6: Report
+        # E6: Report — if the task was cancelled, skip the LLM summary (extra
+        # 5-30s wait) so cancel takes effect promptly. Still build the structured
+        # report from persisted iterations so the user sees what ran.
         exp_store = get_experiment_store()
-        report = await build_report(provider, research_store, task_id, stop_reason, exp_store=exp_store)
+        report_provider = None if state.cancelled else provider
+        report = await build_report(
+            report_provider, research_store, task_id, stop_reason, exp_store=exp_store)
         report.duration_sec = (datetime.now() - start_time).total_seconds()
         research_store.update_task_status(
             task_id, final_status, stop_reason=stop_reason, summary=report.summary)

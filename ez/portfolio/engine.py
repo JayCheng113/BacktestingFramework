@@ -385,8 +385,16 @@ def run_portfolio_backtest(
     # (fixes Known Limitation #5: trade_count reflects full round-trip)
     # Use "T+1" date (next calendar day after last trading day) to avoid
     # same-day ordering conflict with rebalance trades.
+    #
+    # V2.12.1 post-review fix (codex): append the post-liquidation equity point
+    # to equity_curve/dates so downstream metrics (total_return, sharpe, max_dd)
+    # reflect the actual realized cash — prior versions computed metrics on the
+    # pre-liquidation curve, systematically OVERSTATING returns when positions
+    # remained at period end (mark-to-market counted, but commission + stamp +
+    # slippage of the final close-out were never charged against the curve).
     if holdings and prices and trading_days:
         liq_date = trading_days[-1] + timedelta(days=1)
+        had_liquidation = False
         for sym in list(holdings.keys()):
             shares = holdings[sym]
             if shares <= 0 or sym not in prices:
@@ -402,7 +410,16 @@ def run_portfolio_backtest(
                 "shares": shares, "price": sell_price, "cost": comm + stamp,
                 "liquidation": True,
             })
+            had_liquidation = True
         holdings.clear()
+
+        # Append the realized-cash equity point so metrics reflect the true
+        # end-of-period value (post slippage/commission/stamp).
+        if had_liquidation:
+            assert cash >= -EPS_FUND, f"Negative cash after liquidation: {cash:.2f}"
+            result.equity_curve.append(cash)
+            result.dates.append(liq_date)
+            result.weights_history.append({})  # empty — all liquidated
 
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
     # O(n) single-pass via pre-indexed prices

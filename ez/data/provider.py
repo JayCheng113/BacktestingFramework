@@ -81,23 +81,49 @@ class DataProviderChain:
         self._providers = providers
         self._store = store
 
+    @staticmethod
+    def _is_cache_complete(cached: list[Bar], start_date: date, end_date: date) -> tuple[bool, str]:
+        """Check if cached bars cover the requested range WITHOUT gaps.
+
+        Two-stage check (both must pass):
+        1. Boundary: first/last bar within 3-day tolerance of requested range
+        2. Density: bar count >= 75% of expected trading days (catches middle gaps)
+
+        Returns (complete, reason). `reason` explains why cache is considered
+        incomplete (for logging).
+        """
+        if not cached:
+            return False, "empty"
+        cs, ce = cached[0].time.date(), cached[-1].time.date()
+        # Boundary check
+        if (cs - start_date).days > 3:
+            return False, f"start gap: have {cs}, need {start_date}"
+        if (end_date - ce).days > 3:
+            return False, f"end gap: have {ce}, need {end_date}"
+        # Density check — only for ranges long enough to be reliable
+        req_days = (end_date - start_date).days
+        if req_days <= 14:
+            return True, "boundary ok (short range, skip density check)"
+        # A-share: ~245 trading days/year. 0.75 tolerance covers long holidays
+        # (Spring Festival week + October week + minor breaks ≈ 15 days).
+        expected_bars = max(1, int(req_days * 245 / 365))
+        actual_bars = len(cached)
+        if actual_bars < expected_bars * 0.75:
+            return False, f"middle gap: {actual_bars} bars, expected ~{expected_bars} (<75%)"
+        return True, "ok"
+
     def get_kline(
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
     ) -> list[Bar]:
-        # 1. Check cache — only use if it covers the requested range
+        # 1. Check cache — only use if it covers the requested range WITHOUT gaps
         cached = self._store.query_kline(symbol, market, period, start_date, end_date)
         if cached:
-            cached_start = cached[0].time.date()
-            cached_end = cached[-1].time.date()
-            # Allow 3-day tolerance for weekends/holidays at range boundaries
-            start_covered = (cached_start - start_date).days <= 3
-            end_covered = (end_date - cached_end).days <= 3
-            if start_covered and end_covered:
-                logger.info("Cache hit for %s/%s/%s", symbol, market, period)
+            complete, reason = self._is_cache_complete(cached, start_date, end_date)
+            if complete:
+                logger.info("Cache hit for %s/%s/%s (%s)", symbol, market, period, reason)
                 return cached
-            logger.info("Cache partial for %s (have %s~%s, need %s~%s), fetching fresh",
-                        symbol, cached_start, cached_end, start_date, end_date)
+            logger.info("Cache incomplete for %s (%s), fetching fresh", symbol, reason)
 
         # 2. Try providers in order
         last_error: Exception | None = None
@@ -150,17 +176,22 @@ class DataProviderChain:
         self, symbols: list[str], market: str, period: str,
         start_date: date, end_date: date,
     ) -> dict[str, list[Bar]]:
-        """Batch: single DB query for cached, individual fetch for missing."""
+        """Batch: single DB query for cached, individual fetch for missing.
+
+        Uses the same two-stage completeness check as get_kline() — boundary +
+        density — to catch middle gaps in cached data.
+        """
         cached = self._store.query_kline_batch(symbols, market, period, start_date, end_date)
         result: dict[str, list[Bar]] = {}
         missing: list[str] = []
         for sym in symbols:
             bars = cached.get(sym, [])
+            complete, reason = self._is_cache_complete(bars, start_date, end_date) if bars else (False, "empty")
+            if complete:
+                result[sym] = bars
+                continue
             if bars:
-                cs, ce = bars[0].time.date(), bars[-1].time.date()
-                if (cs - start_date).days <= 3 and (end_date - ce).days <= 3:
-                    result[sym] = bars
-                    continue
+                logger.info("Batch cache incomplete for %s (%s), refetching", sym, reason)
             missing.append(sym)
         for sym in missing:
             try:

@@ -58,7 +58,80 @@ class TestCacheLogic:
         chain = DataProviderChain([mock_provider], mock_store)
         result = chain.get_kline("TEST.SZ", "cn_stock", "daily", date(2024, 1, 1), date(2024, 1, 31))
         assert len(result) > 0
+
+    def test_cache_with_middle_gap_refetches(self, mock_store, mock_provider):
+        """Regression test for codex finding: cache with first/last bars covering
+        the range but massive middle gap should NOT be considered a hit.
+
+        Previously only boundary dates were checked — a cache with 3 bars at
+        Jan 2, Jan 30, Jun 28 covering a 6-month request would be accepted,
+        silently returning data with huge middle holes.
+        """
+        # Request 6 months (Jan 2 - Jun 28, 2024) = ~178 days.
+        # Expected bars: 178 * 245/365 ≈ 119. 75% threshold: 89.
+        # Provide only 3 bars: one at start, one at Jan 30, one at end. Boundary passes (first/last within 3 days),
+        # but bar count (3) is way below 89 → should refetch.
+        cached = [
+            _bar(2),  # Jan 2
+            _bar(30),  # Jan 30
+            Bar(time=datetime(2024, 6, 28), symbol="TEST.SZ", market="cn_stock",
+                open=11.0, high=11.5, low=10.8, close=11.2, adj_close=11.15, volume=1000000),
+        ]
+        mock_store.query_kline.return_value = cached
+        chain = DataProviderChain([mock_provider], mock_store)
+        chain.get_kline("TEST.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 6, 28))
+        # Middle gap detected → provider must have been called
         mock_provider.get_kline.assert_called_once()
+
+    def test_cache_short_range_skips_density_check(self, mock_store, mock_provider):
+        """For ranges <= 14 days, density check is skipped (sample too small
+        to reliably estimate coverage — boundary check is sufficient)."""
+        # 5-day request, cached has 2 boundary bars only
+        cached = [_bar(2), _bar(6)]
+        mock_store.query_kline.return_value = cached
+        chain = DataProviderChain([mock_provider], mock_store)
+        result = chain.get_kline("TEST.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 1, 6))
+        # Short range → cache accepted, no provider call
+        assert result == cached
+        mock_provider.get_kline.assert_not_called()
+
+    def test_cache_complete_coverage_accepts(self, mock_store, mock_provider):
+        """Cache with ~trading-day density should be accepted.
+
+        30-day request → expected ~20 bars → 75% = 15.
+        Provide 22 bars (close to realistic trading-day count, above threshold).
+        """
+        # Mon-Fri only, 30 days → roughly 22 trading days
+        cached = [_bar(day=d) for d in range(2, 32) if datetime(2024, 1, d).weekday() < 5][:22]
+        mock_store.query_kline.return_value = cached
+        chain = DataProviderChain([mock_provider], mock_store)
+        result = chain.get_kline("TEST.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 1, 31))
+        # Dense cache → accepted, no provider call
+        assert result == cached
+        mock_provider.get_kline.assert_not_called()
+
+    def test_is_cache_complete_helper_direct(self):
+        """Direct test of _is_cache_complete static method (no DB/provider)."""
+        # Empty
+        complete, reason = DataProviderChain._is_cache_complete([], date(2024, 1, 1), date(2024, 1, 31))
+        assert not complete and reason == "empty"
+        # Start gap
+        bars = [_bar(15)]
+        complete, reason = DataProviderChain._is_cache_complete(bars, date(2024, 1, 1), date(2024, 1, 15))
+        assert not complete and "start gap" in reason
+        # End gap
+        complete, reason = DataProviderChain._is_cache_complete(bars, date(2024, 1, 15), date(2024, 1, 31))
+        assert not complete and "end gap" in reason
+        # Middle gap (3 bars over 90 days, expected ~60, 3 << 75%)
+        bars = [
+            _bar(2),
+            Bar(time=datetime(2024, 2, 15), symbol="TEST.SZ", market="cn_stock",
+                open=10, high=10, low=10, close=10, adj_close=10, volume=100),
+            Bar(time=datetime(2024, 3, 31), symbol="TEST.SZ", market="cn_stock",
+                open=10, high=10, low=10, close=10, adj_close=10, volume=100),
+        ]
+        complete, reason = DataProviderChain._is_cache_complete(bars, date(2024, 1, 2), date(2024, 3, 31))
+        assert not complete and "middle gap" in reason
 
 
 class TestFailover:

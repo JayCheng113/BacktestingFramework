@@ -195,12 +195,85 @@ class TestFinalLiquidation:
         assert len(liq_trades) > 0
 
     def test_liquidation_date_is_after_last_trading_day(self):
+        """Liquidation trades are dated AFTER the last actual trading day.
+
+        After V2.12.1 codex fix, result.dates[-1] IS the liquidation date itself
+        (post-liquidation equity point was appended), so use result.dates[-2] as
+        the reference for the last trading day.
+        """
         result = self._run_with_liquidation()
-        last_day = result.dates[-1].isoformat()
+        assert len(result.dates) >= 2, "Need at least one trading day + liquidation day"
+        last_trading_day = result.dates[-2].isoformat()
         liq_trades = [t for t in result.trades if t.get("liquidation")]
         for t in liq_trades:
-            assert t["date"] > last_day
+            assert t["date"] > last_trading_day
 
     def test_turnover_excludes_liquidation(self):
         result = self._run_with_liquidation()
         assert result.metrics.get("turnover_per_rebalance") is not None
+
+    def test_equity_curve_reflects_post_liquidation_cash(self):
+        """Regression test for codex finding: equity_curve and metrics must
+        include the post-liquidation realized cash, not just mark-to-market
+        equity on the last trading day.
+
+        Prior to fix: total_return/sharpe were computed from eq[:-1] (before
+        liquidation), so end-of-period positions were counted at market value
+        without deducting commission/stamp/slippage of the close-out → returns
+        were SYSTEMATICALLY OVERSTATED.
+        """
+        result = self._run_with_liquidation()
+        liq_trades = [t for t in result.trades if t.get("liquidation")]
+        # Precondition: there must be a liquidation for this test to be meaningful
+        assert len(liq_trades) > 0, "fixture changed: no liquidation to verify"
+
+        # Contract 1: equity_curve must have one extra point for the liquidation day
+        assert len(result.equity_curve) == len(result.dates), (
+            "equity_curve and dates must be 1:1 aligned (post-liquidation point appended)"
+        )
+
+        # Contract 2: the last dates entry IS the liquidation date
+        last_liq_date = max(t["date"] for t in liq_trades)
+        assert result.dates[-1].isoformat() == last_liq_date, (
+            f"result.dates[-1]={result.dates[-1]} should match liquidation date {last_liq_date}"
+        )
+
+        # Contract 3: the last equity_curve value reflects POST-liquidation cash,
+        # which must be LESS than the pre-liquidation mark-to-market value
+        # (due to commission + stamp + slippage on the final close-out).
+        pre_liq_equity = result.equity_curve[-2]  # last trading day mark-to-market
+        post_liq_equity = result.equity_curve[-1]  # after close-out costs
+        assert post_liq_equity < pre_liq_equity, (
+            f"post-liquidation equity {post_liq_equity:.2f} should be < "
+            f"pre-liquidation mark-to-market {pre_liq_equity:.2f} "
+            f"(liquidation costs not being charged against curve)"
+        )
+        # The cost should be measurable (commission + stamp + slippage > 0 for non-empty holdings)
+        cost_drag = pre_liq_equity - post_liq_equity
+        assert cost_drag > 0, f"Expected positive cost drag, got {cost_drag}"
+
+    def test_total_return_uses_post_liquidation_value(self):
+        """Total return metric must be computed from the realized cash, not
+        the pre-liquidation mark-to-market equity."""
+        result = self._run_with_liquidation()
+        if not result.metrics or "total_return" not in result.metrics:
+            return  # metrics may be absent in some edge cases
+        total_return = result.metrics["total_return"]
+        # Reconstruct from curve: eq[-1] is post-liquidation cash
+        expected = result.equity_curve[-1] / result.equity_curve[0] - 1
+        assert abs(total_return - expected) < 1e-6, (
+            f"total_return metric ({total_return:.6f}) does not match curve-derived value ({expected:.6f}) — "
+            f"likely computed from pre-liquidation curve"
+        )
+
+    def test_weights_history_aligned_with_dates(self):
+        """weights_history must stay 1:1 aligned with dates after liquidation
+        (empty dict appended for the post-liquidation point)."""
+        result = self._run_with_liquidation()
+        assert len(result.weights_history) == len(result.dates), (
+            f"weights_history len={len(result.weights_history)} vs dates len={len(result.dates)}"
+        )
+        # Last entry should be empty (all positions liquidated)
+        assert result.weights_history[-1] == {}, (
+            f"Last weights_history entry should be empty after liquidation, got {result.weights_history[-1]}"
+        )
