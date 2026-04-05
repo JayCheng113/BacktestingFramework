@@ -150,3 +150,158 @@ class TestMLAlphaValidation:
         del valid_kwargs["embargo_days"]
         alpha = MLAlpha(**valid_kwargs)
         assert alpha._embargo_days == 0
+
+
+class TestMLAlphaEstimatorWhitelist:
+    """V1 safety: only whitelisted sklearn estimator classes are accepted,
+    and n_jobs=1 is enforced at construction.
+
+    This is the PRIMARY safety layer. Phase 4's AST literal n_jobs check
+    is only a nice-to-have early warning; the runtime check here catches
+    dynamic / wrapped / **kwargs / variable-bound n_jobs values that a
+    pure AST scan cannot see.
+    """
+
+    @pytest.fixture
+    def base_kwargs(self):
+        return dict(
+            name="x",
+            feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"]}),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60,
+            retrain_freq=20,
+            purge_days=5,
+        )
+
+    def test_ridge_is_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        alpha = MLAlpha(model_factory=lambda: Ridge(alpha=1.0), **base_kwargs)
+        assert alpha is not None
+
+    def test_lasso_is_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Lasso
+        alpha = MLAlpha(model_factory=lambda: Lasso(alpha=0.1), **base_kwargs)
+        assert alpha is not None
+
+    def test_linear_regression_is_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import LinearRegression
+        alpha = MLAlpha(model_factory=lambda: LinearRegression(), **base_kwargs)
+        assert alpha is not None
+
+    def test_elastic_net_is_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import ElasticNet
+        alpha = MLAlpha(model_factory=lambda: ElasticNet(alpha=0.1), **base_kwargs)
+        assert alpha is not None
+
+    def test_decision_tree_regressor_is_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.tree import DecisionTreeRegressor
+        alpha = MLAlpha(
+            model_factory=lambda: DecisionTreeRegressor(max_depth=3, random_state=0),
+            **base_kwargs,
+        )
+        assert alpha is not None
+
+    def test_gradient_boosting_regressor_is_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.ensemble import GradientBoostingRegressor
+        alpha = MLAlpha(
+            model_factory=lambda: GradientBoostingRegressor(n_estimators=5, random_state=0),
+            **base_kwargs,
+        )
+        assert alpha is not None
+
+    def test_random_forest_n_jobs_1_accepted(self, base_kwargs):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.ensemble import RandomForestRegressor
+        alpha = MLAlpha(
+            model_factory=lambda: RandomForestRegressor(n_jobs=1, n_estimators=5, random_state=0),
+            **base_kwargs,
+        )
+        assert alpha is not None
+
+    def test_random_forest_n_jobs_minus_one_rejected(self, base_kwargs):
+        """n_jobs=-1 must raise at construction, BEFORE any fit() runs."""
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.ensemble import RandomForestRegressor
+        with pytest.raises(UnsupportedEstimatorError, match="n_jobs"):
+            MLAlpha(
+                model_factory=lambda: RandomForestRegressor(n_jobs=-1),
+                **base_kwargs,
+            )
+
+    def test_random_forest_n_jobs_2_rejected(self, base_kwargs):
+        """n_jobs=2 (or any value != 1/None) must raise."""
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.ensemble import RandomForestRegressor
+        with pytest.raises(UnsupportedEstimatorError, match="n_jobs"):
+            MLAlpha(
+                model_factory=lambda: RandomForestRegressor(n_jobs=2),
+                **base_kwargs,
+            )
+
+    def test_random_forest_n_jobs_none_accepted(self, base_kwargs):
+        """n_jobs=None (sklearn default for some estimators) is treated
+        as 'not set' and allowed through. sklearn's own joblib layer will
+        run in single-process mode when n_jobs is None."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.ensemble import RandomForestRegressor
+        alpha = MLAlpha(
+            model_factory=lambda: RandomForestRegressor(n_jobs=None, n_estimators=5, random_state=0),
+            **base_kwargs,
+        )
+        assert alpha is not None
+
+    def test_non_whitelisted_sklearn_class_rejected(self, base_kwargs):
+        """sklearn has many estimators. MLAlpha V1 whitelists only a
+        small verified subset. SVR is NOT on V1's list — verify rejection
+        with a user-visible message mentioning the whitelist."""
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.svm import SVR
+        with pytest.raises(UnsupportedEstimatorError, match="whitelist"):
+            MLAlpha(model_factory=lambda: SVR(), **base_kwargs)
+
+    def test_arbitrary_python_object_rejected(self, base_kwargs):
+        """A plain Python object with a .fit method is not an sklearn
+        estimator and is rejected."""
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+
+        class FakeEstimator:
+            def fit(self, X, y): return self
+            def predict(self, X): return np.zeros(len(X))
+
+        with pytest.raises(UnsupportedEstimatorError):
+            MLAlpha(model_factory=lambda: FakeEstimator(), **base_kwargs)
+
+    def test_user_subclass_of_ridge_rejected(self, base_kwargs):
+        """Even a Ridge subclass is rejected — type identity, not isinstance.
+        This blocks users from monkey-patching fit() via inheritance as a
+        sandbox bypass."""
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.linear_model import Ridge
+
+        class MyRidge(Ridge):
+            pass
+
+        with pytest.raises(UnsupportedEstimatorError, match="whitelist"):
+            MLAlpha(model_factory=lambda: MyRidge(), **base_kwargs)
+
+    def test_unsupported_error_message_lists_allowed_classes(self, base_kwargs):
+        """The error message must tell the user which classes ARE allowed,
+        so they can pick a substitute. Otherwise the user has to read the
+        source to find the whitelist."""
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.svm import SVR
+        try:
+            MLAlpha(model_factory=lambda: SVR(), **base_kwargs)
+            pytest.fail("Expected UnsupportedEstimatorError")
+        except UnsupportedEstimatorError as e:
+            msg = str(e)
+            # At least Ridge should be mentioned
+            assert "Ridge" in msg
+            # The message should mention the word "whitelist"
+            assert "whitelist" in msg.lower()
