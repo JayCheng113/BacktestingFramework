@@ -78,6 +78,15 @@ TargetFn = Callable[[pd.DataFrame], pd.Series]
 ModelFactory = Callable[[], Any]
 
 
+# numpy dtype kinds that are legitimate ML features/targets. Used by
+# _retrain to reject datetime64 ('M') and timedelta64 ('m') BEFORE they
+# hit np.asarray(dtype=float), which would silently coerce them to
+# nanosecond-epoch floats (~1.65e18 for 2022 dates) and train the model
+# on garbage. V2.13 round 4 reviewer C1.
+#   'f' = floating, 'i' = signed int, 'u' = unsigned int, 'b' = bool
+_NUMERIC_DTYPE_KINDS = frozenset({"f", "i", "u", "b"})
+
+
 class UnsupportedEstimatorError(TypeError):
     """Raised when MLAlpha is constructed with an estimator class that is
     not on the V1 whitelist, or with an instance whose ``n_jobs`` would
@@ -372,20 +381,57 @@ class MLAlpha(CrossSectionalFactor):
             return
 
         # Convert to numeric numpy arrays. A user's feature_fn / target_fn
-        # could accidentally produce object dtype (strings, category
-        # labels, Decimal, mixed types from ragged construction). On
-        # object dtype, np.isfinite raises TypeError and crashes the
-        # backtest — violating the "failure is visible but never crashes"
-        # contract. Force float64 via np.asarray(..., dtype=float); on
-        # non-numeric input this raises ValueError which we catch, log a
-        # one-shot warning, and skip the retrain (keep prior model).
+        # could accidentally produce non-numeric dtypes. Two distinct
+        # failure modes exist and each needs its own defense:
+        #
+        # 1. **Hard failure** (object/string dtype): np.asarray(dtype=float)
+        #    raises ValueError for strings, which we catch.
+        # 2. **Silent coercion** (datetime64 / timedelta64): these have
+        #    kind 'M' / 'm' and np.asarray(dtype=float) SILENTLY converts
+        #    them to nanosecond-epoch floats (~1.65e18 for 2022 dates).
+        #    Ridge then trains on garbage, producing predictions scaled
+        #    by ~1e15. Strictly worse than a crash: a silent bad fit
+        #    could ship to production.
+        #
+        # Defense-in-depth: active dtype.kind whitelist BEFORE asarray +
+        # try/except as fallback. V2.13 round 4 reviewer C1.
+        X_bad_cols = {
+            col: str(dt) for col, dt in X.dtypes.items()
+            if dt.kind not in _NUMERIC_DTYPE_KINDS
+        }
+        y_bad = y.dtype.kind not in _NUMERIC_DTYPE_KINDS
+        if X_bad_cols or y_bad:
+            if not self._non_numeric_warned:
+                _logger.warning(
+                    "MLAlpha[%s]: training panel at %s has non-numeric "
+                    "dtypes (feature columns: %s, target dtype: %s). "
+                    "feature_fn and target_fn must produce numeric "
+                    "dtypes only (float/int/bool). datetime64 and "
+                    "timedelta64 look numeric to numpy but silently "
+                    "coerce to nanosecond-epoch floats (~1.65e18 for "
+                    "current dates) which corrupts the model. Convert "
+                    "timestamps to numeric features explicitly (e.g., "
+                    "days-since-epoch, day-of-week integer). Skipping "
+                    "retrain, keeping prior model (%s). (one-shot warning)",
+                    self._name, current,
+                    X_bad_cols if X_bad_cols else "all numeric",
+                    str(y.dtype),
+                    "present" if self._current_model is not None else "None",
+                )
+                self._non_numeric_warned = True
+            return
+
+        # Dtype whitelist passed — now do the actual numpy conversion.
+        # The try/except is still useful as defense-in-depth for edge
+        # cases like pandas nullable Int64 with pd.NA, mixed-type object
+        # columns that somehow slipped the kind check, etc.
         try:
             X_arr = np.asarray(X.to_numpy(), dtype=float)
             y_arr = np.asarray(y.to_numpy(), dtype=float)
         except (TypeError, ValueError) as e:
             if not self._non_numeric_warned:
                 _logger.warning(
-                    "MLAlpha[%s]: training panel at %s contains non-numeric "
+                    "MLAlpha[%s]: training panel at %s contains unconvertible "
                     "values (X dtype=%s, y dtype=%s): %s. feature_fn and "
                     "target_fn must produce numeric dtypes (float/int). "
                     "Skipping retrain, keeping prior model (%s). "
@@ -692,19 +738,23 @@ class MLAlpha(CrossSectionalFactor):
 
             # model.predict exception: one-shot warn. Common causes:
             # wrong feature count (model trained on N features, predict
-            # given M), wrong dtype, shape mismatch.
+            # given M), dtype mismatch (e.g., feature_fn emits datetime64
+            # at predict but float at training), shape mismatch.
             try:
                 pred = float(self._current_model.predict(latest.to_numpy())[0])
             except Exception as e:
                 if not self._predict_call_exception_warned:
                     _logger.warning(
                         "MLAlpha[%s] model.predict raised %s for symbol %s: "
-                        "%s. feature shape at predict time: %s. "
+                        "%s. feature shape at predict time: %s, dtypes: %s. "
                         "Skipping this symbol. (one-shot warning — check "
-                        "that your feature_fn produces the same feature "
-                        "count at predict time as during training.)",
+                        "that your feature_fn produces features of the "
+                        "same shape AND dtype at predict time as during "
+                        "training. Common causes: column count drift, "
+                        "dtype drift (e.g., datetime64 at predict vs "
+                        "float at training), NaN rows.)",
                         self._name, type(e).__name__, sym, e,
-                        latest.shape,
+                        latest.shape, latest.dtypes.to_dict(),
                     )
                     self._predict_call_exception_warned = True
                 continue

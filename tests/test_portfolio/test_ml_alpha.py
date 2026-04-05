@@ -1393,6 +1393,143 @@ class TestMLAlphaFitExceptionHandling:
         assert alpha._current_model is None
         assert alpha._non_numeric_warned is True
 
+    def test_datetime64_features_do_not_silently_coerce(self):
+        """V2.13 round 4 reviewer C1: all-datetime64 feature columns pass
+        through np.asarray(dtype=float) WITHOUT raising — they silently
+        coerce to nanosecond-epoch floats (~1.65e18 for 2022 dates).
+        Ridge then trains on garbage and produces predictions scaled by
+        ~1e15, corrupting the backtest.
+
+        This is strictly worse than an exception: a crash would be
+        visible; a silent bad fit could ship to production and be
+        discovered only by noticing absurdly-large alpha signals.
+
+        Fix: active dtype.kind whitelist before np.asarray catches this
+        before training.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def all_datetime_feature_fn(df):
+            # User mistakenly returns datetime64 columns (could happen
+            # if they forget to convert a timestamp to a numeric feature)
+            return pd.DataFrame({
+                "t1": pd.Series(df.index.values, index=df.index),
+                "t2": pd.Series(
+                    (df.index + pd.Timedelta(days=1)).values,
+                    index=df.index,
+                ),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=all_datetime_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+
+        # Model must NOT have been trained on datetime64-as-float garbage.
+        # Either (a) retrain was skipped entirely → _current_model is None,
+        # or (b) some future refactor might legitimately train but only
+        # after converting to a sensible numeric representation. For V1,
+        # the correct behavior is "skip and warn".
+        assert alpha._current_model is None, (
+            "Ridge was trained on datetime64 columns silently coerced to "
+            "nanosecond-epoch floats (~1.65e18). This corrupts the backtest "
+            "and must be rejected at _build_training_panel / _retrain."
+        )
+        assert alpha._non_numeric_warned is True, (
+            "datetime64 feature columns must trigger the non-numeric flag, "
+            "not pass through silently."
+        )
+        assert len(scores) == 0
+
+    def test_datetime64_target_do_not_silently_coerce(self):
+        """Symmetric check: target_fn returning a datetime64 Series."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def datetime_target_fn(df):
+            # User passes a timestamp Series as the target (nonsensical
+            # but reproduces the silent-coerce path)
+            return pd.Series(df.index.values, index=df.index)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=datetime_target_fn,
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is None
+        assert alpha._non_numeric_warned is True
+
+    def test_timedelta64_features_do_not_silently_coerce(self):
+        """Variant: timedelta64 also has numeric-looking kind 'm', must
+        also be rejected."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def timedelta_feature_fn(df):
+            td = df.index.to_series().diff().fillna(pd.Timedelta(days=0))
+            return pd.DataFrame({
+                "gap": td,
+            }, index=df.index).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=timedelta_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is None
+        assert alpha._non_numeric_warned is True
+
+    def test_numeric_dtypes_still_accepted_after_whitelist(self):
+        """Regression: the C1 whitelist must NOT reject legitimate numeric
+        dtypes. Verify int32/int64/float32/float64/bool all pass through."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def mixed_numeric_fn(df):
+            # Mix int, float, bool — all numeric kinds
+            ret = df["adj_close"].pct_change(1)
+            return pd.DataFrame({
+                "ret_float64": ret.astype("float64"),
+                "ret_float32": ret.astype("float32"),
+                "is_up_bool": (ret > 0).astype(bool),
+                "volume_int": df["volume"].astype("int64"),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=mixed_numeric_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+
+        # Should train successfully — all features are numeric kinds
+        assert alpha._current_model is not None
+        assert alpha._non_numeric_warned is False
+        assert len(scores) > 0
+
     def test_non_numeric_dtype_logs_warning(self):
         """Non-numeric dtype must emit a one-shot warning with dtype info
         so the user can track down which column is bad."""
