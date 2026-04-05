@@ -839,9 +839,15 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
     with _reload_lock:
         if kind == "portfolio_strategy":
             from ez.portfolio.portfolio_strategy import PortfolioStrategy
-            old_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
-            for k in old_keys:
+            # V2.12.1 post-review: dual-dict registry (_registry_by_key is
+            # authoritative, _registry is the name-keyed backward-compat view).
+            # Must clean BOTH dicts or the full-key dict leaks zombies.
+            old_name_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
+            for k in old_name_keys:
                 del PortfolioStrategy._registry[k]
+            old_full_keys = [k for k, v in PortfolioStrategy._registry_by_key.items() if v.__module__ == module_name]
+            for k in old_full_keys:
+                del PortfolioStrategy._registry_by_key[k]
         elif kind == "cross_factor":
             from ez.portfolio.cross_factor import CrossSectionalFactor
             old_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]

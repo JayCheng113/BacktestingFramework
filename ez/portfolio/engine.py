@@ -75,6 +75,7 @@ def run_portfolio_backtest(
     benchmark_symbol: str = "",  # e.g. "510300.SH" for CSI300 ETF benchmark
     optimizer: PortfolioOptimizer | None = None,  # V2.12: 组合优化器
     risk_manager: RiskManager | None = None,      # V2.12: 风控管理器
+    t_plus_1: bool = True,  # V2.12.1 codex: A-share only; set False for US/HK
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -265,7 +266,7 @@ def run_portfolio_backtest(
             all_syms = sorted(holdings.keys() | target_shares.keys())
             sell_syms = [s for s in all_syms if target_shares.get(s, 0) < holdings.get(s, 0)]
             buy_syms = [s for s in all_syms if target_shares.get(s, 0) > holdings.get(s, 0)]
-            sold_today: set[str] = set()  # T+1: track sold symbols
+            sold_today: set[str] = set()  # T+1: track sold symbols (A-share only)
             for sym in sell_syms + buy_syms:  # sells first, then buys
                 cur = holdings.get(sym, 0)
                 tgt = target_shares.get(sym, 0)
@@ -279,8 +280,10 @@ def run_portfolio_backtest(
                 if sym not in has_bar_today:
                     continue
 
-                # T+1: cannot buy a symbol that was sold today
-                if delta > 0 and sym in sold_today:
+                # T+1: cannot buy a symbol that was sold today (V2.12.1 codex:
+                # gated on t_plus_1 flag so US/HK portfolios allow same-day
+                # sell→buy). Prior version hardcoded A-share T+1 for all markets.
+                if t_plus_1 and delta > 0 and sym in sold_today:
                     continue
 
                 # A-share 涨跌停检查 (C1: use raw close, not adj_close)
@@ -464,16 +467,20 @@ def run_portfolio_backtest(
         n_years = len(returns) / 252
         total_ret = eq[-1] / eq[0] - 1
         ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1 if n_years > 0 else 0
-        vol = np.std(returns) * np.sqrt(252) if len(returns) > 1 else 0
+        # ddof=1 (Bessel correction) to match pandas default used by
+        # ez/backtest/metrics.py — the two engines must return numerically
+        # identical Sharpe for identical inputs (codex finding #1).
+        vol = float(np.std(returns, ddof=1)) * np.sqrt(252) if len(returns) > 1 else 0
         # Standard Sharpe formula matching ez/backtest/metrics.py (codex finding):
         # prior version used `ann_ret / vol`, but single-stock and WF used
         # `excess.mean() / excess.std() × √252` with 3% risk-free rate. Same name,
         # different semantics → portfolio ranking could not be compared with
-        # single-stock results. Unified to the standard daily-excess formula.
+        # single-stock results. Unified to the standard daily-excess formula
+        # with ddof=1 so numeric output matches MetricsCalculator exactly.
         RF_ANNUAL = 0.03
         daily_rf = RF_ANNUAL / 252
         excess = returns - daily_rf
-        excess_std = float(np.std(excess))
+        excess_std = float(np.std(excess, ddof=1)) if len(excess) > 1 else 0.0
         sharpe = float(np.mean(excess) / excess_std * np.sqrt(252)) if excess_std > 1e-10 else 0.0
         drawdown = (eq / np.maximum.accumulate(eq)) - 1
         max_dd = float(np.min(drawdown))

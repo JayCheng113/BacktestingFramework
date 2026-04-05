@@ -605,6 +605,7 @@ def run_portfolio(req: PortfolioRunRequest):
         lot_size=req.lot_size, limit_pct=req.limit_pct,
         benchmark_symbol=req.benchmark_symbol,
         optimizer=optimizer_instance, risk_manager=risk_mgr,
+        t_plus_1=(req.market == "cn_stock"),
     )
 
     # Sanitize NaN/Inf in metrics
@@ -862,6 +863,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 initial_cash=req.initial_cash, cost_model=cost_model,
                 lot_size=req.lot_size, limit_pct=req.limit_pct,
                 benchmark_symbol=req.benchmark_symbol,
+                t_plus_1=(req.market == "cn_stock"),
             )
             m = result.metrics
             results.append({
