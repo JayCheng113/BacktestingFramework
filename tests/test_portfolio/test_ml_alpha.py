@@ -9,6 +9,10 @@ Covers:
 Real sklearn integration tests (deepcopy, end-to-end walk-forward) are in
 tests/test_portfolio/test_ml_alpha_sklearn.py — this file uses sklearn
 only for simple construction smoke and does NOT train any models.
+
+**CI note**: scikit-learn is an OPTIONAL dependency (``pip install -e '.[ml]'``).
+This test module is SKIPPED in its entirety when sklearn is not installed
+so a minimal CI env can still collect and run the non-ML test suite.
 """
 from __future__ import annotations
 
@@ -18,6 +22,12 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import pytest
+
+# Skip the entire module if scikit-learn is not installed. MLAlpha is
+# importable without sklearn (the sklearn import is lazy in ez.portfolio.
+# ml_alpha._build_supported_estimator_set), but every test in this file
+# exercises MLAlpha construction or training, which requires sklearn.
+pytest.importorskip("sklearn", reason="V2.13 MLAlpha tests require scikit-learn; install with `pip install -e '.[ml]'`")
 
 
 def test_mlalpha_import():
@@ -1225,6 +1235,126 @@ class TestMLAlphaFitExceptionHandling:
         assert isinstance(scores, pd.Series)
         assert len(scores) > 0
 
+    def test_non_numeric_feature_dtype_does_not_crash(self):
+        """V2.13 round 3 codex-H: feature_fn that produces object/string
+        dtype must not crash the backtest. The old implementation called
+        np.isfinite() directly on X.to_numpy() which raises
+        ``TypeError: ufunc 'isfinite' not supported for object dtype``
+        the instant a string or mixed-type column slips through.
+
+        A user's feature_fn could reasonably emit non-numeric values by
+        mistake: stringified category labels, mis-casted integer codes,
+        Decimal objects, or even a numpy object array from a ragged
+        construction. The framework must log-and-skip, not crash.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def bad_feature_fn(df):
+            # String column alongside a numeric column. Must preserve
+            # df.index (DatetimeIndex) so alignment with target_fn works.
+            return pd.DataFrame({
+                "numeric": df["adj_close"].pct_change(1),
+                "category": ["A"] * len(df),  # strings → object dtype
+            }, index=df.index).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=bad_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        # Must NOT raise TypeError("ufunc 'isfinite' not supported")
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        except TypeError as e:
+            if "isfinite" in str(e) or "ufunc" in str(e):
+                pytest.fail(f"MLAlpha leaked numpy dtype error to caller: {e}")
+            raise
+        # Retrain skipped, model stays None, scores empty
+        assert isinstance(scores, pd.Series)
+        assert len(scores) == 0
+        assert alpha._current_model is None
+        assert alpha._non_numeric_warned is True
+
+    def test_non_numeric_target_dtype_does_not_crash(self):
+        """Mirror of the feature test, but target_fn returns non-numeric."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def bad_target_fn(df):
+            # Strings in the target column (preserve DatetimeIndex)
+            return pd.Series(["up"] * len(df), index=df.index)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=bad_target_fn,
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        except TypeError as e:
+            if "isfinite" in str(e) or "ufunc" in str(e):
+                pytest.fail(f"MLAlpha leaked numpy dtype error: {e}")
+            raise
+        assert len(scores) == 0
+        assert alpha._current_model is None
+        assert alpha._non_numeric_warned is True
+
+    def test_non_numeric_dtype_logs_warning(self):
+        """Non-numeric dtype must emit a one-shot warning with dtype info
+        so the user can track down which column is bad."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def bad_feature_fn(df):
+            return pd.DataFrame({
+                "numeric": df["adj_close"].pct_change(1),
+                "category": ["X"] * len(df),
+            }, index=df.index).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=bad_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            alpha.compute(data, datetime(2022, 8, 1))
+        finally:
+            logger.removeHandler(handler)
+
+        # Warning must mention "non-numeric" or dtype
+        numeric_warnings = [m for m in captured if "non-numeric" in m.lower() or "dtype" in m.lower()]
+        assert len(numeric_warnings) >= 1, (
+            f"Expected a non-numeric dtype warning, got: {captured}"
+        )
+        # Warning message should include the problematic dtype info for
+        # debugging
+        assert any("category" in m or "object" in m for m in numeric_warnings), (
+            f"Warning should include column/dtype details, got: {numeric_warnings}"
+        )
+
     def test_fit_exception_keeps_prior_model(self):
         """If model.fit() raises on a retrain call, the prior model must
         be kept (not reset to None). A logged warning documents the
@@ -1557,6 +1687,164 @@ class TestMLAlphaContractEdgeCases:
             f"Expected at least 1 predict-stage warning with shape info, "
             f"got: {captured}"
         )
+        # V2.13 round 3 Gap 3 polish: assert the flag directly so a future
+        # refactor that adds feature_fn output caching can't make this test
+        # silent-pass. The flag is set exactly when the model.predict
+        # exception handler runs.
+        assert alpha._predict_call_exception_warned is True, (
+            "_predict_call_exception_warned flag was not set after a real "
+            "model.predict() exception — the test would be vacuous if the "
+            "implementation refactored away the exception path."
+        )
+        # Also: a shape mismatch should NOT also fire the empty_predict
+        # summary (since every symbol failed for the SAME shape reason,
+        # the specific shape warning is more useful than the generic one).
+        # But we don't block — generic + specific is acceptable.
+
+    def test_empty_predict_warned_when_all_predict_fail_after_successful_fit(self):
+        """V2.13 round 3 Gap 4: directly exercise the _empty_predict_warned
+        branch. Setup: model trains successfully on fold 1, then predict
+        stage fails for EVERY symbol because feature_fn is broken only
+        at predict time. Assert the flag is set and the specific summary
+        warning fires.
+
+        This is distinct from test_empty_panel_warning_on_training_failure
+        which exercises the _empty_panel_warned flag (training-stage
+        path)."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=300, n_stocks=4)
+
+        stage = {"n": "train"}
+
+        def feature_fn(df):
+            if stage["n"] == "train":
+                # Training: valid 2-feature DataFrame
+                return pd.DataFrame({
+                    "ret1": df["adj_close"].pct_change(1),
+                    "ret5": df["adj_close"].pct_change(5),
+                }).dropna()
+            # Predict: raise RuntimeError for every symbol
+            raise RuntimeError("predict-stage feature_fn failure")
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+        # Train successfully
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is not None
+        assert alpha._retrain_count == 1
+
+        # Switch to predict-stage feature_fn failure
+        stage["n"] = "predict"
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            # Within retrain_freq → no retrain, only predict runs
+            scores = alpha.compute(data, datetime(2022, 8, 5))
+        finally:
+            logger.removeHandler(handler)
+
+        # All symbols skipped at predict stage
+        assert len(scores) == 0
+        # _empty_predict_warned flag is set (this is the branch being tested)
+        assert alpha._empty_predict_warned is True, (
+            "_empty_predict_warned flag must be set when fit succeeded but "
+            "every symbol failed at predict stage."
+        )
+        # The specific "attempted N symbols but produced 0 predictions"
+        # message must fire
+        empty_predict_warnings = [
+            m for m in captured
+            if "attempted" in m and "0 predictions" in m
+        ]
+        assert len(empty_predict_warnings) == 1, (
+            f"Expected exactly 1 empty-predict summary warning, got: {captured}"
+        )
+
+    def test_predict_feature_fn_returning_non_dataframe_logs_warning(self):
+        """V2.13 round 3 codex-MH: during predict stage, if feature_fn
+        returns a non-DataFrame (e.g., Series because data-length
+        branching degrades the return type), the old code silently
+        continued with NO specific warning — only the generic '0
+        predictions produced' summary would fire eventually.
+
+        That's too silent: the user has a real code bug (type regression
+        between training and predict), not a "no signal" situation. This
+        test asserts a specific type warning with the bad type name and
+        the symbol, so the user can trace back to feature_fn.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=300, n_stocks=4)
+
+        # Mutable state to flip feature_fn return type between training
+        # and predict
+        stage = {"n": "train"}
+
+        def switching_feature_fn(df):
+            if stage["n"] == "train":
+                return pd.DataFrame({
+                    "ret": df["adj_close"].pct_change(1),
+                }).dropna()
+            # Predict stage: return a Series instead of DataFrame (bug)
+            return df["adj_close"].pct_change(1).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=switching_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+
+        # First compute: train successfully (stage=train, returns DataFrame)
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is not None
+
+        # Switch to predict-stage degraded return type
+        stage["n"] = "predict"
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            # Within retrain_freq window → no retrain, only predict runs
+            scores = alpha.compute(data, datetime(2022, 8, 5))
+        finally:
+            logger.removeHandler(handler)
+
+        # All symbols skipped because feature_fn now returns Series
+        assert len(scores) == 0
+
+        # Type-specific warning must be emitted, not just the generic
+        # "0 predictions" summary
+        type_warnings = [
+            m for m in captured
+            if "feature_fn" in m and ("Series" in m or "pandas.DataFrame" in m)
+        ]
+        assert len(type_warnings) >= 1, (
+            f"Expected a predict-stage feature type warning mentioning "
+            f"Series/DataFrame, got: {captured}"
+        )
+        # The flag must be set
+        assert alpha._predict_feature_type_warned is True
 
     def test_empty_panel_warning_on_training_failure(self):
         """When all symbols fail to produce training data (e.g., all

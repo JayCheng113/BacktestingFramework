@@ -17,6 +17,9 @@ assumption that sklearn models work through BOTH the deepcopy code path
 
 Task 1.10 builds on Task 1.9 by adding the end-to-end
 run_portfolio_backtest + portfolio_walk_forward integration.
+
+**CI note**: scikit-learn is an OPTIONAL dependency (``pip install -e '.[ml]'``).
+This test module is SKIPPED in its entirety when sklearn is not installed.
 """
 from __future__ import annotations
 
@@ -27,6 +30,9 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import pytest
+
+# Skip the entire module if scikit-learn is not installed.
+pytest.importorskip("sklearn", reason="V2.13 MLAlpha × sklearn integration tests require scikit-learn; install with `pip install -e '.[ml]'`")
 
 from ez.portfolio.ml_alpha import MLAlpha
 
@@ -512,6 +518,64 @@ class TestMLAlphaEndToEndBacktest:
         assert len(result.equity_curve) > 0
         assert result.equity_curve[-1] > 0
         assert alpha._retrain_count >= 3
+
+    def test_gradient_boosting_portfolio_walk_forward(self):
+        """V2.13 round 3 codex-M: close the asymmetry between RF and GBR.
+        RF has both run_portfolio_backtest and portfolio_walk_forward
+        integration tests, but GBR was only covered at the single-run
+        level. This test walks GBR through the factory-freshness path
+        so a regression in GBR's portfolio_walk_forward interaction
+        would fail visibly.
+        """
+        from sklearn.ensemble import GradientBoostingRegressor
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=500, n_stocks=6)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(6)])
+
+        created_alphas: list[MLAlpha] = []
+
+        def strategy_factory():
+            alpha = MLAlpha(
+                name="gb_wf",
+                model_factory=lambda: GradientBoostingRegressor(
+                    n_estimators=5, max_depth=3, random_state=0,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+            created_alphas.append(alpha)
+            return TopNRotation(factor=alpha, top_n=3)
+
+        wf_result = portfolio_walk_forward(
+            strategy_factory=strategy_factory,
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[60].date(), end=dates[-1].date(),
+            n_splits=3, train_ratio=0.7, freq="weekly",
+        )
+
+        # 3 splits × (IS + OOS) = 6 factory calls
+        assert len(created_alphas) == 6
+        # Distinct instances (factory must not cache)
+        assert len(set(id(a) for a in created_alphas)) == 6
+        # Each factory call produced a fresh instance with zero state
+        for a in created_alphas:
+            # By the time we inspect, retrain may have run, so just
+            # verify the model is either trained or still None (not
+            # some half-state from another fold)
+            assert a._retrain_count >= 0
+        # At least half the folds successfully trained
+        trained = sum(1 for a in created_alphas if a._retrain_count >= 1)
+        assert trained >= 3
+        # Walk-forward produced finite results for all 3 splits
+        assert wf_result.n_splits == 3
+        assert len(wf_result.oos_sharpes) == 3
+        assert all(np.isfinite(s) for s in wf_result.oos_sharpes)
 
     def test_walk_forward_fresh_instances_have_no_cross_fold_state_bleed(self):
         """Stronger form: verify that each fold's MLAlpha instance starts

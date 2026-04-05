@@ -278,9 +278,11 @@ class MLAlpha(CrossSectionalFactor):
         self._feature_fn_exception_warned: bool = False
         self._target_fn_exception_warned: bool = False
         self._predict_feature_exception_warned: bool = False
+        self._predict_feature_type_warned: bool = False
         self._predict_call_exception_warned: bool = False
         self._empty_panel_warned: bool = False
         self._empty_predict_warned: bool = False
+        self._non_numeric_warned: bool = False
 
     @property
     def name(self) -> str:
@@ -316,7 +318,16 @@ class MLAlpha(CrossSectionalFactor):
         return self._predict(universe_data, current)
 
     def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
-        """Raw (un-ranked) predictions. Used by ``AlphaCombiner``."""
+        """Raw (un-ranked) predictions. Used by ``AlphaCombiner``.
+
+        Note: for MLAlpha, ``compute_raw`` is semantically identical to
+        ``compute`` — the model's ``predict()`` output is already raw
+        continuous scores (e.g., expected 5-day forward return), not a
+        rank. Downstream consumers like ``TopNRotation`` will rank/sort
+        these scores themselves. This differs from ``MomentumRank`` etc.,
+        where ``compute`` returns percentile ranks and ``compute_raw``
+        returns the underlying momentum value.
+        """
         return self.compute(universe_data, date)
 
     def _needs_retrain(self, current: _date) -> bool:
@@ -360,13 +371,37 @@ class MLAlpha(CrossSectionalFactor):
                 self._empty_panel_warned = True
             return
 
+        # Convert to numeric numpy arrays. A user's feature_fn / target_fn
+        # could accidentally produce object dtype (strings, category
+        # labels, Decimal, mixed types from ragged construction). On
+        # object dtype, np.isfinite raises TypeError and crashes the
+        # backtest — violating the "failure is visible but never crashes"
+        # contract. Force float64 via np.asarray(..., dtype=float); on
+        # non-numeric input this raises ValueError which we catch, log a
+        # one-shot warning, and skip the retrain (keep prior model).
+        try:
+            X_arr = np.asarray(X.to_numpy(), dtype=float)
+            y_arr = np.asarray(y.to_numpy(), dtype=float)
+        except (TypeError, ValueError) as e:
+            if not self._non_numeric_warned:
+                _logger.warning(
+                    "MLAlpha[%s]: training panel at %s contains non-numeric "
+                    "values (X dtype=%s, y dtype=%s): %s. feature_fn and "
+                    "target_fn must produce numeric dtypes (float/int). "
+                    "Skipping retrain, keeping prior model (%s). "
+                    "(one-shot warning)",
+                    self._name, current, X.dtypes.to_dict(),
+                    y.dtype, e,
+                    "present" if self._current_model is not None else "None",
+                )
+                self._non_numeric_warned = True
+            return
+
         # Filter non-finite values. pandas isna() treats inf as present,
         # but sklearn rejects it. Do this at retrain time (not in
         # _build_training_panel) because a late training row with a
         # transient inf is better kept-and-filtered than silently
         # dropped from earlier stages.
-        X_arr = X.to_numpy()
-        y_arr = y.to_numpy()
         finite_mask = np.isfinite(X_arr).all(axis=1) & np.isfinite(y_arr)
         if not finite_mask.all():
             X_arr = X_arr[finite_mask]
@@ -615,7 +650,31 @@ class MLAlpha(CrossSectionalFactor):
                     self._predict_feature_exception_warned = True
                 continue
 
-            if sym_features is None or not isinstance(sym_features, pd.DataFrame):
+            if sym_features is None:
+                continue
+            if not isinstance(sym_features, pd.DataFrame):
+                # V2.13 round 3 codex-MH: feature_fn returned a non-DataFrame
+                # at predict stage (e.g., Series from a data-length branch
+                # that degrades the return type between training and predict).
+                # The training stage has its own flag (_feature_type_warned)
+                # — we need a separate predict-stage flag so a user whose
+                # feature_fn works at training but regresses at predict sees
+                # a targeted message, not just the generic "0 predictions"
+                # summary.
+                if not self._predict_feature_type_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned %s for symbol %s "
+                        "at predict stage, expected pandas.DataFrame. "
+                        "The model was fitted successfully (training stage "
+                        "returned DataFrame), but predict features degraded "
+                        "to the wrong type. Common cause: branching on "
+                        "data length (e.g., `if len(df) > N`) that produces "
+                        "different return types. Wrap your result in "
+                        "pd.DataFrame({'col': series}). Skipping this symbol. "
+                        "(one-shot warning)",
+                        self._name, type(sym_features).__name__, sym,
+                    )
+                    self._predict_feature_type_warned = True
                 continue
             if sym_features.empty:
                 continue
