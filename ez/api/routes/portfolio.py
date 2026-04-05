@@ -307,15 +307,20 @@ class PortfolioRunRequest(PortfolioCommonConfig):
 def _build_optimizer_risk_factories(req):
     """Build optimizer_factory / risk_manager_factory from a PortfolioCommonConfig request.
 
-    V2.12.1 reviewer round 6 C1+I3 + round 7 M1: shared helper used by /run,
-    /walk-forward, and /search so all three endpoints construct optimizer and
-    risk manager the same way from the same config fields.
+    V2.12.1 reviewer round 6 C1+I3 + round 7 M1 + round 8 M1+M2:
+    shared helper used by /run, /walk-forward, and /search so all three
+    endpoints construct optimizer and risk manager the same way from the
+    same config fields — AND surface the same configuration warnings.
 
-    Returns (opt_factory, rm_factory, index_weights):
+    Returns (opt_factory, rm_factory, index_weights, warnings):
     - opt_factory: callable returning a fresh PortfolioOptimizer (or None)
     - rm_factory: callable returning a fresh RiskManager (or None)
     - index_weights: pre-fetched constituent weights for the index benchmark
       (empty dict if req.index_benchmark is unset or fetch failed)
+    - warnings: list[str] of configuration warnings ready to append to the
+      endpoint's response. Covers:
+      * Index fetch failure (with exception detail when available) — round 8 M1
+      * Missing industry-map data when max_industry_weight < 1.0 — round 8 M2
 
     Factories (not instances) because both classes carry state across days
     and need fresh copies for each backtest/fold/combo:
@@ -323,13 +328,24 @@ def _build_optimizer_risk_factories(req):
     - /walk-forward: per fold, n_splits × 2 (IS + OOS) instances
     - /search: per combo, one optimizer + one risk_manager per parameter combo
     """
+    warnings_out: list[str] = []
+
     index_weights: dict[str, float] = {}
     if getattr(req, "index_benchmark", "") and req.index_benchmark:
         try:
             from ez.portfolio.index_data import IndexDataProvider
             idx_provider = IndexDataProvider()
-            index_weights = idx_provider.get_weights(req.index_benchmark) or {}
-        except Exception:
+            fetched = idx_provider.get_weights(req.index_benchmark) or {}
+            if fetched:
+                index_weights = fetched
+            else:
+                warnings_out.append(f"无法获取指数 {req.index_benchmark} 成分数据")
+        except Exception as e:
+            # V2.12.1 round 8 M1: preserve exception detail. Prior version
+            # silently swallowed the exception and only emitted the generic
+            # "empty result" warning at the endpoint layer.
+            logger.warning("Index data fetch failed for %s: %s", req.index_benchmark, e)
+            warnings_out.append(f"指数数据获取失败: {e}")
             index_weights = {}
 
     opt_factory = None
@@ -346,6 +362,11 @@ def _build_optimizer_risk_factories(req):
                 industry_map = fstore.get_all_industries()
         except Exception:
             pass
+        # V2.12.1 round 8 M2: industry-map warning now lives in the helper
+        # so /run, /walk-forward, and /search all emit it consistently.
+        # Prior version only /run had this check.
+        if not industry_map and getattr(req, "max_industry_weight", 1.0) < 1.0:
+            warnings_out.append("无行业分类数据，行业约束不生效。请先获取基本面数据。")
         constraints = OptimizationConstraints(
             max_weight=req.max_weight,
             max_industry_weight=req.max_industry_weight,
@@ -384,7 +405,7 @@ def _build_optimizer_risk_factories(req):
             ))
         rm_factory = _make_rm
 
-    return opt_factory, rm_factory, index_weights
+    return opt_factory, rm_factory, index_weights, warnings_out
 
 
 def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
@@ -674,27 +695,18 @@ def run_portfolio(req: PortfolioRunRequest):
         slippage_rate=req.slippage_rate,
     )
 
-    # V2.12.1 reviewer round 7 M1: reuse _build_optimizer_risk_factories so
-    # /run, /walk-forward, /search all construct optimizer + risk manager
-    # identically from the shared PortfolioCommonConfig fields.
+    # V2.12.1 reviewer round 7 M1 + round 8: reuse _build_optimizer_risk_factories
+    # helper. Helper now returns warnings list covering index fetch + industry
+    # map issues, so /run, /walk-forward, /search all surface identical
+    # configuration warnings.
     if req.risk_control and req.drawdown_recovery >= req.max_drawdown:
         raise HTTPException(
             422,
             f"drawdown_recovery({req.drawdown_recovery}) must be < "
             f"max_drawdown({req.max_drawdown})",
         )
-    opt_factory, rm_factory, index_weights = _build_optimizer_risk_factories(req)
-    if req.index_benchmark and not index_weights:
-        fund_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
-    if req.optimizer != "none" and req.max_industry_weight < 1.0:
-        # Industry constraint requires fundamental store to have industry data
-        try:
-            from ez.api.deps import get_fundamental_store
-            fstore = get_fundamental_store()
-            if fstore and not fstore.get_all_industries():
-                fund_warnings.append("无行业分类数据，行业约束不生效。请先获取基本面数据。")
-        except Exception:
-            fund_warnings.append("无行业分类数据，行业约束不生效。请先获取基本面数据。")
+    opt_factory, rm_factory, index_weights, helper_warnings = _build_optimizer_risk_factories(req)
+    fund_warnings.extend(helper_warnings)
     # Single backtest — instantiate factories once
     optimizer_instance = opt_factory() if opt_factory else None
     risk_mgr = rm_factory() if rm_factory else None
@@ -844,18 +856,16 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
         slippage_rate=req.slippage_rate,
     )
 
-    # V2.12.1 reviewer round 7 M1: use the shared _build_optimizer_risk_factories
-    # helper so /run, /walk-forward, /search all construct optimizer + risk
-    # manager identically from the shared mixin fields.
+    # V2.12.1 reviewer round 7 M1 + round 8: shared helper returns helper
+    # warnings covering index fetch + industry map issues.
     if req.risk_control and req.drawdown_recovery >= req.max_drawdown:
         raise HTTPException(
             422,
             f"drawdown_recovery({req.drawdown_recovery}) must be < "
             f"max_drawdown({req.max_drawdown})",
         )
-    optimizer_factory, risk_manager_factory, index_weights = _build_optimizer_risk_factories(req)
-    if req.index_benchmark and not index_weights:
-        wf_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
+    optimizer_factory, risk_manager_factory, index_weights, helper_warnings = _build_optimizer_risk_factories(req)
+    wf_warnings.extend(helper_warnings)
 
     try:
         wf_result = portfolio_walk_forward(
@@ -1002,11 +1012,10 @@ def portfolio_search(req: PortfolioSearchRequest):
         slippage_rate=req.slippage_rate,
     )
 
-    # V2.12.1 reviewer round 6 I3: search must use the same optimizer/risk
-    # config as /run, otherwise searched candidates are ranked under a
-    # different execution environment than the final run. Build factories
-    # here (each combo gets a fresh instance inside the loop).
-    _opt_factory, _rm_factory, _index_weights = _build_optimizer_risk_factories(req)
+    # V2.12.1 reviewer round 6 I3 + round 8: search uses the same helper as
+    # /run and /walk-forward, collects helper warnings, creates fresh instance
+    # per combo inside the loop.
+    _opt_factory, _rm_factory, _index_weights, _helper_warns = _build_optimizer_risk_factories(req)
 
     results = []
     # V2.12.1 reviewer round 7: aggregate optimizer fallback events and engine
@@ -1017,13 +1026,18 @@ def portfolio_search(req: PortfolioSearchRequest):
     search_optimizer_fallback_events: list[dict] = []
     search_risk_events: list[dict] = []
     for i, params in enumerate(combos):
+        # Allocate combo-scoped references outside try/except so finally can
+        # reach them (V2.12.1 round 8 M3: prior version lost partial
+        # fallback_events when run_portfolio_backtest raised mid-rebalance).
+        combo_opt = None
+        combo_result = None
         try:
             strategy, _ = _create_strategy(req.strategy_name, params,
                                            symbols=req.symbols, start=start, end=end,
                                            market=req.market, skip_ensure=True)
             combo_opt = _opt_factory() if _opt_factory else None
             combo_rm = _rm_factory() if _rm_factory else None
-            result = run_portfolio_backtest(
+            combo_result = run_portfolio_backtest(
                 strategy=strategy, universe=Universe(req.symbols),
                 universe_data=universe_data, calendar=calendar,
                 start=start, end=end, freq=req.freq,
@@ -1034,14 +1048,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 optimizer=combo_opt,
                 risk_manager=combo_rm,
             )
-            # Capture per-combo optimizer fallbacks and engine risk events
-            if combo_opt is not None and combo_opt.fallback_events:
-                for ev in combo_opt.fallback_events:
-                    search_optimizer_fallback_events.append({**ev, "combo": i})
-            for ev in result.risk_events:
-                search_risk_events.append({**ev, "combo": i})
-
-            m = result.metrics
+            m = combo_result.metrics
             results.append({
                 "rank": 0,
                 "params": params,
@@ -1053,6 +1060,15 @@ def portfolio_search(req: PortfolioSearchRequest):
             })
         except Exception as e:
             logger.warning("Search combo %d/%d failed: %s", i + 1, len(combos), e)
+        finally:
+            # V2.12.1 round 8 M3: aggregate events in finally so partial
+            # events from a crashed combo are still surfaced to users.
+            if combo_opt is not None and combo_opt.fallback_events:
+                for ev in combo_opt.fallback_events:
+                    search_optimizer_fallback_events.append({**ev, "combo": i})
+            if combo_result is not None:
+                for ev in combo_result.risk_events:
+                    search_risk_events.append({**ev, "combo": i})
 
     def _sort_key(r):
         v = r.get("sharpe")
@@ -1064,7 +1080,11 @@ def portfolio_search(req: PortfolioSearchRequest):
         r["rank"] = i + 1
 
     resp = {"results": results, "total_combinations": total_before_truncation, "sampled": len(combos), "completed": len(results)}
-    all_search_warns = (search_funda_warn or []) + ([search_bench_warn] if search_bench_warn else [])
+    all_search_warns = (
+        (search_funda_warn or [])
+        + ([search_bench_warn] if search_bench_warn else [])
+        + _helper_warns  # V2.12.1 round 8: index fetch + industry warnings from helper
+    )
     # Surface optimizer fallback events as a search-wide warning
     if search_optimizer_fallback_events:
         n = len(search_optimizer_fallback_events)
