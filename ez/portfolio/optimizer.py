@@ -75,6 +75,11 @@ class PortfolioOptimizer(ABC):
         self._max_te = max_tracking_error
         self._current_date: date | None = None
         self._universe_data: dict[str, pd.DataFrame] | None = None
+        # V2.12.1 codex follow-up: track fallback events so the API layer can
+        # surface them as user warnings. Prior version only log.warning()'d —
+        # the response looked successful but used equal-weight instead of the
+        # requested optimizer.
+        self.fallback_events: list[dict] = []
 
     def set_context(self, current_date: date,
                     universe_data: dict[str, pd.DataFrame]) -> None:
@@ -99,20 +104,30 @@ class PortfolioOptimizer(ABC):
 
         total_alpha = sum(alpha_weights[s] for s in symbols)
         if total_alpha <= 0:
+            self._record_fallback("total_alpha <= 0")
             return self._fallback(symbols)
         alpha = np.array([alpha_weights[s] / total_alpha for s in symbols])
 
         sigma = self._estimate_covariance(symbols)
         if sigma is None:
+            self._record_fallback("covariance estimation failed (insufficient history)")
             return self._fallback(symbols)
 
         try:
             w = self._optimize(alpha, sigma, symbols)
         except Exception as exc:
             logger.warning("Optimization failed (%s), falling back to equal weight", exc)
+            self._record_fallback(f"optimizer raised: {type(exc).__name__}: {exc}")
             return self._fallback(symbols)
 
         return self._apply_constraints(dict(zip(symbols, w)))
+
+    def _record_fallback(self, reason: str) -> None:
+        """Append a fallback event with the current date and reason."""
+        self.fallback_events.append({
+            "date": str(self._current_date) if self._current_date else "",
+            "reason": reason,
+        })
 
     @abstractmethod
     def _optimize(self, alpha: np.ndarray, sigma: np.ndarray,

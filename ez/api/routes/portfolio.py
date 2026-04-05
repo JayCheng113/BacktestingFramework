@@ -648,6 +648,17 @@ def run_portfolio(req: PortfolioRunRequest):
         else:
             metrics[k] = v
 
+    # V2.12.1 codex follow-up: surface optimizer fallback events as user
+    # warnings. Prior version only logger.warning'd them, so users saw a
+    # "successful" run that silently used equal-weight instead of their
+    # requested optimizer.
+    if optimizer_instance is not None and optimizer_instance.fallback_events:
+        n = len(optimizer_instance.fallback_events)
+        reasons = {ev["reason"] for ev in optimizer_instance.fallback_events}
+        fund_warnings.append(
+            f"优化器在 {n} 次再平衡中退化为等权 (原因: {', '.join(sorted(reasons))[:200]})"
+        )
+
     # Persist
     store = _get_store()
     run_id = store.save_run({
@@ -688,7 +699,15 @@ def run_portfolio(req: PortfolioRunRequest):
         "rebalance_dates": [d.isoformat() for d in result.rebalance_dates],
         "symbols_fetched": fetched_count,
         "symbols_skipped": skipped,
-        "latest_weights": result.weights_history[-1] if result.weights_history else {},
+        # V2.12.1 codex follow-up: return the LAST NON-EMPTY weights entry,
+        # not simply [-1]. The engine appends {} after final liquidation
+        # (#10 attribution fix), so weights_history[-1] is usually empty for
+        # backtests whose final period still held positions. Users want to
+        # see the last actual rebalance weights.
+        "latest_weights": next(
+            (w for w in reversed(result.weights_history) if w),
+            {}
+        ),
         "weights_history": [
             {"date": result.dates[i].isoformat() if i < len(result.dates) else "",
              "weights": result.weights_history[i]}
@@ -725,6 +744,21 @@ class PortfolioWFRequest(BaseModel):
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)
     benchmark_symbol: str = ""
+    # V2.12.1 codex follow-up: walk-forward must use the same optimizer/risk/
+    # index-enhancement config as the main backtest, otherwise the two views
+    # show different strategies for the same user input.
+    optimizer: str = Field(default="none", pattern="^(none|mean_variance|min_variance|risk_parity)$")
+    risk_aversion: float = Field(default=1.0, ge=0)
+    max_weight: float = Field(default=1.0, gt=0, le=1.0)
+    max_industry_weight: float = Field(default=1.0, gt=0, le=1.0)
+    cov_lookback: int = Field(default=60, ge=20, le=252)
+    index_benchmark: str = ""
+    max_tracking_error: float = Field(default=0.05, gt=0, le=0.5)
+    risk_control: bool = False
+    max_drawdown: float = Field(default=0.15, gt=0, le=1.0)
+    drawdown_reduce: float = Field(default=0.5, gt=0, le=1.0)
+    drawdown_recovery: float = Field(default=0.10, gt=0, le=1.0)
+    max_turnover: float = Field(default=1.0, gt=0, le=10.0)
 
 
 @router.post("/walk-forward")
@@ -759,6 +793,73 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
         slippage_rate=req.slippage_rate,
     )
 
+    # V2.12.1 codex follow-up: build optimizer / risk_manager factories matching
+    # the /run endpoint so walk-forward uses the same config as the main backtest.
+    # Factories are used (not instances) because both carry state across days —
+    # every fold needs a fresh copy.
+    index_weights: dict[str, float] = {}
+    if req.index_benchmark:
+        try:
+            from ez.portfolio.index_data import IndexDataProvider
+            idx_provider = IndexDataProvider()
+            index_weights = idx_provider.get_weights(req.index_benchmark)
+            if not index_weights:
+                wf_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
+        except Exception as e:
+            wf_warnings.append(f"指数数据获取失败: {e}")
+
+    optimizer_factory = None
+    if req.optimizer != "none":
+        from ez.portfolio.optimizer import (
+            MeanVarianceOptimizer, MinVarianceOptimizer,
+            RiskParityOptimizer, OptimizationConstraints,
+        )
+        industry_map = {}
+        try:
+            from ez.api.deps import get_fundamental_store
+            fstore = get_fundamental_store()
+            if fstore:
+                industry_map = fstore.get_all_industries()
+        except Exception:
+            pass
+        constraints = OptimizationConstraints(
+            max_weight=req.max_weight,
+            max_industry_weight=req.max_industry_weight,
+            industry_map=industry_map,
+        )
+        opt_extra = {}
+        if index_weights:
+            opt_extra = {"benchmark_weights": index_weights, "max_tracking_error": req.max_tracking_error}
+
+        def _make_optimizer():
+            if req.optimizer == "mean_variance":
+                return MeanVarianceOptimizer(
+                    risk_aversion=req.risk_aversion, constraints=constraints,
+                    cov_lookback=req.cov_lookback, **opt_extra)
+            elif req.optimizer == "min_variance":
+                return MinVarianceOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra)
+            else:  # risk_parity
+                return RiskParityOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra)
+        optimizer_factory = _make_optimizer
+
+    risk_manager_factory = None
+    if req.risk_control:
+        if req.drawdown_recovery >= req.max_drawdown:
+            raise HTTPException(
+                422,
+                f"drawdown_recovery({req.drawdown_recovery}) must be < max_drawdown({req.max_drawdown})",
+            )
+        from ez.portfolio.risk_manager import RiskManager, RiskConfig
+
+        def _make_risk_mgr():
+            return RiskManager(RiskConfig(
+                max_drawdown_threshold=req.max_drawdown,
+                drawdown_reduce_ratio=req.drawdown_reduce,
+                drawdown_recovery_ratio=req.drawdown_recovery,
+                max_turnover=req.max_turnover,
+            ))
+        risk_manager_factory = _make_risk_mgr
+
     try:
         wf_result = portfolio_walk_forward(
             strategy_factory=strategy_factory,
@@ -768,6 +869,8 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             lot_size=req.lot_size, limit_pct=req.limit_pct,
             benchmark_symbol=req.benchmark_symbol,
             t_plus_1=(req.market == "cn_stock"),
+            optimizer_factory=optimizer_factory,
+            risk_manager_factory=risk_manager_factory,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -1071,9 +1174,15 @@ def evaluate_factors(req: FactorEvalRequest):
     start = req.start_date or (end - timedelta(days=365 * 3))
     factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
-    # Dynamic lookback: adapt to the factors actually being evaluated (codex #9)
+    # Dynamic lookback: adapt to the factors actually being evaluated (codex #9).
+    # V2.12.1 reviewer round 5 follow-up: propagate lookback_days to the
+    # evaluator functions too — prior version only lengthened the data fetch
+    # but evaluate_cross_sectional_factor() / compute_factor_correlation()
+    # internally default to 252 and then `slice_universe_data(..., 252)`, so
+    # long-warmup factors were still silently truncated.
+    dynamic_lb = _max_factor_warmup(factors)
     universe_data, calendar = _fetch_data(
-        req.symbols, req.market, start, end, lookback_days=_max_factor_warmup(factors),
+        req.symbols, req.market, start, end, lookback_days=dynamic_lb,
     )
 
     # V2.11.1: Apply industry neutralization if requested
@@ -1096,10 +1205,12 @@ def evaluate_factors(req: FactorEvalRequest):
             factor=factor, universe_data=universe_data, calendar=calendar,
             start=start, end=end, forward_days=req.forward_days,
             eval_freq=req.eval_freq, n_quantiles=req.n_quantiles,
+            lookback_days=dynamic_lb,
         )
         decay = evaluate_ic_decay(
             factor=factor, universe_data=universe_data, calendar=calendar,
             start=start, end=end, lags=[1, 5, 10, 20], eval_freq=req.eval_freq,
+            lookback_days=dynamic_lb,
         )
         results.append({
             "factor_name": result.factor_name,
@@ -1138,14 +1249,17 @@ def factor_correlation(req: FactorCorrelationRequest):
     start = req.start_date or (end - timedelta(days=365 * 3))
     factors = _resolve_factors(req.factor_names, symbols=req.symbols, start=start, end=end)
 
-    # Dynamic lookback: adapt to the factors actually being evaluated (codex #9)
+    # Dynamic lookback: adapt to the factors actually being evaluated (codex #9).
+    # Must be passed to compute_factor_correlation() too, not just to the fetch.
+    dynamic_lb = _max_factor_warmup(factors)
     universe_data, calendar = _fetch_data(
-        req.symbols, req.market, start, end, lookback_days=_max_factor_warmup(factors),
+        req.symbols, req.market, start, end, lookback_days=dynamic_lb,
     )
 
     corr_df = compute_factor_correlation(
         factors=factors, universe_data=universe_data, calendar=calendar,
         start=start, end=end, eval_freq=req.eval_freq,
+        lookback_days=dynamic_lb,
     )
 
     return {

@@ -526,14 +526,24 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           </div>
           {showChat && (
             <div className="border-l" style={{ flex: '0 0 40%', borderColor: 'var(--border)', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-              <ChatPanel editorCode={code} fileKey={filename} onCodeUpdate={(c, f, kind) => {
-                if (c !== undefined && c !== null) setCode(c as string)
-                if (f) {
-                  setFilename(f)
-                  setCurrentKind((kind as CodeKind) || 'strategy')
-                  loadAllFiles()
-                }
-              }} />
+              {/* V2.12.1 codex follow-up: fileKey is {kind}:{filename} so
+                  different kinds with the same filename (e.g. strategies/foo.py
+                  vs cross_factors/foo.py) don't share conversation anchors.
+                  Also: we only update fileKey when there IS a filename (user
+                  still editing a new file passes fileKey="" to avoid binding
+                  conversations to half-typed names). */}
+              <ChatPanel
+                editorCode={code}
+                fileKey={filename ? `${currentKind}:${filename}` : ''}
+                onCodeUpdate={(c, f, kind) => {
+                  if (c !== undefined && c !== null) setCode(c as string)
+                  if (f) {
+                    setFilename(f)
+                    setCurrentKind((kind as CodeKind) || 'strategy')
+                    loadAllFiles()
+                  }
+                }}
+              />
             </div>
           )}
         </div>

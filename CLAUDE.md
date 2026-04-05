@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.1 | Tests: 1773 (1783 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.1 | Tests: 1777 (1787 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -123,7 +123,7 @@ V2.12.1 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest
 
 **影响**: V2.12.1 之前存入 `experiment_runs` 和 `portfolio_runs` 的指标使用旧公式, V2.12.1 之后新建 run 使用新公式. 历史 run 和新 run 的这 5 个指标不可直接比较. 没有迁移脚本 — 历史值保留为记录 (old-formula), 新运行以新公式为准. UI 不区分新旧.
 
-## V2.12.1 codex 审查遗留项 (V2.13+ 处理)
+## V2.12.1 codex 六轮累计遗留项 (V2.13+ 处理)
 - **#7 候选搜索不支持 bool/enum 参数** — web/src/components/CandidateSearch.tsx 的 ParamRangeState 只支持 int/float, generateValues/countValues 也是数值逻辑, 布尔/枚举参数的搜索需要前端 UX 重设计 + 后端 ParamRangeRequest 支持 list[str]/list[bool]. 当前策略作者可以绕过: 用整数编码枚举. 不影响数据正确性.
 - **#18 alpha_combiner 训练窗口固定 365 天** — ez/api/routes/portfolio.py::_compute_alpha_weights 用 start-timedelta(days=365) 作训练区间. 长 warmup 的自定义因子会被喂不足历史. #9 修复后 lookback 已动态, 但训练窗口长度本身还是固定的. 动态化需要更多设计 (训练窗口大小 vs 因子 warmup 的权衡). 暂时把默认值留在 365, 用户可以覆盖 forward_days 间接调整.
 - **#20 multi_select 参数搜索 UX 语义** — PortfolioPanel.tsx 的 paramGrid[key] = vals.map(v => [v]) 让每个候选值独立成一个 combo. 用户输入 "EP,BP,SP,DP" 得到 4 次单因子运行, 而不是多因子组合. 这是产品设计折衷 (单因子搜索 vs 多因子组合空间爆炸), 真正的多因子子集搜索需要 power-set UX. 和上面 "multi_select 参数搜索只搜单因子组合" 同根.

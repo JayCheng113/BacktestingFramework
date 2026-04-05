@@ -299,6 +299,17 @@ def run_portfolio_backtest(
                 raw_shares = target_amount / prices[sym]
                 target_shares[sym] = _lot_round(raw_shares, lot_size)
 
+            # V2.12.1 codex follow-up: track pre-trade equity and trade volume
+            # so we can surface the ACTUAL post-rounding turnover even when
+            # check_turnover() passed the weight-layer limit. Because
+            # _lot_round() rounds DOWN target shares, sell-side deltas can be
+            # larger than what the weight layer intended, pushing realized
+            # turnover above max_turnover — risk_manager.check_turnover()
+            # alone cannot catch this.
+            pre_trade_equity = cash + sum(holdings.get(s, 0) * prices.get(s, 0)
+                                           for s in holdings)
+            trade_volume = 0.0  # sum of |traded value| across all legs
+
             # Execute trades: TWO passes — sells first (free cash), then buys
             all_syms = sorted(holdings.keys() | target_shares.keys())
             sell_syms = [s for s in all_syms if target_shares.get(s, 0) < holdings.get(s, 0)]
@@ -382,6 +393,38 @@ def run_portfolio_backtest(
                     "side": "buy" if delta > 0 else "sell",
                     "shares": abs(delta), "price": price, "cost": total_cost,
                 })
+                # Single-sided turnover: accumulate executed trade value. Use
+                # max(buys, sells) at the end so the ratio matches
+                # risk_manager.check_turnover semantics.
+                trade_volume += amount
+
+            # Post-execution turnover re-check: discrete lot rounding can push
+            # realized turnover above what check_turnover() mixed to. We don't
+            # roll back trades (that would cascade through T+1 / cash / order
+            # dependencies), but we emit a risk_event so users can see when
+            # realized turnover exceeded their configured limit.
+            if risk_manager is not None and pre_trade_equity > 0:
+                # Recompute single-sided turnover from executed trades
+                buy_vol = sum(
+                    abs(t["shares"]) * t["price"]
+                    for t in result.trades
+                    if t.get("date") == day.isoformat() and t.get("side") == "buy"
+                )
+                sell_vol = sum(
+                    abs(t["shares"]) * t["price"]
+                    for t in result.trades
+                    if t.get("date") == day.isoformat() and t.get("side") == "sell"
+                )
+                realized_turnover = max(buy_vol, sell_vol) / pre_trade_equity
+                limit = risk_manager._config.max_turnover
+                if realized_turnover > limit + 1e-6:
+                    result.risk_events.append({
+                        "date": day.isoformat(),
+                        "event": (
+                            f"成交层换手 {realized_turnover:.1%} 超过限制 {limit:.0%} "
+                            f"(权重层 check_turnover 通过, 但 lot_size 取整放大了卖侧)"
+                        ),
+                    })
 
             result.rebalance_dates.append(day)
             result.rebalance_weights.append(dict(weights))  # V2.12: for attribution

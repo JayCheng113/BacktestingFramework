@@ -42,9 +42,14 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     }).catch(() => {})
   }, [])
 
-  // Reset cost settings when market changes (A-share rules only for cn_stock)
+  // Reset cost settings when market changes (A-share rules only for cn_stock).
+  // V2.12.1 codex follow-up: also reset benchmark — previously `...prev.benchmark`
+  // kept the A-share benchmark (e.g. 510300.SH) after switching to US/HK, so the
+  // result page compared US equity curves against a Chinese benchmark, giving
+  // wrong alpha/beta and misleading curve overlays. getDefaultSettings() already
+  // chooses a market-appropriate benchmark (empty for non-CN), so just use it.
   useEffect(() => {
-    setCostSettings(prev => ({ ...getDefaultSettings(market), benchmark: prev.benchmark }))
+    setCostSettings(getDefaultSettings(market))
   }, [market])
 
   const handleRun = async () => {

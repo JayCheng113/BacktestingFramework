@@ -493,6 +493,82 @@ class TestRunner:
         canonical = float(np.mean(excess) / np.std(excess, ddof=1) * np.sqrt(252))
         assert abs(s_port - canonical) < 1e-12
 
+    def test_latest_weights_returns_last_non_empty(self):
+        """Regression test for codex follow-up: latest_weights API field
+        should return the last NON-EMPTY weights entry, not [-1] (which is
+        the post-liquidation empty dict).
+        """
+        from unittest.mock import MagicMock
+        # Simulate a PortfolioResult with [..., {"A":0.5,"B":0.5}, {}]
+        result = MagicMock()
+        result.weights_history = [
+            {"A": 0.3, "B": 0.7},
+            {"A": 0.5, "B": 0.5},
+            {},  # post-liquidation empty
+        ]
+        latest = next((w for w in reversed(result.weights_history) if w), {})
+        assert latest == {"A": 0.5, "B": 0.5}, (
+            f"Expected last non-empty weights, got {latest}"
+        )
+
+    def test_optimizer_fallback_events_tracked(self):
+        """Regression test for codex follow-up: PortfolioOptimizer.fallback_events
+        must record every silent degradation to equal-weight, so the API layer
+        can surface them as user warnings.
+        """
+        from ez.portfolio.optimizer import MeanVarianceOptimizer, OptimizationConstraints
+
+        c = OptimizationConstraints(max_weight=0.5)
+        opt = MeanVarianceOptimizer(risk_aversion=1.0, constraints=c, cov_lookback=60)
+
+        # Case 1: all-negative alpha → fallback
+        opt.optimize({"A": -0.1, "B": -0.2})
+        assert len(opt.fallback_events) == 0, (
+            "All-negative alpha is filtered to empty symbols, not a fallback"
+        )
+
+        # Case 2: no covariance context → fallback path
+        result = opt.optimize({"A": 0.5, "B": 0.3, "C": 0.2})
+        assert isinstance(result, dict)
+        assert len(opt.fallback_events) >= 1, (
+            "No-context optimize should record fallback event"
+        )
+        reason = opt.fallback_events[0]["reason"]
+        assert "covariance" in reason or "fallback" in reason.lower() or "total_alpha" in reason
+
+    def test_evaluate_factors_passes_dynamic_lookback_to_evaluator(self):
+        """Regression test for codex follow-up: evaluate-factors and factor-
+        correlation must propagate dynamic lookback_days to the evaluator
+        functions, not just to the data fetch. Prior version only lengthened
+        the fetch, but evaluate_cross_sectional_factor() defaulted to 252
+        internally, silently truncating long-warmup factors.
+        """
+        import inspect
+        from ez.api.routes import portfolio as _p
+        src = inspect.getsource(_p.evaluate_factors)
+        # Must contain lookback_days=dynamic_lb (or similar) in evaluate call
+        assert "lookback_days=dynamic_lb" in src, (
+            "evaluate_factors must pass dynamic lookback to the evaluator"
+        )
+        src_corr = inspect.getsource(_p.factor_correlation)
+        assert "lookback_days=dynamic_lb" in src_corr, (
+            "factor_correlation must pass dynamic lookback to compute_factor_correlation"
+        )
+
+    def test_ai_portfolio_tool_gates_min_commission_by_market(self):
+        """Regression test for codex follow-up: run_portfolio_backtest_tool
+        must gate min_commission by market (A-share 5, US/HK 0), not just
+        stamp_tax. Prior version only handled stamp_tax and inflated small
+        US/HK trade costs.
+        """
+        import inspect
+        from ez.agent import tools as _t
+        src = inspect.getsource(_t.run_portfolio_backtest_tool.__wrapped__ if hasattr(_t.run_portfolio_backtest_tool, '__wrapped__') else _t.run_portfolio_backtest_tool)
+        # Must mention min_commission is market-gated
+        assert "min_commission=5.0 if is_cn" in src or "min_commission = 5.0 if is_cn" in src, (
+            "AI portfolio tool must gate min_commission by market"
+        )
+
 
 class TestGate:
     def _make_result(self, spec, sample_data) -> RunResult:

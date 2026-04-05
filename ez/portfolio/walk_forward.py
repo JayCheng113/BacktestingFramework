@@ -72,6 +72,8 @@ def portfolio_walk_forward(
     limit_pct: float = 0.10,
     benchmark_symbol: str = "",
     t_plus_1: bool = True,  # V2.12.1 codex reviewer round 4: propagate to run_portfolio_backtest
+    optimizer_factory=None,  # V2.12.1 codex follow-up: propagate to run_portfolio_backtest
+    risk_manager_factory=None,  # V2.12.1 codex follow-up
 ) -> PortfolioWFResult:
     """Run walk-forward validation on a portfolio strategy.
 
@@ -80,6 +82,10 @@ def portfolio_walk_forward(
             Must be a factory (not instance) to reset state between folds.
         n_splits: Number of non-overlapping folds.
         train_ratio: Fraction of each fold used for in-sample.
+        optimizer_factory: Optional callable returning a fresh optimizer per fold
+            (factory, not instance, because optimizers hold context state).
+        risk_manager_factory: Optional callable returning a fresh RiskManager per fold
+            (factory, not instance, because RiskManager tracks drawdown across days).
     """
     if n_splits < 2:
         raise ValueError(f"n_splits must be >= 2, got {n_splits}")
@@ -115,7 +121,7 @@ def portfolio_walk_forward(
         test_start_date = trading_days[train_end_idx]
         test_end_date = trading_days[test_end_idx - 1]
 
-        # Run IS
+        # Run IS — fresh optimizer/risk_manager per fold (they hold state)
         is_result = run_portfolio_backtest(
             strategy=strategy_factory(), universe=universe,
             universe_data=universe_data, calendar=calendar,
@@ -124,9 +130,11 @@ def portfolio_walk_forward(
             cost_model=cost_model, lot_size=lot_size, limit_pct=limit_pct,
             benchmark_symbol=benchmark_symbol,
             t_plus_1=t_plus_1,
+            optimizer=optimizer_factory() if optimizer_factory else None,
+            risk_manager=risk_manager_factory() if risk_manager_factory else None,
         )
 
-        # Run OOS
+        # Run OOS — fresh instances again
         oos_result = run_portfolio_backtest(
             strategy=strategy_factory(), universe=universe,
             universe_data=universe_data, calendar=calendar,
@@ -135,6 +143,8 @@ def portfolio_walk_forward(
             cost_model=cost_model, lot_size=lot_size, limit_pct=limit_pct,
             benchmark_symbol=benchmark_symbol,
             t_plus_1=t_plus_1,
+            optimizer=optimizer_factory() if optimizer_factory else None,
+            risk_manager=risk_manager_factory() if risk_manager_factory else None,
         )
 
         # Extract sharpe

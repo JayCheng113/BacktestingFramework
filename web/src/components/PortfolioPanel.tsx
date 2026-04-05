@@ -101,13 +101,21 @@ export default function PortfolioPanel() {
     return s?.parameters || {}
   }, [strategies, selected])
 
-  // Initialize params from schema defaults when strategy changes
+  // Initialize params from schema defaults when strategy changes.
+  // V2.12.1 codex follow-up: also clear searchGrid and searchResults so the
+  // previous strategy's search state (parameter ranges and ranked results)
+  // doesn't leak onto the new strategy — especially dangerous when two
+  // strategies share a parameter name like 'top_n' which would silently reuse
+  // the old range but apply it to a different strategy's behavior.
   useEffect(() => {
     const defaults: Record<string, any> = {}
     for (const [key, schema] of Object.entries(currentSchema)) {
       defaults[key] = schema.default
     }
     setStrategyParams(defaults)
+    setSearchGrid({})
+    setSearchResults([])
+    setExpandedParams({})
   }, [currentSchema])
 
   useEffect(() => {
