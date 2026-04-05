@@ -5,8 +5,16 @@
 IMPORTANT: Each split's data is strictly non-overlapping to prevent data leakage.
 The engine handles warmup internally — if a split is too short after warmup,
 the engine returns a minimal empty result (this is correct behavior).
+
+V2.12.1 post-review (codex): each split runs on a FRESH deepcopy of the strategy
+to prevent IS→OOS state pollution. Stateful strategies (those that cache
+computed values, maintain counters, or depend on prior calls in instance
+attributes) would otherwise carry IS-phase state into OOS and corrupt the
+walk-forward results.
 """
 from __future__ import annotations
+
+import copy
 
 import pandas as pd
 
@@ -80,10 +88,16 @@ class WalkForwardValidator:
                 continue
 
             # Engine handles warmup internally — short data → empty result (no trades)
-            is_result = self._engine.run(train_data, strategy, initial_capital)
+            # Each split gets a FRESH strategy instance (deepcopy) so IS-phase state
+            # cannot leak into OOS. Without this, stateful strategies (AI-generated
+            # ones that cache intermediate values, strategies with internal counters
+            # or memoization) would produce biased walk-forward results.
+            is_strategy = copy.deepcopy(strategy)
+            is_result = self._engine.run(train_data, is_strategy, initial_capital)
             is_sharpes.append(is_result.metrics.get("sharpe_ratio", 0.0))
 
-            oos_result = self._engine.run(test_data, strategy, initial_capital)
+            oos_strategy = copy.deepcopy(strategy)
+            oos_result = self._engine.run(test_data, oos_strategy, initial_capital)
             oos_sharpes.append(oos_result.metrics.get("sharpe_ratio", 0.0))
 
             splits.append(oos_result)
@@ -96,12 +110,23 @@ class WalkForwardValidator:
             else pd.Series([initial_capital])
         )
 
-        # OOS aggregate metrics
+        # OOS aggregate metrics — recompute from the COMBINED equity curve.
+        # Prior version (codex finding): `sum(oos_sharpes) / len(oos_sharpes)`
+        # averages per-split Sharpe ratios, which is biased when splits have
+        # different lengths or volatility structures. The combined-curve recompute
+        # produces the same Sharpe formula used by single-stock and portfolio
+        # engines (excess daily return / daily std × √252).
         oos_metrics: dict[str, float] = {}
-        if oos_sharpes:
-            oos_metrics["sharpe_ratio"] = sum(oos_sharpes) / len(oos_sharpes)
+        if len(oos_equity) > 1:
+            from ez.backtest.metrics import MetricsCalculator
+            calc = MetricsCalculator()
+            # Benchmark not meaningful in WF aggregate — use flat curve so
+            # alpha/beta are 0 rather than undefined
+            flat_bench = pd.Series([float(oos_equity.iloc[0])] * len(oos_equity))
+            oos_metrics = calc.compute(oos_equity, flat_bench)
 
-        # Degradation: how much worse is OOS vs IS
+        # Degradation: how much worse is OOS vs IS (still based on mean of per-split
+        # Sharpes — this is a cross-split consistency measure, not an aggregate)
         is_mean = sum(is_sharpes) / len(is_sharpes) if is_sharpes else 0.0
         oos_mean = sum(oos_sharpes) / len(oos_sharpes) if oos_sharpes else 0.0
         degradation = (

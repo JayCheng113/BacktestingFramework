@@ -243,6 +243,12 @@ def _run_backtest(
         ]
     ).set_index("time")
 
+    # V2.12.1 post-review (codex): propagate A-share market rules so chat/
+    # research backtest runs use the SAME execution environment as the web
+    # ExperimentPanel (which sets use_market_rules=True for cn_stock). Prior
+    # version inherited RunSpec defaults (use_market_rules=False), producing
+    # systematically different results between the AI assistant and the UI.
+    is_cn = market == "cn_stock"
     spec = RunSpec(
         strategy_name=strategy_name,
         strategy_params=params or {},
@@ -252,6 +258,10 @@ def _run_backtest(
         start_date=start_date,
         end_date=end_date,
         run_wfo=False,
+        use_market_rules=is_cn,
+        t_plus_1=is_cn,
+        price_limit_pct=0.10 if is_cn else 0.0,
+        lot_size=100 if is_cn else 1,
     )
     result = _run_with_timeout(lambda: Runner().run(spec, df), timeout=300)
     if isinstance(result, dict) and "error" in result:
@@ -350,6 +360,8 @@ def _run_experiment(
         ]
     ).set_index("time")
 
+    # Market rules aligned with web ExperimentPanel (codex fix, see _run_backtest)
+    is_cn = market == "cn_stock"
     spec = RunSpec(
         strategy_name=strategy_name,
         strategy_params=params or {},
@@ -358,6 +370,10 @@ def _run_experiment(
         period=period,
         start_date=start_date,
         end_date=end_date,
+        use_market_rules=is_cn,
+        t_plus_1=is_cn,
+        price_limit_pct=0.10 if is_cn else 0.0,
+        lot_size=100 if is_cn else 1,
     )
 
     store = get_experiment_store()
@@ -373,7 +389,10 @@ def _run_experiment(
     report = ExperimentReport.from_result(result, verdict)
     report_dict = report.to_dict()
 
-    store.save_spec(spec.__dict__)
+    # spec.to_dict() — NOT spec.__dict__ — because spec_id is a @property
+    # computed from the other fields, and save_spec() reads spec_dict["spec_id"].
+    # Prior version passed __dict__ which lacks the property → KeyError crash.
+    store.save_spec(spec.to_dict())
     store.save_completed_run(report_dict)
 
     return {

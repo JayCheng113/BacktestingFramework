@@ -108,12 +108,14 @@ def _build_matcher(spec: RunSpec) -> Matcher:
             commission_rate=spec.commission_rate,
             min_commission=spec.min_commission,
         )
-    # V2.6: wrap with market rules if enabled
+    # V2.6: wrap with market rules if enabled.
+    # V2.12.1 post-review (codex): T+1 gated on market to prevent US/HK
+    # backtests accidentally inheriting A-share T+1 from defaults.
     if spec.use_market_rules:
         from ez.core.market_rules import MarketRulesMatcher
         inner = MarketRulesMatcher(
             inner,
-            t_plus_1=spec.t_plus_1,
+            t_plus_1=spec.t_plus_1 and spec.market == "cn_stock",
             price_limit_pct=spec.price_limit_pct,
             lot_size=spec.lot_size,
         )
@@ -132,20 +134,28 @@ class Runner:
         t0 = time.perf_counter()
 
         try:
-            strategy = _resolve_strategy(spec.strategy_name, spec.strategy_params)
             matcher = _build_matcher(spec)
             engine = VectorizedBacktestEngine(matcher=matcher)
 
             bt_result: BacktestResult | None = None
             wf_result: WalkForwardResult | None = None
 
+            # Each phase gets a FRESH strategy instance via re-resolution so
+            # backtest-phase state cannot leak into the WFO phase (codex finding:
+            # Runner previously resolved once and reused, allowing stateful
+            # strategies to carry cached values across phases).
             if spec.run_backtest:
-                bt_result = engine.run(data, strategy, spec.initial_capital)
+                bt_strategy = _resolve_strategy(spec.strategy_name, spec.strategy_params)
+                bt_result = engine.run(data, bt_strategy, spec.initial_capital)
 
             if spec.run_wfo:
+                # WFO will internally deepcopy the strategy per split, but we
+                # still hand it a fresh resolve so the backtest-phase instance
+                # (if any) is never shared.
+                wfo_strategy = _resolve_strategy(spec.strategy_name, spec.strategy_params)
                 validator = WalkForwardValidator(engine)
                 wf_result = validator.validate(
-                    data, strategy,
+                    data, wfo_strategy,
                     n_splits=spec.wfo_n_splits,
                     train_ratio=spec.wfo_train_ratio,
                     initial_capital=spec.initial_capital,

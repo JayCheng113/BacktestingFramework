@@ -95,13 +95,28 @@ def compute_attribution(
     if len(rebalance_dates) < 2 or len(weights_history) < 1:
         return AttributionResult()
 
+    # V2.12.1 post-review (codex): extend the date series with the final
+    # equity-curve date so attribution covers the period from the last
+    # rebalance to liquidation. Previously `range(min(len-1, len))` stopped
+    # one short, leaving the final holding period unattributed — users saw
+    # attribution.cumulative.total_excess that didn't match total_return.
+    effective_dates = list(rebalance_dates)
+    if hasattr(result, 'dates') and result.dates:
+        final_date = result.dates[-1]
+        if final_date > effective_dates[-1]:
+            effective_dates.append(final_date)
+            # Last rebalance weights stay in effect until liquidation; no new
+            # weights entry needed — loop uses weights_history[i] for
+            # effective_dates[i] → effective_dates[i+1].
+
     periods: list[BrinsonAttribution] = []
     # Per-period per-industry effects (for Carino-linked industry accumulation)
     period_industry_effects: list[dict[str, dict[str, float]]] = []
 
-    for i in range(min(len(rebalance_dates) - 1, len(weights_history))):
-        t_start = rebalance_dates[i]
-        t_end = rebalance_dates[i + 1]
+    n_periods = min(len(effective_dates) - 1, len(weights_history))
+    for i in range(n_periods):
+        t_start = effective_dates[i]
+        t_end = effective_dates[i + 1]
         w_p = weights_history[i]
 
         # Dynamic benchmark per period

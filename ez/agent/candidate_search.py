@@ -24,7 +24,15 @@ class ParamRange:
 
 @dataclass
 class SearchConfig:
-    """Configuration for candidate generation."""
+    """Configuration for candidate generation.
+
+    V2.12.1 post-review (codex): now includes A-share market rule fields
+    (use_market_rules / t_plus_1 / price_limit_pct / lot_size) so candidate
+    search produces RunSpecs whose execution environment matches the final
+    experiment run. Prior version omitted these fields, causing the search
+    results to rank strategies under a different execution environment than
+    what the ExperimentPanel would actually use.
+    """
 
     strategy_name: str
     param_ranges: list[ParamRange]
@@ -39,6 +47,11 @@ class SearchConfig:
     commission_rate: float = 0.0003
     min_commission: float = 5.0
     slippage_rate: float = 0.0
+    # Market rules (V2.12.1 codex fix)
+    use_market_rules: bool = False
+    t_plus_1: bool = True
+    price_limit_pct: float = 0.1
+    lot_size: int = 100
 
 
 def grid_search(config: SearchConfig) -> list[RunSpec]:
@@ -103,4 +116,10 @@ def _make_spec(config: SearchConfig, params: dict[str, int | float]) -> RunSpec:
         slippage_rate=config.slippage_rate,
         run_wfo=config.run_wfo,
         wfo_n_splits=config.wfo_n_splits,
+        # Propagate market rule fields so search, prefilter, and full run
+        # all use the same execution environment (codex fix).
+        use_market_rules=config.use_market_rules,
+        t_plus_1=config.t_plus_1,
+        price_limit_pct=config.price_limit_pct,
+        lot_size=config.lot_size,
     )

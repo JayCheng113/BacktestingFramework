@@ -96,7 +96,17 @@ def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
 
 
 def _build_matcher(req: BacktestRequest) -> Matcher:
-    """Build matcher from request params. Falls back to config defaults for None values."""
+    """Build matcher from request params. Falls back to config defaults for None values.
+
+    V2.12.1 post-review (codex): MarketRulesMatcher previously wrapped any
+    request with lot_size > 0, but the frontend passes lot_size=1 for US/HK
+    (to disable lot-size rounding) — and MarketRulesMatcher defaults to
+    t_plus_1=True, silently enforcing A-share T+1 on foreign markets.
+    Fix:
+    - lot_size=1 is treated as "no constraint" (was > 0, now > 1)
+    - t_plus_1 is gated on market == cn_stock, so HK/US future lot_size>1
+      cases will NOT incorrectly apply T+1
+    """
     config = load_config()
     comm_rate = req.commission_rate if req.commission_rate is not None else config.backtest.default_commission_rate
     min_comm = req.min_commission if req.min_commission is not None else config.backtest.default_min_commission
@@ -111,11 +121,13 @@ def _build_matcher(req: BacktestRequest) -> Matcher:
     # Sell-side stamp tax wrapper (A-share: 0.05%)
     if req.stamp_tax_rate > 0:
         inner = _SellSideTaxMatcher(inner, stamp_tax_rate=req.stamp_tax_rate)
-    # Wrap with MarketRulesMatcher if A-share rules requested
-    if req.lot_size > 0 or req.limit_pct > 0:
+    # Wrap with MarketRulesMatcher if A-share rules requested.
+    # lot_size=1 is treated as "no constraint" (avoids the US/HK T+1 leak).
+    if req.lot_size > 1 or req.limit_pct > 0:
         inner = MarketRulesMatcher(
             inner=inner,
-            lot_size=req.lot_size if req.lot_size > 0 else 0,
+            t_plus_1=(req.market == "cn_stock"),  # T+1 is A-share only
+            lot_size=req.lot_size if req.lot_size > 1 else 0,
             price_limit_pct=req.limit_pct if req.limit_pct > 0 else 0,
         )
     return inner

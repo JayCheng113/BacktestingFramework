@@ -465,7 +465,16 @@ def run_portfolio_backtest(
         total_ret = eq[-1] / eq[0] - 1
         ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1 if n_years > 0 else 0
         vol = np.std(returns) * np.sqrt(252) if len(returns) > 1 else 0
-        sharpe = ann_ret / vol if vol > 0 else 0
+        # Standard Sharpe formula matching ez/backtest/metrics.py (codex finding):
+        # prior version used `ann_ret / vol`, but single-stock and WF used
+        # `excess.mean() / excess.std() × √252` with 3% risk-free rate. Same name,
+        # different semantics → portfolio ranking could not be compared with
+        # single-stock results. Unified to the standard daily-excess formula.
+        RF_ANNUAL = 0.03
+        daily_rf = RF_ANNUAL / 252
+        excess = returns - daily_rf
+        excess_std = float(np.std(excess))
+        sharpe = float(np.mean(excess) / excess_std * np.sqrt(252)) if excess_std > 1e-10 else 0.0
         drawdown = (eq / np.maximum.accumulate(eq)) - 1
         max_dd = float(np.min(drawdown))
 

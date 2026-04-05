@@ -137,8 +137,18 @@ class TestAttributionEngineIntegration:
         industry_map = {f"S{i}": f"ind{i % 2}" for i in range(5)}
         attr = compute_attribution(result, data, industry_map, initial_cash=1_000_000)
 
-        # Must have periods matching rebalance intervals
-        assert len(attr.periods) == len(result.rebalance_dates) - 1
+        # V2.12.1 post-review (codex): attribution now covers (N-1) rebalance
+        # intervals PLUS the final period from the last rebalance to liquidation
+        # (result.dates[-1]), so periods == rebalance_dates rather than
+        # rebalance_dates - 1. Prior version left the final holding period
+        # unattributed, making cumulative.total_excess inconsistent with
+        # total_return whenever positions remained at period end.
+        expected_periods = len(result.rebalance_dates)
+        # If the engine's final date (liquidation) is later than the last
+        # rebalance, we get one extra attribution period for that segment.
+        if result.dates and result.dates[-1] <= result.rebalance_dates[-1]:
+            expected_periods = len(result.rebalance_dates) - 1
+        assert len(attr.periods) == expected_periods
         # Brinson identity must hold
         for p in attr.periods:
             recon = p.allocation_effect + p.selection_effect + p.interaction_effect

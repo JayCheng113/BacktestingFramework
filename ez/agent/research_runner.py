@@ -78,12 +78,24 @@ def _run_batch_for_strategies(
     data: pd.DataFrame,
     gate_config: GateConfig,
 ) -> tuple:
-    """Create RunSpecs and run batch. Returns (batch_result, spec_ids)."""
+    """Create RunSpecs and run batch. Returns (batch_result, spec_ids).
+
+    V2.12.1 post-review (codex): research batch now propagates A-share market
+    rules so research-discovered strategies are evaluated in the same execution
+    environment as the ExperimentPanel. Prior version used RunSpec defaults
+    (use_market_rules=False), so research results ranked under different rules
+    than the final promoted/experiment run — undermining promotion credibility.
+    """
+    is_cn = goal.market == "cn_stock"
     specs = [
         RunSpec(
             strategy_name=name, strategy_params={},
             symbol=goal.symbol, market=goal.market, period=goal.period,
             start_date=goal.start_date, end_date=goal.end_date,
+            use_market_rules=is_cn,
+            t_plus_1=is_cn,
+            price_limit_pct=0.10 if is_cn else 0.0,
+            lot_size=100 if is_cn else 1,
         )
         for name in strategy_names
     ]

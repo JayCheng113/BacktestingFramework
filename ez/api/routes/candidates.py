@@ -36,6 +36,13 @@ class SearchRequest(BaseModel):
     n_samples: int = Field(default=20, ge=1, le=1000)
     seed: int | None = None
 
+    # Market rules (V2.12.1 codex fix): propagate to RunSpec so search runs
+    # in the same execution environment as the final experiment
+    use_market_rules: bool = False
+    t_plus_1: bool = True
+    price_limit_pct: float = 0.1
+    lot_size: int = 100
+
     # Pre-filter
     prefilter_min_sharpe: float = 0.0
     prefilter_max_drawdown: float = 0.5
@@ -60,6 +67,10 @@ def _build_search_config(req: SearchRequest) -> SearchConfig:
         end_date=req.end_date,
         run_wfo=req.run_wfo,
         wfo_n_splits=req.wfo_n_splits,
+        use_market_rules=req.use_market_rules,
+        t_plus_1=req.t_plus_1,
+        price_limit_pct=req.price_limit_pct,
+        lot_size=req.lot_size,
     )
 
 
@@ -89,12 +100,18 @@ def search_candidates(req: SearchRequest):
     data = _fetch_data(req.symbol, req.market, req.period, req.start_date, req.end_date)
     store = get_experiment_store()
 
+    # V2.12.1 post-review (codex): align gate.require_wfo with search.run_wfo.
+    # Prior version: SearchRequest.run_wfo defaults to False, but GateConfig
+    # defaults require_wfo to True — causing ALL candidates to systematically
+    # fail the gate regardless of metrics. Now require_wfo follows the search
+    # request flag so a backtest-only search produces valid gate verdicts.
     batch_config = BatchConfig(
         gate_config=GateConfig(
             min_sharpe=req.gate_min_sharpe,
             max_drawdown=req.gate_max_drawdown,
             min_trades=req.gate_min_trades,
             max_p_value=req.gate_max_p_value,
+            require_wfo=req.run_wfo,
         ),
         prefilter_config=PrefilterConfig(
             min_sharpe=req.prefilter_min_sharpe,
