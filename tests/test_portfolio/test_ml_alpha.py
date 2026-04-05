@@ -161,6 +161,34 @@ class TestMLAlphaValidation:
         alpha = MLAlpha(**valid_kwargs)
         assert alpha._embargo_days == 0
 
+    def test_feature_warmup_days_included_in_warmup_period(self, valid_kwargs):
+        """V2.13 round 6 reviewer I1: feature_warmup_days must be
+        included in warmup_period so TopNRotation.lookback_days
+        propagates the full requirement to the engine."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["train_window"] = 400
+        valid_kwargs["purge_days"] = 5
+        valid_kwargs["embargo_days"] = 2
+        valid_kwargs["feature_warmup_days"] = 100  # rolling(100) warmup
+        alpha = MLAlpha(**valid_kwargs)
+        # warmup = 400 + 5 + 2 + 100 = 507
+        assert alpha.warmup_period == 507
+
+    def test_feature_warmup_days_zero_default(self, valid_kwargs):
+        """feature_warmup_days defaults to 0 (backward compatible)."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        alpha = MLAlpha(**valid_kwargs)
+        assert alpha._feature_warmup_days == 0
+        # warmup = train_window(60) + purge(5) + embargo(0) + feature(0) = 65
+        assert alpha.warmup_period == 65
+
+    @pytest.mark.parametrize("bad", [-1, -10])
+    def test_feature_warmup_days_must_be_non_negative(self, valid_kwargs, bad):
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["feature_warmup_days"] = bad
+        with pytest.raises(ValueError, match="feature_warmup_days"):
+            MLAlpha(**valid_kwargs)
+
     @pytest.mark.parametrize("bad", [None, "not_a_function", 42, [1, 2, 3]])
     def test_model_factory_must_be_callable(self, valid_kwargs, bad):
         """model_factory must be a callable. Non-callable raises TypeError
@@ -369,6 +397,40 @@ class TestMLAlphaEstimatorWhitelist:
                 target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
                 train_window=60, retrain_freq=20, purge_days=5,
             )
+
+    def test_factory_returning_different_class_rejected_at_init(self):
+        """V2.13 round 6 reviewer I2: MH1 singleton check calls factory
+        twice (probe1 + probe2). probe1 is validated by
+        _assert_supported_estimator, but probe2 was NOT. A factory that
+        returns Ridge on the first call and SVR on the second would pass
+        __init__ silently, deferring the rejection to the first _retrain.
+
+        Fix: validate probe2 too. The mismatch should fail at construction
+        time, not during the first compute.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.linear_model import Ridge
+        from sklearn.svm import SVR
+
+        call_count = {"n": 0}
+
+        def switching_factory():
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return Ridge(alpha=1.0)  # probe1 — whitelist
+            return SVR()  # probe2 — NOT on whitelist
+
+        # MUST raise at __init__, not at compute
+        with pytest.raises(UnsupportedEstimatorError, match="whitelist"):
+            MLAlpha(
+                name="t",
+                model_factory=switching_factory,
+                feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"]}),
+                target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+        # Factory was called exactly twice (probe1 + probe2), then rejected
+        assert call_count["n"] == 2
 
     def test_factory_returning_fresh_instance_accepted(self):
         """Regression: the singleton detector must NOT reject a legitimate
@@ -2408,7 +2470,17 @@ class TestMLAlphaContractEdgeCases:
 
     def test_factory_returning_different_class_on_retrain_rejected(self):
         """Model factory that returns a different estimator class on a
-        later call must be caught by the re-check in _retrain."""
+        later call must be caught by the re-check in _retrain.
+
+        V2.13 round 6 I2 update: __init__ now calls factory TWICE
+        (probe1 + probe2) and validates BOTH via _assert_supported_estimator.
+        So the switching point must be call 3+ (the first _retrain call).
+
+        Call sequence:
+            Call 1: __init__ probe1 → Ridge (whitelist passes)
+            Call 2: __init__ probe2 → Ridge (whitelist passes, singleton check: different id → OK)
+            Call 3: _retrain → SVR (whitelist re-check raises UnsupportedEstimatorError)
+        """
         from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.linear_model import Ridge
         from sklearn.svm import SVR
@@ -2417,14 +2489,14 @@ class TestMLAlphaContractEdgeCases:
 
         def factory():
             call_count["n"] += 1
-            # __init__ probe (1st call): return a valid Ridge
-            # _retrain calls (2nd+): return a rejected SVR
-            if call_count["n"] == 1:
+            # Calls 1-2: __init__ probes → return valid Ridge
+            # Call 3+: _retrain → return rejected SVR
+            if call_count["n"] <= 2:
                 return Ridge(alpha=1.0)
             return SVR()  # not on whitelist
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
-        # __init__ accepts Ridge
+        # __init__ accepts Ridge on both probe calls
         alpha = MLAlpha(
             name="t",
             model_factory=factory,
@@ -2434,6 +2506,7 @@ class TestMLAlphaContractEdgeCases:
             target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
             train_window=60, retrain_freq=20, purge_days=5,
         )
+        assert call_count["n"] == 2  # both probes
         # compute → first _retrain → factory returns SVR → rejected
         with pytest.raises(UnsupportedEstimatorError, match="whitelist"):
             alpha.compute(data, datetime(2022, 8, 1))
@@ -2514,4 +2587,5 @@ class TestMLAlphaTemplate:
 
         instance = cls()
         assert instance.name == "bar_ridge"
-        assert instance.warmup_period == 120 + 5 + 2  # train_window + purge + embargo
+        # train_window=120 + purge=5 + embargo=2 + feature_warmup=20 = 147
+        assert instance.warmup_period == 120 + 5 + 2 + 20

@@ -198,6 +198,16 @@ class MLAlpha(CrossSectionalFactor):
             in typical target functions. This is NOT calendar days.
         embargo_days: Additional trading-day buffer on top of purge_days.
             Defaults to 0 (purge alone matches the minimum safe gap).
+        feature_warmup_days: Number of **trading days** consumed by the
+            ``feature_fn``'s own internal rolling/pct_change warmup.
+            Defaults to 0. If your feature_fn uses ``rolling(100).std()``,
+            set ``feature_warmup_days=100`` so that ``warmup_period``
+            correctly includes this overhead and the engine fetches enough
+            history. Without this, the first ``train_window`` rows after
+            purge+embargo will be shortened by the feature NaN head,
+            silently corrupting the model with fewer samples than you
+            intended. A runtime warning fires if actual per-symbol rows
+            fall below 90% of ``train_window`` (see ``_retrain``).
     """
 
     def __init__(
@@ -210,6 +220,7 @@ class MLAlpha(CrossSectionalFactor):
         retrain_freq: int,
         purge_days: int,
         embargo_days: int = 0,
+        feature_warmup_days: int = 0,
     ):
         # Callable-ness validation. Do this FIRST (before the sklearn
         # probe below) so that a None / str / int model_factory raises a
@@ -239,6 +250,10 @@ class MLAlpha(CrossSectionalFactor):
             raise ValueError(f"purge_days must be >= 0, got {purge_days}")
         if embargo_days < 0:
             raise ValueError(f"embargo_days must be >= 0, got {embargo_days}")
+        if feature_warmup_days < 0:
+            raise ValueError(
+                f"feature_warmup_days must be >= 0, got {feature_warmup_days}"
+            )
 
         self._name = name
         self._model_factory = model_factory
@@ -248,6 +263,7 @@ class MLAlpha(CrossSectionalFactor):
         self._retrain_freq = retrain_freq
         self._purge_days = purge_days
         self._embargo_days = embargo_days
+        self._feature_warmup_days = feature_warmup_days
 
         # V1 safety: validate the estimator BEFORE any fit happens. Raises
         # UnsupportedEstimatorError if the class is not on the whitelist
@@ -295,6 +311,12 @@ class MLAlpha(CrossSectionalFactor):
                 f"estimator on every call (called multiple times across "
                 f"fold boundaries)."
             ) from e
+        # V2.13 round 6 reviewer I2: probe2 must ALSO pass the whitelist.
+        # A factory that returns Ridge on call 1 and SVR on call 2 would
+        # otherwise silently pass __init__ and fail later at _retrain.
+        # Fail fast at construction time — this matches the "hard config
+        # error" tier of our exception handling strategy.
+        _assert_supported_estimator(probe2)
         if probe is probe2:
             raise TypeError(
                 f"model_factory() returned the SAME instance on two "
@@ -333,6 +355,10 @@ class MLAlpha(CrossSectionalFactor):
         # V2.13 round 5 codex-H: feature schema drift (column order)
         self._feature_schema_drift_warned: bool = False
         self._trained_feature_cols: list[str] | None = None
+        # V2.13 round 6 reviewer I1: runtime shortfall detection.
+        # If the actual per-symbol panel rows fall below train_window
+        # by > 10%, the feature_fn is eating more warmup than declared.
+        self._train_shortfall_warned: bool = False
 
     @property
     def name(self) -> str:
@@ -340,11 +366,21 @@ class MLAlpha(CrossSectionalFactor):
 
     @property
     def warmup_period(self) -> int:
-        # Need at least train_window + purge + embargo TRADING days of
-        # history before the first prediction date can be made. All three
-        # quantities are in the same unit (trading days / data rows), so
-        # summing them is exact — not an estimate.
-        return self._train_window + self._purge_days + self._embargo_days
+        # Need at least train_window + purge + embargo + feature_warmup
+        # TRADING days of history before the first prediction date can
+        # be made. All four quantities are in the same unit (trading
+        # days / data rows), so summing them is exact.
+        #
+        # feature_warmup_days covers the user's own rolling/pct_change
+        # warmup inside feature_fn. Without it, rolling(100).std() would
+        # eat 100 rows off the top of every training panel, silently
+        # shrinking the effective train_window. V2.13 round 6 I1 fix.
+        return (
+            self._train_window
+            + self._purge_days
+            + self._embargo_days
+            + self._feature_warmup_days
+        )
 
     def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
         """Return per-symbol predictions at ``date``.
@@ -544,6 +580,34 @@ class MLAlpha(CrossSectionalFactor):
         # so a reorder between training and predict silently produces
         # wrong predictions. Store as list to preserve order.
         self._trained_feature_cols = list(X.columns)
+
+        # V2.13 round 6 reviewer I1: runtime shortfall detection.
+        # If feature_fn eats more rows than the user declared via
+        # feature_warmup_days, the effective training panel will be
+        # shorter than train_window. This is a silent data-correctness
+        # bug — the model trains on fewer samples than intended. Emit a
+        # one-shot warning suggesting the user bump feature_warmup_days.
+        if not self._train_shortfall_warned:
+            n_syms = X.index.get_level_values("symbol").nunique()
+            if n_syms > 0:
+                rows_per_sym = len(X) / n_syms
+                threshold = self._train_window * 0.9
+                if rows_per_sym < threshold:
+                    _logger.warning(
+                        "MLAlpha[%s]: training panel at %s has %.0f rows "
+                        "per symbol (across %d symbols), which is < 90%% "
+                        "of train_window=%d. Your feature_fn likely "
+                        "consumes %.0f rows of warmup (e.g., rolling/pct_change "
+                        "NaN head). Set feature_warmup_days=%d to request "
+                        "enough history from the engine. Currently "
+                        "feature_warmup_days=%d. (one-shot warning)",
+                        self._name, current, rows_per_sym, n_syms,
+                        self._train_window,
+                        self._train_window - rows_per_sym,
+                        int(self._train_window - rows_per_sym) + 5,
+                        self._feature_warmup_days,
+                    )
+                    self._train_shortfall_warned = True
 
     def _build_training_panel(
         self,
@@ -1022,5 +1086,12 @@ class {class_name}(MLAlpha):
             retrain_freq=21,   # ~monthly retraining
             purge_days=5,      # matches target's 5-day forward horizon
             embargo_days=2,    # safety buffer
+            # feature_warmup_days: set to the longest rolling/pct_change
+            # window inside _feature_fn. The default _feature_fn above uses
+            # rolling(20) → set to 20. If you change _feature_fn to use
+            # rolling(100), bump this to 100 — otherwise the engine won't
+            # fetch enough history, and your training panel will be 80
+            # rows short of train_window with NO warning.
+            feature_warmup_days=20,
         )
 '''
