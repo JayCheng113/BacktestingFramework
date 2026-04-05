@@ -370,10 +370,15 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   }
 
   // Sidebar file item renderer
+  // V2.12.2 codex round 8 reviewer: highlight uses committedFilename (not
+  // live filename input) for consistency with deleteFile + fileKey. The
+  // highlight now tracks "which file is actually loaded in the editor
+  // buffer" rather than "what the input field says", which is the stable
+  // identity users care about.
   const renderFileItem = (f: FileInfo, kind: CodeKind) => (
     <div key={`${kind}:${f.filename}`}
       className="flex items-center justify-between px-2 py-1 rounded cursor-pointer text-xs group"
-      style={{ backgroundColor: f.filename === filename && currentKind === kind ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
+      style={{ backgroundColor: f.filename === committedFilename && currentKind === kind ? 'var(--bg-primary)' : 'transparent', color: 'var(--text-primary)' }}
       onClick={() => loadFile(f.filename, kind)}>
       <span className="truncate" title={f.class_name || f.filename}>{f.class_name || f.filename}</span>
       <button onClick={e => { e.stopPropagation(); deleteFile(f.filename, kind) }}

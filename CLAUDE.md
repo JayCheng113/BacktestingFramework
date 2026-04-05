@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 1789 (1799 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.2 | Tests: 1805 (1815 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -156,3 +156,4 @@ V2.12.2 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest
 - **Portfolio 引擎 lookback 硬校验只 warn 不 raise** — #22 修复加了 warning log 但不 raise, 保留向后兼容. 有误差但可诊断. 硬 raise 需要确认所有 builtin 策略的 lookback_days 声明正确.
 - **WalkForward deepcopy 对 unpicklable state 敏感** — ez/backtest/walk_forward.py 每折 copy.deepcopy(strategy) 防 IS/OOS 状态污染. 对 hold DuckDB 连接 / 文件句柄 / httpx client 的 strategy 会 raise TypeError. 当前 single-stock builtin strategies 都没有这类字段, 但用户自定义策略需要避免 (或者改用 strategy_factory 模式, 组合 WF 已经这样做). 文档提醒: Strategy 子类尽量只 hold 纯数据字段, 避免 DB/file/network refs.
 - **API 层 stamp_tax_rate 默认 0.0005 不按 market gate** — PortfolioRunRequest/PortfolioWFRequest/PortfolioSearchRequest 的 Pydantic 默认是 A 股. 前端 getDefaultSettings 按 market 传 0, 所以 UI 路径 OK; 但非 UI 客户端 (测试, 外部脚本, 直接 HTTP 不传该字段) 会给 US/HK 错加中国印花税. 真正的 defense-in-depth 需要 model_validator 或 endpoint 层 coerce. 风险低 (几乎所有客户端都是 UI).
+- **部分前端异步 handler 还没有 race token 保护** — round 8 给 BacktestPanel.handleRun / PortfolioPanel.handleRun/handleWalkForward/handleSearch / PortfolioRunContent.handleLoadFullWeights 加了 runTokenRef 模式防止输入变更后旧响应污染 state, 但还有 4 个 handler 未覆盖: PortfolioPanel.handleEvaluateFactors (evalResult/corrResult), handleFetchFundamental (fundaStatus/qualityReport), handleCompare (compareData), CodeEditor.loadFile (code/filename). 这几个对应的写操作都有 sibling 清理 useEffect 所以 late writes 会被覆盖成新输入的空状态 (或被新点击覆盖), 视觉上可能有短暂闪烁但无数据正确性问题. 未来如果用户报告 race 再补全. 参考 round 8 reviewer 建议.

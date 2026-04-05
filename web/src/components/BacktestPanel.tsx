@@ -240,6 +240,13 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             // version left the previous mode's buy/sell markers on the
             // chart after switching modes, misleading the user into
             // thinking the markers belonged to the new mode's run.
+            // V2.12.2 codex round 8 reviewer: also bump runTokenRef so
+            // any in-flight request under the old mode is invalidated.
+            // Without this, a pending backtest response would land in
+            // `result` even after switching to walk-forward (invisible
+            // bloat, not a visible bug but inconsistent with the rest
+            // of round 8's race guards).
+            runTokenRef.current += 1
             setMode(e.target.value as any); setResult(null); setWfResult(null); onTradesUpdate?.([])
           }}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>

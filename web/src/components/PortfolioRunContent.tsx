@@ -129,6 +129,13 @@ export default function PortfolioRunContent(props: Props) {
   // resume. Prior version only cleared fullWeights on run_id change but
   // did not invalidate in-flight requests — a late response from the
   // previous run would still write its data back, polluting the new run.
+  //
+  // NOTE: this guard works in tandem with the `setFullWeights(null)`
+  // clearing effect below — if a microtask slips through the ref-sync
+  // timing window (React batches setState → useEffect → ref update),
+  // the sibling clearing effect still wipes any stale write in the
+  // same batch. Do not remove the clearing effect without replacing
+  // the guard with a tighter synchronization primitive.
   const currentRunIdRef = useRef<string | undefined>(result?.run_id)
   useEffect(() => {
     currentRunIdRef.current = result?.run_id
