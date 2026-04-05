@@ -3,7 +3,7 @@ import type { PortfolioRunResult, ParamSchema, ActiveWeight } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import BacktestSettings from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getPortfolioRunHoldings } from '../api'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -124,6 +124,15 @@ export default function PortfolioRunContent(props: Props) {
   // Local state for full weights loading
   const [fullWeights, setFullWeights] = useState<{ date: string; weights: Record<string, number> }[] | null>(null)
   const [weightsLoading, setWeightsLoading] = useState(false)
+  // V2.12.2 codex round 8: track the current result.run_id in a ref so
+  // the async handler can check whether the run is still current on
+  // resume. Prior version only cleared fullWeights on run_id change but
+  // did not invalidate in-flight requests — a late response from the
+  // previous run would still write its data back, polluting the new run.
+  const currentRunIdRef = useRef<string | undefined>(result?.run_id)
+  useEffect(() => {
+    currentRunIdRef.current = result?.run_id
+  }, [result?.run_id])
 
   // V2.12.1 post-review (codex #21): clear stale fullWeights whenever the
   // underlying run changes. Prior version only set fullWeights on manual
@@ -135,7 +144,8 @@ export default function PortfolioRunContent(props: Props) {
   }, [result?.run_id])
 
   const handleLoadFullWeights = async () => {
-    if (!result?.run_id) return
+    const requestedRunId = result?.run_id
+    if (!requestedRunId) return
     setWeightsLoading(true)
     try {
       // V2.12.2 codex: call /holdings to get ACTUAL post-execution weights
@@ -144,11 +154,20 @@ export default function PortfolioRunContent(props: Props) {
       // under the same "加载完整历史" button: before click the pie chart
       // showed actual latest_weights; after click the table switched to
       // rebalance targets. Users could not tell which was which.
-      const res = await getPortfolioRunHoldings(result.run_id)
+      const res = await getPortfolioRunHoldings(requestedRunId)
+      // V2.12.2 codex round 8: only apply the response if the current run
+      // is STILL the one we requested. Prior version wrote the data
+      // unconditionally, so switching runs during fetch caused the old
+      // run's holdings table to appear under the new run's pie chart.
+      if (currentRunIdRef.current !== requestedRunId) return  // superseded
       setFullWeights(res.data.weights_history || [])
     } catch (e: any) {
-      alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
-    } finally { setWeightsLoading(false) }
+      if (currentRunIdRef.current === requestedRunId) {
+        alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
+      }
+    } finally {
+      if (currentRunIdRef.current === requestedRunId) setWeightsLoading(false)
+    }
   }
 
   const equityOption = result ? {

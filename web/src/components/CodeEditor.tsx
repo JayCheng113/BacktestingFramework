@@ -346,7 +346,15 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         // Prior version matched only by filename, so deleting e.g. a strategy
         // `my.py` would clear an unrelated factor `my.py` that happened to be
         // open in the editor.
-        if (fname === filename && kind === currentKind) {
+        //
+        // V2.12.2 codex round 8: match against `committedFilename`, not the
+        // live `filename` input. If the user started renaming the file
+        // (changed the input without saving) and then deleted the original
+        // from the sidebar, the live `filename` would no longer match
+        // `fname`, so the old check failed and the editor kept the deleted
+        // file's source. `committedFilename` is the stable identity of
+        // what's actually loaded in the editor buffer.
+        if (fname === committedFilename && kind === currentKind) {
           setCode('')
           setFilename('')
           setCommittedFilename('')

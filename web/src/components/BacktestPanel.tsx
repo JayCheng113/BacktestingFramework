@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listStrategies, runBacktest, runWalkForward } from '../api'
 import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
@@ -24,6 +24,12 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [wfResult, setWfResult] = useState<WalkForwardResult | null>(null)
   const [loading, setLoading] = useState(false)
+  // V2.12.2 codex round 8: monotonic run token for stale-response
+  // invalidation. Every handleRun increments this; every await resolution
+  // checks whether the token still matches before writing result state.
+  // Input-change useEffect also increments to invalidate in-flight
+  // requests when the user changes symbol/market/params mid-request.
+  const runTokenRef = useRef(0)
 
   useEffect(() => {
     listStrategies().then(r => {
@@ -62,6 +68,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   // version left stale result visible when only strategy params or cost
   // settings changed.
   useEffect(() => {
+    // V2.12.2 codex round 8: bump runTokenRef to invalidate any in-flight
+    // request. Without this, a pending response from before the input
+    // change would still pass its token check on return and re-populate
+    // the result state the user just cleared.
+    runTokenRef.current += 1
     setResult(null)
     setWfResult(null)
     onTradesUpdate?.([])
@@ -75,6 +86,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
 
   const handleRun = async () => {
     if (!selected || !symbol) return
+    // V2.12.2 codex round 8: capture a per-request token. The response
+    // handler only applies setState if this token is still the latest —
+    // otherwise the request was superseded by an input change or a new
+    // run click, and its response is stale.
+    const myToken = ++runTokenRef.current
     setLoading(true)
     setResult(null)
     setWfResult(null)
@@ -101,6 +117,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           strategy_params: params, start_date: startDate, end_date: endDate,
           ...costParams,
         })
+        if (runTokenRef.current !== myToken) return  // superseded
         setResult(res.data)
         onTradesUpdate?.(res.data.trades || [])
       } else {
@@ -110,10 +127,16 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           n_splits: nSplits,
           ...costParams,
         })
+        if (runTokenRef.current !== myToken) return  // superseded
         setWfResult(res.data)
       }
-    } catch (e: any) { alert(e?.response?.data?.detail || 'Failed') }
-    finally { setLoading(false) }
+    } catch (e: any) {
+      if (runTokenRef.current === myToken) alert(e?.response?.data?.detail || 'Failed')
+    } finally {
+      // Only reset loading if we're still the latest request — otherwise
+      // a newer in-flight request would be marked as "done" prematurely.
+      if (runTokenRef.current === myToken) setLoading(false)
+    }
   }
 
   const onStrategyChange = (key: string) => {

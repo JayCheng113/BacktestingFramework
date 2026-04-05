@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, deletePortfolioRun, getPortfolioRun, evaluateFactors, factorCorrelation, portfolioWalkForward, fetchFundamentalData, fundamentalDataQuality, portfolioSearch } from '../api'
 import { DEFAULT_SETTINGS, getDefaultSettings } from './BacktestSettings'
 import type { PortfolioRunResult, HistoryRun, ParamSchema } from '../types'
@@ -99,6 +99,14 @@ export default function PortfolioPanel() {
   const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({})
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchResults, setSearchResults] = useState<any[]>([])
+  // V2.12.2 codex round 8: monotonic tokens for stale-response
+  // invalidation. Each handler (run/wf/search) bumps its own token
+  // before awaiting and checks on resume whether the token is still
+  // the latest. Input-change useEffects also bump to invalidate
+  // in-flight requests when inputs change mid-request.
+  const runTokenRef = useRef(0)
+  const wfTokenRef = useRef(0)
+  const searchTokenRef = useRef(0)
   // V2.12.2 codex: track sampled/completed/failed counts + failed combos
   // so the UI can show "N of M combos failed" banner instead of silently
   // dropping failures from the results list.
@@ -144,6 +152,12 @@ export default function PortfolioPanel() {
   // optimizer or cost model. Using JSON stringify for deep equality on
   // dict-shaped state (acceptable overhead for ~10 KB).
   useEffect(() => {
+    // V2.12.2 codex round 8: bump all three request tokens to invalidate
+    // any in-flight run / WF / search that would otherwise re-populate
+    // the state we just cleared when its response finally arrives.
+    runTokenRef.current += 1
+    wfTokenRef.current += 1
+    searchTokenRef.current += 1
     setResult(null)
     setWfResult(null)
     setSearchResults([])
@@ -164,6 +178,12 @@ export default function PortfolioPanel() {
   // results) leak from the previous market. Backend silently accepted the
   // stale A-share cost model and index benchmark when user ran US/HK runs.
   useEffect(() => {
+    // V2.12.2 codex round 8: bump tokens so any in-flight request under
+    // the previous market is invalidated (would otherwise mix A-share
+    // results into US/HK page).
+    runTokenRef.current += 1
+    wfTokenRef.current += 1
+    searchTokenRef.current += 1
     // Re-apply market-appropriate cost model + rules
     setSettings(getDefaultSettings(market))
     // Non-cn_stock has no A-share index benchmark — reset to "none"
@@ -335,6 +355,9 @@ export default function PortfolioPanel() {
   }
 
   const handleRun = async () => {
+    // V2.12.2 codex round 8: capture per-request token. Check on resume
+    // to reject stale responses after input change or new run.
+    const myToken = ++runTokenRef.current
     setLoading(true); setResult(null); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
@@ -366,14 +389,21 @@ export default function PortfolioPanel() {
         index_benchmark: indexBenchmark,
         max_tracking_error: trackingError / 100,
       })
+      if (runTokenRef.current !== myToken) return  // superseded
       setResult(res.data)
       loadHistory()
     } catch (e: any) {
-      alert(e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
-    } finally { setLoading(false) }
+      if (runTokenRef.current === myToken) {
+        alert(e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
+      }
+    } finally {
+      if (runTokenRef.current === myToken) setLoading(false)
+    }
   }
 
   const handleWalkForward = async () => {
+    // V2.12.2 codex round 8: stale-response token.
+    const myToken = ++wfTokenRef.current
     setWfLoading(true); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
@@ -410,11 +440,16 @@ export default function PortfolioPanel() {
         index_benchmark: indexBenchmark,
         max_tracking_error: trackingError / 100,
       })
+      if (wfTokenRef.current !== myToken) return  // superseded
       setWfResult(res.data)
       if (res.data.warnings?.length) alert('前推验证提示: ' + res.data.warnings.join('\n'))
     } catch (e: any) {
-      alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
-    } finally { setWfLoading(false) }
+      if (wfTokenRef.current === myToken) {
+        alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
+      }
+    } finally {
+      if (wfTokenRef.current === myToken) setWfLoading(false)
+    }
   }
 
   const handleSearch = async () => {
@@ -453,6 +488,8 @@ export default function PortfolioPanel() {
     }
     if (Object.keys(paramGrid).length === 0) { alert('请至少为一个参数设置多个候选值'); return }
 
+    // V2.12.2 codex round 8: stale-response token for search.
+    const myToken = ++searchTokenRef.current
     setSearchLoading(true); setSearchResults([])
     try {
       // V2.12.2 codex: propagate optimizer/risk/index to search so each
@@ -481,6 +518,7 @@ export default function PortfolioPanel() {
         index_benchmark: indexBenchmark,
         max_tracking_error: trackingError / 100,
       })
+      if (searchTokenRef.current !== myToken) return  // superseded
       setSearchResults(res.data.results || [])
       setSearchMeta({
         sampled: res.data.sampled || 0,
@@ -493,8 +531,11 @@ export default function PortfolioPanel() {
       let searchMsg = res.data.warnings?.length ? res.data.warnings.join('\n') + '\n' : ''
       if (tc > 50) searchMsg += `共 ${tc} 种组合，随机采样 50 个展示（可能不完整）`
       if (searchMsg) alert(searchMsg.trim())
-    } catch (e: any) { alert(e?.response?.data?.detail || '搜索失败') }
-    finally { setSearchLoading(false) }
+    } catch (e: any) {
+      if (searchTokenRef.current === myToken) alert(e?.response?.data?.detail || '搜索失败')
+    } finally {
+      if (searchTokenRef.current === myToken) setSearchLoading(false)
+    }
   }
 
   // Render a single param input based on schema type
