@@ -72,3 +72,15 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 - V2.11.1 post-release: 会计assert改有意义(cash>=0+equity>0), WF不可达代码移除(test_end_idx>n_days), Bootstrap CI升级BCa(z0 clamp防±inf, jackknife加速)
 - V2.12: PortfolioOptimizer(MeanVariance/MinVariance/RiskParity, Ledoit-Wolf), RiskManager(drawdown+turnover), Brinson attribution(Carino几何链接), engine每日回撤+紧急减仓+期末强平, PortfolioStore归因数据持久化(rebalance_weights+trades)
 - V2.12.1: Gram-Schmidt因子正交化(orthogonalization.py), IndexDataProvider(AKShare成分+24h cache), Optimizer TE约束(benchmark_weights+max_tracking_error), batch kline query, weights完整历史端点, TypeScript types(0 as any)
+- V2.12.1 post-release (codex 6 轮 + Claude reviewer 8 轮迭代):
+  - **engine.py 指标公式统一**: sharpe/sortino/alpha/beta 全部匹配 ez/backtest/metrics.py 的标准公式 (excess returns + ddof=1), 之前组合 vs 单票公式不同 (差 0.77 sortino / 5.72pp alpha)
+  - **清仓 equity_curve 写回**: 期末强平后 append(cash, liq_date, {}) 到 equity_curve/dates/weights_history, 之前 metrics 基于清仓前曲线系统性高估
+  - **归因覆盖最后持仓区间**: effective_dates 追加 result.dates[-1], 之前 Brinson 漏最后段导致 total_excess != total_return
+  - **t_plus_1 gate**: run_portfolio_backtest 加 t_plus_1 参数, sold_today 检查按 market gate (非 cn_stock 允许同日 sell→buy)
+  - **成交层 turnover 复核**: RiskManager.check_turnover 权重层通过后, _lot_round 可能放大卖侧换手, 引擎 post-loop 重算实际 turnover, 超限 emit risk_event
+  - **lookback 动态化**: run_portfolio_backtest 启动时 warn 若 strategy.lookback_days < max(factor.warmup_period)
+  - **PortfolioStrategy dual-dict registry**: _registry_by_key (module.class 唯一) + _registry (name-keyed 向后兼容) + resolve_class() 三阶段解析, 消除同名覆盖
+  - **PortfolioOptimizer fallback_events**: 记录每次降级 (total_alpha<=0 / cov 失败 / _optimize 异常), API 层 surface
+  - **walk_forward deepcopy**: 每折 copy.deepcopy(strategy) 防 IS→OOS 状态污染
+  - **walk_forward optimizer/risk_manager factory**: 每折 fresh 实例 + aggregate optimizer_fallback_events / risk_events
+  - **oos_metrics 拼接重算**: 用 MetricsCalculator 基于拼接 oos_equity_curve 算, 不是每折 sharpe 平均

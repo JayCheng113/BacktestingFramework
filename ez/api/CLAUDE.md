@@ -98,3 +98,12 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 - V2.10 post-release: fetch_kline_df shared helper in deps.py
 - V2.11: Fundamental data API (fetch/quality/factors), fundamental factor injection in portfolio routes, FundamentalStore singleton in deps.py, factor categories in strategies endpoint
 - V2.11.1: evaluate-factors +neutralize param, NeutralizedWrapper (warnings accumulate+dedup), AlphaCombiner integration (_create_alpha_combiner + _compute_alpha_weights, IC weight sign-preserving, alpha_method validation), portfolio /search endpoint (batch parameter search, MultiFactorRotation preload, skip_ensure), /fundamental/fetch+quality symbols min_length=1 validation
+- V2.12.1 post-release (codex 6 轮 + Claude reviewer 8 轮):
+  - **PortfolioCommonConfig mixin** (ez/api/routes/portfolio.py): 3 个 request model (PortfolioRunRequest/PortfolioWFRequest/PortfolioSearchRequest) 共享 20+ 字段 (cost/optimizer/risk/index) 的单一来源, 防止默认值和 Field constraints drift
+  - **_build_optimizer_risk_factories() 共享 helper**: /run, /walk-forward, /search 统一构造 optimizer_factory + risk_manager_factory + index_weights + helper_warnings, 3 endpoint 参数和警告完全一致
+  - **strategy key 撞名**: _get_strategy() 三阶段解析 (exact key → unique name → 409 ambiguous), 前端 option value 改 s.key
+  - **walk-forward 配置完整继承**: PortfolioWFRequest 继承 mixin → /walk-forward 同样支持 optimizer/risk_control/index_benchmark, 同时 aggregate optimizer_fallback_events + risk_events 到 response
+  - **search 同样聚合**: /search 每 combo 捕获 combo_opt + combo_result, try/finally 聚合 fallback_events + risk_events (partial 事件保护)
+  - **latest_weights 返回最后非空**: next((w for w in reversed(history) if w), {}) 绕过清仓后 append({}) 的空 entry
+  - **evaluate-factors / factor-correlation lookback propagation**: _max_factor_warmup(factors) 不止传给 fetch, 还传给 evaluate_cross_sectional_factor() 和 compute_factor_correlation() 的 lookback_days 参数
+  - **PortfolioSearchRequest 加 optimizer/risk 字段**: 之前搜索完全忽略 optimizer 配置

@@ -29,3 +29,4 @@ Define and auto-register trading strategies. Strategies produce position weight 
 
 ## Status
 - Implemented: Strategy ABC, loader, MACrossStrategy, MomentumStrategy, BollReversionStrategy
+- V2.12.1 post-release: **Strategy.resolve_class(name)** classmethod — 三阶段解析 (exact key → unique name → AmbiguousStrategyName). 由 ez/api/routes/backtest.py::_get_strategy 和 ez/agent/runner.py::_resolve_strategy 共用, 解决 codex 发现的跨路径 first-match 漏洞 (promote_research_strategy 把 ResearchFoo 改成 Foo 后和 builtin 撞名). AmbiguousStrategyName 异常含 candidate_keys 列表, REST 层转成 409.

@@ -31,3 +31,9 @@ Run vectorized backtests, compute metrics, validate via Walk-Forward, test stati
 - V2.2: SlippageMatcher — user-configurable slippage via API/frontend
 - V2.10: WalkForward constructor validates n_splits >= 2 and 0 < train_ratio < 1 (raises ValueError)
 - Engine uses fill.fill_price (not exec_price) for entry/exit/PnL — supports slippage
+- V2.12.1 post-release (codex 6 轮 + reviewer 8 轮):
+  - **engine.py profit_factor**: 改用标准 `gross_profit / gross_loss` 公式 (原 `avg_win_pct / avg_loss_pct` 忽略 position sizing, 几次大赢+多次小亏会完全扭曲)
+  - **walk_forward.py 每折 deepcopy strategy**: copy.deepcopy(strategy) 防 IS→OOS 状态污染 (原版复用同一实例)
+  - **walk_forward.py oos_metrics 重算**: 用 MetricsCalculator 基于拼接 oos_equity_curve 算, 不是每折 sharpe 平均 (折长不一时偏)
+  - **walk_forward.py _sharpe / significance.py _sharpe ddof=1**: 3 个 helpers 全部改 ddof=1, 匹配 metrics.py. 短 OOS (30-60d) 偏差最大 2.7%, CI 和显示 Sharpe 一致
+  - **metrics.py degenerate input 防护**: _nan_safe() helper + rolling_corr 常数窗口 fast-path (1e-12 tolerance), evaluator.py 全部输出点 sanitize
