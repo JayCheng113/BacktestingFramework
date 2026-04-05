@@ -250,3 +250,188 @@ class TestMLAlphaCrossInstanceDeterminism:
         s1 = a1.compute(data, dates[150].to_pydatetime())
         s2 = a2.compute(data, dates[150].to_pydatetime())
         pd.testing.assert_series_equal(s1, s2)
+
+
+# ─── End-to-end: run_portfolio_backtest + portfolio_walk_forward ────
+
+class TestMLAlphaEndToEndBacktest:
+    """The critical integration tests. MLAlpha must work through both the
+    single-run `run_portfolio_backtest` path and the multi-fold
+    `portfolio_walk_forward` path. The walk-forward test specifically
+    exercises the strategy_factory() per-fold-fresh-instance isolation
+    mechanism — which is how V2.13 resolves audit open Q#1 for the
+    portfolio code path (portfolio WF does NOT use copy.deepcopy).
+    """
+
+    def test_ridge_momentum_run_portfolio_backtest(self):
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=400, n_stocks=8)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(8)])
+
+        alpha = MLAlpha(
+            name="ridge_mom",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        strategy = TopNRotation(factor=alpha, top_n=3)
+
+        result = run_portfolio_backtest(
+            strategy=strategy,
+            universe=universe,
+            universe_data=data,
+            calendar=cal,
+            start=dates[100].date(),
+            end=dates[-1].date(),
+            freq="weekly",
+            initial_cash=1_000_000,
+        )
+
+        # Backtest completed without errors
+        assert result is not None
+        assert len(result.equity_curve) > 0
+        # Not bankrupt
+        assert result.equity_curve[-1] > 0
+        # Alpha retrained multiple times across the weekly rebalance schedule.
+        # ~300 days / retrain_freq=20 ≈ 15 max retrains (weekly rebalance
+        # hits retrain boundary every ~3 rebalances given freq=20 calendar
+        # days). Lower bound 5 is very conservative.
+        assert alpha._retrain_count >= 5, (
+            f"Expected ≥5 retrains over ~300 days of weekly rebalance; "
+            f"got {alpha._retrain_count}"
+        )
+
+    def test_ridge_momentum_portfolio_walk_forward_factory_fresh_instances(self):
+        """THE critical integration test. Validates that MLAlpha works
+        end-to-end through portfolio_walk_forward's factory-based per-fold
+        isolation mechanism.
+
+        Resolves audit open Q#1 for the portfolio path: portfolio walk-
+        forward does NOT use copy.deepcopy. It calls strategy_factory()
+        once per fold per stage (IS + OOS), expecting a fresh strategy
+        instance each time. MLAlpha's per-fold isolation comes entirely
+        from the factory returning a new MLAlpha with _current_model=None.
+        """
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=500, n_stocks=8)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(8)])
+
+        created_alphas: list[MLAlpha] = []
+
+        def strategy_factory():
+            alpha = MLAlpha(
+                name="ridge_mom_wf",
+                model_factory=lambda: Ridge(alpha=1.0),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+            created_alphas.append(alpha)
+            return TopNRotation(factor=alpha, top_n=3)
+
+        wf_result = portfolio_walk_forward(
+            strategy_factory=strategy_factory,
+            universe=universe,
+            universe_data=data,
+            calendar=cal,
+            start=dates[60].date(),
+            end=dates[-1].date(),
+            n_splits=3,
+            train_ratio=0.7,
+            freq="weekly",
+        )
+
+        # 3 splits × (IS + OOS) = 6 factory calls
+        assert len(created_alphas) == 6, (
+            f"Expected 6 factory calls (3 splits × IS + OOS), got {len(created_alphas)}"
+        )
+
+        # Every alpha is a distinct instance — factory must not cache
+        assert len(set(id(a) for a in created_alphas)) == 6, (
+            "strategy_factory returned the same MLAlpha instance twice — "
+            "this breaks per-fold isolation and is the bug Task 1.10 guards against."
+        )
+
+        # Each alpha retrained at least once during its fold (retrain_count >= 1)
+        # UNLESS the fold had too little data — we allow 0 if a fold is very short,
+        # but at least HALF of the alphas must have trained.
+        trained = sum(1 for a in created_alphas if a._retrain_count >= 1)
+        assert trained >= 3, (
+            f"Fewer than half of MLAlpha instances retrained — expected ≥3 of 6, "
+            f"got {trained}. retrain_counts: {[a._retrain_count for a in created_alphas]}"
+        )
+
+        # Walk-forward produced results
+        assert wf_result.n_splits == 3
+        assert len(wf_result.is_sharpes) == 3
+        assert len(wf_result.oos_sharpes) == 3
+        # All OOS Sharpes finite (may be negative — we only assert no crash/NaN)
+        assert all(np.isfinite(s) for s in wf_result.oos_sharpes), (
+            f"NaN OOS Sharpes: {wf_result.oos_sharpes}"
+        )
+
+    def test_walk_forward_fresh_instances_have_no_cross_fold_state_bleed(self):
+        """Stronger form: verify that each fold's MLAlpha instance starts
+        with _current_model=None (no state bleed from prior folds). This
+        guards against a future refactor that accidentally caches the
+        factory output."""
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=500, n_stocks=6)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(6)])
+
+        initial_states: list[tuple] = []
+
+        def strategy_factory():
+            alpha = MLAlpha(
+                name="ridge",
+                model_factory=lambda: Ridge(alpha=1.0),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+            # Capture the initial state IMMEDIATELY after construction —
+            # before walk_forward has a chance to call compute()
+            initial_states.append((
+                alpha._current_model is None,
+                alpha._retrain_count,
+                alpha._last_retrain_date,
+            ))
+            return TopNRotation(factor=alpha, top_n=3)
+
+        portfolio_walk_forward(
+            strategy_factory=strategy_factory,
+            universe=universe,
+            universe_data=data,
+            calendar=cal,
+            start=dates[60].date(),
+            end=dates[-1].date(),
+            n_splits=3,
+            train_ratio=0.7,
+            freq="weekly",
+        )
+
+        # Every factory call produced a fresh MLAlpha with zero state
+        assert len(initial_states) == 6
+        for idx, (is_none, count, last_dt) in enumerate(initial_states):
+            assert is_none is True, f"Fold call {idx}: _current_model was not None"
+            assert count == 0, f"Fold call {idx}: _retrain_count was {count}"
+            assert last_dt is None, f"Fold call {idx}: _last_retrain_date was {last_dt}"
