@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 1805 (1815 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.2 | Tests: 1813 (1823 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -117,7 +117,15 @@ No version tag without review pass. No push without critical issues resolved.
   - **ChatPanel 原子文件绑定**: `activeId` 闭包改 `targetId` 捕获防流式中途切换会话串线; AI 创建文件失败 fetch 路径从 "更新 filename 但留旧代码" 改为 "atomic: 要么三项都更新, 要么仅刷新侧栏 + 用户警告" (CodeEditor handler 配套允许 undefined 三元组); fileKey 统一 `${kind}:${filename}` 格式消除重复会话
   - **CodeEditor 删除 kind 校验**: 删除文件时需要 filename **和** kind 都匹配才清编辑器, 避免同名跨类型误清
   - 1789 tests (+8 回归: walk-forward tail drop×2, factor collision×2, portfolio store config/dates×4)
-- **Next: V2.13** — ML Alpha+多策略 → V3.0 Paper OMS
+- **V2.12.2 post-release rounds 3-8** (1789 → 1813 tests, +24): 7 轮追加修复 + reviewer 验证 共 36 个新 bug 修复 + 全部通过 `superpowers:code-reviewer` 独立审查:
+  - **round 3** (12 bug, `1217705`): 单票 sell_commission_rate 独立字段, portfolio /walk-forward & /search 补齐 optimizer/risk/index 传播, /run trades 不再截断 100, portfolio_store 新增 weights_history 列, PortfolioPanel market 完整 reset, 历史列表 config_summary + warning_count, ChatPanel aiCreatedFileRef 生命周期, 输入变化清 result, trackingError 市场 reset, latest_weights terminal_liquidated flag, multi_select `|` subset 分隔符, 搜索失败 combos surface
+  - **round 4** (4 bug, `dbf8d29`): handleLoadFullWeights 改调 /holdings (语义对齐), 历史 run 保留期末清仓 terminal 标记, BacktestPanel mode toggle 清交易标记, portfolio WF OOS sharpe 用拼接曲线 MetricsCalculator 重算 (原折平均 sibling of 单票 WF round 1)
+  - **round 5** (6 bug, `8d52236`): 单票回测 terminal liquidation 虚拟 TradeRecord (held-to-end 策略不再 trade_count=0), MetricsCalculator 短样本 NaN guard (n_days>=2), portfolio weights_history 日频 drift 重算 (非调仓日 `holdings × prices / equity` 反映真实漂移), MarketRulesMatcher 整手佣金 min_commission floor 保底, PortfolioPanel 全字段 invalidation (strategyParams/settings/optimizer/risk/index 任何变化都清 result), BacktestPanel params/costSettings/nSplits 变化 invalidation
+  - **round 6** (4 bug, `a634a0d` + `a7eacd2`): CodeEditor `committedFilename` state (半成品文件名不驱动 ChatPanel), newFile 跨 kind 允许同名, 单票引擎 prev_weight 按实际成交回算 (整手 lot rounding 后不再误判"已到目标"), pnl_pct `cycle_peak_invested` cost basis (加仓/减仓循环内真实投入资本), reviewer round: terminal liquidation sibling miss + `1e-6`→`1e-3` 阈值防 phantom trade + 测试强度加强
+  - **round 7** (3 bug, `1e7944b` + `5744a6c`): compute_significance 常量信号 NaN → 1.0 (前端 isFinite guard), PortfolioRunContent 交易记录 "100+" 过时提示删除, latest_weights 期末清仓标签语义对齐 round 5 daily drift
+  - **round 8** (3 bug, `fed9a2f` + `2d58b76`): 回测/WF/搜索异步响应 `runTokenRef` 版本保护 (输入变化时失效在途请求), handleLoadFullWeights `currentRunIdRef` run_id 匹配检查, CodeEditor.deleteFile 改用 `committedFilename` 稳定身份; reviewer follow-up: mode onChange 补 token bump + sidebar 高亮 normalize + 4 个未覆盖 handler 记入遗留项
+  - **V2.13 readiness validation** (+8 tests, `tests/test_portfolio/test_v213_readiness.py`): 5 个 MLAlpha 契约验证 — 自重训 stateful CrossSectionalFactor 走通 engine, 严格 anti-lookahead (slice 用 `< target_date`), walk-forward factory 每折 fresh instance, 有状态策略 deepcopy 独立, dual-dict registry 解析动态定义的 ML-shaped factor. 全部通过.
+- **Next: V2.13** — ML Alpha + 多策略组合 (**readiness audit APPROVED**, 见 `docs/audit/v2.13-readiness-audit.md`, 12/12 entry criteria ✓, zero CORE changes required)
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
