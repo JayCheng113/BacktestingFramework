@@ -2512,6 +2512,145 @@ class TestMLAlphaContractEdgeCases:
             alpha.compute(data, datetime(2022, 8, 1))
 
 
+class TestMLAlphaDiagnosticsInterface:
+    """V2.13 Phase 2 prerequisite: MLAlpha exposes a public read-only
+    interface so MLDiagnostics doesn't need to touch private attrs."""
+
+    def test_diagnostics_snapshot_before_any_compute(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"].pct_change(1)}).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        snap = alpha.diagnostics_snapshot()
+        assert snap["retrain_count"] == 0
+        assert snap["last_retrain_date"] is None
+        assert snap["has_model"] is False
+        assert snap["feature_cols"] == []
+        assert snap["feature_importance"] == {}
+
+    def test_diagnostics_snapshot_after_retrain(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+                "ret5": df["adj_close"].pct_change(5),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+
+        snap = alpha.diagnostics_snapshot()
+        assert snap["retrain_count"] == 1
+        assert snap["last_retrain_date"] == "2022-08-01"
+        assert snap["has_model"] is True
+        assert snap["feature_cols"] == ["ret1", "ret5"]
+        # Ridge has coef_ — 2 coefficients for 2 features
+        assert set(snap["feature_importance"].keys()) == {"ret1", "ret5"}
+        assert all(isinstance(v, float) for v in snap["feature_importance"].values())
+
+    def test_diagnostics_snapshot_is_json_serializable(self):
+        """All values must be plain Python types — no numpy, no pandas,
+        no sklearn objects."""
+        import json
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        snap = alpha.diagnostics_snapshot()
+        # Must not raise
+        json_str = json.dumps(snap)
+        assert len(json_str) > 10
+
+    def test_config_dict_contains_all_constructor_params(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        factory = lambda: Ridge(alpha=1.0)
+        feat_fn = lambda df: pd.DataFrame({"f": df["adj_close"]})
+        tgt_fn = lambda df: df["adj_close"].pct_change(5).shift(-5)
+        alpha = MLAlpha(
+            name="test_config",
+            model_factory=factory,
+            feature_fn=feat_fn,
+            target_fn=tgt_fn,
+            train_window=120, retrain_freq=30,
+            purge_days=5, embargo_days=2, feature_warmup_days=20,
+        )
+        cfg = alpha.config_dict()
+        assert cfg["name"] == "test_config"
+        assert cfg["model_factory"] is factory
+        assert cfg["feature_fn"] is feat_fn
+        assert cfg["target_fn"] is tgt_fn
+        assert cfg["train_window"] == 120
+        assert cfg["retrain_freq"] == 30
+        assert cfg["purge_days"] == 5
+        assert cfg["embargo_days"] == 2
+        assert cfg["feature_warmup_days"] == 20
+
+    def test_config_dict_can_recreate_mlalpha(self):
+        """config_dict must contain everything needed to construct a
+        fresh MLAlpha with identical configuration — this is how
+        MLDiagnostics creates its diagnostic copy."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        original = MLAlpha(
+            name="orig",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        copy = MLAlpha(**original.config_dict())
+        assert copy.name == original.name
+        assert copy.warmup_period == original.warmup_period
+        assert copy._retrain_count == 0  # fresh copy, no state
+
+    def test_snapshot_with_random_forest_feature_importances(self):
+        """RF uses feature_importances_ instead of coef_."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.ensemble import RandomForestRegressor
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: RandomForestRegressor(
+                n_estimators=5, max_depth=3, n_jobs=1, random_state=0,
+            ),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+                "vol": df["adj_close"].pct_change(1).rolling(10).std(),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+            feature_warmup_days=10,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        snap = alpha.diagnostics_snapshot()
+        assert snap["has_model"] is True
+        assert set(snap["feature_importance"].keys()) == {"ret1", "vol"}
+        # RF importances are non-negative and sum to ~1
+        assert all(v >= 0 for v in snap["feature_importance"].values())
+
+
 class TestMLAlphaPackageExports:
     """V2.13 Phase 1 Task 1.14 — verify package-level exports."""
 

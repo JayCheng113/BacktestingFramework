@@ -382,6 +382,68 @@ class MLAlpha(CrossSectionalFactor):
             + self._feature_warmup_days
         )
 
+    def diagnostics_snapshot(self) -> dict:
+        """Public read-only snapshot of internal state for MLDiagnostics.
+
+        Returns a plain dict (JSON-serializable) so that Phase 2's
+        ``MLDiagnostics`` can observe retrain events, extract model
+        attributes, and compute IS/OOS IC without directly touching
+        any private ``_*`` attributes. This is the **only** interface
+        Phase 2 should use to inspect MLAlpha internals.
+
+        V2.13 Phase 2 design decision: centralizing private-attr access
+        here means a future refactor of MLAlpha's internal state won't
+        break MLDiagnostics — only this method needs updating.
+        """
+        model = self._current_model
+        # Extract feature importance from the fitted model. sklearn's
+        # linear models expose coef_, tree-based expose feature_importances_.
+        importance: dict[str, float] = {}
+        feature_cols = self._trained_feature_cols or []
+        if model is not None and feature_cols:
+            if hasattr(model, "coef_"):
+                coefs = model.coef_
+                if hasattr(coefs, "__len__") and len(coefs) == len(feature_cols):
+                    importance = {
+                        col: float(coefs[i]) for i, col in enumerate(feature_cols)
+                    }
+            elif hasattr(model, "feature_importances_"):
+                imp = model.feature_importances_
+                if hasattr(imp, "__len__") and len(imp) == len(feature_cols):
+                    importance = {
+                        col: float(imp[i]) for i, col in enumerate(feature_cols)
+                    }
+        return {
+            "retrain_count": self._retrain_count,
+            "last_retrain_date": (
+                self._last_retrain_date.isoformat()
+                if self._last_retrain_date is not None else None
+            ),
+            "has_model": self._current_model is not None,
+            "feature_cols": list(feature_cols),
+            "feature_importance": importance,
+        }
+
+    def config_dict(self) -> dict:
+        """Return the MLAlpha's constructor configuration as a plain dict.
+
+        Used by MLDiagnostics to create a fresh diagnostic copy with the
+        same parameters without accessing private attributes directly.
+        The factory callables are included by reference (they're closures,
+        not serializable).
+        """
+        return {
+            "name": self._name,
+            "model_factory": self._model_factory,
+            "feature_fn": self._feature_fn,
+            "target_fn": self._target_fn,
+            "train_window": self._train_window,
+            "retrain_freq": self._retrain_freq,
+            "purge_days": self._purge_days,
+            "embargo_days": self._embargo_days,
+            "feature_warmup_days": self._feature_warmup_days,
+        }
+
     def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
         """Return per-symbol predictions at ``date``.
 
