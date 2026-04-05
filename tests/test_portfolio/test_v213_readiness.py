@@ -1,35 +1,55 @@
-"""V2.13 readiness integration tests.
+"""V2.13 infrastructure shape-level contract tests.
 
-Validates that the infrastructure V2.13 MLAlpha will rely on is already
-in place in the V2.12.2 post-release codebase. Each test proves one
-concrete capability MLAlpha needs to function, using minimal sklearn-free
-"ML-shaped" factors and strategies that mirror the patterns V2.13 will use.
+SCOPE: these tests validate that the **existing V2.12.2 post-release
+infrastructure** (walk-forward, CrossSectionalFactor ABC, engine,
+registry) can host the future V2.13 MLAlpha work, using **pure-Python
+mocks** (no sklearn, no lightgbm, no xgboost). The tests are
+regression canaries that will fail if a future refactor breaks the
+foundation V2.13 depends on.
 
-The goal is NOT to implement V2.13 — these tests are canaries that will
-fail loudly if a future refactor breaks the infrastructure MLAlpha depends
-on, before V2.13 is even written.
+NOT IN SCOPE — these are V2.13 implementation tasks, not pre-conditions:
+- Real sklearn / lightgbm / xgboost estimators surviving
+  `copy.deepcopy()` under `portfolio_walk_forward`'s per-fold path
+- LightGBM / XGBoost booster pickle compatibility (known version
+  quirks, must be verified with actual library calls)
+- Sandbox `ml_alphas/` kind, contract test running real sklearn
+  training, hot-reload, `/api/portfolio/ml-alpha/*` endpoints — NONE
+  of these exist yet
+- Model persistence strategy under sandbox `pickle` /
+  `multiprocessing` / `threading` / `subprocess` bans
 
-Contracts verified:
+See `docs/audit/v2.13-readiness-audit.md` for the full readiness
+analysis.
 
-1. **Stateful self-retraining CrossSectionalFactor**: MLAlpha will hold a
-   trained model + validity window internally, retraining when the eval
-   date moves beyond the current model's validity. This test uses a
-   simple "last-N-day momentum" factor that "retrains" (recomputes its
-   lookback period) when the date crosses a boundary.
+Shape-level contracts verified here (with pure-Python mocks):
 
-2. **Anti-lookahead enforcement**: MLAlpha MUST NOT see future data during
-   training. This test constructs a factor that raises if it sees any
-   data beyond the eval date.
+1. **Stateful self-retraining `CrossSectionalFactor` shape**: the ABC
+   permits a factor that holds internal "model" state (here:
+   cumulative return on a sliding window) and retrains when the eval
+   date crosses a retrain boundary. Runs through
+   `run_portfolio_backtest` and `portfolio_walk_forward` without errors.
+   NOT a real ML model — just the shape V2.13 will take.
 
-3. **Walk-forward factory freshness**: MLAlpha models must be fresh per
-   fold to avoid IS→OOS state leakage. This test confirms strategy_factory
-   is called once per fold (twice counting IS + OOS) and optimizer_factory
-   likewise.
+2. **Anti-lookahead enforcement**: `slice_universe_data` strictly
+   excludes `target_date`, so any factor receiving `universe_data`
+   sees only dates `< target_date`. Verified with a
+   `_LookaheadDetector` that records violations.
 
-4. **Deepcopy safety**: single-stock WalkForwardValidator deepcopies the
-   strategy per fold. MLAlpha models must be picklable to survive this.
-   This test confirms a stateful strategy with internal "model" state
-   deepcopies correctly.
+3. **Walk-forward factory freshness**: `portfolio_walk_forward` calls
+   `strategy_factory` once per fold × (IS + OOS), producing fresh
+   instances with independent `id()`. Necessary for MLAlpha state
+   isolation across folds.
+
+4. **Pure-Python stateful object deepcopy**: a `_MLShapedFactor`
+   instance can be `copy.deepcopy()`'d and mutations on the clone
+   don't affect the original. ⚠️ THIS IS NOT A TEST OF REAL SKLEARN
+   MODEL PICKLING. V2.13 must verify real estimator round-trip
+   separately.
+
+5. **Dual-dict registry for dynamically-defined factors**: the
+   `CrossSectionalFactor._registry_by_key` + `_registry` pattern
+   (from V2.12.2 round 1) correctly handles factor classes defined
+   at test-module-import time, including `resolve_class()` lookup.
 """
 from __future__ import annotations
 
@@ -146,7 +166,9 @@ class _MLShapedFactor(CrossSectionalFactor):
 
 class TestStatefulSelfRetrainingFactor:
     """V2.13 MLAlpha will be a stateful factor that retrains internally.
-    Prove the CrossSectionalFactor ABC + engine supports this shape."""
+    Prove the `CrossSectionalFactor` ABC + engine support this SHAPE,
+    using a pure-Python mock (cumulative return as "trained weights",
+    not a real model). Does NOT test real ML library integration."""
 
     def test_factor_retrains_across_rebalances(self):
         data, cal, universe, dates = _make_universe()
@@ -264,12 +286,22 @@ class TestWalkForwardFactoryFreshness:
         assert all(c >= 0 for c in counts)
 
 
-# ─── Contract 4: Deepcopy safety for pure-python stateful strategy ──────
+# ─── Contract 4: Deepcopy safety for PURE-PYTHON stateful strategy ──────
 
 class TestDeepcopySafety:
-    """Single-stock WalkForwardValidator uses copy.deepcopy(strategy) per
-    fold. MLAlpha models must survive deepcopy. Verify a stateful
-    pure-python strategy with internal "model" state deepcopies cleanly.
+    """Single-stock `WalkForwardValidator.validate()` uses
+    `copy.deepcopy(strategy)` per fold. V2.13 MLAlpha will rely on this
+    to get fresh model state per fold.
+
+    ⚠️ SCOPE: this class ONLY verifies that a **pure-python** stateful
+    object (`_MLShapedFactor` mock with dict + int + date state)
+    survives `copy.deepcopy()` cleanly and has independent state after.
+    This does **NOT** verify that real sklearn / lightgbm / xgboost
+    estimators survive the same path. Those libraries have their own
+    `__reduce__` / `__getstate__` implementations and known pickle
+    quirks across versions — V2.13 implementation must test each
+    estimator it supports explicitly. This canary only catches
+    regressions in the generic deepcopy path.
     """
 
     def test_stateful_factor_deepcopy(self):
