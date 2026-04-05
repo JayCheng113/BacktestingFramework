@@ -42,13 +42,35 @@ rationale.
 """
 from __future__ import annotations
 
-from datetime import date as _date, datetime, timedelta
+import logging
+from datetime import date as _date, datetime
 from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
 
 from ez.portfolio.cross_factor import CrossSectionalFactor
+
+_logger = logging.getLogger(__name__)
+
+
+def _to_date(x: Any) -> _date:
+    """Normalize ``datetime``/``pd.Timestamp``/``date`` → python ``date``.
+
+    Used internally to accept both ``datetime.datetime`` and
+    ``datetime.date`` parameter values without shadow collisions with
+    the ``date`` name imported from ``datetime``. ``datetime`` is a
+    subclass of ``date``, so a strict ``isinstance(x, _date)`` check
+    returns True for both — we use duck-typing on ``.date()`` instead.
+    """
+    # datetime (and pd.Timestamp) have a .date() method; date itself
+    # does not. pd.Timestamp.date() returns a python date.
+    if hasattr(x, "date") and callable(x.date):
+        try:
+            return x.date()
+        except TypeError:
+            pass  # on an actual date, .date is the class, not a method
+    return x  # type: ignore[return-value]
 
 
 FeatureFn = Callable[[pd.DataFrame], pd.DataFrame]
@@ -153,15 +175,20 @@ class MLAlpha(CrossSectionalFactor):
         target_fn: Per-symbol target extractor. Called with the same
             single-symbol DataFrame, returns a Series of forward-looking
             labels aligned to the feature dates.
-        train_window: Number of trailing trading days to use for each
-            retrain's training panel.
+        train_window: Number of trailing **trading days** (data rows) to
+            use for each retrain's training panel.
         retrain_freq: Retrain when current prediction date exceeds last
-            retrain date by this many calendar days.
-        purge_days: Exclude the last N training dates before the
-            prediction date to prevent feature-label temporal overlap.
-            MUST be at least the target's forward horizon.
-        embargo_days: Additional buffer on top of purge_days. Defaults
-            to 0 (purge is already the minimum safe gap).
+            retrain date by this many **calendar days**.
+        purge_days: Number of **trading days** (data rows) to drop from
+            the tail of the training panel before fitting. MUST be at
+            least the target's forward horizon in trading-day units to
+            prevent label leakage — if ``target_fn`` is
+            ``df.pct_change(5).shift(-5)``, set ``purge_days >= 5``.
+            The engine applies purge by positionally trimming the last
+            N rows per symbol, matching the unit of ``shift(-k)`` used
+            in typical target functions. This is NOT calendar days.
+        embargo_days: Additional trading-day buffer on top of purge_days.
+            Defaults to 0 (purge alone matches the minimum safe gap).
     """
 
     def __init__(
@@ -208,6 +235,10 @@ class MLAlpha(CrossSectionalFactor):
         self._current_model: Any = None
         self._last_retrain_date: _date | None = None
         self._retrain_count: int = 0
+        # One-shot warning flags to avoid log spam when the same user
+        # mistake repeats across many symbols / rebalances.
+        self._feature_type_warned: bool = False
+        self._target_type_warned: bool = False
 
     @property
     def name(self) -> str:
@@ -215,8 +246,10 @@ class MLAlpha(CrossSectionalFactor):
 
     @property
     def warmup_period(self) -> int:
-        # Need at least train_window + purge + embargo days of history
-        # before the first prediction date can be made.
+        # Need at least train_window + purge + embargo TRADING days of
+        # history before the first prediction date can be made. All three
+        # quantities are in the same unit (trading days / data rows), so
+        # summing them is exact — not an estimate.
         return self._train_window + self._purge_days + self._embargo_days
 
     def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
@@ -225,8 +258,12 @@ class MLAlpha(CrossSectionalFactor):
         Lazy retrain: if the current model is stale (older than
         ``retrain_freq`` days from ``date``), build a fresh training
         panel from ``universe_data`` and fit a new model.
+
+        The parameter is named ``date`` to match ``CrossSectionalFactor``'s
+        ABC signature. We normalize internally via ``_to_date`` to avoid
+        shadow confusion with the ``datetime.date`` type.
         """
-        current: _date = date.date() if hasattr(date, "date") else date
+        current = _to_date(date)
 
         if self._needs_retrain(current):
             self._retrain(universe_data, current)
@@ -253,16 +290,57 @@ class MLAlpha(CrossSectionalFactor):
         samples (< 10) — this can happen early in the universe data when
         not enough history has accumulated to satisfy the train_window
         after purge+embargo exclusion.
+
+        Non-finite values (``inf``/``-inf``) are filtered before fit —
+        ``isna()`` alone does NOT catch these. A very plausible user
+        mistake (``pct_change`` on a price of 0 when a stock is
+        suspended or delisted) produces ``inf`` that then crashes
+        ``sklearn`` with ``ValueError("Input X contains infinity...")``.
+
+        If fit() itself raises for any other reason, the prior model is
+        kept (or remains ``None`` if this is the first retrain) and a
+        warning is logged. The backtest continues.
         """
         X, y = self._build_training_panel(universe_data, current)
         if X is None or y is None or len(X) < 10:
             return
+
+        # Filter non-finite values. pandas isna() treats inf as present,
+        # but sklearn rejects it. Do this at retrain time (not in
+        # _build_training_panel) because a late training row with a
+        # transient inf is better kept-and-filtered than silently
+        # dropped from earlier stages.
+        X_arr = X.to_numpy()
+        y_arr = y.to_numpy()
+        finite_mask = np.isfinite(X_arr).all(axis=1) & np.isfinite(y_arr)
+        if not finite_mask.all():
+            X_arr = X_arr[finite_mask]
+            y_arr = y_arr[finite_mask]
+            if len(X_arr) < 10:
+                _logger.warning(
+                    "MLAlpha[%s]: training panel at %s had < 10 finite rows "
+                    "after inf/nan filtering; skipping retrain.",
+                    self._name, current,
+                )
+                return
+
         model = self._model_factory()
         # Re-check the factory output — user could return a different
         # estimator class on subsequent calls. V1 safety means whitelist
         # applies to every produced instance, not just the first probe.
         _assert_supported_estimator(model)
-        model.fit(X.values, y.values)
+
+        try:
+            model.fit(X_arr, y_arr)
+        except Exception as e:
+            _logger.warning(
+                "MLAlpha[%s]: fit() failed at %s: %s. Keeping prior model "
+                "(%s). The backtest continues.",
+                self._name, current, e,
+                "present" if self._current_model is not None else "None",
+            )
+            return
+
         self._current_model = model
         self._last_retrain_date = current
         self._retrain_count += 1
@@ -275,15 +353,26 @@ class MLAlpha(CrossSectionalFactor):
         """Stack per-symbol ``(feature, target)`` pairs into a
         cross-sectional training panel.
 
-        Exclusion rules:
-        1. Exclude all dates ``>= prediction_date - purge_days - embargo_days``
-           (forward-looking label leakage prevention).
-        2. Include at most the last ``train_window`` rows per symbol
-           (after purge exclusion).
-        3. Drop rows where the target is NaN (pct_change + shift(-k)
-           produces a NaN tail).
+        Exclusion rules (applied per-symbol):
+        1. **Strict anti-lookahead on feature date**: drop all rows whose
+           feature date ``>= prediction_date``. This is redundant with
+           the engine's ``slice_universe_data`` upstream slice but makes
+           MLAlpha correct even when called with un-sliced data.
+        2. **Purge + embargo on label leakage**: drop the last
+           ``purge_days + embargo_days`` **trading days** (data rows)
+           from the per-symbol tail. This is POSITIONAL (``iloc[:-N]``),
+           not calendar-day-based. The rationale: typical ``target_fn``
+           shapes like ``df.pct_change(5).shift(-5)`` use a
+           trading-day-unit forward horizon. Trimming by calendar days
+           would span weekends and retain 2/5 of the tail rows with
+           their labels pointing INTO the prediction window. See the
+           class docstring for the bug this prevents.
+        3. **NaN target filter**: ``shift(-k)`` produces a NaN tail;
+           drop those rows.
+        4. **train_window cap**: keep at most the last ``train_window``
+           rows per symbol (after steps 1-3 have trimmed the tail).
         """
-        cutoff = prediction_date - timedelta(days=self._purge_days + self._embargo_days)
+        purge_bars = self._purge_days + self._embargo_days
 
         rows: list[pd.DataFrame] = []
         labels: list[pd.Series] = []
@@ -299,7 +388,24 @@ class MLAlpha(CrossSectionalFactor):
 
             if sym_features is None or sym_target is None:
                 continue
-            if not isinstance(sym_features, pd.DataFrame) or not isinstance(sym_target, pd.Series):
+            if not isinstance(sym_features, pd.DataFrame):
+                if not self._feature_type_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned %s for symbol %s, "
+                        "expected pandas.DataFrame — skipping this symbol. "
+                        "Wrap your Series in pd.DataFrame({'col_name': series}).",
+                        self._name, type(sym_features).__name__, sym,
+                    )
+                    self._feature_type_warned = True
+                continue
+            if not isinstance(sym_target, pd.Series):
+                if not self._target_type_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] target_fn returned %s for symbol %s, "
+                        "expected pandas.Series — skipping this symbol.",
+                        self._name, type(sym_target).__name__, sym,
+                    )
+                    self._target_type_warned = True
                 continue
             if sym_features.empty or sym_target.empty:
                 continue
@@ -311,12 +417,26 @@ class MLAlpha(CrossSectionalFactor):
             feat = sym_features.loc[aligned_idx]
             tgt = sym_target.loc[aligned_idx]
 
-            # Apply purge + embargo: exclude dates >= cutoff
-            mask = feat.index.date < cutoff
-            feat = feat.loc[mask]
-            tgt = tgt.loc[mask]
+            # Step 1: strict anti-lookahead — feature date < prediction_date
+            strict_mask = feat.index.date < prediction_date
+            feat = feat.loc[strict_mask]
+            tgt = tgt.loc[strict_mask]
+            if len(feat) == 0:
+                continue
 
-            # Drop rows where target is NaN (shift(-k) tail)
+            # Step 2: positional purge — drop the last `purge_bars` rows
+            # (trading days). This matches the trading-day unit of
+            # typical target_fn shift(-k) patterns, so the label at the
+            # retained tail cannot point INTO the [prediction_date,
+            # prediction_date + k) window.
+            if purge_bars > 0:
+                if len(feat) <= purge_bars:
+                    continue  # not enough rows to purge safely
+                feat = feat.iloc[:-purge_bars]
+                tgt = tgt.iloc[:-purge_bars]
+
+            # Step 3: drop NaN targets (shift(-k) tail already excluded
+            # by purge, but pct_change warmup can still leave NaN)
             valid = ~tgt.isna()
             feat = feat.loc[valid]
             tgt = tgt.loc[valid]
@@ -324,7 +444,7 @@ class MLAlpha(CrossSectionalFactor):
             if len(feat) == 0:
                 continue
 
-            # Take last train_window rows only
+            # Step 4: cap at train_window rows
             if len(feat) > self._train_window:
                 feat = feat.iloc[-self._train_window:]
                 tgt = tgt.iloc[-self._train_window:]
@@ -347,7 +467,8 @@ class MLAlpha(CrossSectionalFactor):
         X = pd.concat(rows, axis=0)
         y = pd.concat(labels, axis=0)
 
-        # Drop any remaining NaN rows in X (feature NaN)
+        # Drop any remaining NaN rows in X (feature NaN after pct_change
+        # warmup). inf filtering is done in _retrain.
         valid_rows = ~X.isna().any(axis=1)
         X = X.loc[valid_rows]
         y = y.loc[valid_rows]
@@ -393,14 +514,14 @@ class MLAlpha(CrossSectionalFactor):
                 continue
 
             try:
-                pred = float(self._current_model.predict(latest.values)[0])
+                pred = float(self._current_model.predict(latest.to_numpy())[0])
             except Exception:
                 continue
             if not np.isfinite(pred):
                 continue
             predictions[sym] = pred
 
-        return pd.Series(predictions, dtype=float) if predictions else pd.Series(dtype=float)
+        return pd.Series(predictions, dtype=float)
 
 
 # Prevent auto-registration: MLAlpha is a BASE class that users instantiate
