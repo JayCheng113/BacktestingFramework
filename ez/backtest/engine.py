@@ -75,12 +75,23 @@ class VectorizedBacktestEngine:
         metrics = self._metrics.compute(equity, benchmark)
         if trades:
             wins = [t for t in trades if t.pnl > 0]
+            losses = [t for t in trades if t.pnl <= 0]
             metrics["win_rate"] = len(wins) / len(trades) if trades else 0.0
             metrics["trade_count"] = len(trades)
-            avg_win = np.mean([t.pnl_pct for t in wins]) if wins else 0.0
-            losses = [t for t in trades if t.pnl <= 0]
-            avg_loss = abs(np.mean([t.pnl_pct for t in losses])) if losses else 1.0
-            metrics["profit_factor"] = avg_win / avg_loss if avg_loss > 0 else float("inf")
+            # V2.12.1 post-review (codex #1 sub-issue): standard Profit Factor
+            # definition is gross_profit / gross_loss (sum of absolute P&L),
+            # not avg_win_pct / avg_loss_pct. Prior version computed the ratio
+            # of average pnl_pct which is dimensionally wrong and ignores
+            # position sizing — a few large wins and many small losses would
+            # give the wrong answer.
+            gross_profit = float(sum(t.pnl for t in wins)) if wins else 0.0
+            gross_loss = abs(float(sum(t.pnl for t in losses))) if losses else 0.0
+            if gross_loss > 1e-10:
+                metrics["profit_factor"] = gross_profit / gross_loss
+            elif gross_profit > 0:
+                metrics["profit_factor"] = float("inf")  # all winners, no losses
+            else:
+                metrics["profit_factor"] = 0.0
             # Average holding period in days
             try:
                 holding_days = [(t.exit_time - t.entry_time).days for t in trades]
