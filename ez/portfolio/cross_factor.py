@@ -21,18 +21,63 @@ class CrossSectionalFactor(ABC):
     """Base class for cross-sectional factors.
 
     Subclasses auto-register via __init_subclass__. Access registry via get_registry().
+
+    V2.12.2 codex: dual-dict registry mirrors Factor/PortfolioStrategy — one
+    keyed by `module.class` (authoritative) and one keyed by `__name__`
+    (backward compat). Name collision logs a warning; use `resolve_class()`
+    to disambiguate. Prior version silently overwrote on collision.
     """
 
+    # Authoritative: "module.class" → class (unique)
+    _registry_by_key: dict[str, type] = {}
+    # Backward-compat: "class_name" → class (last-write-wins with warning)
     _registry: dict[str, type] = {}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if not getattr(cls, '__abstractmethods__', None):
-            CrossSectionalFactor._registry[cls.__name__] = cls
+            key = f"{cls.__module__}.{cls.__name__}"
+            CrossSectionalFactor._registry_by_key[key] = cls
+
+            name = cls.__name__
+            existing = CrossSectionalFactor._registry.get(name)
+            if existing is not None and existing is not cls:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "CrossSectionalFactor name collision: '%s' previously "
+                    "registered by %s.%s, now replaced by %s.%s. Use "
+                    "CrossSectionalFactor.resolve_class() with the full "
+                    "'module.class' key to disambiguate.",
+                    name,
+                    existing.__module__, existing.__name__,
+                    cls.__module__, cls.__name__,
+                )
+            CrossSectionalFactor._registry[name] = cls
 
     @classmethod
     def get_registry(cls) -> dict[str, type]:
         return dict(cls._registry)
+
+    @classmethod
+    def resolve_class(cls, name: str) -> type:
+        """Resolve a cross-factor identifier using three-stage matching.
+
+        Order: exact module.class key → unique __name__ match → ValueError.
+        """
+        exact = cls._registry_by_key.get(name)
+        if exact is not None:
+            return exact
+        matches = [(k, c) for k, c in cls._registry_by_key.items() if c.__name__ == name]
+        if len(matches) == 1:
+            return matches[0][1]
+        if len(matches) > 1:
+            keys = [k for k, _ in matches]
+            raise ValueError(
+                f"CrossSectionalFactor name '{name}' is ambiguous — "
+                f"multiple classes registered: {keys}. Submit the full "
+                f"module.class key."
+            )
+        raise KeyError(name)
 
     @property
     @abstractmethod

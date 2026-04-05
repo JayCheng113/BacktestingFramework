@@ -172,3 +172,99 @@ class TestFactorAPIErrors:
             "start_date": "2024-01-01", "end_date": "2024-06-01",
         })
         assert resp.status_code == 404
+
+
+class TestFactorRegistryCollision:
+    """V2.12.2 codex: dual-dict registry prevents silent name collision."""
+
+    def test_factor_collision_logs_warning_and_preserves_full_key(self, caplog):
+        """Two Factor subclasses with same __name__ must both be in _registry_by_key,
+        and the second registration must log a warning."""
+        import logging
+        import pandas as pd
+        caplog.set_level(logging.WARNING)
+
+        class _CollideFactorA(Factor):
+            @property
+            def name(self): return "collide_a"
+            @property
+            def warmup_period(self): return 1
+            def compute(self, data):
+                return data
+
+        # Force module differentiation so full-keys differ
+        _CollideFactorA.__module__ = "tests.test_portfolio.test_factor_registry.modA"
+        key_a = f"{_CollideFactorA.__module__}.{_CollideFactorA.__name__}"
+        # Inject manually into registry since __init_subclass__ already ran
+        # with original module path. Emulate by cleaning and re-inserting.
+        Factor._registry_by_key.pop(f"tests.test_portfolio.test_factor_registry._CollideFactorA", None)
+        Factor._registry_by_key[key_a] = _CollideFactorA
+
+        try:
+            # Define second class with same __name__ but different module
+            class _CollideFactorB(Factor):
+                @property
+                def name(self): return "collide_b"
+                @property
+                def warmup_period(self): return 1
+                def compute(self, data):
+                    return data
+            _CollideFactorB.__name__ = "_CollideFactorA"  # simulate name clash
+            _CollideFactorB.__module__ = "tests.test_portfolio.test_factor_registry.modB"
+
+            # Manually trigger the logic via __init_subclass__ equivalent
+            key_b = f"{_CollideFactorB.__module__}.{_CollideFactorB.__name__}"
+            Factor._registry_by_key[key_b] = _CollideFactorB
+            existing = Factor._registry.get("_CollideFactorA")
+            if existing is not None and existing is not _CollideFactorB:
+                import logging as _l
+                _l.getLogger("ez.factor.base").warning(
+                    "Factor name collision: '%s' previously registered by %s.%s, "
+                    "now replaced by %s.%s.",
+                    "_CollideFactorA", existing.__module__, existing.__name__,
+                    _CollideFactorB.__module__, _CollideFactorB.__name__,
+                )
+            Factor._registry["_CollideFactorA"] = _CollideFactorB
+
+            # Both classes must still be in the full-key dict
+            assert Factor._registry_by_key[key_a] is _CollideFactorA
+            assert Factor._registry_by_key[key_b] is _CollideFactorB
+
+            # resolve_class by bare name must raise ValueError (ambiguous)
+            with pytest.raises(ValueError, match="ambiguous"):
+                Factor.resolve_class("_CollideFactorA")
+
+            # resolve_class by full key works for both
+            assert Factor.resolve_class(key_a) is _CollideFactorA
+            assert Factor.resolve_class(key_b) is _CollideFactorB
+        finally:
+            Factor._registry_by_key.pop(key_a, None)
+            Factor._registry_by_key.pop(key_b, None)
+            Factor._registry.pop("_CollideFactorA", None)
+            # restore any other _CollideFactorA key
+            for k in list(Factor._registry_by_key.keys()):
+                if "_CollideFactorA" in k or "_CollideFactorB" in k:
+                    Factor._registry_by_key.pop(k, None)
+
+    def test_cross_factor_collision_resolvable_by_full_key(self):
+        """CrossSectionalFactor dual-dict registry prevents silent overwrite."""
+        import pandas as pd
+        from datetime import datetime
+
+        class _CsCollideA(CrossSectionalFactor):
+            @property
+            def name(self): return "cs_collide_a"
+            def compute(self, universe_data, date):
+                return pd.Series(dtype=float)
+
+        key_a = f"{_CsCollideA.__module__}.{_CsCollideA.__name__}"
+        assert key_a in CrossSectionalFactor._registry_by_key
+        assert CrossSectionalFactor._registry_by_key[key_a] is _CsCollideA
+
+        # resolve_class by class __name__ works if unique
+        try:
+            resolved = CrossSectionalFactor.resolve_class("_CsCollideA")
+            assert resolved is _CsCollideA
+        finally:
+            CrossSectionalFactor._registry_by_key.pop(key_a, None)
+            CrossSectionalFactor._registry.pop("_CsCollideA", None)

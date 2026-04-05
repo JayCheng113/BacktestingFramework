@@ -13,18 +13,70 @@ class Factor(ABC):
     """Base class for all factors (technical indicators, alpha factors, etc.).
 
     Subclasses auto-register via __init_subclass__. Access via get_registry().
+
+    V2.12.2 codex: dual-dict registry mirrors PortfolioStrategy — one keyed
+    by `module.class` (authoritative) and one keyed by `__name__` (backward
+    compat). Name collision logs a warning; use `resolve_class()` to
+    disambiguate. Prior version silently overwrote on collision, so two
+    unrelated factors with the same class name (e.g. a user factor shadowing
+    a builtin with a typo) could cause the wrong class to be used.
     """
 
+    # Authoritative: "module.class" → class (unique)
+    _registry_by_key: dict[str, type] = {}
+    # Backward-compat: "class_name" → class (last-write-wins with warning)
     _registry: dict[str, type] = {}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if not getattr(cls, '__abstractmethods__', None):
-            Factor._registry[cls.__name__] = cls
+            key = f"{cls.__module__}.{cls.__name__}"
+            Factor._registry_by_key[key] = cls
+
+            name = cls.__name__
+            existing = Factor._registry.get(name)
+            if existing is not None and existing is not cls:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Factor name collision: '%s' previously registered by "
+                    "%s.%s, now replaced by %s.%s. Use Factor.resolve_class() "
+                    "with the full 'module.class' key to disambiguate.",
+                    name,
+                    existing.__module__, existing.__name__,
+                    cls.__module__, cls.__name__,
+                )
+            Factor._registry[name] = cls
 
     @classmethod
     def get_registry(cls) -> dict[str, type]:
         return dict(cls._registry)
+
+    @classmethod
+    def resolve_class(cls, name: str) -> type:
+        """Resolve a factor identifier to a class using three-stage matching.
+
+        Order:
+        1. Exact key match (`module.class`) — unambiguous
+        2. Unique class-name match — backward-compat
+        3. Ambiguous name → ValueError with all candidate keys
+
+        Raises:
+            KeyError: name not found
+            ValueError: multiple classes share this __name__
+        """
+        exact = cls._registry_by_key.get(name)
+        if exact is not None:
+            return exact
+        matches = [(k, c) for k, c in cls._registry_by_key.items() if c.__name__ == name]
+        if len(matches) == 1:
+            return matches[0][1]
+        if len(matches) > 1:
+            keys = [k for k, _ in matches]
+            raise ValueError(
+                f"Factor name '{name}' is ambiguous — multiple classes "
+                f"registered: {keys}. Submit the full module.class key."
+            )
+        raise KeyError(name)
 
     @property
     @abstractmethod

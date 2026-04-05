@@ -295,23 +295,53 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                   try {
                     const r = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
                     if (r.success && r.path) {
-                      const fname = r.path.replace('strategies/', '').replace('portfolio_strategies/', '').replace('cross_factors/', '').replace('factors/', '')
-                      // Bind current conversation to the new file BEFORE updating fileKey
-                      // This prevents useEffect[fileKey] from creating a new conversation
-                      aiCreatedFileRef.current = true  // Mark: fileKey change is from AI, not user click
-                      setConversations(prev => prev.map(c =>
-                        c.id === activeId ? { ...c, fileKey: fname, title: fname.replace('.py', '') } : c
-                      ))
+                      const bareName = r.path.replace('strategies/', '').replace('portfolio_strategies/', '').replace('cross_factors/', '').replace('factors/', '')
                       // Detect kind from path prefix for CodeEditor
                       const detectedKind = r.path.startsWith('portfolio_strategies/') ? 'portfolio_strategy'
                         : r.path.startsWith('cross_factors/') ? 'cross_factor'
                         : r.path.startsWith('factors/') ? 'factor' : 'strategy'
-                      fetch(`/api/code/files/${fname}?kind=${detectedKind}`).then(resp => resp.json()).then(f => {
-                        if (f.code) onCodeUpdate(f.code, fname, detectedKind)
-                      }).catch(() => {
-                        // Fetch failed but file was created — update filename only (don't clear editor code)
-                        if (onCodeUpdate) onCodeUpdate(undefined, fname, detectedKind)
-                      })
+                      // V2.12.2 codex: fileKey must match CodeEditor's
+                      // `${kind}:${filename}` format, otherwise useEffect[fileKey]
+                      // in this component creates a duplicate conversation when
+                      // the user later opens the same file from the sidebar.
+                      // Prior version used bare filename, producing two
+                      // conversations per AI-created file.
+                      const boundKey = `${detectedKind}:${bareName}`
+                      // Bind current conversation to the new file BEFORE updating fileKey
+                      // This prevents useEffect[fileKey] from creating a new conversation.
+                      // V2.12.2 codex: use `targetId` captured at message send
+                      // time, not `activeId` from closure. If user switches
+                      // conversations while the stream is active, activeId
+                      // points to the new conversation and binds the file
+                      // to the wrong one.
+                      aiCreatedFileRef.current = true  // Mark: fileKey change is from AI, not user click
+                      setConversations(prev => prev.map(c =>
+                        c.id === targetId ? { ...c, fileKey: boundKey, title: bareName.replace('.py', '') } : c
+                      ))
+                      // V2.12.2 codex: on fetch success, switch filename +
+                      // kind + code atomically so editor/filename/kind stay
+                      // consistent. On fetch failure, do NOT touch filename
+                      // or kind — prior version split-updated (filename
+                      // changed, code stayed), leaving the editor pointing
+                      // at the new file but displaying the previous file's
+                      // source. Subsequent save/run would operate on the
+                      // wrong content. Instead, refresh the sidebar and
+                      // append a user-visible warning instructing them to
+                      // open the file manually from the sidebar.
+                      const fetchedFile = await fetch(`/api/code/files/${bareName}?kind=${detectedKind}`)
+                        .then(resp => resp.ok ? resp.json() : null)
+                        .catch(() => null)
+                      if (fetchedFile && fetchedFile.code) {
+                        onCodeUpdate(fetchedFile.code, bareName, detectedKind)
+                      } else {
+                        // Only refresh the sidebar (file list) — do not
+                        // touch filename / kind / code.
+                        onCodeUpdate(undefined, undefined, undefined)
+                        updateMsgs(prev => [...prev, {
+                          role: 'assistant',
+                          content: `⚠️ 文件 ${bareName} 已创建但内容读取失败，请从左侧文件列表手动打开。`
+                        }])
+                      }
                     }
                   } catch {}
                 }

@@ -44,11 +44,27 @@ class PortfolioStore:
                 rebalance_count INTEGER,
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 rebalance_weights TEXT,
-                trades          TEXT
+                trades          TEXT,
+                config          TEXT,
+                warnings        TEXT,
+                dates           TEXT
             )
         """)
-        # Migration: add columns for existing DBs
-        for col, typ in [("rebalance_weights", "TEXT"), ("trades", "TEXT")]:
+        # Migration: add columns for existing DBs. V2.12.2 codex: config +
+        # warnings added so past runs retain optimizer/risk_control/
+        # index_benchmark/tracking_error plus the warnings the user saw at
+        # run time. `dates` added so the compare-chart can align equity
+        # curves by real trading days instead of the synthetic bar index —
+        # prior version only stored equity values, so runs with different
+        # date ranges, frequencies, or holiday gaps appeared aligned on the
+        # x-axis but were actually shifted relative to each other.
+        for col, typ in [
+            ("rebalance_weights", "TEXT"),
+            ("trades", "TEXT"),
+            ("config", "TEXT"),
+            ("warnings", "TEXT"),
+            ("dates", "TEXT"),
+        ]:
             try:
                 self._conn.execute(f"ALTER TABLE portfolio_runs ADD COLUMN {col} {typ}")
             except Exception:
@@ -60,8 +76,8 @@ class PortfolioStore:
             """INSERT OR IGNORE INTO portfolio_runs
                (run_id, strategy_name, strategy_params, symbols, start_date, end_date,
                 freq, initial_cash, metrics, equity_curve, trade_count, rebalance_count,
-                rebalance_weights, trades)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rebalance_weights, trades, config, warnings, dates)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 run_id,
                 data.get("strategy_name", ""),
@@ -77,6 +93,9 @@ class PortfolioStore:
                 data.get("rebalance_count", 0),
                 json.dumps(data.get("rebalance_weights", []), ensure_ascii=False),
                 json.dumps(data.get("trades", []), ensure_ascii=False),
+                json.dumps(data.get("config", {}), ensure_ascii=False),
+                json.dumps(data.get("warnings", []), ensure_ascii=False),
+                json.dumps(data.get("dates", []), ensure_ascii=False),
             ],
         )
         return run_id
@@ -104,7 +123,7 @@ class PortfolioStore:
             """SELECT run_id, strategy_name, strategy_params, symbols,
                       start_date, end_date, freq, initial_cash,
                       metrics, equity_curve, trade_count, rebalance_count, created_at,
-                      rebalance_weights, trades
+                      rebalance_weights, trades, config, warnings, dates
                FROM portfolio_runs WHERE run_id = ?""", [run_id],
         ).fetchone()
         if not row:
@@ -112,10 +131,10 @@ class PortfolioStore:
         cols = ["run_id", "strategy_name", "strategy_params", "symbols",
                 "start_date", "end_date", "freq", "initial_cash",
                 "metrics", "equity_curve", "trade_count", "rebalance_count", "created_at",
-                "rebalance_weights", "trades"]
+                "rebalance_weights", "trades", "config", "warnings", "dates"]
         d = dict(zip(cols, row))
         for key in ("strategy_params", "symbols", "metrics", "equity_curve",
-                     "rebalance_weights", "trades"):
+                     "rebalance_weights", "trades", "config", "warnings", "dates"):
             if d.get(key) and isinstance(d[key], str):
                 d[key] = _sanitize_nans(json.loads(d[key]))
         if d["created_at"]:

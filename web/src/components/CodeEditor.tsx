@@ -318,7 +318,14 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
       if (res.ok) {
         const data = await res.json()
         loadAllFiles()
-        if (fname === filename) { setCode(''); setFilename('') }
+        // V2.12.2 codex: clear editor only if BOTH filename and kind match.
+        // Prior version matched only by filename, so deleting e.g. a strategy
+        // `my.py` would clear an unrelated factor `my.py` that happened to be
+        // open in the editor.
+        if (fname === filename && kind === currentKind) {
+          setCode('')
+          setFilename('')
+        }
         setStatus(data.warning ? `已删除 ${fname}（${data.warning}）` : `已删除 ${fname}`)
       } else {
         const err = await res.json().catch(() => ({ detail: '未知错误' }))
@@ -536,12 +543,20 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
                 editorCode={code}
                 fileKey={filename ? `${currentKind}:${filename}` : ''}
                 onCodeUpdate={(c, f, kind) => {
+                  // V2.12.2 codex: on fetch-failure branch, ChatPanel calls
+                  // with (undefined, undefined, undefined) to refresh the
+                  // sidebar without touching the editor. Prior version
+                  // updated filename/kind even when code was undefined,
+                  // leaving the editor pointing at a new file but
+                  // displaying the previous file's source.
                   if (c !== undefined && c !== null) setCode(c as string)
                   if (f) {
                     setFilename(f)
                     setCurrentKind((kind as CodeKind) || 'strategy')
-                    loadAllFiles()
                   }
+                  // Always refresh file list so AI-created files appear in
+                  // the sidebar even if their content fetch failed.
+                  loadAllFiles()
                 }}
               />
             </div>

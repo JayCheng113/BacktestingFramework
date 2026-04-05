@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 1781 (1791 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.2 | Tests: 1789 (1799 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -108,6 +108,15 @@ No version tag without review pass. No push without critical issues resolved.
   - **测试强化**: 基本面因子真参数化契约测试 (18 因子 × 12 invariants = 216 独立 cases); evaluator 边界测试 (常数/NaN/单值); walk_forward 参数化边界 + 数据隔离测试; optimizer 奇异协方差 edge case; portfolio 引擎 metrics 和 single-stock byte-identical integration test
   - **⚠️ 非 backward compat**: 5 个指标 (sharpe/sortino/alpha/beta/profit_factor) 公式变更, V2.12.2 之前存入 DB 的历史 run 用旧公式, 之后新 run 用新公式, 无迁移脚本
   - 1500 → 1781 tests (+281)
+- **V2.12.2 post-release**: 再一轮 codex + reviewer 挖出 13 bug 并修复 (1781 → 1789 tests, +8 回归测试):
+  - **数据正确性**: walk-forward `window_size = n // n_splits` 尾部丢弃 (backtest + portfolio 两处, 改整数区间 `i*n//n_splits`); alpha_combiner `_compute_alpha_weights` 的 `dynamic_lb` 未传给 `evaluate_cross_sectional_factor()` (长 warmup 因子训练窗被 252 默认截断)
+  - **注册表 dual-dict 贯彻**: Factor 和 CrossSectionalFactor 补齐 `_registry_by_key` + `_registry` 双字典 + `resolve_class()` + 冲突 warning (对齐 PortfolioStrategy V2.12.1 模式); sandbox 热重载两处 (Factor/CrossFactor) 清理两个字典; reviewer round 发现 3 个 sibling miss 并修复: `alpha_combiner.py` AlphaCombiner pop, `sandbox.py` 因子保存失败 rollback 路径, `code.py` `/refresh` + delete 路由 (新增 `_get_all_registries_for_kind()` 返回 dict list 统一清理)
+  - **Portfolio store 上下文完整**: 新增 `config` + `warnings` + `dates` 三列 (ALTER 迁移), `/run` 打包 market/optimizer/risk/index/cost config 持久化; 历史对比图表用真实交易日 time axis 对齐 (legacy 空 dates 行降级 index 轴 + 警告 banner)
+  - **前端 market 状态贯通**: PortfolioPanel 原本无 `market` state, 所有 7 个 API 调用点 (run/walk-forward/search/evaluate-factors/factor-correlation/fundamental-fetch/quality) 默认 backend cn_stock; 新增 state + 两个子组件选择器 UI, A 股 T+1/印花税/涨跌停规则不再误加到美股港股
+  - **UI 陈旧状态清理**: BacktestPanel + FactorPanel `useEffect` 按 symbol/market/dates/factor 变化清 result/wfResult/trades, 避免用户切标的后看到上一次的指标
+  - **ChatPanel 原子文件绑定**: `activeId` 闭包改 `targetId` 捕获防流式中途切换会话串线; AI 创建文件失败 fetch 路径从 "更新 filename 但留旧代码" 改为 "atomic: 要么三项都更新, 要么仅刷新侧栏 + 用户警告" (CodeEditor handler 配套允许 undefined 三元组); fileKey 统一 `${kind}:${filename}` 格式消除重复会话
+  - **CodeEditor 删除 kind 校验**: 删除文件时需要 filename **和** kind 都匹配才清编辑器, 避免同名跨类型误清
+  - 1789 tests (+8 回归: walk-forward tail drop×2, factor collision×2, portfolio store config/dates×4)
 - **Next: V2.13** — ML Alpha+多策略 → V3.0 Paper OMS
 
 ## A 股约束 (贯穿所有版本)

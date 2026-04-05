@@ -44,6 +44,10 @@ export default function PortfolioPanel() {
   const [factorCategories, setFactorCategories] = useState<{ key: string; label: string; factors: any[] }[]>([])
   const [selected, setSelected] = useState('')
   const [symbols, setSymbols] = useState('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH')
+  // V2.12.2 codex: previously PortfolioPanel had no market state at all and
+  // every API call defaulted to backend's cn_stock. This silently applied
+  // A-share T+1 / stamp tax / limit-pct rules to US/HK backtests.
+  const [market, setMarket] = useState('cn_stock')
   const [startDate, setStartDate] = useState('2020-01-01')
   const [endDate, setEndDate] = useState('2024-12-31')
   const [freq, setFreq] = useState('monthly')
@@ -155,10 +159,19 @@ export default function PortfolioPanel() {
         const res = await getPortfolioRun(id)
         const d = res.data
         const ec = d.equity_curve || d.equity || []
+        // V2.12.2 codex: propagate per-bar dates from the run so the
+        // compare chart can align runs by real trading days. Prior version
+        // left `dates: []` which forced PortfolioHistoryContent into an
+        // index-based x-axis that visually aligns runs with different
+        // date ranges or trading-day gaps, producing misleading overlays.
+        // Pre-V2.12.2 runs have no stored dates → empty list, chart falls
+        // back to index-based rendering for those legacy rows only.
+        const dates = Array.isArray(d.dates) ? d.dates : []
         results.push({
           id, name: `${d.strategy_name || '未知'} (${(d.start_date || '').slice(0, 10)}~${(d.end_date || '').slice(0, 10)})`,
           equity: ec.map((v: number) => v / (ec[0] || 1)),
-          dates: [], metrics: d.metrics || {},
+          dates,
+          metrics: d.metrics || {},
         })
       } catch (e: any) {
         errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
@@ -182,9 +195,9 @@ export default function PortfolioPanel() {
     setEvalLoading(true); setEvalResult(null); setCorrResult(null)
     try {
       const [evalRes, corrRes] = await Promise.all([
-        evaluateFactors({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors, forward_days: 5, eval_freq: 'weekly', neutralize }),
+        evaluateFactors({ symbols: symbolList, market, start_date: startDate, end_date: endDate, factor_names: evalFactors, forward_days: 5, eval_freq: 'weekly', neutralize }),
         evalFactors.length >= 2
-          ? factorCorrelation({ symbols: symbolList, start_date: startDate, end_date: endDate, factor_names: evalFactors })
+          ? factorCorrelation({ symbols: symbolList, market, start_date: startDate, end_date: endDate, factor_names: evalFactors })
           : Promise.resolve(null),
       ])
       setEvalResult(evalRes.data)
@@ -205,9 +218,9 @@ export default function PortfolioPanel() {
         })
       })
       const hasFina = evalFactors.some(f => finaFactorKeys.has(f))
-      const res = await fetchFundamentalData({ symbols: symbolList, start_date: startDate, end_date: endDate, include_fina: hasFina })
+      const res = await fetchFundamentalData({ symbols: symbolList, market, start_date: startDate, end_date: endDate, include_fina: hasFina })
       setFundaStatus(res.data.message || '完成')
-      const qr = await fundamentalDataQuality({ symbols: symbolList, start_date: startDate, end_date: endDate })
+      const qr = await fundamentalDataQuality({ symbols: symbolList, market, start_date: startDate, end_date: endDate })
       setQualityReport(qr.data.report || [])
     } catch (e: any) { setFundaStatus(e.response?.data?.detail || '获取失败') }
     finally { setFetchingFunda(false) }
@@ -260,6 +273,7 @@ export default function PortfolioPanel() {
       const cleanParams = Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_')))
       const res = await runPortfolioBacktest({
         strategy_name: selected, symbols: symbolList,
+        market,
         start_date: startDate, end_date: endDate, freq,
         strategy_params: cleanParams,
         initial_cash: settings.initial_cash,
@@ -297,6 +311,7 @@ export default function PortfolioPanel() {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
       const res = await portfolioWalkForward({
         strategy_name: selected, symbols: symbolList,
+        market,
         start_date: startDate, end_date: endDate, freq,
         strategy_params: Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
         initial_cash: settings.initial_cash,
@@ -345,6 +360,7 @@ export default function PortfolioPanel() {
     try {
       const res = await portfolioSearch({
         strategy_name: selected, symbols: symbolList,
+        market,
         start_date: startDate, end_date: endDate, freq,
         param_grid: paramGrid, max_combinations: 50,
         buy_commission_rate: settings.buy_commission_rate, sell_commission_rate: settings.sell_commission_rate,
@@ -513,6 +529,7 @@ export default function PortfolioPanel() {
       {tab === 'run' && (
         <PortfolioRunContent
           symbols={symbols} setSymbols={setSymbols}
+          market={market} setMarket={setMarket}
           startDate={startDate} setStartDate={setStartDate}
           endDate={endDate} setEndDate={setEndDate}
           freq={freq} setFreq={setFreq}
@@ -554,6 +571,7 @@ export default function PortfolioPanel() {
       {tab === 'factor-research' && (
         <PortfolioFactorContent
           symbols={symbols} setSymbols={setSymbols}
+          market={market} setMarket={setMarket}
           startDate={startDate} setStartDate={setStartDate}
           endDate={endDate} setEndDate={setEndDate}
           factors={factors} factorCategories={factorCategories}

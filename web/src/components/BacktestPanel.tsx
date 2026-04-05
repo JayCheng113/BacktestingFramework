@@ -52,6 +52,17 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     setCostSettings(getDefaultSettings(market))
   }, [market])
 
+  // V2.12.2 codex: clear stale result when any search input changes (symbol,
+  // market, period, dates). Prior version kept the old result visible
+  // on-screen even though the inputs no longer matched the run, misleading
+  // the user into thinking the metrics applied to the new inputs.
+  useEffect(() => {
+    setResult(null)
+    setWfResult(null)
+    onTradesUpdate?.([])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, market, period, startDate, endDate])
+
   const handleRun = async () => {
     if (!selected || !symbol) return
     setLoading(true)
@@ -99,6 +110,12 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
       for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as any).default
       setParams(defaults)
     }
+    // V2.12.2 codex: clear previous-strategy results + trades so the user
+    // never sees a metric panel labelled under a strategy that did not
+    // actually run (prior result kept showing until next manual run).
+    setResult(null)
+    setWfResult(null)
+    onTradesUpdate?.([])
   }
 
   const equityOption = result ? {

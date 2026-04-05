@@ -120,6 +120,33 @@ class TestPortfolioWalkForward:
         # 3 splits × 2 (IS + OOS) = 6 calls
         assert call_count[0] == 6
 
+    def test_tail_days_not_silently_dropped(self):
+        """V2.12.2 codex: window_size = n_days // n_splits silently drops the
+        remainder n_days % n_splits at the tail. Use daily rebalance so
+        oos_dates captures every trading day, then assert the last OOS date
+        is within 2 trading days of the final input date."""
+        data, cal, universe, dates = _make_data(n_days=510)  # 510 % 7 = 6
+        # Call portfolio_walk_forward direct, not portfolio_significance helper
+        # so we get a PortfolioWFResult with oos_dates list.
+        result = portfolio_walk_forward(
+            strategy_factory=lambda: TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            n_splits=7, train_ratio=0.7, freq="daily",
+        )
+        assert result.oos_dates, "no OOS dates"
+        from datetime import date as _date
+        last_d = _date.fromisoformat(result.oos_dates[-1])
+        inp_d = dates[-1].date()
+        # Fix: last OOS covers rows up to inp_d → delta = 0 or 1.
+        # Bug: window_size=72, last window ends at row 504, dropping rows
+        # 504..510 → delta = 6 business days = 8 calendar days.
+        delta_days = (inp_d - last_d).days
+        assert delta_days <= 4, (
+            f"Last OOS ends {delta_days} days before input — "
+            f"tail days silently dropped by n_days // n_splits"
+        )
+
 
 class TestPortfolioSignificance:
 

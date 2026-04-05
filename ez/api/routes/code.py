@@ -20,7 +20,11 @@ from ez.agent.sandbox import (
 
 
 def _get_registry_for_kind(kind: str) -> dict | None:
-    """Get the _registry dict for a given kind."""
+    """Get the name-keyed _registry dict for a given kind (read path).
+
+    Read callers can use this single dict since it is the backward-compat
+    view. Cleanup callers must use `_get_all_registries_for_kind` instead.
+    """
     if kind == "strategy":
         from ez.strategy.base import Strategy
         return Strategy._registry
@@ -34,6 +38,30 @@ def _get_registry_for_kind(kind: str) -> dict | None:
         from ez.portfolio.cross_factor import CrossSectionalFactor
         return CrossSectionalFactor._registry
     return None
+
+
+def _get_all_registries_for_kind(kind: str) -> list[dict]:
+    """Get ALL registry dicts for a given kind (cleanup path).
+
+    V2.12.2 codex reviewer: Factor, CrossSectionalFactor, and
+    PortfolioStrategy all use dual-dict registries (`_registry` name-keyed
+    + `_registry_by_key` module.class-keyed). Cleanup must scrub BOTH
+    dicts or the full-key dict leaks zombies. Strategy is single-dict so
+    returns just the one entry.
+    """
+    if kind == "strategy":
+        from ez.strategy.base import Strategy
+        return [Strategy._registry]
+    elif kind == "factor":
+        from ez.factor.base import Factor
+        return [Factor._registry, Factor._registry_by_key]
+    elif kind == "portfolio_strategy":
+        from ez.portfolio.portfolio_strategy import PortfolioStrategy
+        return [PortfolioStrategy._registry, PortfolioStrategy._registry_by_key]
+    elif kind == "cross_factor":
+        from ez.portfolio.cross_factor import CrossSectionalFactor
+        return [CrossSectionalFactor._registry, CrossSectionalFactor._registry_by_key]
+    return []
 
 
 def _validate_kind(kind: str) -> None:
@@ -130,14 +158,16 @@ def delete_file(filename: str, kind: str = Query(default="strategy")):
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
-    # Step 1: Clean registry BEFORE deleting file (prevents zombie state)
+    # Step 1: Clean registry BEFORE deleting file (prevents zombie state).
+    # V2.12.2 codex reviewer: clean BOTH name-keyed and module.class-keyed
+    # dicts so dual-dict registries (Factor/CrossSectionalFactor/
+    # PortfolioStrategy) don't leak zombies.
     import sys
     cleanup_warning = ""
     stem = safe_name.replace(".py", "")
     module_name = f"{target_dir.name}.{stem}"
     try:
-        registry = _get_registry_for_kind(kind)
-        if registry is not None:
+        for registry in _get_all_registries_for_kind(kind):
             old_keys = [k for k, v in registry.items() if v.__module__ == module_name]
             for k in old_keys:
                 del registry[k]
@@ -270,17 +300,19 @@ def refresh_registries():
     from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
 
     # Step 1: Clear ALL user entries from registries + sys.modules
-    # (so loaders don't skip already-imported modules)
+    # (so loaders don't skip already-imported modules).
+    # V2.12.2 codex reviewer: clean BOTH dicts for dual-dict registries so
+    # the full-key dict doesn't leak zombies.
     for kind, prefix in [("strategy", "strategies"), ("factor", "factors"),
                          ("portfolio_strategy", "portfolio_strategies"), ("cross_factor", "cross_factors")]:
-        registry = _get_registry_for_kind(kind)
-        if registry is None:
-            continue
-        user_keys = [k for k, v in registry.items()
-                     if (v.__module__ or '').startswith(f"{prefix}.")]
-        for k in user_keys:
-            mod = registry[k].__module__
-            del registry[k]
+        mods_to_remove: set[str] = set()
+        for registry in _get_all_registries_for_kind(kind):
+            user_keys = [k for k, v in registry.items()
+                         if (v.__module__ or '').startswith(f"{prefix}.")]
+            for k in user_keys:
+                mods_to_remove.add(registry[k].__module__)
+                del registry[k]
+        for mod in mods_to_remove:
             if mod in sys.modules:
                 del sys.modules[mod]
 

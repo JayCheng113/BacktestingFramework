@@ -68,20 +68,41 @@ export default function PortfolioHistoryContent(props: Props) {
       )}
 
       {/* Compare overlay chart + metrics table */}
-      {compareData.length >= 2 && (
+      {compareData.length >= 2 && (() => {
+        // V2.12.2 codex: align overlays on real trading days when every
+        // selected run has persisted dates (V2.12.2+ runs). If ANY
+        // selected run is a legacy row that predates dates persistence
+        // (dates is empty), fall back to index-based rendering and warn
+        // the user — otherwise ECharts silently drops the date-less
+        // series from a time axis.
+        const allHaveDates = compareData.every(d =>
+          Array.isArray(d.dates) && d.dates.length > 0 && d.dates.length === d.equity.length
+        )
+        const axisType = allHaveDates ? 'time' : 'value'
+        const xName = allHaveDates ? '日期' : '交易日序号'
+        return (
         <div className="mt-4 p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-          <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>对比净值曲线 ({compareData.length} 条)</h4>
+          <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+            对比净值曲线 ({compareData.length} 条)
+            {!allHaveDates && (
+              <span className="ml-2" style={{ color: '#d29922', fontSize: '10px' }}>
+                ⚠️ 部分历史记录无日期信息，降级按序号对齐 (V2.12.2 之前的记录)
+              </span>
+            )}
+          </h4>
           <ReactECharts option={{
             backgroundColor: '#0d1117',
             tooltip: { trigger: 'axis' as const },
             legend: { data: compareData.map(d => d.name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 5, type: 'scroll' as const },
             grid: { left: 70, right: 20, top: 40, bottom: 30 },
-            xAxis: { type: 'value' as const, name: '交易日序号', axisLabel: { color: '#8b949e' } },
+            xAxis: { type: axisType as 'time' | 'value', name: xName, axisLabel: { color: '#8b949e' } },
             yAxis: { type: 'value' as const, name: '归一化净值', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
             color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#f97316'],
             series: compareData.map(d => ({
               name: d.name, type: 'line' as const,
-              data: d.equity.map((v, i) => [i, v]),
+              data: allHaveDates
+                ? d.equity.map((v, i) => [d.dates[i], v])
+                : d.equity.map((v, i) => [i, v]),
               showSymbol: false, lineStyle: { width: 1.5 },
             })),
           }} style={{ height: 280 }} />
@@ -112,7 +133,8 @@ export default function PortfolioHistoryContent(props: Props) {
           <button onClick={() => setCompareData([])} className="mt-2 text-xs px-2 py-1 rounded"
             style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭对比</button>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

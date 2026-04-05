@@ -76,3 +76,60 @@ class TestRegistry:
         from ez.portfolio.portfolio_strategy import PortfolioStrategy
         assert "TopNRotation" in PortfolioStrategy._registry
         assert "MultiFactorRotation" in PortfolioStrategy._registry
+
+
+class TestConfigAndWarnings:
+    """V2.12.2 codex: config + warnings columns preserve run context."""
+
+    def test_save_and_get_config(self, store):
+        run_id = store.save_run({
+            "strategy_name": "TopNRotation",
+            "config": {
+                "market": "cn_stock",
+                "_optimizer": {"kind": "mean_variance", "risk_aversion": 2.0},
+                "_risk": {"enabled": True, "max_drawdown": 0.15},
+                "_index": {"benchmark": "000300", "max_tracking_error": 0.05},
+            },
+            "warnings": ["优化器在 3 次再平衡中退化为等权"],
+        })
+        result = store.get_run(run_id)
+        assert result is not None
+        assert result["config"]["market"] == "cn_stock"
+        assert result["config"]["_optimizer"]["kind"] == "mean_variance"
+        assert result["config"]["_optimizer"]["risk_aversion"] == 2.0
+        assert result["config"]["_risk"]["enabled"] is True
+        assert result["config"]["_risk"]["max_drawdown"] == 0.15
+        assert result["config"]["_index"]["benchmark"] == "000300"
+        assert result["warnings"] == ["优化器在 3 次再平衡中退化为等权"]
+
+    def test_empty_config_and_warnings_default_gracefully(self, store):
+        """Missing config/warnings fields must not break save/get."""
+        run_id = store.save_run({"strategy_name": "X", "metrics": {}})
+        result = store.get_run(run_id)
+        assert result is not None
+        # Empty dict / list are stored as JSON, read back as dict/list or None.
+        assert result.get("config") in ({}, None)
+        assert result.get("warnings") in ([], None)
+
+
+class TestDatesPersistence:
+    """V2.12.2 codex: per-bar `dates` column enables real-date compare charts."""
+
+    def test_save_and_get_dates(self, store):
+        run_id = store.save_run({
+            "strategy_name": "TopNRotation",
+            "equity_curve": [1_000_000, 1_005_000, 1_010_000],
+            "dates": ["2024-01-02", "2024-01-03", "2024-01-04"],
+        })
+        result = store.get_run(run_id)
+        assert result is not None
+        assert result["dates"] == ["2024-01-02", "2024-01-03", "2024-01-04"]
+        assert len(result["dates"]) == len(result["equity_curve"])
+
+    def test_legacy_row_missing_dates_is_graceful(self, store):
+        """Run stored without dates returns empty list / None so frontend
+        can detect legacy rows and fall back to index-based rendering."""
+        run_id = store.save_run({"strategy_name": "Y", "equity_curve": [100, 101]})
+        result = store.get_run(run_id)
+        assert result is not None
+        assert result.get("dates") in ([], None)

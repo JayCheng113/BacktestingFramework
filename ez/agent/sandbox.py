@@ -705,10 +705,16 @@ def save_and_validate_code(
                         f"Factor hot-reload succeeded but registry has no entries for {module_name}"
                     )
         except Exception as e:
-            # Clean up any dirty registry entries
+            # Clean up any dirty registry entries.
+            # V2.12.2 codex reviewer: dual-dict registry — clean BOTH dicts
+            # or the full-key dict leaks zombies on save rollback. Prior
+            # version only popped name-keyed entries.
             dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
             for k in dirty:
                 del Factor._registry[k]
+            dirty_full = [k for k, v in Factor._registry_by_key.items() if v.__module__ == module_name]
+            for k in dirty_full:
+                del Factor._registry_by_key[k]
             if module_name in sys.modules:
                 del sys.modules[module_name]
             # Rollback file AND re-register the previous version so users
@@ -869,9 +875,14 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
                 del PortfolioStrategy._registry_by_key[k]
         elif kind == "cross_factor":
             from ez.portfolio.cross_factor import CrossSectionalFactor
-            old_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]
-            for k in old_keys:
+            # V2.12.2 codex: dual-dict registry — clean BOTH dicts or the
+            # full-key dict leaks zombies on hot-reload.
+            old_name_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]
+            for k in old_name_keys:
                 del CrossSectionalFactor._registry[k]
+            old_full_keys = [k for k, v in CrossSectionalFactor._registry_by_key.items() if v.__module__ == module_name]
+            for k in old_full_keys:
+                del CrossSectionalFactor._registry_by_key[k]
 
         if module_name in sys.modules:
             del sys.modules[module_name]
@@ -904,9 +915,14 @@ def _reload_factor_code(filename: str, target_dir: Path) -> None:
 
     with _reload_lock:
         from ez.factor.base import Factor
-        old_keys = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
-        for k in old_keys:
+        # V2.12.2 codex: dual-dict registry — clean BOTH dicts or the
+        # full-key dict leaks zombies on hot-reload.
+        old_name_keys = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+        for k in old_name_keys:
             del Factor._registry[k]
+        old_full_keys = [k for k, v in Factor._registry_by_key.items() if v.__module__ == module_name]
+        for k in old_full_keys:
+            del Factor._registry_by_key[k]
 
         if module_name in sys.modules:
             del sys.modules[module_name]

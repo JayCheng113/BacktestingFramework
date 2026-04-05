@@ -655,8 +655,12 @@ NEEDS_FINA.discard("IndustryMomentum")  # doesn't need fina data
 
 # ── Registry helper ───────────────────────────────────────────────────
 
-# C1 fix: Remove abstract base from registry (registered by __init_subclass__ before __abstractmethods__ set)
+# C1 fix: Remove abstract base from registry (registered by __init_subclass__ before __abstractmethods__ set).
+# V2.12.2 codex: dual-dict registry — pop from both _registry (name-keyed)
+# and _registry_by_key (module.class-keyed).
 CrossSectionalFactor._registry.pop("FundamentalCrossFactor", None)
+_fund_key = f"{FundamentalCrossFactor.__module__}.FundamentalCrossFactor"
+CrossSectionalFactor._registry_by_key.pop(_fund_key, None)
 
 
 def get_fundamental_factors() -> dict[str, type]:

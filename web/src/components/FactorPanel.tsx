@@ -32,6 +32,14 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     }).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // V2.12.2 codex: clear stale factor result when any evaluation input
+  // changes (symbol, market, dates, factor). Prior version kept the old
+  // result visible even though the inputs no longer matched the evaluation,
+  // misleading the user into thinking the metrics applied to the new inputs.
+  useEffect(() => {
+    setResult(null)
+  }, [symbol, market, startDate, endDate, factor])
+
   const handleEval = async () => {
     setLoading(true)
     try {

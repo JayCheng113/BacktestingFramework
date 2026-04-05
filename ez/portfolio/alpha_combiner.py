@@ -129,5 +129,11 @@ class AlphaCombiner(CrossSectionalFactor):
         return raw.rank(pct=True) if len(raw) > 0 else raw
 
 
-# Prevent auto-registration (AlphaCombiner can't be instantiated without args)
+# Prevent auto-registration (AlphaCombiner can't be instantiated without args).
+# V2.12.2 codex reviewer: dual-dict registry — pop from BOTH _registry and
+# _registry_by_key. Prior version left a zombie entry in _registry_by_key
+# that would be returned by resolve_class("AlphaCombiner"), then crash on
+# instantiation because AlphaCombiner.__init__ requires args.
 CrossSectionalFactor._registry.pop("AlphaCombiner", None)
+_ac_key = f"{AlphaCombiner.__module__}.AlphaCombiner"
+CrossSectionalFactor._registry_by_key.pop(_ac_key, None)

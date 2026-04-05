@@ -44,6 +44,13 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **CodeEditor auto-overwrite**: save() 遇 "already exists" 自动用 overwrite=true 重试 (AI 创建场景)
 - **指数增强 UI**: PortfolioPanel 组合 tab 添加 benchmark_index + max_tracking_error 表单字段 (V2.12.1 S4)
 
+## V2.12.2 post-release
+- **PortfolioPanel `market` state 贯通**: 原本无 `market` state, 7 个 API 调用默认 backend cn_stock. 新增 state + 7 个 API 调用点 + `PortfolioRunContent`/`PortfolioFactorContent` 两个子组件选择器 UI (A股/美股/港股).
+- **PortfolioHistoryContent 对比图按真实日期对齐**: 之前 `xAxis.type='value'` + `data: equity.map((v,i)=>[i,v])` 按序号硬拼. 现在 run 有 `dates` 字段时走 `type:'time'`, 空 dates 行 (V2.12.2 之前的历史数据) 降级 index 轴 + 黄色警告 banner.
+- **BacktestPanel / FactorPanel 陈旧 result 清理**: `useEffect` 按 symbol/market/period/dates/factor 变化清 result/wfResult/trades, 用户切标的/日期后不再看到前一次指标.
+- **ChatPanel AI 创建文件原子绑定**: 流式中 fileKey 绑定用 `targetId` (消息发送时捕获) 而不是 `activeId` 闭包值 (避免用户切会话串线); fetch 失败从 "只切 filename 留旧代码" 改为 "atomic: 要么三元组全更新要么仅刷新侧栏 + 用户警告" (CodeEditor 配套支持 `(undefined, undefined, undefined)` 仅刷新调用); AI 创建 fileKey 采用 `${kind}:${filename}` 格式和 CodeEditor 一致消除重复会话.
+- **CodeEditor deleteFile kind 校验**: 删除文件清编辑器时需要 filename **和** kind 都匹配, 避免同名跨类型 (strategy/factor) 误清.
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000

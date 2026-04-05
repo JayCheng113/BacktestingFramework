@@ -37,3 +37,5 @@ Run vectorized backtests, compute metrics, validate via Walk-Forward, test stati
   - **walk_forward.py oos_metrics 重算**: 用 MetricsCalculator 基于拼接 oos_equity_curve 算, 不是每折 sharpe 平均 (折长不一时偏)
   - **walk_forward.py _sharpe / significance.py _sharpe ddof=1**: 3 个 helpers 全部改 ddof=1, 匹配 metrics.py. 短 OOS (30-60d) 偏差最大 2.7%, CI 和显示 Sharpe 一致
   - **metrics.py degenerate input 防护**: _nan_safe() helper + rolling_corr 常数窗口 fast-path (1e-12 tolerance), evaluator.py 全部输出点 sanitize
+- V2.12.2 post-release:
+  - **walk_forward.py 尾部丢弃修复**: 原 `window_size = n // n_splits` 静默丢弃 `n % n_splits` 行 (n=510, k=7 丢 6 行). 改用整数区间 `i*n//n_splits .. (i+1)*n//n_splits`, 最后一折吸收余数. 校验用 `min_window = n // n_splits` 作为最小折的保守下界.

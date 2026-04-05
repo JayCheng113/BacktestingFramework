@@ -231,9 +231,16 @@ def _compute_alpha_weights(factors, symbols, market, start, end, method,
     weights = {}
     for f in factors:
         try:
+            # V2.12.2 codex: propagate dynamic_lb to the evaluator — prior
+            # version only lengthened the data fetch, but
+            # evaluate_cross_sectional_factor() internally defaults to
+            # lookback_days=252 and then slice_universe_data() truncates,
+            # so long-warmup custom factors (e.g. 250-day momentum,
+            # annualized stats) were silently starved of history.
             result = evaluate_cross_sectional_factor(
                 factor=f, universe_data=universe_data, calendar=calendar,
                 start=train_start, end=train_end, forward_days=forward_days, eval_freq="weekly",
+                lookback_days=dynamic_lb,
             )
             if method == "ic":
                 # Use raw IC (preserve sign: negative IC = factor direction wrong, gets negative weight)
@@ -740,19 +747,45 @@ def run_portfolio(req: PortfolioRunRequest):
             f"优化器在 {n} 次再平衡中退化为等权 (原因: {', '.join(sorted(reasons))[:200]})"
         )
 
-    # Persist
+    # Persist. V2.12.2 codex: the `config` column captures every non-default
+    # run parameter so historical runs retain full context on reload —
+    # optimizer choice, risk-control thresholds, index benchmark, tracking
+    # error, market, and cost model. Prior version only packed `_cost` into
+    # strategy_params and dropped everything else, making stored runs
+    # un-reproducible.
+    run_config = {
+        "market": req.market,
+        "_cost": {
+            "buy_commission_rate": buy_rate, "sell_commission_rate": sell_rate,
+            "min_commission": req.min_commission, "stamp_tax_rate": req.stamp_tax_rate,
+            "slippage_rate": req.slippage_rate, "lot_size": req.lot_size,
+            "limit_pct": req.limit_pct, "benchmark": req.benchmark_symbol,
+        },
+        "_optimizer": {
+            "kind": req.optimizer,
+            "risk_aversion": req.risk_aversion,
+            "max_weight": req.max_weight,
+            "max_industry_weight": req.max_industry_weight,
+            "cov_lookback": req.cov_lookback,
+        },
+        "_risk": {
+            "enabled": req.risk_control,
+            "max_drawdown": req.max_drawdown,
+            "drawdown_reduce": req.drawdown_reduce,
+            "drawdown_recovery": req.drawdown_recovery,
+            "max_turnover": req.max_turnover,
+        },
+        "_index": {
+            "benchmark": req.index_benchmark,
+            "max_tracking_error": req.max_tracking_error,
+        },
+    }
     store = _get_store()
     run_id = store.save_run({
         "strategy_name": req.strategy_name,
         "strategy_params": {
             **req.strategy_params,
-            "_cost": {
-                "buy_commission_rate": buy_rate, "sell_commission_rate": sell_rate,
-                "min_commission": req.min_commission, "stamp_tax_rate": req.stamp_tax_rate,
-                "slippage_rate": req.slippage_rate, "lot_size": req.lot_size,
-                "limit_pct": req.limit_pct, "benchmark": req.benchmark_symbol,
-                "market": req.market,
-            },
+            "_cost": run_config["_cost"],  # backward-compat mirror
         },
         "symbols": req.symbols,
         "start_date": start.isoformat(),
@@ -768,6 +801,13 @@ def run_portfolio(req: PortfolioRunRequest):
             for d, w in zip(result.rebalance_dates, result.rebalance_weights)
         ],
         "trades": result.trades,
+        "config": run_config,
+        "warnings": list(fund_warnings) if fund_warnings else [],
+        # V2.12.2 codex: persist per-bar dates so the compare-chart can
+        # align runs by real trading days. Prior version stored only
+        # equity_curve and the frontend fell back to index-based x-axis,
+        # misleading users when compared runs had different date ranges.
+        "dates": [d.isoformat() for d in result.dates],
     })
 
     return {
@@ -1215,7 +1255,10 @@ class _NeutralizedWrapper(CrossSectionalFactor):
         raw = self.compute_raw(universe_data, date)
         return raw.rank(pct=True) if len(raw) > 0 else raw
 
+# V2.12.2 codex: dual-dict registry — pop from both dicts.
 CrossSectionalFactor._registry.pop("_NeutralizedWrapper", None)
+_nw_key = f"{_NeutralizedWrapper.__module__}._NeutralizedWrapper"
+CrossSectionalFactor._registry_by_key.pop(_nw_key, None)
 
 
 def _wrap_neutralized(factor, industry_map: dict):

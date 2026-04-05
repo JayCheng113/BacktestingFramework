@@ -84,3 +84,8 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
   - **walk_forward deepcopy**: 每折 copy.deepcopy(strategy) 防 IS→OOS 状态污染
   - **walk_forward optimizer/risk_manager factory**: 每折 fresh 实例 + aggregate optimizer_fallback_events / risk_events
   - **oos_metrics 拼接重算**: 用 MetricsCalculator 基于拼接 oos_equity_curve 算, 不是每折 sharpe 平均
+- V2.12.2 post-release:
+  - **walk_forward.py 尾部丢弃**: 原 `window_size = n_days // n_splits` 静默丢弃 `n_days % n_splits` 尾部交易日. 改整数区间 `i*n_days//n_splits .. (i+1)*n_days//n_splits`, 最后一折吸收余数, 所有交易日都纳入 IS/OOS.
+  - **CrossSectionalFactor dual-dict registry**: 补齐 `_registry_by_key` + `_registry` + `resolve_class()` + 冲突 warning (对齐 PortfolioStrategy V2.12.1). `AlphaCombiner` pop 同步清理 `_registry_by_key` (reviewer sibling miss fix).
+  - **portfolio_store 上下文完整**: 新增 `config` / `warnings` / `dates` 三列 + ALTER 迁移, `/run` 打包 market/optimizer/risk/index/cost 到 `config`, 历史对比图表用真实交易日 time axis 对齐 (legacy 空 dates 行降级 index 轴 + 警告 banner).
+  - **alpha_combiner 训练 lookback 正确传递**: `_compute_alpha_weights` 的 `dynamic_lb` 之前只传 fetch, 现在也传 `evaluate_cross_sectional_factor()`, 避免长 warmup 因子训练窗被默认 252 截断.

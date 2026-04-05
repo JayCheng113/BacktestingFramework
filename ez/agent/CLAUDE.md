@@ -113,6 +113,10 @@ pending → running → completed
 - CodeEditor sidebar hides `research_` files
 - Promote workflow: POST /api/code/promote copies research_ file → removes prefix → renames class → contract test → registers globally
 
+## V2.12.2 post-release
+- **Sandbox dual-dict hot-reload cleanup**: `_reload_factor_code` 和 `_reload_portfolio_code` 的 `cross_factor` 分支清理 `_registry` + `_registry_by_key` 两个 dict, 避免 hot-reload 后全键 dict 留 zombie 类指针.
+- **Sandbox factor save rollback 同步清理**: `_save_factor_code` 的 except 分支之前只清名字键 dict, 现在同时清全键 dict. 与 V2.12.2 Factor dual-dict 注册表匹配.
+
 ## Sandbox Security (V2.7+V2.10+V2.12.1)
 - **Forbidden imports**: os, sys, subprocess, socket, shutil, pathlib, importlib, ctypes, multiprocessing, threading, signal, pickle, http, urllib, requests, httpx, duckdb, etc.
 - **Dunder access**: AST check for `__attr__` attribute access; only _SAFE_DUNDERS allowed (__init__, __getitem__, __setitem__, __contains__, __call__, etc.)

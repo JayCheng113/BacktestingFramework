@@ -98,13 +98,19 @@ def portfolio_walk_forward(
 
     trading_days = calendar.trading_days_between(start, end)
     n_days = len(trading_days)
-    window_size = n_days // n_splits
 
+    # V2.12.2 codex: use integer-interval arithmetic so the last window
+    # absorbs the remainder n_days % n_splits. Previously
+    # `window_size = n_days // n_splits` silently dropped the tail — for 503
+    # days and 7 splits, the final 6 trading days were invisible to both IS
+    # and OOS. Validation below uses the smallest possible window as a
+    # conservative lower bound for the test size.
+    min_window = n_days // n_splits
     min_test = 20
-    test_size = window_size - int(window_size * train_ratio)
-    if test_size < min_test:
+    min_test_size = min_window - int(min_window * train_ratio)
+    if min_test_size < min_test:
         raise ValueError(
-            f"OOS window too short: {test_size} days for {n_splits} splits. "
+            f"OOS window too short: {min_test_size} days for {n_splits} splits. "
             f"Need >= {min_test}. Try fewer splits or longer date range."
         )
 
@@ -113,9 +119,12 @@ def portfolio_walk_forward(
     chain_value = initial_cash
 
     for i in range(n_splits):
-        win_start = i * window_size
-        train_end_idx = win_start + int(window_size * train_ratio)
-        test_end_idx = min(win_start + window_size, n_days)
+        # Integer-interval boundaries: last fold absorbs the remainder.
+        win_start = i * n_days // n_splits
+        win_end = (i + 1) * n_days // n_splits
+        cur_window = win_end - win_start
+        train_end_idx = win_start + int(cur_window * train_ratio)
+        test_end_idx = win_end
 
         if train_end_idx >= n_days:
             continue  # not enough data for this fold

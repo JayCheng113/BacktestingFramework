@@ -110,3 +110,32 @@ class TestWalkForwardBoundary:
         df = _make_df(500)
         with pytest.raises(ValueError, match="Try n_splits"):
             validator.validate(df, strategy, n_splits=10)
+
+    def test_tail_data_not_silently_dropped(self):
+        """V2.12.2 codex: window_size = n // n_splits silently drops the
+        remainder n % n_splits at the tail. For n=510, n_splits=7, old
+        code covered rows [0..504), leaving rows [504..510) invisible to
+        both IS and OOS. Use integer-interval arithmetic so the last
+        window absorbs the remainder and all rows participate.
+
+        Test strategy: choose n and n_splits so remainder = 6 business days
+        (~8 calendar days), then assert the last OOS timestamp is within 2
+        business days of input end (delta.days <= 4). Without the fix, delta
+        would be ~8 days.
+        """
+        validator = WalkForwardValidator()
+        strategy = MACrossStrategy(short_period=3, long_period=5)
+        # 510 rows, 7 splits — 510 % 7 = 6 remainder business days
+        df = _make_df(510)
+        result = validator.validate(df, strategy, n_splits=7, train_ratio=0.7)
+        last_split_oos = result.splits[-1]
+        assert len(last_split_oos.equity_curve) > 0, "last split has no data"
+        last_oos_ts = last_split_oos.equity_curve.index[-1]
+        input_last_ts = df.index[-1]
+        delta_days = (input_last_ts - last_oos_ts).days
+        # Fix absorbs remainder → delta = 0. Bug leaves remainder = 6 business
+        # days = 8 calendar days. Threshold of 4 cleanly separates the two.
+        assert delta_days <= 4, (
+            f"Last OOS ends {delta_days} days before input ends — "
+            f"tail rows silently dropped by window_size = n // n_splits"
+        )

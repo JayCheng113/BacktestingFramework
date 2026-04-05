@@ -52,33 +52,41 @@ class WalkForwardValidator:
         if not (0.0 < train_ratio < 1.0):
             raise ValueError(f"train_ratio must be in (0, 1), got {train_ratio}")
         n = len(data)
-        window_size = n // n_splits
 
         # Each split needs enough bars for the engine to produce meaningful results
         warmup = 0
         for factor in strategy.required_factors():
             warmup = max(warmup, factor.warmup_period)
 
+        # V2.12.2 codex: use integer-interval arithmetic for window boundaries
+        # so the last window absorbs the remainder n % n_splits. Previously
+        # `window_size = n // n_splits` silently dropped the tail — for 503
+        # rows and 10 splits, rows 500..502 were invisible to both IS and OOS.
+        # Validation below uses the smallest possible window (n // n_splits)
+        # as a conservative lower bound for the test size.
+        min_window = n // n_splits
         min_tradeable = 10
-        test_size = window_size - int(window_size * train_ratio)
-        if test_size < warmup + min_tradeable:
+        min_test_size = min_window - int(min_window * train_ratio)
+        if min_test_size < warmup + min_tradeable:
             max_splits = n // (int((warmup + min_tradeable) / (1 - train_ratio)) + 1)
             raise ValueError(
-                f"OOS window too short for {n_splits} splits: each test has {test_size} bars "
+                f"OOS window too short for {n_splits} splits: each test has {min_test_size} bars "
                 f"but strategy needs {warmup} warmup + {min_tradeable} tradeable = {warmup + min_tradeable}. "
                 f"Try n_splits<={max(1, max_splits)} or use a shorter-warmup strategy."
             )
 
-        train_size = int(window_size * train_ratio)
         splits: list[BacktestResult] = []
         oos_equities: list[pd.Series] = []
         is_sharpes: list[float] = []
         oos_sharpes: list[float] = []
 
         for i in range(n_splits):
-            window_start = i * window_size
-            train_end = window_start + train_size
-            test_end = min(window_start + window_size, n)
+            # Integer-interval boundaries: last window absorbs the remainder.
+            window_start = i * n // n_splits
+            window_end = (i + 1) * n // n_splits
+            cur_window = window_end - window_start
+            train_end = window_start + int(cur_window * train_ratio)
+            test_end = window_end
 
             # Strictly non-overlapping: IS = [window_start, train_end), OOS = [train_end, test_end)
             train_data = data.iloc[window_start:train_end]

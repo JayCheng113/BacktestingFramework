@@ -43,6 +43,7 @@ const fmt = (v: number | null | undefined, pct = false) => {
 interface Props {
   // Shared state
   symbols: string; setSymbols: (v: string) => void
+  market: string; setMarket: (v: string) => void
   startDate: string; setStartDate: (v: string) => void
   endDate: string; setEndDate: (v: string) => void
   freq: string; setFreq: (v: string) => void
@@ -96,7 +97,8 @@ interface Props {
 
 export default function PortfolioRunContent(props: Props) {
   const {
-    symbols, setSymbols, startDate, setStartDate, endDate, setEndDate, freq, setFreq,
+    symbols, setSymbols, market, setMarket,
+    startDate, setStartDate, endDate, setEndDate, freq, setFreq,
     settings, setSettings, strategies, factors, factorCategories,
     selected, setSelected, strategyParams, updateParam, currentSchema, currentDesc,
     result, loading, wfResult, setWfResult, wfLoading, wfSplits, setWfSplits, wfTrainRatio, setWfTrainRatio,
@@ -219,7 +221,14 @@ export default function PortfolioRunContent(props: Props) {
           <BacktestSettings value={settings} onChange={setSettings} />
         </div>
         <div className="mb-3">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>市场</label>
+            <select value={market} onChange={e => setMarket(e.target.value)}
+              className="text-xs px-2 py-0.5 rounded" style={inputStyle}>
+              <option value="cn_stock">A股/ETF</option>
+              <option value="us_stock">美股</option>
+              <option value="hk_stock">港股</option>
+            </select>
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>股票池 (逗号分隔)</label>
             <button onClick={() => setSymbols('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH,513880.SH,513260.SH,159985.SZ')}
               className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--color-accent)', border: '1px solid var(--border)' }}>宽基ETF</button>

@@ -107,3 +107,7 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
   - **latest_weights 返回最后非空**: next((w for w in reversed(history) if w), {}) 绕过清仓后 append({}) 的空 entry
   - **evaluate-factors / factor-correlation lookback propagation**: _max_factor_warmup(factors) 不止传给 fetch, 还传给 evaluate_cross_sectional_factor() 和 compute_factor_correlation() 的 lookback_days 参数
   - **PortfolioSearchRequest 加 optimizer/risk 字段**: 之前搜索完全忽略 optimizer 配置
+- V2.12.2 post-release:
+  - **`_compute_alpha_weights` lookback 补齐**: `dynamic_lb` 之前只传 `_fetch_data()`, 没传 `evaluate_cross_sectional_factor()`, 长 warmup 因子的训练窗被默认 252 截断. V2.12.1 round 5 同类修复遗漏的最后一个 sibling.
+  - **/run 持久化完整上下文**: PortfolioStore 新增 `config` / `warnings` / `dates` 三列 (ALTER 迁移), `/run` endpoint 打包 market/optimizer/risk/index/cost 到 `run_config` dict, 历史对比图表可按真实交易日 time axis 对齐 (替代原 index-based 硬拼).
+  - **routes/code.py dual-dict cleanup**: 新增 `_get_all_registries_for_kind()` 返回 dict list, delete 路由 + `/refresh` endpoint 统一清理名字键 + 全键两个 dict, 避免 Factor/CrossSectionalFactor/PortfolioStrategy 的 `_registry_by_key` 在删除/刷新时泄漏 zombie 类.
