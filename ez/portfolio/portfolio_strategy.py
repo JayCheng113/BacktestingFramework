@@ -154,6 +154,36 @@ class TopNRotation(PortfolioStrategy):
         self._factor = factor
         self._top_n = top_n
 
+    @property
+    def factor(self) -> CrossSectionalFactor:
+        """Public accessor for the wrapped factor.
+
+        V2.13 round 5 codex-H: engine.run_portfolio_backtest warmup check
+        at ez/portfolio/engine.py:101 walks ``getattr(strategy, 'factor')``
+        to discover the factor's ``warmup_period``. Before this property
+        was added, engine read ``None`` for TopNRotation (the factor was
+        stored as private ``_factor``) and silently skipped the warmup
+        validation. Combined with the default ``lookback_days=252``,
+        MLAlpha(train_window > 252) received truncated history on early
+        rebalances with no warning. Exposing the factor here lets the
+        engine's existing defensive check do its job.
+        """
+        return self._factor
+
+    @property
+    def lookback_days(self) -> int:
+        """Required history length in trading days.
+
+        V2.13 round 5 codex-H: derived from the inner factor's
+        ``warmup_period`` so MLAlpha with a long ``train_window`` gets
+        enough history. Floor at 252 (the prior default) to avoid
+        regressions for short-warmup factors like MomentumRank. Add a
+        20-day buffer for upstream ``pct_change`` / ``rolling`` warmup
+        inside feature functions.
+        """
+        factor_warmup = int(getattr(self._factor, "warmup_period", 0) or 0)
+        return max(252, factor_warmup + 20)
+
     @classmethod
     def get_parameters_schema(cls) -> dict:
         return {
@@ -185,6 +215,30 @@ class MultiFactorRotation(PortfolioStrategy):
             raise ValueError(f"top_n must be >= 1, got {top_n}")
         self._factors = factors
         self._top_n = top_n
+
+    @property
+    def factors(self) -> list[CrossSectionalFactor]:
+        """Public accessor for the wrapped factors list.
+
+        See TopNRotation.factor docstring for the engine-side warmup
+        check that reads this attribute. V2.13 round 5 codex-H.
+        """
+        return list(self._factors)
+
+    @property
+    def lookback_days(self) -> int:
+        """Required history length — max warmup across all factors + buffer.
+
+        V2.13 round 5 codex-H: MLAlpha(train_window=500) wrapped in
+        MultiFactorRotation needs ≥ 500 rows of history. Previously this
+        strategy inherited default 252 and silently truncated.
+        """
+        if not self._factors:
+            return 252
+        max_warmup = max(
+            int(getattr(f, "warmup_period", 0) or 0) for f in self._factors
+        )
+        return max(252, max_warmup + 20)
 
     @classmethod
     def get_parameters_schema(cls) -> dict:

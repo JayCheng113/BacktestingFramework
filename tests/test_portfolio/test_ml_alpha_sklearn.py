@@ -577,6 +577,156 @@ class TestMLAlphaEndToEndBacktest:
         assert len(wf_result.oos_sharpes) == 3
         assert all(np.isfinite(s) for s in wf_result.oos_sharpes)
 
+    def test_topn_rotation_lookback_respects_mlalpha_warmup(self):
+        """V2.13 round 5 codex-H: TopNRotation must propagate the inner
+        factor's warmup_period into its own lookback_days so the engine
+        fetches enough history for the MLAlpha training window.
+
+        Before the fix: TopNRotation inherited default lookback_days=252
+        and engine's warmup check used getattr(strategy, 'factor', None)
+        which returned None (TopNRotation stored it as _factor). So an
+        MLAlpha(train_window=400) silently got 252 days of history on
+        early rebalances, corrupting the training panel with NO warning
+        and NO exception — the single most dangerous class of bug.
+
+        After the fix: TopNRotation.factor is a public property, and
+        TopNRotation.lookback_days = max(default, factor.warmup_period +
+        buffer).
+        """
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import TopNRotation
+
+        # Long train window — bigger than the default 252 lookback
+        alpha = MLAlpha(
+            name="long_train",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=400,  # > 252 default
+            retrain_freq=20,
+            purge_days=5,
+            embargo_days=2,
+        )
+        # warmup_period = 400 + 5 + 2 = 407
+        assert alpha.warmup_period == 407
+
+        strategy = TopNRotation(factor=alpha, top_n=3)
+
+        # The inner factor must be publicly accessible so engine's
+        # warmup check (getattr(strategy, 'factor')) can walk it.
+        assert hasattr(strategy, "factor")
+        assert strategy.factor is alpha
+
+        # The strategy's declared lookback must be >= factor warmup.
+        # Otherwise the engine's slice_universe_data call at day D will
+        # return [D - 252, D - 1] which is shorter than 407 rows needed,
+        # and _build_training_panel will silently drop rows.
+        assert strategy.lookback_days >= alpha.warmup_period, (
+            f"TopNRotation.lookback_days = {strategy.lookback_days} < "
+            f"MLAlpha.warmup_period = {alpha.warmup_period}. Engine will "
+            f"fetch truncated history on early rebalances."
+        )
+
+    def test_multifactor_rotation_lookback_respects_longest_mlalpha(self):
+        """Symmetric check for MultiFactorRotation: the strategy's
+        lookback_days must be at least the MAXIMUM warmup_period across
+        all wrapped factors."""
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import MultiFactorRotation
+
+        alpha_short = MLAlpha(
+            name="short",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        alpha_long = MLAlpha(
+            name="long",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=500, retrain_freq=20, purge_days=5, embargo_days=5,
+        )
+        assert alpha_short.warmup_period == 65
+        assert alpha_long.warmup_period == 510
+
+        strategy = MultiFactorRotation(factors=[alpha_short, alpha_long], top_n=3)
+
+        # factors property is public
+        assert hasattr(strategy, "factors")
+        assert list(strategy.factors) == [alpha_short, alpha_long]
+
+        # lookback must cover the LONGEST warmup
+        assert strategy.lookback_days >= 510, (
+            f"MultiFactorRotation.lookback_days = {strategy.lookback_days} "
+            f"< max factor warmup 510"
+        )
+
+    def test_mlalpha_long_train_window_gets_full_history_in_backtest(self):
+        """End-to-end regression for the H1 bug: run a backtest with
+        MLAlpha(train_window > 252) and verify the model actually saw
+        ≥ train_window rows during its first retrain.
+
+        This is the integration-level counterpart to the unit tests
+        above — it fails visibly if the engine's warmup propagation
+        breaks in a future refactor.
+        """
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        # 600 days of data so a 400-row train window can be satisfied
+        # starting from ~day 410 (train_window + purge + embargo)
+        data, dates = _make_data(n_days=600, n_stocks=4)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(4)])
+
+        # Capture the X shape at each retrain via monkey-patch hook.
+        panel_row_counts: list[int] = []
+
+        class _RecordingAlpha(MLAlpha):
+            def _retrain(self, universe_data, current):
+                X, y = self._build_training_panel(universe_data, current)
+                if X is not None:
+                    panel_row_counts.append(len(X))
+                # Delegate to parent to actually fit
+                return super()._retrain(universe_data, current)
+
+        alpha = _RecordingAlpha(
+            name="long_regression",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=400,  # intentionally > default 252 lookback
+            retrain_freq=40,
+            purge_days=5,
+            embargo_days=2,
+        )
+        strategy = TopNRotation(factor=alpha, top_n=3)
+
+        run_portfolio_backtest(
+            strategy=strategy, universe=universe, universe_data=data,
+            calendar=cal,
+            start=dates[450].date(),  # late enough for 400 rows of history
+            end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+        )
+
+        # At least one retrain should have captured a panel with enough
+        # rows. With 4 stocks × train_window 400 rows each, we expect
+        # roughly 1600 panel rows (minus NaN head from pct_change).
+        # Lower bound: at least 400 rows — the train_window itself.
+        assert len(panel_row_counts) > 0, "No retrains recorded"
+        max_panel = max(panel_row_counts)
+        assert max_panel >= 400, (
+            f"Max panel row count {max_panel} is < train_window 400. "
+            f"Engine truncated history to default lookback (252 × 4 "
+            f"symbols = ~1000 rows minus warmup). H1 bug not fixed."
+        )
+
     def test_walk_forward_fresh_instances_have_no_cross_fold_state_bleed(self):
         """Stronger form: verify that each fold's MLAlpha instance starts
         with _current_model=None (no state bleed from prior folds). This

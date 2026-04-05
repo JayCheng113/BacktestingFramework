@@ -341,6 +341,51 @@ class TestMLAlphaEstimatorWhitelist:
         with pytest.raises(UnsupportedEstimatorError, match="whitelist"):
             MLAlpha(model_factory=lambda: MyRidge(), **base_kwargs)
 
+    def test_factory_returning_singleton_rejected(self):
+        """V2.13 round 5 codex-MH: MLAlpha's design relies on
+        model_factory() returning a FRESH unfit estimator on every call.
+        The ``strategy_factory()`` per-fold isolation mechanism depends
+        on this — if the user's factory caches a singleton, subsequent
+        retrains reuse a fitted model, cross-fold state leaks, and the
+        walk-forward guarantee is broken silently.
+
+        __init__ must detect this at construction time by calling
+        model_factory() twice and comparing instance identity.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from sklearn.linear_model import Ridge
+
+        # Buggy factory: caches a single instance and returns it repeatedly
+        _cached = Ridge(alpha=1.0)
+
+        def singleton_factory():
+            return _cached
+
+        with pytest.raises(TypeError, match="SAME instance"):
+            MLAlpha(
+                name="t",
+                model_factory=singleton_factory,
+                feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"]}),
+                target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+    def test_factory_returning_fresh_instance_accepted(self):
+        """Regression: the singleton detector must NOT reject a legitimate
+        factory that returns a new instance on every call."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        # Standard factory pattern
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"]}),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        assert alpha is not None
+
     def test_unsupported_error_message_lists_allowed_classes(self, base_kwargs):
         """The error message must tell the user which classes ARE allowed,
         so they can pick a substitute. Otherwise the user has to read the
@@ -1266,10 +1311,15 @@ class TestMLAlphaFitExceptionHandling:
             )
 
     def test_model_factory_exception_at_retrain_keeps_prior_model(self):
-        """If model_factory() succeeds at __init__ (probe) but then
+        """If model_factory() succeeds at __init__ (probes) but then
         raises on a later _retrain() call — e.g., a transient config
         error, a race on shared state — the backtest must continue with
         the prior fitted model (or no model if it's the first retrain).
+
+        V2.13 round 5 codex-MH update: __init__ now calls the factory
+        TWICE (probe + singleton check). The flaky counter is adjusted
+        to fail starting on the FOURTH call so that probes succeed and
+        the first retrain also succeeds.
         """
         from ez.portfolio.ml_alpha import MLAlpha
         from sklearn.linear_model import Ridge
@@ -1280,10 +1330,11 @@ class TestMLAlphaFitExceptionHandling:
 
         def flaky_factory():
             call_count["n"] += 1
-            # Call 1: probe at __init__ → succeed
-            # Call 2: first retrain → succeed
-            # Call 3: second retrain → raise
-            if call_count["n"] >= 3:
+            # Call 1: __init__ probe 1 (whitelist) → succeed
+            # Call 2: __init__ probe 2 (singleton check) → succeed
+            # Call 3: first retrain → succeed
+            # Call 4: second retrain → raise
+            if call_count["n"] >= 4:
                 raise RuntimeError("transient config error")
             return Ridge(alpha=1.0)
 
@@ -1296,9 +1347,10 @@ class TestMLAlphaFitExceptionHandling:
             target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
             train_window=60, retrain_freq=20, purge_days=5,
         )
-        # call_count == 1 after __init__ probe
+        # call_count == 2 after __init__ (both probes)
+        assert call_count["n"] == 2
 
-        # First compute triggers first retrain → succeed (call 2)
+        # First compute triggers first retrain → succeed (call 3)
         alpha.compute(data, datetime(2022, 8, 1))
         assert alpha._retrain_count == 1
         assert alpha._current_model is not None
@@ -1847,45 +1899,55 @@ class TestMLAlphaContractEdgeCases:
         )
 
     def test_predict_exception_logs_once(self):
-        """When model.predict() raises at predict stage (e.g., feature
-        count mismatch), the error must be logged once, not silently
-        returned as 'no prediction for this symbol'."""
+        """When model.predict() raises at predict stage (e.g., dtype
+        mismatch between training and predict features), the error must
+        be logged once, not silently returned as 'no prediction for
+        this symbol'.
+
+        V2.13 round 5 codex-H update: the feature schema check now
+        intercepts column-count/order drift BEFORE model.predict runs
+        (which is strictly better behavior). This test now exercises
+        the dtype-drift path — same column names but different dtypes —
+        which passes the schema check and reaches model.predict, where
+        sklearn raises UFuncTypeError.
+        """
         from ez.portfolio.ml_alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300, n_stocks=4)
 
-        # First retrain uses feature_fn with 2 features. Then switch
-        # feature_fn to produce 3 features → predict shape mismatch.
-        call_state = {"n_features": 2}
+        # feature_fn returns float features at training, datetime64
+        # features at predict — same column NAMES but different dtypes.
+        # Schema check passes (names + order match), but sklearn's
+        # predict raises when it tries to do matmul on datetime64.
+        stage = {"n": "train"}
 
-        def switching_feature_fn(df):
-            if call_state["n_features"] == 2:
+        def dtype_drift_feature_fn(df):
+            if stage["n"] == "train":
                 return pd.DataFrame({
-                    "ret1": df["adj_close"].pct_change(1),
-                    "ret5": df["adj_close"].pct_change(5),
+                    "f1": df["adj_close"].pct_change(1),
+                    "f2": df["adj_close"].pct_change(5),
                 }).dropna()
+            # Predict stage: same column names, datetime64 dtype
             return pd.DataFrame({
-                "ret1": df["adj_close"].pct_change(1),
-                "ret5": df["adj_close"].pct_change(5),
-                "ret20": df["adj_close"].pct_change(20),
-            }).dropna()
+                "f1": pd.Series(df.index.values, index=df.index),
+                "f2": pd.Series(df.index.values, index=df.index),
+            })
 
         alpha = MLAlpha(
             name="t",
             model_factory=lambda: Ridge(alpha=1.0),
-            feature_fn=switching_feature_fn,
+            feature_fn=dtype_drift_feature_fn,
             target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
             train_window=80, retrain_freq=20, purge_days=5,
         )
-        # First compute: train with 2 features
+        # First compute: train with float features
         alpha.compute(data, datetime(2022, 8, 1))
         assert alpha._current_model is not None
 
-        # Switch feature_fn to 3 features → predict will raise
-        # (model was trained on 2). Call within retrain_freq window so
-        # retrain doesn't happen — only predict runs with new features.
-        call_state["n_features"] = 3
+        # Switch to datetime64 features — schema check (names + order)
+        # passes, but model.predict raises at matmul time
+        stage["n"] = "predict"
 
         import logging
         captured = []
@@ -1901,10 +1963,13 @@ class TestMLAlphaContractEdgeCases:
 
         # model.predict should have raised → all symbols skipped
         assert len(scores) == 0
-        # Warning about predict exception
-        pred_warnings = [m for m in captured if "predict" in m.lower() and "shape" in m.lower()]
+        # Warning about predict exception (mentions shape/dtype)
+        pred_warnings = [
+            m for m in captured
+            if "predict" in m.lower() and ("shape" in m.lower() or "dtype" in m.lower())
+        ]
         assert len(pred_warnings) >= 1, (
-            f"Expected at least 1 predict-stage warning with shape info, "
+            f"Expected at least 1 predict-stage warning with shape/dtype info, "
             f"got: {captured}"
         )
         # V2.13 round 3 Gap 3 polish: assert the flag directly so a future
@@ -1916,10 +1981,6 @@ class TestMLAlphaContractEdgeCases:
             "model.predict() exception — the test would be vacuous if the "
             "implementation refactored away the exception path."
         )
-        # Also: a shape mismatch should NOT also fire the empty_predict
-        # summary (since every symbol failed for the SAME shape reason,
-        # the specific shape warning is more useful than the generic one).
-        # But we don't block — generic + specific is acceptable.
 
     def test_empty_predict_warned_when_all_predict_fail_after_successful_fit(self):
         """V2.13 round 3 Gap 4: directly exercise the _empty_predict_warned
@@ -2102,6 +2163,248 @@ class TestMLAlphaContractEdgeCases:
         assert len(empty_warnings) == 1, (
             f"Expected exactly 1 empty-panel warning, got: {captured}"
         )
+
+    def test_feature_fn_returning_non_datetime_index_does_not_crash(self):
+        """V2.13 round 5 codex-H: MLAlpha only validated the INPUT
+        df.index as DatetimeIndex, not the OUTPUT of feature_fn/target_fn.
+        A user whose feature_fn does ``.reset_index()`` or returns a
+        RangeIndex would make ``sym_features.index.date`` raise
+        AttributeError deep inside _build_training_panel, crashing the
+        backtest.
+
+        Fix: validate the output index at each stage, emit one-shot
+        warning + skip symbol if non-DatetimeIndex.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def buggy_feature_fn(df):
+            # User mistake: reset_index() drops the DatetimeIndex
+            return pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna().reset_index(drop=True)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=buggy_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        # Must not crash with AttributeError
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        except AttributeError as e:
+            if "index" in str(e).lower() or "date" in str(e).lower():
+                pytest.fail(f"non-DatetimeIndex leaked: {e}")
+            raise
+        assert len(scores) == 0
+        assert alpha._current_model is None
+
+    def test_unsorted_feature_index_is_sorted_with_warning(self):
+        """A feature_fn that returns a DatetimeIndex in shuffled order
+        would make iloc[-train_window:] pick the wrong 'latest' rows.
+        MLAlpha must sort or reject to prevent silent mis-training."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def shuffled_feature_fn(df):
+            result = pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna()
+            # Shuffle the index so iloc[-1:] no longer picks the latest date
+            return result.sample(frac=1.0, random_state=42)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=shuffled_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            # Must NOT crash and must produce SOME predictions (the
+            # framework sorts internally)
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        finally:
+            logger.removeHandler(handler)
+
+        # A warning about sort order must be emitted
+        sort_warnings = [m for m in captured if "sort" in m.lower() or "monotonic" in m.lower()]
+        assert len(sort_warnings) >= 1, (
+            f"Expected a sort warning for unsorted feature index, got: {captured}"
+        )
+
+    def test_feature_column_order_drift_reorders_with_warning(self):
+        """V2.13 round 5 codex-H: sklearn models use positional features.
+        If feature_fn returns the same column set but in different order
+        between training and predict, model.predict silently computes
+        wrong values — no exception, wrong output.
+
+        Fix: save training column order, verify + reorder at predict.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=300, n_stocks=4)
+
+        stage = {"n": "train"}
+
+        def reordering_feature_fn(df):
+            if stage["n"] == "train":
+                # Training order: [a, b, c]
+                return pd.DataFrame({
+                    "a": df["adj_close"].pct_change(1),
+                    "b": df["adj_close"].pct_change(5),
+                    "c": df["adj_close"].pct_change(20),
+                }).dropna()
+            # Predict order: [c, a, b] — same set, different order
+            return pd.DataFrame({
+                "c": df["adj_close"].pct_change(20),
+                "a": df["adj_close"].pct_change(1),
+                "b": df["adj_close"].pct_change(5),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=reordering_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is not None
+        # Training saved column order
+        assert alpha._trained_feature_cols == ["a", "b", "c"]
+
+        # Switch to reordered predict
+        stage["n"] = "predict"
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 5))  # within retrain_freq
+        finally:
+            logger.removeHandler(handler)
+
+        # Predictions must still be produced (reorder recovered)
+        assert len(scores) > 0
+        # Warning must be emitted about column order drift
+        order_warnings = [
+            m for m in captured
+            if "order" in m.lower() and "drift" in m.lower()
+        ]
+        assert len(order_warnings) >= 1, (
+            f"Expected column order drift warning, got: {captured}"
+        )
+        assert alpha._feature_schema_drift_warned is True
+
+    def test_feature_column_set_mismatch_skips_with_warning(self):
+        """If the predict-stage feature_fn returns a completely different
+        column set, we cannot reorder — skip with a clear warning."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=300, n_stocks=4)
+
+        stage = {"n": "train"}
+
+        def changing_feature_fn(df):
+            if stage["n"] == "train":
+                return pd.DataFrame({
+                    "a": df["adj_close"].pct_change(1),
+                    "b": df["adj_close"].pct_change(5),
+                }).dropna()
+            # Predict: different column names entirely
+            return pd.DataFrame({
+                "x": df["adj_close"].pct_change(1),
+                "y": df["adj_close"].pct_change(5),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=changing_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is not None
+
+        stage["n"] = "predict"
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 5))
+        finally:
+            logger.removeHandler(handler)
+
+        # Cannot recover, scores empty
+        assert len(scores) == 0
+        # Warning about column set difference
+        set_warnings = [
+            m for m in captured
+            if "column set" in m.lower() or "differs" in m.lower()
+        ]
+        assert len(set_warnings) >= 1, (
+            f"Expected column set mismatch warning, got: {captured}"
+        )
+        assert alpha._feature_schema_drift_warned is True
+
+    def test_non_datetime_target_index_does_not_crash(self):
+        """Symmetric for target_fn returning non-DatetimeIndex."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def buggy_target_fn(df):
+            # Return a Series with RangeIndex
+            return pd.Series(
+                df["adj_close"].pct_change(5).shift(-5).values,
+                index=range(len(df)),
+            )
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=buggy_target_fn,
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        except AttributeError as e:
+            if "index" in str(e).lower() or "date" in str(e).lower():
+                pytest.fail(f"non-DatetimeIndex target leaked: {e}")
+            raise
+        assert len(scores) == 0
+        assert alpha._current_model is None
 
     def test_factory_returning_different_class_on_retrain_rejected(self):
         """Model factory that returns a different estimator class on a

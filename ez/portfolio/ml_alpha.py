@@ -270,6 +270,40 @@ class MLAlpha(CrossSectionalFactor):
             ) from e
         _assert_supported_estimator(probe)
 
+        # V2.13 round 5 codex-MH: factory MUST return a NEW instance on
+        # every call. MLAlpha's per-fold isolation mechanism is built on
+        # `strategy_factory()` calling `model_factory()` to get a fresh
+        # unfitted model at each retrain. If the user caches a singleton
+        # and returns it repeatedly, the same Ridge instance is fit()'d
+        # on fold 1, then refit on fold 2's data — but the clone in fold
+        # 1 still references the SAME object, so any concurrent use or
+        # later retrain sees fold-2 state. Cross-fold state bleed with
+        # no exception and no warning.
+        #
+        # Detection: call factory twice and compare identity. This
+        # catches the most common bug (module-level estimator used as
+        # factory) but not every possible caching pattern (e.g., a
+        # factory that returns a new instance on odd calls and cached
+        # on even calls). For those, user error is unrecoverable at
+        # construction time — we accept this limitation.
+        try:
+            probe2 = model_factory()
+        except Exception as e:
+            raise TypeError(
+                f"model_factory()'s second call raised {type(e).__name__}: "
+                f"{e}. A valid model_factory must return a fresh unfit "
+                f"estimator on every call (called multiple times across "
+                f"fold boundaries)."
+            ) from e
+        if probe is probe2:
+            raise TypeError(
+                f"model_factory() returned the SAME instance on two "
+                f"consecutive calls (id={id(probe)}). MLAlpha's per-fold "
+                f"isolation requires a new unfit estimator on each call. "
+                f"Use `lambda: Ridge(alpha=1.0)` instead of `factory = "
+                f"Ridge(alpha=1.0); model_factory=lambda: factory`."
+            )
+
         # Runtime state. A fresh MLAlpha instance (from strategy_factory())
         # starts with _current_model=None, so portfolio walk-forward gets
         # per-fold isolation "for free". copy.deepcopy also works
@@ -292,6 +326,13 @@ class MLAlpha(CrossSectionalFactor):
         self._empty_panel_warned: bool = False
         self._empty_predict_warned: bool = False
         self._non_numeric_warned: bool = False
+        # V2.13 round 5 codex-H: output index contract warnings
+        self._feature_index_warned: bool = False
+        self._target_index_warned: bool = False
+        self._unsorted_index_warned: bool = False
+        # V2.13 round 5 codex-H: feature schema drift (column order)
+        self._feature_schema_drift_warned: bool = False
+        self._trained_feature_cols: list[str] | None = None
 
     @property
     def name(self) -> str:
@@ -498,6 +539,11 @@ class MLAlpha(CrossSectionalFactor):
         self._current_model = model
         self._last_retrain_date = current
         self._retrain_count += 1
+        # V2.13 round 5 codex-H: save the feature schema so _predict can
+        # verify column order drift. sklearn uses positional features,
+        # so a reorder between training and predict silently produces
+        # wrong predictions. Store as list to preserve order.
+        self._trained_feature_cols = list(X.columns)
 
     def _build_training_panel(
         self,
@@ -588,6 +634,49 @@ class MLAlpha(CrossSectionalFactor):
                 continue
             if sym_features.empty or sym_target.empty:
                 continue
+
+            # V2.13 round 5 codex-H: validate output index contract.
+            # - Must be a DatetimeIndex (else downstream .index.date
+            #   raises AttributeError or intersection silently empties)
+            # - Must be monotonic increasing (else iloc[-N:] picks the
+            #   wrong "latest" rows and _train_window_ cap takes the wrong
+            #   window)
+            if not isinstance(sym_features.index, pd.DatetimeIndex):
+                if not self._feature_index_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned non-DatetimeIndex "
+                        "(%s) for symbol %s. MLAlpha requires a DatetimeIndex "
+                        "matching the input DataFrame. Common cause: calling "
+                        "reset_index() inside feature_fn. Skipping this "
+                        "symbol. (one-shot warning)",
+                        self._name, type(sym_features.index).__name__, sym,
+                    )
+                    self._feature_index_warned = True
+                continue
+            if not isinstance(sym_target.index, pd.DatetimeIndex):
+                if not self._target_index_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] target_fn returned non-DatetimeIndex "
+                        "(%s) for symbol %s. Skipping this symbol. "
+                        "(one-shot warning)",
+                        self._name, type(sym_target.index).__name__, sym,
+                    )
+                    self._target_index_warned = True
+                continue
+            if not sym_features.index.is_monotonic_increasing:
+                if not self._unsorted_index_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned unsorted "
+                        "DatetimeIndex for symbol %s. MLAlpha's "
+                        "iloc[-train_window:] assumes chronological order. "
+                        "Sorting internally, but please sort in your "
+                        "feature_fn for clarity. (one-shot warning)",
+                        self._name, sym,
+                    )
+                    self._unsorted_index_warned = True
+                sym_features = sym_features.sort_index()
+            if not sym_target.index.is_monotonic_increasing:
+                sym_target = sym_target.sort_index()
 
             # Align features and target on common dates
             aligned_idx = sym_features.index.intersection(sym_target.index)
@@ -727,6 +816,70 @@ class MLAlpha(CrossSectionalFactor):
                 continue
             if sym_features.empty:
                 continue
+
+            # V2.13 round 5 codex-H: validate predict-stage index contract
+            # too. Without this, a feature_fn that returns RangeIndex at
+            # predict time (but worked at training) would raise
+            # AttributeError at the .index.date line below.
+            if not isinstance(sym_features.index, pd.DatetimeIndex):
+                if not self._feature_index_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned non-DatetimeIndex "
+                        "(%s) for symbol %s at predict stage. Skipping "
+                        "this symbol. (one-shot warning)",
+                        self._name, type(sym_features.index).__name__, sym,
+                    )
+                    self._feature_index_warned = True
+                continue
+            if not sym_features.index.is_monotonic_increasing:
+                if not self._unsorted_index_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned unsorted "
+                        "DatetimeIndex for symbol %s at predict stage. "
+                        "Sorting internally. (one-shot warning)",
+                        self._name, sym,
+                    )
+                    self._unsorted_index_warned = True
+                sym_features = sym_features.sort_index()
+
+            # V2.13 round 5 codex-H: feature schema drift check — verify
+            # column names + order match training. sklearn uses positional
+            # feature semantics (model.predict(X[:, 0] × coef_[0] + ...),
+            # so a column reorder between training and predict silently
+            # produces wrong predictions. Defense: if training saved a
+            # feature schema, compare and reorder (or skip on set mismatch).
+            if self._trained_feature_cols is not None:
+                actual_cols = list(sym_features.columns)
+                trained_cols = self._trained_feature_cols
+                if actual_cols != trained_cols:
+                    if set(actual_cols) == set(trained_cols):
+                        # Same set, different order — reorder and warn once
+                        if not self._feature_schema_drift_warned:
+                            _logger.warning(
+                                "MLAlpha[%s] feature column order drifted "
+                                "between training and predict for symbol %s. "
+                                "Training order: %s, predict order: %s. "
+                                "Reordering predict features to match "
+                                "training (sklearn uses positional features). "
+                                "Please make feature_fn's column order "
+                                "deterministic. (one-shot warning)",
+                                self._name, sym, trained_cols, actual_cols,
+                            )
+                            self._feature_schema_drift_warned = True
+                        sym_features = sym_features[trained_cols]
+                    else:
+                        # Different column set — cannot recover safely
+                        if not self._feature_schema_drift_warned:
+                            _logger.warning(
+                                "MLAlpha[%s] feature column set differs "
+                                "between training and predict for symbol %s. "
+                                "Training: %s, predict: %s. Cannot reorder "
+                                "because the column sets don't match. "
+                                "Skipping this symbol. (one-shot warning)",
+                                self._name, sym, trained_cols, actual_cols,
+                            )
+                            self._feature_schema_drift_warned = True
+                        continue
 
             # Strict anti-lookahead: features date < current
             mask = sym_features.index.date < current
