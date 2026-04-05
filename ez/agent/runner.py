@@ -49,32 +49,51 @@ def _get_git_sha() -> str:
 
 
 def _resolve_strategy(name: str, params: dict) -> Strategy:
-    """Find strategy by name in the registry and instantiate with params."""
-    for key, cls in Strategy._registry.items():
-        if cls.__name__ == name or key == name:
-            schema = cls.get_parameters_schema()
-            merged = {k: v["default"] for k, v in schema.items()}
-            merged.update(params)
-            # Coerce types per schema (JSON/Pydantic may send float for int params)
-            for k, v in merged.items():
-                if k in schema:
-                    expected = schema[k].get("type", "float")
-                    if expected == "int":
-                        if isinstance(v, float) and v != int(v):
-                            raise ValueError(
-                                f"Parameter '{k}' expects int but got {v} "
-                                f"(non-integer float would be silently truncated)"
-                            )
-                        merged[k] = int(v)
-                    elif expected == "float":
-                        merged[k] = float(v)
-                    elif expected == "bool":
-                        if isinstance(v, str):
-                            merged[k] = v.lower() not in ("false", "0", "no", "")
-                        else:
-                            merged[k] = bool(v)
-            return cls(**merged)
-    raise ValueError(f"Strategy '{name}' not found in registry")
+    """Find strategy by name in the registry and instantiate with params.
+
+    V2.12.1 codex post-review fix: delegates class resolution to the shared
+    `Strategy.resolve_class()` three-stage helper (exact key → unique name →
+    ambiguous). Previously this function had its own first-match scan that
+    silently picked wrong classes when two files registered the same
+    `__name__` — the exact scenario `promote_research_strategy()` makes
+    likely (ResearchFoo → Foo colliding with builtin Foo). The API route
+    `_get_strategy` was hardened earlier, but this function wasn't, leaving
+    the research pipeline (`run_batch` → `Runner().run`), the experiment
+    tool, and the chat assistant backtest tool still vulnerable.
+
+    After resolution, applies schema-driven type coercion that the API
+    route doesn't need (JSON/Pydantic may send float for int params).
+    """
+    from ez.strategy.base import AmbiguousStrategyName
+    try:
+        cls = Strategy.resolve_class(name)
+    except KeyError:
+        raise ValueError(f"Strategy '{name}' not found in registry")
+    except AmbiguousStrategyName as e:
+        # Re-raise as ValueError so Runner can record it in RunResult.error
+        raise ValueError(str(e)) from e
+    schema = cls.get_parameters_schema()
+    merged = {k: v["default"] for k, v in schema.items()}
+    merged.update(params)
+    # Coerce types per schema (JSON/Pydantic may send float for int params)
+    for k, v in merged.items():
+        if k in schema:
+            expected = schema[k].get("type", "float")
+            if expected == "int":
+                if isinstance(v, float) and v != int(v):
+                    raise ValueError(
+                        f"Parameter '{k}' expects int but got {v} "
+                        f"(non-integer float would be silently truncated)"
+                    )
+                merged[k] = int(v)
+            elif expected == "float":
+                merged[k] = float(v)
+            elif expected == "bool":
+                if isinstance(v, str):
+                    merged[k] = v.lower() not in ("false", "0", "no", "")
+                else:
+                    merged[k] = bool(v)
+    return cls(**merged)
 
 
 def _build_matcher(spec: RunSpec) -> Matcher:

@@ -133,6 +133,98 @@ class TestCacheLogic:
         complete, reason = DataProviderChain._is_cache_complete(bars, date(2024, 1, 2), date(2024, 3, 31))
         assert not complete and "middle gap" in reason
 
+    def test_skip_density_accepts_sparse_cache(self):
+        """skip_density=True bypasses the density check for known-sparse symbols."""
+        # Same middle-gap scenario as above
+        bars = [
+            _bar(2),
+            Bar(time=datetime(2024, 2, 15), symbol="TEST.SZ", market="cn_stock",
+                open=10, high=10, low=10, close=10, adj_close=10, volume=100),
+            Bar(time=datetime(2024, 3, 31), symbol="TEST.SZ", market="cn_stock",
+                open=10, high=10, low=10, close=10, adj_close=10, volume=100),
+        ]
+        complete, reason = DataProviderChain._is_cache_complete(
+            bars, date(2024, 1, 2), date(2024, 3, 31), skip_density=True,
+        )
+        assert complete is True
+        assert "known-sparse" in reason
+
+    def test_thinly_traded_symbol_no_infinite_refetch(self):
+        """Regression test for reviewer finding I2: a legitimately thin symbol
+        (e.g., niche ETF with ~10 trading days/month) should not cause repeated
+        refetches on every call. After the first provider confirms the data is
+        sparse, subsequent cache hits must be accepted.
+        """
+        # Scenario: 90-day range, provider returns only 10 bars (way below 75% of
+        # expected ~60). For a realistic thinly-traded symbol, the last bar is
+        # close to end_date (provider already gave everything it has).
+        # First call: cache empty → fetch → save + mark sparse. Second call:
+        # cache has 10 bars → density check would fail → must be bypassed via
+        # the _known_sparse_symbols set.
+        from ez.data.provider import DataProviderChain
+
+        # Clear any prior state from other tests
+        DataProviderChain._known_sparse_symbols.clear()
+
+        # 10 bars spread over Jan 2 - Mar 28 (90 days). Last bar at Mar 28 is
+        # within 3-day boundary of end_date Mar 31.
+        sparse_dates = [
+            datetime(2024, 1, 2), datetime(2024, 1, 15), datetime(2024, 1, 29),
+            datetime(2024, 2, 5), datetime(2024, 2, 19),
+            datetime(2024, 3, 4), datetime(2024, 3, 11), datetime(2024, 3, 18),
+            datetime(2024, 3, 25), datetime(2024, 3, 28),
+        ]
+        sparse_bars = [
+            Bar(time=d, symbol="THIN.SZ", market="cn_stock",
+                open=10, high=10, low=10, close=10, adj_close=10, volume=100)
+            for d in sparse_dates
+        ]  # 10 bars over 90 days — well below 75% of ~60 expected
+
+        class _FakeStore:
+            def __init__(self):
+                self._data = []
+            def query_kline(self, sym, mkt, p, s, e):
+                return list(self._data)
+            def query_kline_batch(self, syms, mkt, p, s, e):
+                return {sym: list(self._data) for sym in syms}
+            def save_kline(self, bars, period):
+                self._data = list(bars)
+                return len(bars)
+            def has_data(self, *args, **kwargs):
+                return len(self._data) > 0
+
+        store = _FakeStore()
+        provider = MagicMock(spec=DataProvider)
+        provider.name = "sparse_mock"
+        provider.get_kline.return_value = sparse_bars
+        chain = DataProviderChain([provider], store)
+
+        # First call: cache empty → fetch from provider → save → return
+        chain.get_kline("THIN.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))
+        assert provider.get_kline.call_count == 1
+        # The thin symbol should now be marked as known-sparse
+        assert ("THIN.SZ", "cn_stock", "daily") in DataProviderChain._known_sparse_symbols
+
+        # Second call: cache has 10 bars → density would fail → but skip_density=True
+        # bypasses it → cache accepted → NO provider refetch
+        chain.get_kline("THIN.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))
+        assert provider.get_kline.call_count == 1, (
+            f"Provider was called {provider.get_kline.call_count} times for thin symbol — "
+            f"refetch loop not prevented"
+        )
+
+        # Third, fourth, fifth calls: still cached
+        for _ in range(3):
+            chain.get_kline("THIN.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))
+        assert provider.get_kline.call_count == 1, "Refetch triggered after sparse mark"
+
+        # Batch path also uses the sparse flag
+        chain.get_kline_batch(["THIN.SZ"], "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))
+        assert provider.get_kline.call_count == 1, "get_kline_batch refetched sparse symbol"
+
+        # Cleanup
+        DataProviderChain._known_sparse_symbols.clear()
+
 
 class TestFailover:
     def test_first_provider_fails_second_succeeds(self, mock_store):

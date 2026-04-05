@@ -77,17 +77,37 @@ class DataStore(ABC):
 class DataProviderChain:
     """Try providers in priority order with failover."""
 
+    # Session-scoped memoization of symbols known to legitimately return fewer
+    # bars than the density threshold would expect (new listings, niche ETFs,
+    # thinly-traded instruments). Populated on provider refetch when the bar
+    # count is < 75% of expected — prevents the cache-check from forcing an
+    # infinite refetch loop on every subsequent call for the same symbol.
+    # Key: (symbol, market, period) — range-independent so a 1-month query
+    # and 6-month query share the same "known sparse" flag.
+    _known_sparse_symbols: set[tuple[str, str, str]] = set()
+
     def __init__(self, providers: list[DataProvider], store: DataStore):
         self._providers = providers
         self._store = store
 
     @staticmethod
-    def _is_cache_complete(cached: list[Bar], start_date: date, end_date: date) -> tuple[bool, str]:
+    def _is_cache_complete(
+        cached: list[Bar],
+        start_date: date,
+        end_date: date,
+        *,
+        skip_density: bool = False,
+    ) -> tuple[bool, str]:
         """Check if cached bars cover the requested range WITHOUT gaps.
 
         Two-stage check (both must pass):
         1. Boundary: first/last bar within 3-day tolerance of requested range
         2. Density: bar count >= 75% of expected trading days (catches middle gaps)
+
+        Args:
+            skip_density: when True, only boundary is checked. Used for symbols
+                known to legitimately return sparse data (see
+                `_known_sparse_symbols`) to avoid infinite refetch loops.
 
         Returns (complete, reason). `reason` explains why cache is considered
         incomplete (for logging).
@@ -104,6 +124,8 @@ class DataProviderChain:
         req_days = (end_date - start_date).days
         if req_days <= 14:
             return True, "boundary ok (short range, skip density check)"
+        if skip_density:
+            return True, "boundary ok (known-sparse symbol, skip density check)"
         # A-share: ~245 trading days/year. 0.75 tolerance covers long holidays
         # (Spring Festival week + October week + minor breaks ≈ 15 days).
         expected_bars = max(1, int(req_days * 245 / 365))
@@ -116,10 +138,16 @@ class DataProviderChain:
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
     ) -> list[Bar]:
-        # 1. Check cache — only use if it covers the requested range WITHOUT gaps
+        # 1. Check cache — only use if it covers the requested range WITHOUT gaps.
+        # Skip density check for symbols already known to be sparse (e.g. niche
+        # ETFs, new listings) to avoid refetch loops on legitimately thin data.
+        sparse_key = (symbol, market, period)
+        skip_density = sparse_key in self._known_sparse_symbols
         cached = self._store.query_kline(symbol, market, period, start_date, end_date)
         if cached:
-            complete, reason = self._is_cache_complete(cached, start_date, end_date)
+            complete, reason = self._is_cache_complete(
+                cached, start_date, end_date, skip_density=skip_density,
+            )
             if complete:
                 logger.info("Cache hit for %s/%s/%s (%s)", symbol, market, period, reason)
                 return cached
@@ -157,6 +185,13 @@ class DataProviderChain:
                             logger.info("Provider %s returned partial data for %s (%d/%d bars), trying next",
                                         provider.name, symbol, actual_bars, expected_bars)
                             continue
+                        # Mark as known-sparse if legitimately below density threshold:
+                        # the (last) provider confirmed this is all the data available,
+                        # so future cache checks should skip density to avoid refetch loops.
+                        if req_days > 30 and actual_bars < expected_bars * 0.75:
+                            self._known_sparse_symbols.add(sparse_key)
+                            logger.info("Marked %s as known-sparse (%d/%d bars)",
+                                        symbol, actual_bars, expected_bars)
                         return result.valid_bars
                     else:
                         logger.warning("All %d bars invalid from %s for %s, trying next provider",
@@ -186,7 +221,10 @@ class DataProviderChain:
         missing: list[str] = []
         for sym in symbols:
             bars = cached.get(sym, [])
-            complete, reason = self._is_cache_complete(bars, start_date, end_date) if bars else (False, "empty")
+            skip_density = (sym, market, period) in self._known_sparse_symbols
+            complete, reason = self._is_cache_complete(
+                bars, start_date, end_date, skip_density=skip_density,
+            ) if bars else (False, "empty")
             if complete:
                 result[sym] = bars
                 continue

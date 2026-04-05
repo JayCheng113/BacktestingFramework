@@ -72,45 +72,22 @@ class WalkForwardRequest(BacktestRequest):
 def _get_strategy(name: str, params: dict) -> Strategy:
     """Resolve a strategy identifier to an instantiated Strategy.
 
-    V2.12.1 post-review fix (codex): prior version scanned the registry and
-    returned the FIRST class matching by either `cls.__name__ == name` OR
-    `key == name`. When two files registered classes with the same __name__
-    (a real risk after promote_research_strategy renamed ResearchFoo → Foo),
-    the caller got a non-deterministic pick based on dict insertion order.
-
-    New resolution order:
-    1. Exact key match (`module.class`) — unambiguous, always preferred
-    2. Unique class-name match — backward-compatible with existing API callers
-    3. Ambiguous name → HTTP 409 with both candidate keys, forcing the client
-       to disambiguate by passing the full key
+    Delegates to Strategy.resolve_class() for the three-stage resolution
+    (exact key → unique name → ambiguous), then instantiates with params
+    merged over the schema defaults. Converts KeyError → 404 and
+    AmbiguousStrategyName → 409 for the REST layer.
     """
-    # 1. Exact key match (module.class)
-    cls = Strategy._registry.get(name)
-    if cls is not None:
-        schema = cls.get_parameters_schema()
-        p = {k: v["default"] for k, v in schema.items()}
-        p.update(params)
-        return cls(**p)
-
-    # 2. Class-name match (backward compat)
-    matches = [(k, c) for k, c in Strategy._registry.items() if c.__name__ == name]
-    if len(matches) == 1:
-        _, cls = matches[0]
-        schema = cls.get_parameters_schema()
-        p = {k: v["default"] for k, v in schema.items()}
-        p.update(params)
-        return cls(**p)
-
-    # 3. Multiple classes share this __name__ → refuse to guess
-    if len(matches) > 1:
-        keys = [k for k, _ in matches]
-        raise HTTPException(
-            status_code=409,
-            detail=f"Strategy name '{name}' is ambiguous — multiple classes registered: "
-                   f"{keys}. Please submit the full key instead.",
-        )
-
-    raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found")
+    from ez.strategy.base import AmbiguousStrategyName
+    try:
+        cls = Strategy.resolve_class(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found")
+    except AmbiguousStrategyName as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    schema = cls.get_parameters_schema()
+    p = {k: v["default"] for k, v in schema.items()}
+    p.update(params)
+    return cls(**p)
 
 
 def _fetch_data(req: BacktestRequest) -> pd.DataFrame:

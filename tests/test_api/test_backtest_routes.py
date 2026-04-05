@@ -137,8 +137,10 @@ def test_get_strategy_ambiguous_name_raises_409():
     from ez.api.routes.backtest import _get_strategy
     from ez.strategy.base import Strategy
 
-    # Create two synthetic strategy classes with the same __name__ under
-    # different fake modules, register them temporarily
+    # Snapshot registry so we can restore exactly (including any auto-registered
+    # entries from the class definitions below).
+    snapshot = dict(Strategy._registry)
+
     class _Fake1(Strategy):
         def required_factors(self):
             return []
@@ -159,6 +161,8 @@ def test_get_strategy_ambiguous_name_raises_409():
     key2 = "tests.fake_mod_2.AmbiguousTestStrat"
     Strategy._registry[key1] = _Fake1
     Strategy._registry[key2] = _Fake2
+    # After remap we expect exactly 2 matches — the auto-registered entries
+    # (under real module paths) have been pruned by the snapshot restore below
 
     try:
         # Submitting just the __name__ is ambiguous → 409
@@ -175,5 +179,69 @@ def test_get_strategy_ambiguous_name_raises_409():
         inst2 = _get_strategy(key2, {})
         assert inst2.__class__ is _Fake2
     finally:
-        Strategy._registry.pop(key1, None)
-        Strategy._registry.pop(key2, None)
+        # Full registry restore — removes BOTH the manually-added keys AND the
+        # auto-registered entries from `class _FakeN(Strategy)` definitions
+        # (previously only the manual keys were popped, leaving zombies).
+        Strategy._registry.clear()
+        Strategy._registry.update(snapshot)
+
+
+def test_runner_resolve_strategy_ambiguous_raises_value_error():
+    """Regression test for codex round 3 I1 follow-up: the agent Runner path
+    must use the same three-stage resolution as the API route. Prior to the
+    shared Strategy.resolve_class() helper, `ez/agent/runner.py::_resolve_strategy`
+    had its own first-match scan that silently picked wrong classes — affecting
+    the research pipeline (run_batch → Runner), experiment tool, and chat
+    assistant backtest tool.
+    """
+    from ez.agent.runner import _resolve_strategy
+    from ez.strategy.base import Strategy
+
+    snapshot = dict(Strategy._registry)
+
+    class _RunnerFake1(Strategy):
+        def required_factors(self):
+            return []
+        def generate_signals(self, data):
+            import pandas as pd
+            return pd.Series([0.0] * len(data), index=data.index)
+    class _RunnerFake2(Strategy):
+        def required_factors(self):
+            return []
+        def generate_signals(self, data):
+            import pandas as pd
+            return pd.Series([0.0] * len(data), index=data.index)
+
+    _RunnerFake1.__name__ = "RunnerAmbiguous"
+    _RunnerFake2.__name__ = "RunnerAmbiguous"
+    Strategy._registry["tests.runner_fake_1.RunnerAmbiguous"] = _RunnerFake1
+    Strategy._registry["tests.runner_fake_2.RunnerAmbiguous"] = _RunnerFake2
+
+    try:
+        # Ambiguous bare name → ValueError containing the candidate keys
+        try:
+            _resolve_strategy("RunnerAmbiguous", {})
+            raise AssertionError("Expected ValueError for ambiguous name")
+        except ValueError as e:
+            msg = str(e)
+            assert "ambiguous" in msg.lower()
+            assert "tests.runner_fake_1.RunnerAmbiguous" in msg
+            assert "tests.runner_fake_2.RunnerAmbiguous" in msg
+        # But the full key resolves unambiguously
+        inst1 = _resolve_strategy("tests.runner_fake_1.RunnerAmbiguous", {})
+        assert inst1.__class__ is _RunnerFake1
+        inst2 = _resolve_strategy("tests.runner_fake_2.RunnerAmbiguous", {})
+        assert inst2.__class__ is _RunnerFake2
+    finally:
+        Strategy._registry.clear()
+        Strategy._registry.update(snapshot)
+
+
+def test_runner_resolve_strategy_not_found_raises_value_error():
+    """Runner must translate KeyError → ValueError for unknown strategy names."""
+    from ez.agent.runner import _resolve_strategy
+    try:
+        _resolve_strategy("NonExistentStrategyXYZ123", {})
+        raise AssertionError("Expected ValueError")
+    except ValueError as e:
+        assert "not found" in str(e).lower()
