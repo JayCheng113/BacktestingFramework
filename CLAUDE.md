@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.1 | Tests: 1770 (1780 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.1 | Tests: 1773 (1783 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -110,6 +110,18 @@ No version tag without review pass. No push without critical issues resolved.
 - AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log)
 - 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)
 - AI助手SSE流式输出无法前端强制中断 (需后端cancel机制, 当前只能等输出完成)
+
+## V2.12.1 中期指标公式语义变更 (⚠ 非 backward compat)
+V2.12.1 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest/engine.py`
+和 `ez/portfolio/engine.py` 统一以下 5 个指标为标准公式:
+- **sharpe_ratio**: `excess.mean() / excess.std(ddof=1) × √252` (原 portfolio 是 `ann_ret/vol` 无 rf)
+- **sortino_ratio**: `excess.mean() / sqrt(mean(min(excess,0)²)) × √252` (原 portfolio 用 total return+ddof=0, 差约 30%)
+- **alpha**: `(mean(excess_s) - beta × mean(excess_b)) × 252` (原 portfolio 没减 rf, 差约 5pp)
+- **beta**: `cov(excess_s, excess_b, ddof=1) / var(excess_b, ddof=1)` (原 portfolio 用 ddof=0)
+- **profit_factor**: `gross_profit / gross_loss` (原单票用 `avg_win_pct/avg_loss_pct`, 忽略 position sizing)
+另外 `ez/portfolio/walk_forward.py` 和 `ez/backtest/significance.py` 的 `_sharpe` helpers 也统一用 ddof=1, 和 engine sharpe 一致 (之前默认 ddof=0, 短 OOS 窗口下 CI 和显示 sharpe 偏差最大 2.7%).
+
+**影响**: V2.12.1 之前存入 `experiment_runs` 和 `portfolio_runs` 的指标使用旧公式, V2.12.1 之后新建 run 使用新公式. 历史 run 和新 run 的这 5 个指标不可直接比较. 没有迁移脚本 — 历史值保留为记录 (old-formula), 新运行以新公式为准. UI 不区分新旧.
 
 ## V2.12.1 codex 审查遗留项 (V2.13+ 处理)
 - **#7 候选搜索不支持 bool/enum 参数** — web/src/components/CandidateSearch.tsx 的 ParamRangeState 只支持 int/float, generateValues/countValues 也是数值逻辑, 布尔/枚举参数的搜索需要前端 UX 重设计 + 后端 ParamRangeRequest 支持 list[str]/list[bool]. 当前策略作者可以绕过: 用整数编码枚举. 不影响数据正确性.

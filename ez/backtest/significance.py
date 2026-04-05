@@ -96,8 +96,11 @@ def compute_significance(
 
 
 def _sharpe(returns: np.ndarray, daily_rf: float) -> float:
+    # V2.12.1 reviewer round 5: ddof=1 to match ez/backtest/metrics.py and
+    # ez/portfolio/engine.py. numpy ndarray.std() defaults to ddof=0 which
+    # gave a displayed-Sharpe-vs-CI inconsistency on short OOS windows.
     excess = returns - daily_rf
-    std = excess.std()
+    std = float(np.std(excess, ddof=1)) if len(excess) > 1 else 0.0
     if std < 1e-10:
         return 0.0
-    return float(excess.mean() / std * np.sqrt(252))
+    return float(np.mean(excess) / std * np.sqrt(252))

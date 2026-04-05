@@ -334,6 +334,165 @@ class TestRunner:
         # The oos_equity_curve must have enough points to support metric computation
         assert len(result.oos_equity_curve) > 1
 
+    def test_portfolio_engine_metrics_match_single_stock_end_to_end(self):
+        """Integration regression test for reviewer round 5 Important 2: the
+        prior test (test_portfolio_all_metrics_match_single_stock) only verified
+        a hand-replica of the formula, not the engine code path. This test
+        actually runs run_portfolio_backtest() and compares its metrics dict
+        against MetricsCalculator on the resulting equity curve.
+        """
+        import numpy as np
+        import pandas as pd
+        from ez.portfolio.engine import run_portfolio_backtest, CostModel
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+        from ez.portfolio.cross_factor import MomentumRank
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.backtest.metrics import MetricsCalculator
+
+        # Minimal deterministic universe: 3 symbols, 100 trading days
+        symbols = [f"S{i}" for i in range(3)]
+        rng = np.random.default_rng(42)
+        dates = pd.date_range("2023-01-02", periods=100, freq="B")
+        data = {}
+        for i, sym in enumerate(symbols):
+            prices = 10 * (i + 1) * np.cumprod(1 + rng.normal(0.001, 0.012, 100))
+            data[sym] = pd.DataFrame({
+                "open": prices, "high": prices * 1.01, "low": prices * 0.99,
+                "close": prices, "adj_close": prices,
+                "volume": rng.integers(100000, 5000000, 100),
+            }, index=dates)
+
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        result = run_portfolio_backtest(
+            strategy=TopNRotation(MomentumRank(20), top_n=2),
+            universe=Universe(symbols), universe_data=data, calendar=cal,
+            start=dates[25].date(), end=dates[-1].date(),
+            freq="monthly", initial_cash=1_000_000,
+            cost_model=CostModel(),
+        )
+
+        # Now run the same equity curve through MetricsCalculator and verify
+        # the engine's metrics match exactly.
+        eq_s = pd.Series(result.equity_curve)
+        bench_s = pd.Series(result.benchmark_curve)
+        canonical = MetricsCalculator().compute(eq_s, bench_s)
+
+        assert abs(result.metrics["sharpe_ratio"] - canonical["sharpe_ratio"]) < 1e-10, (
+            f"engine sharpe={result.metrics['sharpe_ratio']} vs "
+            f"canonical sharpe={canonical['sharpe_ratio']}"
+        )
+        assert abs(result.metrics["sortino_ratio"] - canonical["sortino_ratio"]) < 1e-10
+        assert abs(result.metrics["alpha"] - canonical["alpha"]) < 1e-10
+        assert abs(result.metrics["beta"] - canonical["beta"]) < 1e-10
+        assert abs(result.metrics["max_drawdown"] - canonical["max_drawdown"]) < 1e-10
+
+    def test_profit_factor_engine_integration(self):
+        """Integration regression test for reviewer round 5 Important 2: the
+        prior profit_factor test used MagicMock trades, not the real engine
+        path. This test runs VectorizedBacktestEngine.run() on a synthetic
+        series designed to produce exactly known P&L per trade, then asserts
+        result.metrics["profit_factor"] equals the standard gross ratio.
+        """
+        import numpy as np
+        import pandas as pd
+        from ez.backtest.engine import VectorizedBacktestEngine
+        from ez.strategy.base import Strategy
+
+        # Construct a custom deterministic strategy that enters on day 5 and
+        # exits on day 10 (one known trade per window). Three trades total
+        # with a known P&L structure.
+        class _FixedSignalStrategy(Strategy):
+            """Signal = 1 on days 5-9, 15-19, 25-29. Otherwise 0."""
+            def required_factors(self):
+                return []
+            def generate_signals(self, data):
+                n = len(data)
+                sig = pd.Series([0.0] * n, index=data.index)
+                for start in [5, 15, 25]:
+                    for i in range(start, min(start + 5, n)):
+                        sig.iloc[i] = 1.0
+                return sig
+
+        # Synthetic prices with predictable jumps: trade 1 wins big, trades 2&3 lose
+        n = 40
+        prices = [100.0] * n
+        # trade 1: day 5 buy @ 100, day 11 sell @ 150 (+50 per share → big win)
+        for i in range(5, 11):
+            prices[i] = 100 + (i - 4) * 10  # ramp up
+        for i in range(11, 15):
+            prices[i] = 150  # plateau
+        # trade 2: day 15 buy @ 150, day 21 sell @ 140 (-10 per share → small loss)
+        for i in range(15, 21):
+            prices[i] = 150 - (i - 14) * 2  # ramp down
+        for i in range(21, 25):
+            prices[i] = 138
+        # trade 3: day 25 buy @ 138, day 31 sell @ 128 (-10 per share → small loss)
+        for i in range(25, 31):
+            prices[i] = 138 - (i - 24) * 2
+        for i in range(31, n):
+            prices[i] = 126
+
+        dates = pd.date_range("2023-01-02", periods=n, freq="B")
+        df = pd.DataFrame({
+            "open": prices, "high": [p * 1.01 for p in prices],
+            "low": [p * 0.99 for p in prices],
+            "close": prices, "adj_close": prices,
+            "volume": [1_000_000] * n,
+        }, index=dates)
+
+        engine = VectorizedBacktestEngine()
+        result = engine.run(df, _FixedSignalStrategy(), initial_capital=100_000)
+
+        # Must have produced trades
+        assert result.metrics["trade_count"] > 0, "No trades produced — fixture issue"
+        pf = result.metrics.get("profit_factor")
+        # Either a finite positive number (normal path) or inf (all winners)
+        # For this fixture we expect 1 winner + 2 losers → finite positive ratio.
+        assert pf is not None and pf != 0.0, "profit_factor should be set"
+        # Manually replicate from the engine's own trade list to verify the
+        # formula matches the canonical gross-ratio definition.
+        gross_profit = sum(t.pnl for t in result.trades if t.pnl > 0)
+        gross_loss = abs(sum(t.pnl for t in result.trades if t.pnl <= 0))
+        if gross_loss > 1e-10:
+            expected_pf = gross_profit / gross_loss
+            assert abs(pf - expected_pf) < 1e-6, (
+                f"engine profit_factor={pf} differs from gross ratio "
+                f"({gross_profit}/{gross_loss} = {expected_pf})"
+            )
+
+    def test_portfolio_significance_sharpe_aligned_with_engine(self):
+        """Integration regression test for reviewer round 5 Important 1: the
+        _sharpe() helpers in portfolio_significance and backtest significance
+        previously used numpy default ddof=0, while engine sharpe used ddof=1.
+        On short OOS windows the CI and observed sharpe could disagree by up
+        to 2.7%. Now all use ddof=1.
+        """
+        import numpy as np
+        from ez.portfolio.walk_forward import _sharpe as _port_sharpe
+        from ez.backtest.significance import _sharpe as _bt_sharpe
+
+        # Construct a daily return series
+        rng = np.random.default_rng(7)
+        returns = rng.normal(0.001, 0.012, 60)  # short OOS window
+
+        # Portfolio helper
+        s_port = _port_sharpe(returns)
+        # Backtest helper (same formula, same rf)
+        s_bt = _bt_sharpe(returns, daily_rf=0.03 / 252)
+
+        # Both should match to numerical precision
+        assert abs(s_port - s_bt) < 1e-12, (
+            f"Portfolio helper sharpe ({s_port}) differs from backtest helper "
+            f"sharpe ({s_bt}) — both should use the same ddof=1 formula"
+        )
+
+        # And they should match the canonical engine formula (ddof=1)
+        daily_rf = 0.03 / 252
+        excess = returns - daily_rf
+        canonical = float(np.mean(excess) / np.std(excess, ddof=1) * np.sqrt(252))
+        assert abs(s_port - canonical) < 1e-12
+
 
 class TestGate:
     def _make_result(self, spec, sample_data) -> RunResult:

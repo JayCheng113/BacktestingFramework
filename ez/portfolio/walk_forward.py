@@ -44,8 +44,13 @@ class PortfolioSignificanceResult:
 
 
 def _sharpe(returns: np.ndarray, rf_daily: float = 0.03 / 252) -> float:
+    # V2.12.1 reviewer round 5: ddof=1 to match ez/backtest/metrics.py and
+    # ez/portfolio/engine.py. Prior version used numpy default ddof=0, causing
+    # observed_sharpe and CI bounds computed here to disagree with the engine's
+    # own Sharpe for the SAME equity curve — on short OOS windows (30-60 days)
+    # the displayed Sharpe could fall outside its own CI by up to 2.7%.
     excess = returns - rf_daily
-    std = float(np.std(excess))
+    std = float(np.std(excess, ddof=1)) if len(excess) > 1 else 0.0
     if std < 1e-10:
         return 0.0
     return float(np.mean(excess) / std * np.sqrt(252))
@@ -240,8 +245,12 @@ def portfolio_significance(
 
 
 def _sharpe_raw(excess_returns: np.ndarray) -> float:
-    """Sharpe from already-excess returns (no rf subtraction)."""
-    std = float(np.std(excess_returns))
+    """Sharpe from already-excess returns (no rf subtraction).
+
+    V2.12.1 reviewer round 5: ddof=1 to match the canonical Sharpe formula
+    across all modules.
+    """
+    std = float(np.std(excess_returns, ddof=1)) if len(excess_returns) > 1 else 0.0
     if std < 1e-10:
         return 0.0
     return float(np.mean(excess_returns) / std * np.sqrt(252))
