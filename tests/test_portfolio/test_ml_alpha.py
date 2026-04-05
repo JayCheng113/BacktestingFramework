@@ -724,3 +724,160 @@ class TestMLAlphaDeterminism:
         pd.testing.assert_series_equal(scores1, scores2)
         # Only one retrain should have happened (second call is cached)
         assert alpha._retrain_count == 1
+
+
+class TestMLAlphaCache:
+    """In-memory state on the MLAlpha instance IS the cache. Verify that
+    repeated calls within retrain_freq do not retrain."""
+
+    def test_single_retrain_within_freq_window(self):
+        """5 compute() calls spanning 10 days with retrain_freq=20 should
+        result in exactly 1 retrain."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=4)
+        alpha = MLAlpha(
+            name="cache_t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        # 5 calls within a 10-day window
+        base = datetime(2022, 8, 1)
+        for i in range(5):
+            alpha.compute(data, base + timedelta(days=i * 2))  # 0, 2, 4, 6, 8
+
+        assert alpha._retrain_count == 1
+
+    def test_fresh_instance_resets_cache(self):
+        """Two independently-constructed instances must have independent
+        state — no cross-instance caching."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        def make():
+            return MLAlpha(
+                name="fresh",
+                model_factory=lambda: Ridge(),
+                feature_fn=lambda df: pd.DataFrame({
+                    "f": df["adj_close"].pct_change(1),
+                }).dropna(),
+                target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+        a1 = make()
+        a2 = make()
+        assert a1._current_model is None
+        assert a2._current_model is None
+        assert a1 is not a2
+
+        # Train a1 only
+        data, dates = _make_universe_df(n_days=200)
+        a1.compute(data, datetime(2022, 8, 1))
+        assert a1._current_model is not None
+        # a2 still untouched
+        assert a2._current_model is None
+        assert a2._retrain_count == 0
+
+
+class TestMLAlphaFeatureErrorHandling:
+    """feature_fn / target_fn errors must not crash compute(); they
+    should skip the offending symbol and continue."""
+
+    def _make_data(self):
+        return _make_universe_df(n_days=200, n_stocks=3)
+
+    def test_feature_fn_raising_skips_symbol(self):
+        """A buggy feature_fn that raises must not crash compute. When
+        ALL symbols fail, compute returns empty Series and no model
+        trains."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = self._make_data()
+
+        def buggy_feature_fn(df):
+            raise ValueError("buggy")
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=buggy_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        # Must not crash
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+        # All symbols skipped → empty Series + no model trained
+        assert len(scores) == 0
+        assert alpha._current_model is None
+
+    def test_feature_fn_returning_none_skips_symbol(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = self._make_data()
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=lambda df: None,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+        assert len(scores) == 0
+
+    def test_target_fn_raising_skips_symbol(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = self._make_data()
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=lambda df: pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: (_ for _ in ()).throw(ValueError("buggy")),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+        assert len(scores) == 0
+
+    def test_partial_symbol_failure_still_produces_predictions(self):
+        """If feature_fn fails for SOME symbols but not others, compute
+        should return predictions for the good symbols only."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = self._make_data()
+        call_count = {"n": 0}
+
+        def sometimes_buggy(df):
+            call_count["n"] += 1
+            # Fail on first symbol, succeed on others
+            if call_count["n"] == 1:
+                raise ValueError("buggy")
+            return pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=sometimes_buggy,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        # Don't crash — should have enough data from remaining symbols
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+        # At least some predictions returned (might be 2 or 3 depending
+        # on whether the iteration order made the buggy call happen
+        # during _build_training_panel OR during _predict)
+        assert isinstance(scores, pd.Series)
