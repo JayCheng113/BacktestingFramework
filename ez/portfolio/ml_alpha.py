@@ -220,19 +220,187 @@ class MLAlpha(CrossSectionalFactor):
         return self._train_window + self._purge_days + self._embargo_days
 
     def compute(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
-        """Return per-symbol predictions at date ``date``.
+        """Return per-symbol predictions at ``date``.
 
-        Placeholder for Phase 1 Task 1.4 — returns an empty Series so the
-        skeleton tests can import and instantiate without NotImplementedError.
+        Lazy retrain: if the current model is stale (older than
+        ``retrain_freq`` days from ``date``), build a fresh training
+        panel from ``universe_data`` and fit a new model.
         """
-        return pd.Series(dtype=float)
+        current: _date = date.date() if hasattr(date, "date") else date
+
+        if self._needs_retrain(current):
+            self._retrain(universe_data, current)
+
+        if self._current_model is None:
+            return pd.Series(dtype=float)
+
+        return self._predict(universe_data, current)
 
     def compute_raw(self, universe_data: dict[str, pd.DataFrame], date: datetime) -> pd.Series:
-        """Raw predictions (no ranking). Used by AlphaCombiner.
-
-        Placeholder for Phase 1 Task 1.4 — same as ``compute()``.
-        """
+        """Raw (un-ranked) predictions. Used by ``AlphaCombiner``."""
         return self.compute(universe_data, date)
+
+    def _needs_retrain(self, current: _date) -> bool:
+        if self._current_model is None or self._last_retrain_date is None:
+            return True
+        elapsed = (current - self._last_retrain_date).days
+        return elapsed >= self._retrain_freq
+
+    def _retrain(self, universe_data: dict[str, pd.DataFrame], current: _date) -> None:
+        """Build a fresh training panel and fit a new model on it.
+
+        Skips retrain silently if the panel is empty or has too few
+        samples (< 10) — this can happen early in the universe data when
+        not enough history has accumulated to satisfy the train_window
+        after purge+embargo exclusion.
+        """
+        X, y = self._build_training_panel(universe_data, current)
+        if X is None or y is None or len(X) < 10:
+            return
+        model = self._model_factory()
+        # Re-check the factory output — user could return a different
+        # estimator class on subsequent calls. V1 safety means whitelist
+        # applies to every produced instance, not just the first probe.
+        _assert_supported_estimator(model)
+        model.fit(X.values, y.values)
+        self._current_model = model
+        self._last_retrain_date = current
+        self._retrain_count += 1
+
+    def _build_training_panel(
+        self,
+        universe_data: dict[str, pd.DataFrame],
+        prediction_date: _date,
+    ) -> tuple[pd.DataFrame | None, pd.Series | None]:
+        """Stack per-symbol ``(feature, target)`` pairs into a
+        cross-sectional training panel.
+
+        Exclusion rules:
+        1. Exclude all dates ``>= prediction_date - purge_days - embargo_days``
+           (forward-looking label leakage prevention).
+        2. Include at most the last ``train_window`` rows per symbol
+           (after purge exclusion).
+        3. Drop rows where the target is NaN (pct_change + shift(-k)
+           produces a NaN tail).
+        """
+        cutoff = prediction_date - timedelta(days=self._purge_days + self._embargo_days)
+
+        rows: list[pd.DataFrame] = []
+        labels: list[pd.Series] = []
+        for sym, df in universe_data.items():
+            if not isinstance(df.index, pd.DatetimeIndex):
+                continue
+
+            try:
+                sym_features = self._feature_fn(df)
+                sym_target = self._target_fn(df)
+            except Exception:
+                continue
+
+            if sym_features is None or sym_target is None:
+                continue
+            if not isinstance(sym_features, pd.DataFrame) or not isinstance(sym_target, pd.Series):
+                continue
+            if sym_features.empty or sym_target.empty:
+                continue
+
+            # Align features and target on common dates
+            aligned_idx = sym_features.index.intersection(sym_target.index)
+            if len(aligned_idx) == 0:
+                continue
+            feat = sym_features.loc[aligned_idx]
+            tgt = sym_target.loc[aligned_idx]
+
+            # Apply purge + embargo: exclude dates >= cutoff
+            mask = feat.index.date < cutoff
+            feat = feat.loc[mask]
+            tgt = tgt.loc[mask]
+
+            # Drop rows where target is NaN (shift(-k) tail)
+            valid = ~tgt.isna()
+            feat = feat.loc[valid]
+            tgt = tgt.loc[valid]
+
+            if len(feat) == 0:
+                continue
+
+            # Take last train_window rows only
+            if len(feat) > self._train_window:
+                feat = feat.iloc[-self._train_window:]
+                tgt = tgt.iloc[-self._train_window:]
+
+            # Tag with symbol as MultiIndex level
+            feat = feat.copy()
+            feat.index = pd.MultiIndex.from_arrays(
+                [feat.index, [sym] * len(feat)],
+                names=["date", "symbol"],
+            )
+            tgt = tgt.copy()
+            tgt.index = feat.index
+
+            rows.append(feat)
+            labels.append(tgt)
+
+        if not rows:
+            return None, None
+
+        X = pd.concat(rows, axis=0)
+        y = pd.concat(labels, axis=0)
+
+        # Drop any remaining NaN rows in X (feature NaN)
+        valid_rows = ~X.isna().any(axis=1)
+        X = X.loc[valid_rows]
+        y = y.loc[valid_rows]
+
+        if len(X) == 0:
+            return None, None
+        return X, y
+
+    def _predict(
+        self,
+        universe_data: dict[str, pd.DataFrame],
+        current: _date,
+    ) -> pd.Series:
+        """Predict scores for each symbol at ``current``.
+
+        For each symbol, extracts the most recent feature row strictly
+        before ``current`` (anti-lookahead guard — this is redundant with
+        the engine's ``slice_universe_data`` upstream slice, but doing it
+        here makes MLAlpha correct even if someone passes un-sliced data).
+        """
+        if self._current_model is None:
+            return pd.Series(dtype=float)
+
+        predictions: dict[str, float] = {}
+        for sym, df in universe_data.items():
+            if not isinstance(df.index, pd.DatetimeIndex):
+                continue
+            try:
+                sym_features = self._feature_fn(df)
+            except Exception:
+                continue
+            if sym_features is None or not isinstance(sym_features, pd.DataFrame):
+                continue
+            if sym_features.empty:
+                continue
+
+            # Strict anti-lookahead: features date < current
+            mask = sym_features.index.date < current
+            if not mask.any():
+                continue
+            latest = sym_features.loc[mask].iloc[-1:]
+            if latest.isna().any().any():
+                continue
+
+            try:
+                pred = float(self._current_model.predict(latest.values)[0])
+            except Exception:
+                continue
+            if not np.isfinite(pred):
+                continue
+            predictions[sym] = pred
+
+        return pd.Series(predictions, dtype=float) if predictions else pd.Series(dtype=float)
 
 
 # Prevent auto-registration: MLAlpha is a BASE class that users instantiate

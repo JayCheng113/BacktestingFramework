@@ -12,7 +12,7 @@ only for simple construction smoke and does NOT train any models.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 import numpy as np
@@ -305,3 +305,205 @@ class TestMLAlphaEstimatorWhitelist:
             assert "Ridge" in msg
             # The message should mention the word "whitelist"
             assert "whitelist" in msg.lower()
+
+
+def _make_universe_df(n_days: int = 200, n_stocks: int = 5, seed: int = 42):
+    """Build a deterministic multi-stock universe for MLAlpha testing."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2022-01-03", periods=n_days, freq="B")
+    data = {}
+    for i in range(n_stocks):
+        # Different drift per stock so rankings vary
+        prices = 100 * np.cumprod(1 + rng.normal(0.0003 * (i + 1), 0.012, n_days))
+        data[f"S{i:02d}"] = pd.DataFrame({
+            "open": prices, "high": prices * 1.005, "low": prices * 0.995,
+            "close": prices, "adj_close": prices,
+            "volume": rng.integers(100_000, 1_000_000, n_days).astype(float),
+        }, index=dates)
+    return data, dates
+
+
+class TestMLAlphaLazyRetrain:
+    """MLAlpha must call _retrain on first compute call and skip
+    subsequent calls within retrain_freq."""
+
+    def test_compute_triggers_retrain_on_first_call(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+                "ret5": df["adj_close"].pct_change(5),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60,
+            retrain_freq=20,
+            purge_days=5,
+        )
+        assert alpha._retrain_count == 0
+        assert alpha._current_model is None
+
+        # First compute at ~150 bars in — enough data for a 60-day train
+        # window plus 5-day purge.
+        dt = datetime(2022, 8, 1)
+        alpha.compute(data, dt)
+
+        assert alpha._retrain_count == 1
+        assert alpha._current_model is not None
+        assert alpha._last_retrain_date == dt.date()
+
+    def test_compute_skips_retrain_within_freq(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60,
+            retrain_freq=20,
+            purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._retrain_count == 1
+
+        # 9 days later — within retrain_freq=20 — must NOT retrain
+        alpha.compute(data, datetime(2022, 8, 10))
+        assert alpha._retrain_count == 1
+
+        # 31 days later — beyond retrain_freq=20 — must retrain
+        alpha.compute(data, datetime(2022, 9, 1))
+        assert alpha._retrain_count == 2
+
+
+class TestBuildTrainingPanel:
+    """Training panel must exclude samples within purge+embargo window."""
+
+    def _make_alpha(self, purge=5, embargo=0, train_window=60):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+        return MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=train_window,
+            retrain_freq=20,
+            purge_days=purge,
+            embargo_days=embargo,
+        )
+
+    def test_training_panel_not_empty(self):
+        alpha = self._make_alpha()
+        data, dates = _make_universe_df(200)
+        X, y = alpha._build_training_panel(data, dates[150].date())
+        assert X is not None
+        assert y is not None
+        assert len(X) > 0
+        assert len(X) == len(y)
+        assert X.shape[1] == 1  # one feature: ret1
+
+    def test_training_panel_excludes_purge_window(self):
+        """With purge_days=5 and prediction_date=dates[150], the training
+        panel must NOT include any feature dates >= dates[145] (by
+        trading-day arithmetic purge_days is a CALENDAR day offset, so
+        we check against prediction_date - 5 calendar days)."""
+        alpha = self._make_alpha(purge=5)
+        data, dates = _make_universe_df(200)
+        prediction_date = dates[150].date()
+        purge_cutoff = prediction_date - timedelta(days=5)
+
+        X, y = alpha._build_training_panel(data, prediction_date)
+        assert X is not None
+        # X is a MultiIndex (date, symbol)
+        max_date = max(X.index.get_level_values("date")).date()
+        assert max_date < purge_cutoff, (
+            f"Training panel has sample at {max_date} which is >= "
+            f"purge cutoff {purge_cutoff} — feature-label leakage risk"
+        )
+
+    def test_training_panel_respects_train_window(self):
+        """Training panel's per-symbol slice must only contain the last
+        train_window rows (after purge exclusion)."""
+        alpha = self._make_alpha(train_window=30, purge=5)
+        data, dates = _make_universe_df(200)
+        X, y = alpha._build_training_panel(data, dates[150].date())
+        assert X is not None
+        # Expect at most 30 dates × 5 symbols = 150 rows (minus NaN from
+        # pct_change warmup and dropna on the target side). Upper bound
+        # is lenient: 30 * 5 = 150.
+        assert 0 < len(X) <= 30 * 5, f"Expected ≤150 rows, got {len(X)}"
+
+    def test_training_panel_embargo_adds_to_purge(self):
+        """embargo_days=3 extends the purge window by 3 additional days."""
+        alpha = self._make_alpha(purge=5, embargo=3)
+        data, dates = _make_universe_df(200)
+        prediction_date = dates[150].date()
+        purge_embargo_cutoff = prediction_date - timedelta(days=5 + 3)
+
+        X, y = alpha._build_training_panel(data, prediction_date)
+        assert X is not None
+        max_date = max(X.index.get_level_values("date")).date()
+        assert max_date < purge_embargo_cutoff
+
+
+class TestMLAlphaPredict:
+    """compute() returns a Series indexed by symbol with model predictions."""
+
+    def test_compute_returns_series_with_symbols_as_index(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=4)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+                "ret5": df["adj_close"].pct_change(5),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60,
+            retrain_freq=20,
+            purge_days=5,
+        )
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+        assert isinstance(scores, pd.Series)
+        assert len(scores) == 4
+        assert set(scores.index) == {"S00", "S01", "S02", "S03"}
+        assert scores.notna().all()
+        assert np.isfinite(scores.values).all()
+
+    def test_compute_predictions_vary_across_symbols(self):
+        """Sanity: with stocks that have different drift, predictions
+        should NOT all be equal (otherwise the model learned nothing)."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=5)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=0.01),  # low regularization
+            feature_fn=lambda df: pd.DataFrame({
+                "ret5": df["adj_close"].pct_change(5),
+                "ret20": df["adj_close"].pct_change(20),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=80,
+            retrain_freq=20,
+            purge_days=5,
+        )
+        scores = alpha.compute(data, datetime(2022, 8, 1))
+        assert len(scores) == 5
+        # Not all predictions are identical
+        assert scores.nunique() > 1
