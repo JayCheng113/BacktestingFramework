@@ -110,3 +110,9 @@ No version tag without review pass. No push without critical issues resolved.
 - AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log)
 - 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)
 - AI助手SSE流式输出无法前端强制中断 (需后端cancel机制, 当前只能等输出完成)
+
+## V2.12.1 codex 审查遗留项 (V2.13+ 处理)
+- **#7 候选搜索不支持 bool/enum 参数** — web/src/components/CandidateSearch.tsx 的 ParamRangeState 只支持 int/float, generateValues/countValues 也是数值逻辑, 布尔/枚举参数的搜索需要前端 UX 重设计 + 后端 ParamRangeRequest 支持 list[str]/list[bool]. 当前策略作者可以绕过: 用整数编码枚举. 不影响数据正确性.
+- **#18 alpha_combiner 训练窗口固定 365 天** — ez/api/routes/portfolio.py::_compute_alpha_weights 用 start-timedelta(days=365) 作训练区间. 长 warmup 的自定义因子会被喂不足历史. #9 修复后 lookback 已动态, 但训练窗口长度本身还是固定的. 动态化需要更多设计 (训练窗口大小 vs 因子 warmup 的权衡). 暂时把默认值留在 365, 用户可以覆盖 forward_days 间接调整.
+- **#20 multi_select 参数搜索 UX 语义** — PortfolioPanel.tsx 的 paramGrid[key] = vals.map(v => [v]) 让每个候选值独立成一个 combo. 用户输入 "EP,BP,SP,DP" 得到 4 次单因子运行, 而不是多因子组合. 这是产品设计折衷 (单因子搜索 vs 多因子组合空间爆炸), 真正的多因子子集搜索需要 power-set UX. 和上面 "multi_select 参数搜索只搜单因子组合" 同根.
+- **Portfolio 引擎 lookback 硬校验只 warn 不 raise** — #22 修复加了 warning log 但不 raise, 保留向后兼容. 有误差但可诊断. 硬 raise 需要确认所有 builtin 策略的 lookback_days 声明正确.
