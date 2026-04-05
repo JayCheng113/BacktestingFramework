@@ -4,7 +4,7 @@ import type { BacktestSettingsValue } from './BacktestSettings'
 import BacktestSettings from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import { useState, useEffect } from 'react'
-import { getPortfolioRunWeights } from '../api'
+import { getPortfolioRunHoldings } from '../api'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -138,8 +138,14 @@ export default function PortfolioRunContent(props: Props) {
     if (!result?.run_id) return
     setWeightsLoading(true)
     try {
-      const res = await getPortfolioRunWeights(result.run_id)
-      setFullWeights(res.data.rebalance_weights || [])
+      // V2.12.2 codex: call /holdings to get ACTUAL post-execution weights
+      // (daily weights_history from engine) instead of /weights which
+      // returns rebalance target weights. Prior version mixed two semantics
+      // under the same "加载完整历史" button: before click the pie chart
+      // showed actual latest_weights; after click the table switched to
+      // rebalance targets. Users could not tell which was which.
+      const res = await getPortfolioRunHoldings(result.run_id)
+      setFullWeights(res.data.weights_history || [])
     } catch (e: any) {
       alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
     } finally { setWeightsLoading(false) }

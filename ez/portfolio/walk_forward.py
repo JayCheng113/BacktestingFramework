@@ -205,8 +205,31 @@ def portfolio_walk_forward(
         compound_ret = 1.0
         for r in result.oos_returns:
             compound_ret *= (1 + r)
+        # V2.12.2 codex round 3: recompute OOS sharpe from the CHAINED OOS
+        # equity curve, not the mean of per-fold sharpes. Folds have
+        # different lengths and volatility structures, so the mean of
+        # per-fold Sharpe ratios diverges from the Sharpe of the
+        # concatenated curve (same bug pattern that single-stock
+        # walk_forward fixed in round 1). Uses MetricsCalculator so the
+        # formula matches ez/backtest/metrics.py (excess-return /
+        # daily-std × √252, ddof=1).
+        chained_sharpe = float(oos_mean)  # fallback to mean of per-fold
+        if len(result.oos_equity_curve) > 1:
+            try:
+                import pandas as pd
+                from ez.backtest.metrics import MetricsCalculator
+                calc = MetricsCalculator()
+                oos_equity_series = pd.Series(result.oos_equity_curve)
+                flat_bench = pd.Series(
+                    [float(oos_equity_series.iloc[0])] * len(oos_equity_series)
+                )
+                chained_metrics = calc.compute(oos_equity_series, flat_bench)
+                chained_sharpe = float(chained_metrics.get("sharpe_ratio", oos_mean))
+            except Exception:
+                # Fallback to mean-of-per-fold if metrics recompute fails
+                pass
         result.oos_metrics = {
-            "sharpe_ratio": float(oos_mean),
+            "sharpe_ratio": chained_sharpe,
             "total_return": float(compound_ret - 1),
         }
 

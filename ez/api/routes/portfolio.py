@@ -808,14 +808,21 @@ def run_portfolio(req: PortfolioRunRequest):
         # equity_curve and the frontend fell back to index-based x-axis,
         # misleading users when compared runs had different date ranges.
         "dates": [d.isoformat() for d in result.dates],
-        # V2.12.2 codex: persist per-day actual post-execution holdings
-        # (sparse — only non-empty days). Distinct from `rebalance_weights`
-        # which is the per-rebalance target. History page uses this for
-        # "latest holdings" so it matches what /run response showed.
+        # V2.12.2 codex round 3: persist per-day actual post-execution
+        # holdings. Previously we filtered out empty dict entries to save
+        # space, but this dropped the POST-LIQUIDATION terminal marker
+        # (engine appends {} after final sell-all). History page then
+        # showed the last rebalance weights as "current holdings" even
+        # when the backtest ended in all-cash. Now we preserve ALL entries
+        # aligned 1:1 with `dates`, so `weights_history[-1] == {}` signals
+        # terminal liquidation and history page can render "已清仓" state.
+        # Pre-first-rebalance days (also empty) are included too — they
+        # accurately represent "no position yet" which downstream
+        # attribution and drawdown analysis benefit from knowing.
         "weights_history": [
             {"date": result.dates[i].isoformat(), "weights": result.weights_history[i]}
             for i in range(len(result.weights_history))
-            if i < len(result.dates) and result.weights_history[i]
+            if i < len(result.dates)
         ],
     })
 
@@ -1246,15 +1253,30 @@ def get_run_holdings(run_id: str):
     holdings after lot rounding and risk-manager turnover caps. Prior to
     V2.12.2 this data was only available in the /run response and was
     lost on reload from history.
+
+    V2.12.2 codex round 3: also returns `terminal_liquidated` flag derived
+    from whether the last entry's weights dict is empty. Matches the /run
+    response's flag so history-reload and live-response render the same
+    UI label ("最后一次调仓目标 (期末已清仓)" vs "最新持仓分布").
     """
     run = _get_store().get_run(run_id)
     if not run:
         raise HTTPException(404, f"Run '{run_id}' not found")
     weights_history = run.get("weights_history") or []
-    latest = next((w for w in reversed(weights_history) if w.get("weights")), {})
+    latest = next(
+        (w for w in reversed(weights_history) if isinstance(w, dict) and w.get("weights")),
+        {},
+    )
+    # Terminal liquidation: last entry exists and its weights dict is empty.
+    terminal_liquidated = (
+        bool(weights_history)
+        and isinstance(weights_history[-1], dict)
+        and not weights_history[-1].get("weights")
+    )
     return {
         "weights_history": weights_history,
         "latest_weights": latest.get("weights", {}) if isinstance(latest, dict) else {},
+        "terminal_liquidated": terminal_liquidated,
     }
 
 

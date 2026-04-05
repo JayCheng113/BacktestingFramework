@@ -202,7 +202,13 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         {/* Mode toggle */}
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>模式</label>
-          <select value={mode} onChange={e => { setMode(e.target.value as any); setResult(null); setWfResult(null) }}
+          <select value={mode} onChange={e => {
+            // V2.12.2 codex: also clear KlineChart trade markers. Prior
+            // version left the previous mode's buy/sell markers on the
+            // chart after switching modes, misleading the user into
+            // thinking the markers belonged to the new mode's run.
+            setMode(e.target.value as any); setResult(null); setWfResult(null); onTradesUpdate?.([])
+          }}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             <option value="backtest">单次回测</option>
             <option value="walk-forward">前推验证</option>

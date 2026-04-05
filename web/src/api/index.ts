@@ -77,6 +77,13 @@ export const portfolioSearch = (data: any) => api.post('/portfolio/search', data
 
 // Portfolio run weights history (V2.12.1)
 export const getPortfolioRunWeights = (runId: string) => api.get(`/portfolio/runs/${runId}/weights`)
+// V2.12.2 codex: /holdings returns actual post-execution weights_history
+// (distinct from /weights which returns rebalance target weights). The
+// "load full history" button must call /holdings so the displayed table
+// matches the same semantic as the live pie chart.
+export const getPortfolioRunHoldings = (runId: string) => api.get(`/portfolio/runs/${runId}/holdings`)
+// Full trade list for a persisted run (V2.12.2)
+export const getPortfolioRunTrades = (runId: string) => api.get(`/portfolio/runs/${runId}/trades`)
 
 // Fundamental data (V2.11)
 export const fetchFundamentalData = (data: any) => api.post('/fundamental/fetch', data)

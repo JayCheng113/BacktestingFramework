@@ -120,6 +120,44 @@ class TestPortfolioWalkForward:
         # 3 splits × 2 (IS + OOS) = 6 calls
         assert call_count[0] == 6
 
+    def test_oos_sharpe_matches_chained_curve_not_fold_mean(self):
+        """V2.12.2 codex round 3: oos_metrics['sharpe_ratio'] must be
+        computed from the chained OOS equity curve via MetricsCalculator,
+        not the mean of per-fold Sharpes. Mean-of-folds diverges from the
+        true Sharpe of the concatenated curve when folds have different
+        lengths or volatility structures.
+        """
+        import pandas as pd
+        from ez.backtest.metrics import MetricsCalculator
+        data, cal, universe, dates = _make_data()
+        result = portfolio_walk_forward(
+            strategy_factory=lambda: TopNRotation(MomentumRank(20), top_n=3),
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[60].date(), end=dates[-1].date(),
+            n_splits=3, freq="monthly",
+        )
+        assert "sharpe_ratio" in result.oos_metrics
+        # Compute the "reference" sharpe directly from the chained curve
+        # using the same MetricsCalculator path the fix uses.
+        if len(result.oos_equity_curve) > 1:
+            calc = MetricsCalculator()
+            eq = pd.Series(result.oos_equity_curve)
+            flat_bench = pd.Series([float(eq.iloc[0])] * len(eq))
+            ref_metrics = calc.compute(eq, flat_bench)
+            ref_sharpe = float(ref_metrics.get("sharpe_ratio", 0.0))
+            reported = float(result.oos_metrics["sharpe_ratio"])
+            # The two should be identical (same computation path)
+            assert abs(reported - ref_sharpe) < 1e-10, (
+                f"oos_metrics sharpe {reported} does not match chained-curve "
+                f"sharpe {ref_sharpe} — fallback to fold-mean detected"
+            )
+            # And must differ from the naive fold-mean (unless folds happen
+            # to align — which is rare but possible for tiny random seed).
+            fold_mean = float(np.mean(result.oos_sharpes)) if result.oos_sharpes else 0.0
+            # Not asserting they're different (folds may coincidentally match);
+            # just verify the chained computation is what's reported.
+            _ = fold_mean
+
     def test_tail_days_not_silently_dropped(self):
         """V2.12.2 codex: window_size = n_days // n_splits silently drops the
         remainder n_days % n_splits at the tail. Use daily rebalance so
