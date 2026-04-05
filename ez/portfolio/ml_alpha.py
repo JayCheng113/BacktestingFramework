@@ -568,11 +568,17 @@ class MLAlpha(CrossSectionalFactor):
                 feat = feat.iloc[:-purge_bars]
                 tgt = tgt.iloc[:-purge_bars]
 
-            # Step 3: drop NaN targets (shift(-k) tail already excluded
-            # by purge, but pct_change warmup can still leave NaN)
-            valid = ~tgt.isna()
-            feat = feat.loc[valid]
-            tgt = tgt.loc[valid]
+            # Step 3: drop rows with NaN in EITHER target OR any feature
+            # column. pct_change warmup leaves NaN at the head of features,
+            # shift(-k) leaves NaN at the tail of target (though step 2
+            # already trimmed most of it). Inlining both drops here (vs
+            # draining NaN targets now + NaN features at the concat step)
+            # keeps the per-symbol loop self-contained and readable.
+            # ``inf`` filtering is deliberately deferred to ``_retrain``
+            # because ``pandas.isna()`` does NOT treat ``inf`` as missing.
+            row_valid = (~tgt.isna()) & (~feat.isna().any(axis=1))
+            feat = feat.loc[row_valid]
+            tgt = tgt.loc[row_valid]
 
             if len(feat) == 0:
                 continue
@@ -597,14 +603,11 @@ class MLAlpha(CrossSectionalFactor):
         if not rows:
             return None, None
 
+        # NaN filtering already happened per-symbol in step 3; no second
+        # pass needed. inf filtering still happens in _retrain because
+        # isna() doesn't catch inf.
         X = pd.concat(rows, axis=0)
         y = pd.concat(labels, axis=0)
-
-        # Drop any remaining NaN rows in X (feature NaN after pct_change
-        # warmup). inf filtering is done in _retrain.
-        valid_rows = ~X.isna().any(axis=1)
-        X = X.loc[valid_rows]
-        y = y.loc[valid_rows]
 
         if len(X) == 0:
             return None, None

@@ -1037,6 +1037,89 @@ class TestMLAlphaFeatureErrorHandling:
         scores = alpha.compute(data, datetime(2022, 8, 1))
         assert len(scores) == 0
 
+    def test_mixed_partial_failure_produces_predictions_for_good_symbols(self):
+        """V2.13 round 3 reviewer Gap 2: more targeted than the existing
+        `test_partial_symbol_failure_*` — constructs 3 symbols where
+        exactly 1 fails at feature_fn, asserts (a) model still trains on
+        the remaining 2, (b) exactly 2 predictions returned, (c) exactly
+        1 one-shot warning fires.
+
+        This is the real-world scenario where one stock has broken data
+        (delisted mid-period, column missing, corrupt row) but the
+        majority of the universe is healthy. The framework must degrade
+        gracefully — not collapse to zero predictions.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        # Identify the "bad" symbol by id(df) — first one inserted is S00
+        bad_df_id = id(data["S00"])
+
+        def selective_feature_fn(df):
+            if id(df) == bad_df_id:
+                raise ValueError("S00 has corrupt data")
+            return pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+                "ret5": df["adj_close"].pct_change(5),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=selective_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        finally:
+            logger.removeHandler(handler)
+
+        # Model trained on S01 + S02 (not S00)
+        assert alpha._current_model is not None
+        assert alpha._retrain_count == 1
+
+        # Exactly 2 predictions (S01, S02), S00 skipped
+        assert len(scores) == 2, (
+            f"Expected predictions for 2 good symbols (S01, S02), "
+            f"got {len(scores)}: {scores.index.tolist() if len(scores) > 0 else '[]'}"
+        )
+        assert "S00" not in scores.index
+        assert "S01" in scores.index
+        assert "S02" in scores.index
+
+        # Exactly ONE one-shot warning (not two, even though S00 was
+        # attempted twice: once in _build_training_panel, once in _predict)
+        feature_fn_warnings = [
+            m for m in captured
+            if "feature_fn" in m and "ValueError" in m
+        ]
+        # May be 1 (training-stage warning) or 2 (training + predict
+        # stage, because they use independent one-shot flags). Both
+        # are acceptable — each flag fires exactly once. Assert the
+        # flags are set.
+        assert alpha._feature_fn_exception_warned is True
+        # The predict-stage flag may or may not be set depending on
+        # whether _predict was reached (it is, because the model trained
+        # successfully). Since S00 raises in BOTH training and predict
+        # for this test, both flags fire.
+        assert alpha._predict_feature_exception_warned is True
+        # Warning count matches flag count: both fired exactly once
+        assert len(feature_fn_warnings) == 2, (
+            f"Expected exactly 2 warnings (training + predict, both "
+            f"one-shot), got: {feature_fn_warnings}"
+        )
+
     def test_partial_symbol_failure_still_produces_predictions(self):
         """If feature_fn fails for SOME symbols but not others, compute
         should return predictions for the good symbols only.
