@@ -31,6 +31,10 @@ class PortfolioWFResult:
     degradation: float = 0.0       # (IS_sharpe - OOS_sharpe) / |IS_sharpe|
     overfitting_score: float = 0.0  # max(0, degradation)
     oos_metrics: dict[str, float] = field(default_factory=dict)
+    # V2.12.1 reviewer round 6 I1+I2: aggregate events from all folds so WF
+    # users see optimizer fallbacks and risk events just like /run users do.
+    optimizer_fallback_events: list[dict] = field(default_factory=list)
+    risk_events: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -122,6 +126,8 @@ def portfolio_walk_forward(
         test_end_date = trading_days[test_end_idx - 1]
 
         # Run IS — fresh optimizer/risk_manager per fold (they hold state)
+        is_opt = optimizer_factory() if optimizer_factory else None
+        is_rm = risk_manager_factory() if risk_manager_factory else None
         is_result = run_portfolio_backtest(
             strategy=strategy_factory(), universe=universe,
             universe_data=universe_data, calendar=calendar,
@@ -130,11 +136,19 @@ def portfolio_walk_forward(
             cost_model=cost_model, lot_size=lot_size, limit_pct=limit_pct,
             benchmark_symbol=benchmark_symbol,
             t_plus_1=t_plus_1,
-            optimizer=optimizer_factory() if optimizer_factory else None,
-            risk_manager=risk_manager_factory() if risk_manager_factory else None,
+            optimizer=is_opt,
+            risk_manager=is_rm,
         )
+        # V2.12.1 reviewer round 6 I1+I2: aggregate events from this fold
+        if is_opt is not None and is_opt.fallback_events:
+            for ev in is_opt.fallback_events:
+                result.optimizer_fallback_events.append({**ev, "phase": "IS", "fold": i})
+        for ev in is_result.risk_events:
+            result.risk_events.append({**ev, "phase": "IS", "fold": i})
 
         # Run OOS — fresh instances again
+        oos_opt = optimizer_factory() if optimizer_factory else None
+        oos_rm = risk_manager_factory() if risk_manager_factory else None
         oos_result = run_portfolio_backtest(
             strategy=strategy_factory(), universe=universe,
             universe_data=universe_data, calendar=calendar,
@@ -143,9 +157,14 @@ def portfolio_walk_forward(
             cost_model=cost_model, lot_size=lot_size, limit_pct=limit_pct,
             benchmark_symbol=benchmark_symbol,
             t_plus_1=t_plus_1,
-            optimizer=optimizer_factory() if optimizer_factory else None,
-            risk_manager=risk_manager_factory() if risk_manager_factory else None,
+            optimizer=oos_opt,
+            risk_manager=oos_rm,
         )
+        if oos_opt is not None and oos_opt.fallback_events:
+            for ev in oos_opt.fallback_events:
+                result.optimizer_fallback_events.append({**ev, "phase": "OOS", "fold": i})
+        for ev in oos_result.risk_events:
+            result.risk_events.append({**ev, "phase": "OOS", "fold": i})
 
         # Extract sharpe
         is_sharpe = is_result.metrics.get("sharpe_ratio", 0.0)

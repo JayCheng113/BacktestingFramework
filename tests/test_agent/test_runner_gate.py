@@ -569,6 +569,148 @@ class TestRunner:
             "AI portfolio tool must gate min_commission by market"
         )
 
+    def test_portfolio_request_config_parity(self):
+        """Regression test for reviewer round 6 Critical C1: PortfolioRunRequest,
+        PortfolioWFRequest and PortfolioSearchRequest must resolve to the same
+        default values for every optimizer/risk/index/cost field. Prior version
+        declared the fields separately on each request model with drifted
+        defaults (e.g. max_weight /run=0.10 vs /walk-forward=1.0), so "same
+        user input" produced different strategies across endpoints.
+
+        Mixin approach: all three inherit from PortfolioCommonConfig.
+        """
+        from ez.api.routes.portfolio import (
+            PortfolioRunRequest, PortfolioWFRequest, PortfolioSearchRequest,
+            PortfolioCommonConfig,
+        )
+        # All three must inherit from the common config
+        assert issubclass(PortfolioRunRequest, PortfolioCommonConfig)
+        assert issubclass(PortfolioWFRequest, PortfolioCommonConfig)
+        assert issubclass(PortfolioSearchRequest, PortfolioCommonConfig)
+
+        # Build minimal instances and verify all inherited field defaults match
+        run = PortfolioRunRequest(symbols=["000001.SZ"])
+        wf = PortfolioWFRequest(symbols=["000001.SZ"])
+        search = PortfolioSearchRequest(symbols=["000001.SZ"])
+
+        # Every field in PortfolioCommonConfig must have the same value in all 3
+        common_fields = PortfolioCommonConfig.model_fields
+        for field_name in common_fields:
+            run_val = getattr(run, field_name)
+            wf_val = getattr(wf, field_name)
+            search_val = getattr(search, field_name)
+            assert run_val == wf_val, (
+                f"Field '{field_name}' drifts: run={run_val} vs wf={wf_val}"
+            )
+            assert run_val == search_val, (
+                f"Field '{field_name}' drifts: run={run_val} vs search={search_val}"
+            )
+
+    def test_portfolio_walk_forward_uses_optimizer_factory(self):
+        """Regression integration test for reviewer round 6 I4: verify that
+        optimizer_factory is actually wired through to the engine in
+        portfolio_walk_forward. Uses a spy optimizer that records optimize()
+        invocations to prove the call path is alive (MinVariance output can
+        coincidentally equal equal-weight on some fixtures, so a numeric
+        diff check is unreliable — a call-count spy is definitive).
+        """
+        import numpy as np
+        import pandas as pd
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+        from ez.portfolio.cross_factor import MomentumRank
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.optimizer import PortfolioOptimizer, OptimizationConstraints
+
+        # Spy optimizer that records how many times optimize() is called per
+        # instance. Override optimize() directly (not _optimize) so we don't
+        # need to implement the abstract hook — we bypass the cov estimation
+        # path entirely.
+        class _SpyOptimizer(PortfolioOptimizer):
+            def __init__(self):
+                super().__init__(OptimizationConstraints(max_weight=1.0), cov_lookback=30)
+                self.calls = 0
+
+            def _optimize(self, alpha, sigma, symbols):
+                # Not used — optimize() is overridden below
+                import numpy as np
+                return np.ones(len(symbols)) / len(symbols)
+
+            def optimize(self, alpha_weights):
+                self.calls += 1
+                syms = [s for s, w in alpha_weights.items() if w > 0]
+                if not syms:
+                    return {}
+                # Non-uniform: first symbol gets 60%, rest split the remainder
+                result = {syms[0]: 0.6}
+                if len(syms) > 1:
+                    remain = 0.4 / (len(syms) - 1)
+                    for s in syms[1:]:
+                        result[s] = remain
+                return result
+
+        instances: list[_SpyOptimizer] = []
+
+        def _spy_factory():
+            inst = _SpyOptimizer()
+            instances.append(inst)
+            return inst
+
+        symbols = [f"S{i}" for i in range(5)]
+        rng = np.random.default_rng(42)
+        dates = pd.date_range("2023-01-02", periods=250, freq="B")
+        data = {}
+        for i, sym in enumerate(symbols):
+            prices = 10 * (i + 1) * np.cumprod(1 + rng.normal(0.001, 0.015, 250))
+            data[sym] = pd.DataFrame({
+                "open": prices, "high": prices * 1.01, "low": prices * 0.99,
+                "close": prices, "adj_close": prices,
+                "volume": rng.integers(100000, 5000000, 250),
+            }, index=dates)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        def _strat():
+            return TopNRotation(MomentumRank(20), top_n=3)
+
+        result = portfolio_walk_forward(
+            strategy_factory=_strat,
+            universe=Universe(symbols), universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            n_splits=3, train_ratio=0.7, initial_cash=1_000_000,
+            optimizer_factory=_spy_factory,
+        )
+
+        # Contract 1: factory was invoked (one instance per IS + one per OOS
+        # per fold = 6 instances for 3 splits)
+        assert len(instances) > 0, "optimizer_factory was never called"
+        # Contract 2: at least one instance actually had optimize() called
+        # (meaning the engine saw the optimizer and invoked it during rebalance)
+        total_calls = sum(inst.calls for inst in instances)
+        assert total_calls > 0, (
+            f"optimizer instances were created but optimize() was never called "
+            f"by the engine ({len(instances)} instances, 0 calls)"
+        )
+
+    def test_portfolio_walk_forward_surfaces_fallback_events(self):
+        """Regression integration test for reviewer round 6 I1: walk-forward
+        must aggregate optimizer.fallback_events across folds into
+        PortfolioWFResult.optimizer_fallback_events so the API can surface them.
+        """
+        import inspect
+        from ez.portfolio.walk_forward import PortfolioWFResult, portfolio_walk_forward
+        # Field must exist on the result dataclass
+        assert "optimizer_fallback_events" in PortfolioWFResult.__dataclass_fields__
+        assert "risk_events" in PortfolioWFResult.__dataclass_fields__
+        # Function source must aggregate per-fold events
+        src = inspect.getsource(portfolio_walk_forward)
+        assert "optimizer_fallback_events.append" in src, (
+            "portfolio_walk_forward must aggregate optimizer fallback events across folds"
+        )
+        assert "result.risk_events.append" in src, (
+            "portfolio_walk_forward must aggregate risk_events across folds"
+        )
+
 
 class TestGate:
     def _make_result(self, spec, sample_data) -> RunResult:

@@ -249,7 +249,50 @@ def _compute_alpha_weights(factors, symbols, market, start, end, method,
     return weights
 
 
-class PortfolioRunRequest(BaseModel):
+class PortfolioCommonConfig(BaseModel):
+    """Shared optimizer/risk-control/index-enhancement/cost fields.
+
+    V2.12.1 reviewer round 6 C1 fix: previously PortfolioRunRequest and
+    PortfolioWFRequest each declared their own copies of these fields with
+    DIFFERENT default values and Field constraints — running "/run" vs
+    "/walk-forward" with identical user payloads produced different strategies
+    because Pydantic fills in different defaults.
+
+    Single source of truth for every field that affects optimizer / risk /
+    index / cost behavior. Any endpoint that runs a portfolio backtest should
+    inherit this mixin so defaults stay in lockstep.
+    """
+
+    # Cost model
+    buy_commission_rate: float = Field(default=0.0003, ge=0)
+    sell_commission_rate: float = Field(default=0.0003, ge=0)
+    min_commission: float = Field(default=5.0, ge=0)
+    stamp_tax_rate: float = Field(default=0.0005, ge=0)
+    slippage_rate: float = Field(default=0.0, ge=0)
+    lot_size: int = Field(default=100, ge=1)
+    limit_pct: float = Field(default=0.10, ge=0, le=0.30)
+    benchmark_symbol: str = ""
+
+    # Optimizer (V2.12)
+    optimizer: str = Field(default="none", pattern="^(none|mean_variance|min_variance|risk_parity)$")
+    risk_aversion: float = Field(default=1.0, gt=0)
+    max_weight: float = Field(default=0.10, gt=0, le=1.0)
+    max_industry_weight: float = Field(default=0.30, gt=0, le=1.0)
+    cov_lookback: int = Field(default=60, ge=10, le=500)
+
+    # Risk control (V2.12)
+    risk_control: bool = False
+    max_drawdown: float = Field(default=0.20, gt=0, le=0.50)
+    drawdown_reduce: float = Field(default=0.50, gt=0, le=1.0)
+    drawdown_recovery: float = Field(default=0.10, gt=0, le=0.50)
+    max_turnover: float = Field(default=0.50, gt=0, le=2.0)
+
+    # Index enhancement (V2.12.1)
+    index_benchmark: str = Field(default="", pattern=r"^(|000300|000905|000852)$")
+    max_tracking_error: float = Field(default=0.05, gt=0, le=0.20)
+
+
+class PortfolioRunRequest(PortfolioCommonConfig):
     strategy_name: str = "TopNRotation"
     symbols: list[str]
     market: str = "cn_stock"
@@ -258,30 +301,83 @@ class PortfolioRunRequest(BaseModel):
     freq: str = Field(default="monthly", pattern="^(daily|weekly|monthly|quarterly)$")
     strategy_params: dict = {}
     initial_cash: float = Field(default=1_000_000, ge=10_000)
-    buy_commission_rate: float = Field(default=0.0003, ge=0)
-    sell_commission_rate: float = Field(default=0.0003, ge=0)
     commission_rate: float | None = Field(default=None, ge=0)  # backward compat: if set, overrides both
-    min_commission: float = Field(default=5.0, ge=0)
-    stamp_tax_rate: float = Field(default=0.0005, ge=0)
-    slippage_rate: float = Field(default=0.0, ge=0)
-    lot_size: int = Field(default=100, ge=1)
-    limit_pct: float = Field(default=0.10, ge=0, le=0.30)  # 涨跌停比例 (10%=0.10, 科创板20%=0.20)
-    benchmark_symbol: str = ""  # e.g. "510300.SH"
-    # V2.12: Optimizer
-    optimizer: str = Field(default="none", pattern="^(none|mean_variance|min_variance|risk_parity)$")
-    risk_aversion: float = Field(default=1.0, gt=0)
-    max_weight: float = Field(default=0.10, gt=0, le=1.0)
-    max_industry_weight: float = Field(default=0.30, gt=0, le=1.0)
-    cov_lookback: int = Field(default=60, ge=10, le=500)
-    # V2.12: Risk control
-    risk_control: bool = False
-    max_drawdown: float = Field(default=0.20, gt=0, le=0.50)
-    drawdown_reduce: float = Field(default=0.50, gt=0, le=1.0)
-    drawdown_recovery: float = Field(default=0.10, gt=0, le=0.50)
-    max_turnover: float = Field(default=0.50, gt=0, le=2.0)
-    # V2.12.1: Index enhancement
-    index_benchmark: str = Field(default="", pattern=r"^(|000300|000905|000852)$")
-    max_tracking_error: float = Field(default=0.05, gt=0, le=0.20)
+
+
+def _build_optimizer_risk_factories(req):
+    """Build optimizer_factory / risk_manager_factory from a PortfolioCommonConfig request.
+
+    V2.12.1 reviewer round 6 C1+I3: shared helper used by /run, /walk-forward,
+    and /search so all three endpoints construct optimizer and risk manager
+    the same way from the same config fields. Returns (opt_factory, rm_factory,
+    index_weights) — factories (not instances) because both carry state across
+    days and need fresh copies for each backtest/fold/combo.
+
+    /run uses the factory once (single backtest), /walk-forward per fold,
+    /search per combo.
+    """
+    index_weights: dict[str, float] = {}
+    if getattr(req, "index_benchmark", "") and req.index_benchmark:
+        try:
+            from ez.portfolio.index_data import IndexDataProvider
+            idx_provider = IndexDataProvider()
+            index_weights = idx_provider.get_weights(req.index_benchmark) or {}
+        except Exception:
+            index_weights = {}
+
+    opt_factory = None
+    if getattr(req, "optimizer", "none") != "none":
+        from ez.portfolio.optimizer import (
+            MeanVarianceOptimizer, MinVarianceOptimizer,
+            RiskParityOptimizer, OptimizationConstraints,
+        )
+        industry_map = {}
+        try:
+            from ez.api.deps import get_fundamental_store
+            fstore = get_fundamental_store()
+            if fstore:
+                industry_map = fstore.get_all_industries()
+        except Exception:
+            pass
+        constraints = OptimizationConstraints(
+            max_weight=req.max_weight,
+            max_industry_weight=req.max_industry_weight,
+            industry_map=industry_map,
+        )
+        opt_extra = {}
+        if index_weights:
+            opt_extra = {
+                "benchmark_weights": index_weights,
+                "max_tracking_error": req.max_tracking_error,
+            }
+
+        def _make_optimizer():
+            if req.optimizer == "mean_variance":
+                return MeanVarianceOptimizer(
+                    risk_aversion=req.risk_aversion, constraints=constraints,
+                    cov_lookback=req.cov_lookback, **opt_extra)
+            elif req.optimizer == "min_variance":
+                return MinVarianceOptimizer(
+                    constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra)
+            else:
+                return RiskParityOptimizer(
+                    constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra)
+        opt_factory = _make_optimizer
+
+    rm_factory = None
+    if getattr(req, "risk_control", False):
+        from ez.portfolio.risk_manager import RiskManager, RiskConfig
+
+        def _make_rm():
+            return RiskManager(RiskConfig(
+                max_drawdown_threshold=req.max_drawdown,
+                drawdown_reduce_ratio=req.drawdown_reduce,
+                drawdown_recovery_ratio=req.drawdown_recovery,
+                max_turnover=req.max_turnover,
+            ))
+        rm_factory = _make_rm
+
+    return opt_factory, rm_factory, index_weights
 
 
 def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
@@ -725,7 +821,12 @@ def run_portfolio(req: PortfolioRunRequest):
     }
 
 
-class PortfolioWFRequest(BaseModel):
+class PortfolioWFRequest(PortfolioCommonConfig):
+    """Walk-forward request. Inherits optimizer/risk/index/cost fields from
+    PortfolioCommonConfig so /run and /walk-forward ALWAYS resolve to the
+    same strategy for the same user payload (V2.12.1 reviewer round 6 C1).
+    """
+
     strategy_name: str = "TopNRotation"
     symbols: list[str]
     market: str = "cn_stock"
@@ -736,29 +837,6 @@ class PortfolioWFRequest(BaseModel):
     initial_cash: float = Field(default=1_000_000, ge=10_000)
     n_splits: int = Field(default=5, ge=2, le=20)
     train_ratio: float = Field(default=0.7, gt=0.0, lt=1.0)
-    buy_commission_rate: float = Field(default=0.0003, ge=0)
-    sell_commission_rate: float = Field(default=0.0003, ge=0)
-    min_commission: float = Field(default=5.0, ge=0)
-    stamp_tax_rate: float = Field(default=0.0005, ge=0)
-    slippage_rate: float = Field(default=0.0, ge=0)
-    lot_size: int = Field(default=100, ge=1)
-    limit_pct: float = Field(default=0.10, ge=0, le=0.30)
-    benchmark_symbol: str = ""
-    # V2.12.1 codex follow-up: walk-forward must use the same optimizer/risk/
-    # index-enhancement config as the main backtest, otherwise the two views
-    # show different strategies for the same user input.
-    optimizer: str = Field(default="none", pattern="^(none|mean_variance|min_variance|risk_parity)$")
-    risk_aversion: float = Field(default=1.0, ge=0)
-    max_weight: float = Field(default=1.0, gt=0, le=1.0)
-    max_industry_weight: float = Field(default=1.0, gt=0, le=1.0)
-    cov_lookback: int = Field(default=60, ge=20, le=252)
-    index_benchmark: str = ""
-    max_tracking_error: float = Field(default=0.05, gt=0, le=0.5)
-    risk_control: bool = False
-    max_drawdown: float = Field(default=0.15, gt=0, le=1.0)
-    drawdown_reduce: float = Field(default=0.5, gt=0, le=1.0)
-    drawdown_recovery: float = Field(default=0.10, gt=0, le=1.0)
-    max_turnover: float = Field(default=1.0, gt=0, le=10.0)
 
 
 @router.post("/walk-forward")
@@ -878,6 +956,16 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     # Significance on OOS equity curve
     sig = portfolio_significance(wf_result.oos_equity_curve, seed=42) if wf_result.oos_equity_curve else None
 
+    # V2.12.1 reviewer round 6 I1+I2: surface optimizer fallback and risk events
+    # aggregated across all folds so WF users see the same warnings /run users do.
+    all_warnings = wf_warnings + ([wf_bench_warn] if wf_bench_warn else [])
+    if wf_result.optimizer_fallback_events:
+        n = len(wf_result.optimizer_fallback_events)
+        reasons = {ev["reason"] for ev in wf_result.optimizer_fallback_events}
+        all_warnings.append(
+            f"优化器在 walk-forward 中共 {n} 次退化为等权 (原因: {', '.join(sorted(reasons))[:200]})"
+        )
+
     return {
         "n_splits": wf_result.n_splits,
         "is_sharpes": wf_result.is_sharpes,
@@ -893,13 +981,18 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             "p_value": sig.monte_carlo_p_value if sig else 1,
             "is_significant": sig.is_significant if sig else False,
         } if sig else None,
-        "warnings": (wf_warnings + ([wf_bench_warn] if wf_bench_warn else [])) or None,
+        "warnings": all_warnings or None,
+        "risk_events": wf_result.risk_events if wf_result.risk_events else None,
     }
 
 
 # ─── V2.11.1: Portfolio Parameter Search ───
 
-class PortfolioSearchRequest(BaseModel):
+class PortfolioSearchRequest(PortfolioCommonConfig):
+    """Parameter search request. Inherits optimizer/risk/index/cost fields
+    from PortfolioCommonConfig (V2.12.1 reviewer round 6 I3) so searched
+    candidates run under the SAME execution environment as /run."""
+
     strategy_name: str = "TopNRotation"
     symbols: list[str]
     market: str = "cn_stock"
@@ -909,14 +1002,6 @@ class PortfolioSearchRequest(BaseModel):
     param_grid: dict[str, list] = {}
     max_combinations: int = Field(default=50, ge=1, le=200)
     initial_cash: float = Field(default=1_000_000, ge=10_000)
-    buy_commission_rate: float = Field(default=0.0003, ge=0)
-    sell_commission_rate: float = Field(default=0.0003, ge=0)
-    min_commission: float = Field(default=5.0, ge=0)
-    stamp_tax_rate: float = Field(default=0.0005, ge=0)
-    slippage_rate: float = Field(default=0.0, ge=0)
-    lot_size: int = Field(default=100, ge=1)
-    limit_pct: float = Field(default=0.10, ge=0, le=0.30)
-    benchmark_symbol: str = ""
 
 
 def _generate_combinations(param_grid: dict[str, list], max_combos: int) -> tuple[list[dict], int]:
@@ -998,6 +1083,12 @@ def portfolio_search(req: PortfolioSearchRequest):
         slippage_rate=req.slippage_rate,
     )
 
+    # V2.12.1 reviewer round 6 I3: search must use the same optimizer/risk
+    # config as /run, otherwise searched candidates are ranked under a
+    # different execution environment than the final run. Build factories
+    # here (each combo gets a fresh instance inside the loop).
+    _opt_factory, _rm_factory, _index_weights = _build_optimizer_risk_factories(req)
+
     results = []
     for i, params in enumerate(combos):
         try:
@@ -1012,6 +1103,8 @@ def portfolio_search(req: PortfolioSearchRequest):
                 lot_size=req.lot_size, limit_pct=req.limit_pct,
                 benchmark_symbol=req.benchmark_symbol,
                 t_plus_1=(req.market == "cn_stock"),
+                optimizer=_opt_factory() if _opt_factory else None,
+                risk_manager=_rm_factory() if _rm_factory else None,
             )
             m = result.metrics
             results.append({
