@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 1813 (1823 collected, 10 skip) | C++ acceleration: up to 7.9x
+Version: 0.2.12.2 | Tests: 1888 (1898 collected, 10 skip) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -125,7 +125,16 @@ No version tag without review pass. No push without critical issues resolved.
   - **round 7** (3 bug, `1e7944b` + `5744a6c`): compute_significance 常量信号 NaN → 1.0 (前端 isFinite guard), PortfolioRunContent 交易记录 "100+" 过时提示删除, latest_weights 期末清仓标签语义对齐 round 5 daily drift
   - **round 8** (3 bug, `fed9a2f` + `2d58b76`): 回测/WF/搜索异步响应 `runTokenRef` 版本保护 (输入变化时失效在途请求), handleLoadFullWeights `currentRunIdRef` run_id 匹配检查, CodeEditor.deleteFile 改用 `committedFilename` 稳定身份; reviewer follow-up: mode onChange 补 token bump + sidebar 高亮 normalize + 4 个未覆盖 handler 记入遗留项
   - **V2.13 基础设施 shape-level 契约测试** (+8 tests, `tests/test_portfolio/test_v213_readiness.py`): 用 **纯 Python mock** (`_MLShapedFactor` 内部用累积收益模拟"模型") 验证 5 个基础设施契约 — 自重训 stateful CrossSectionalFactor 走通 engine, 严格 anti-lookahead (slice 用 `< target_date`), walk-forward factory 每折 fresh instance, 纯 Python 有状态策略 deepcopy 独立, dual-dict registry 解析动态定义的 ML-shaped factor. **这些不是** sklearn/lightgbm/xgboost 真实模型的 pickle/deepcopy 验证 (那是 V2.13 实施任务). 测试本身是 regression canaries, 防止后续 refactor 破坏 V2.13 依赖的基础设施.
-- **Next: V2.13** — ML Alpha + 多策略组合 (**infrastructure foundation READY**, 见 `docs/audit/v2.13-readiness-audit.md`; 注意: V2.13 实际代码 `ez/portfolio/ml_alpha.py` / `ml_diagnostics.py` / `ensemble.py` **尚未实现**, F8/F9/D5/F7 在 roadmap 里仍是 unchecked. audit 只证明了基础设施 (walk-forward + ABC + registry + sandbox) 可以承载 V2.13, 用 pure-Python mock 做 shape-level 契约验证. 真实 sklearn/lightgbm/xgboost 模型的 pickle/deepcopy 兼容性 + sandbox `pickle`/`multiprocessing`/`threading` 禁用下的 ML 设计 (in-memory cache vs disk / n_jobs=1 / 等), 都是 V2.13 实施时要解决的 **open questions**, 不是 pre-conditions)
+- **V2.13 Phase 1 — MLAlpha Core** (`ez/portfolio/ml_alpha.py`, plan `docs/superpowers/plans/2026-04-06-v213-ml-alpha.md`): 走完 F8 第 1 阶段 (14 tasks + code review round). 实现 walk-forward ML 因子框架作为 `CrossSectionalFactor` 子类.
+  - **安全分层**: V1 严格 7 类 sklearn whitelist (Ridge/Lasso/LinearRegression/ElasticNet/DecisionTreeRegressor/RandomForestRegressor/GradientBoostingRegressor), `n_jobs=1` 在 `MLAlpha.__init__` 运行时 via `getattr(instance, 'n_jobs', None)` 检查, 用 `type(instance)` 身份比对而非 `isinstance` (阻止用户子类通过继承 monkey-patch `fit()` 绕过沙箱). `_assert_supported_estimator` 也在每次 `_retrain()` 重新验证 `model_factory()` 返回值, 防止工厂在不同调用时返回不同的 estimator 类.
+  - **反 lookahead**: 两层防御 — (1) `slice_universe_data` 上游严格 `<` 切片 (V2.12.2 既有); (2) `_build_training_panel()` **positional purge (trading days)** 从尾部去除 `purge_days + embargo_days` 行. ⚠️ purge/embargo 是交易日单位不是日历日 — 原始实现用 `timedelta(days=N)` 日历日会让 label 穿过周末指向预测窗口, reviewer 发现这个 C1 bug 后改为 `iloc[:-purge_bars]`, 与 `shift(-k)` 的行单位匹配.
+  - **状态隔离**: portfolio walk-forward 通过 `strategy_factory()` 每折返回新实例获得隔离 (NOT `copy.deepcopy`). 单票 WalkForwardValidator 走 `copy.deepcopy` 路径 — MLAlpha 作为 generic Python value 也 deepcopy-safe (Ridge/RandomForest/GradientBoosting 三个 estimator 的 round-trip 已验证). `portfolio_walk_forward` 3 splits × (IS+OOS) = 6 factory calls 的集成测试断言每个实例 id 唯一 + 初始状态清零.
+  - **In-memory 持久化**: 模型存在 `self._current_model`, 无磁盘 I/O (符合 sandbox 禁 `pickle`). 同一实例内 `retrain_freq` 窗口内的 compute 调用走 cache, 不重训.
+  - **容错**: `feature_fn`/`target_fn` 抛异常 → skip symbol; 返回 non-DataFrame/non-Series 类型 → 一次性 warning log (防 log spam) + skip; 价格为 0 造成的 `inf` 特征 → `np.isfinite` 在 fit 前过滤; `model.fit()` 抛异常 → warning log 并保留上一次的模型, 不 crash backtest.
+  - **用户 API**: `ML_ALPHA_TEMPLATE` 字符串 (含 `{class_name}`/`{name}`/`{description}` 占位符), `UnsupportedEstimatorError` 公开异常, 三个符号都从 `ez.portfolio` 顶层 export. MLAlpha 基类通过 pop dual-dict registry 防止自动注册到 factor dropdown (对齐 `alpha_combiner.py` 模式).
+  - **测试覆盖**: 75 个新测试 (`tests/test_portfolio/test_ml_alpha.py` 61 + `test_ml_alpha_sklearn.py` 14), 覆盖参数验证 / whitelist+n_jobs (14 cases) / lazy retrain / purge+embargo / anti-lookahead (含 outlier regression) / determinism (Ridge+RF fixed seed) / deepcopy (Ridge/RF/GBR) / end-to-end portfolio_walk_forward factory-freshness / cache / feature_fn 错误处理 / inf/fit exception / 5 个 contract edge cases / template render+compile+exec / package exports.
+  - **依赖**: `scikit-learn>=1.5` (新增 `[ml]` optional group, 与 numpy>=2.0 ABI 兼容). 1813 → 1888 tests (+75).
+- **Next: V2.13 Phase 2** — MLDiagnostics (F9): feature importance stability / IS/OOS IC decay / turnover. Phase 3 (StrategyEnsemble D5), Phase 4 (Sandbox ml_alpha kind F7), Phase 5 (API endpoints), Phase 6 (Frontend) 待实施
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)

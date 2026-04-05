@@ -42,6 +42,7 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 | risk_manager.py | RiskConfig + RiskManager: drawdown state machine + turnover limiter (V2.12) |
 | attribution.py | BrinsonAttribution + compute_attribution(): Brinson decomposition (V2.12) |
 | loader.py | Startup scanner for portfolio_strategies/ and cross_factors/ |
+| ml_alpha.py | MLAlpha(CrossSectionalFactor): walk-forward ML factor framework + V1 whitelist + n_jobs runtime enforcement + positional purge/embargo (trading days) + ML_ALPHA_TEMPLATE + UnsupportedEstimatorError (V2.13 Phase 1) |
 
 ## Key Design Decisions
 - Anti-lookahead: engine slices data to [date-lookback, date-1] before calling strategy
@@ -89,3 +90,12 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
   - **CrossSectionalFactor dual-dict registry**: 补齐 `_registry_by_key` + `_registry` + `resolve_class()` + 冲突 warning (对齐 PortfolioStrategy V2.12.1). `AlphaCombiner` pop 同步清理 `_registry_by_key` (reviewer sibling miss fix).
   - **portfolio_store 上下文完整**: 新增 `config` / `warnings` / `dates` 三列 + ALTER 迁移, `/run` 打包 market/optimizer/risk/index/cost 到 `config`, 历史对比图表用真实交易日 time axis 对齐 (legacy 空 dates 行降级 index 轴 + 警告 banner).
   - **alpha_combiner 训练 lookback 正确传递**: `_compute_alpha_weights` 的 `dynamic_lb` 之前只传 fetch, 现在也传 `evaluate_cross_sectional_factor()`, 避免长 warmup 因子训练窗被默认 252 截断.
+- **V2.13 Phase 1 — MLAlpha Core** (`ml_alpha.py`, plan `docs/superpowers/plans/2026-04-06-v213-ml-alpha.md`): 走完 F8 第 1 阶段 (14 tasks + code review round). 见根 CLAUDE.md V2.13 条目. 关键点摘要:
+  - **MLAlpha(CrossSectionalFactor)** + lazy retrain + purge/embargo + anti-lookahead 两层防御
+  - **V1 safety 层**: 7 类 sklearn whitelist (Ridge/Lasso/LinearRegression/ElasticNet/DecisionTreeRegressor/RandomForestRegressor/GradientBoostingRegressor), n_jobs=1 运行时强制, type 身份比对阻止 monkey-patch 子类绕过. `_assert_supported_estimator` 在 `__init__` 和每次 `_retrain()` 运行.
+  - **⚠️ Purge/embargo 是 trading days (positional `iloc[:-N]`), 不是 calendar days** — 原始用 `timedelta(days=N)` 会让 label 穿过周末指向预测窗口, reviewer 发现这个 C1 bug 后改为 positional trim 匹配 `shift(-k)` 的行单位.
+  - **portfolio walk-forward 隔离走 `strategy_factory()` 每折 fresh instance** (非 `copy.deepcopy`). 单票 WalkForwardValidator 走 deepcopy — MLAlpha 作为 Python value 也 deepcopy-safe. `test_walk_forward_fresh_instances_have_no_cross_fold_state_bleed` 3 splits × (IS+OOS) 断言 6 个独立 id + 初始状态清零.
+  - **In-memory 模型**, 无磁盘 I/O (sandbox 禁 pickle). `retrain_freq` 窗口内 compute 调用走 cache.
+  - **容错**: feature_fn/target_fn 异常 skip, non-DataFrame/Series 返回一次性 warning + skip, inf 特征 `np.isfinite` 过滤, `model.fit()` 异常保留上一次模型不 crash.
+  - **75 tests** (`test_ml_alpha.py` 61 + `test_ml_alpha_sklearn.py` 14) 覆盖 whitelist enforcement / anti-lookahead outlier regression / deepcopy round-trip / end-to-end factory-freshness / cache / error handling / edge cases / template render+exec.
+  - **Dependency**: `scikit-learn>=1.5` 作为 `[ml]` optional group (numpy>=2.0 ABI 兼容).
