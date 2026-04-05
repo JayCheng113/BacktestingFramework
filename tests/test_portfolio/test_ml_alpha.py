@@ -507,3 +507,131 @@ class TestMLAlphaPredict:
         assert len(scores) == 5
         # Not all predictions are identical
         assert scores.nunique() > 1
+
+
+class TestMLAlphaAntiLookahead:
+    """The single most important MLAlpha test class. Any failure here
+    means the framework is lying about walk-forward — V2.13 cannot ship.
+    """
+
+    def test_engine_slice_enforces_strict_less_than(self):
+        """Upstream invariant: slice_universe_data must exclude the
+        current date. MLAlpha relies on this for the first anti-lookahead
+        layer (the second layer is purge+embargo inside MLAlpha itself)."""
+        from ez.portfolio.universe import slice_universe_data
+
+        dates = pd.date_range("2022-01-03", periods=10, freq="B")
+        df = pd.DataFrame({
+            "open": range(10), "high": range(10), "low": range(10),
+            "close": range(10), "adj_close": range(10), "volume": [1.0] * 10,
+        }, index=dates)
+        universe_data = {"S00": df}
+
+        sliced = slice_universe_data(universe_data, dates[5].date(), lookback_days=20)
+        assert "S00" in sliced
+        sliced_df = sliced["S00"]
+        max_date = sliced_df.index.max()
+        assert max_date.date() < dates[5].date(), (
+            f"slice_universe_data must use strict `<`, but returned data "
+            f"with max date {max_date.date()} >= target {dates[5].date()}"
+        )
+
+    def test_compute_never_uses_data_at_or_after_current_date(self):
+        """The single most important test. Construct a series where a
+        HUGE outlier exists at a future date. Call compute() at a date
+        BEFORE the outlier. The model must not see the outlier. A model
+        that leaked would produce predictions dominated by the outlier's
+        massive feature/target values.
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        n_days = 400
+        dates = pd.date_range("2022-01-03", periods=n_days, freq="B")
+        # Flat series with tiny noise
+        rng = np.random.default_rng(0)
+        prices_base = 100 + rng.normal(0, 0.01, n_days)
+        # Inject HUGE outlier at index 250 — price jumps to 10000
+        prices_with_outlier = prices_base.copy()
+        prices_with_outlier[250] = 10_000
+
+        data = {
+            "S00": pd.DataFrame({
+                "open": prices_with_outlier, "high": prices_with_outlier,
+                "low": prices_with_outlier, "close": prices_with_outlier,
+                "adj_close": prices_with_outlier,
+                "volume": np.ones(n_days) * 1e6,
+            }, index=dates),
+        }
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=100,
+            retrain_freq=20,
+            purge_days=5,
+        )
+
+        # Compute at day 240 — before the outlier at 250
+        # purge_days=5 means training only sees features with date <
+        # dates[240].date() - 5 calendar days. With B-freq dates (5
+        # business days = 7 calendar days), the cutoff at index 240 is
+        # approximately around index 235. The outlier at index 250 is
+        # far beyond this cutoff, so it must be excluded.
+        prediction_date = dates[240].to_pydatetime()
+        scores = alpha.compute(data, prediction_date)
+
+        # The model should not have seen the outlier. Ridge trained on
+        # near-constant data with tiny daily returns would predict
+        # forward 5-day returns near 0 (magnitude ~0.01 * 5 ~ 0.05).
+        # If the model leaked the outlier, its learned coefficient on
+        # ret1 would be huge, and the current feature row (near the
+        # tail of the anti-lookahead slice) would multiply out to a
+        # massive prediction.
+        assert "S00" in scores.index, (
+            "Model did not produce a prediction for S00 — possibly "
+            "because _build_training_panel skipped the symbol."
+        )
+        assert abs(scores["S00"]) < 1.0, (
+            f"MLAlpha prediction {scores['S00']} is too large — "
+            f"the model likely leaked the outlier at dates[250]={dates[250]} "
+            f"into the training panel. Prediction date was {prediction_date.date()}, "
+            f"purge cutoff should be approximately {(prediction_date.date() - timedelta(days=5))}."
+        )
+
+    def test_build_training_panel_never_contains_prediction_date(self):
+        """Stricter form of the outlier test: verify directly that
+        _build_training_panel returns X with all date levels < cutoff,
+        for multiple prediction dates and multiple purge values."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=300)
+
+        for purge in [0, 3, 5, 10]:
+            for pred_idx in [100, 150, 200, 250]:
+                alpha = MLAlpha(
+                    name="t",
+                    model_factory=lambda: Ridge(alpha=1.0),
+                    feature_fn=lambda df: pd.DataFrame({
+                        "ret1": df["adj_close"].pct_change(1),
+                    }).dropna(),
+                    target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                    train_window=60,
+                    retrain_freq=20,
+                    purge_days=purge,
+                )
+                pred_date = dates[pred_idx].date()
+                X, y = alpha._build_training_panel(data, pred_date)
+                if X is None:
+                    continue
+                max_panel_date = max(X.index.get_level_values("date")).date()
+                cutoff = pred_date - timedelta(days=purge)
+                assert max_panel_date < cutoff, (
+                    f"purge={purge}, pred_idx={pred_idx}: "
+                    f"panel max={max_panel_date}, cutoff={cutoff}"
+                )
