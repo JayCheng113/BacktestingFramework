@@ -175,13 +175,15 @@ def test_engine_reinforced_position_cost_basis():
     #
     # Trace (signals shift by 1, so engine sees sig at bar i+1):
     #   bar 2 (price 12): buy all 100000 @ 12 → shares = 25000/3 ≈ 8333.33
-    #     cycle_cash_in = 100000, cycle_peak_invested = 100000
+    #     cycle_net_invested = 100000, cycle_peak_invested = 100000
+    #     peak_shares = 8333.33 (never decreases after this)
     #   bar 3 (price 13): sig=0.5, sell half → cash += 54166.67
     #     shares = 4166.67, cycle_net_invested = 45833.33 (peak unchanged)
     #     partial_pnl = (13-12) * 4166.67 = 4166.67
     #   bar 4 (price 14): sig=1, buy more → fill 3869.05 shares
     #     shares = 8035.72, entry_price_VWAP = 104166.67/8035.72 ≈ 12.963
     #     cycle_net_invested = 45833.33 + 54166.67 = 100000 (back to peak)
+    #     peak_shares stays 8333.33 (max of 8333.33 and 8035.72)
     #   bar 5 (price 15): sig=0, close → sell all at 15
     #     final_pnl = (15 - 12.963) * 8035.72 ≈ 16369.05
     #     total_pnl = 4166.67 + 16369.05 - 0 ≈ 20535.71
@@ -189,9 +191,9 @@ def test_engine_reinforced_position_cost_basis():
     #     pnl_pct = 20535.71 / 100000 ≈ 0.2054
     #
     # Old formula: cost_basis = entry_price × peak_shares + entry_comm
-    #              = 12.963 × 8035.72 + 0 ≈ 104166.67
-    #              pnl_pct_old ≈ 20535.71 / 104166.67 ≈ 0.1971
-    # The ~0.8pp gap between 0.2054 and 0.1971 is the regression signal.
+    #              = 12.963 × 8333.33 + 0 ≈ 108024.71 (peak_shares from bar 2 buy)
+    #              pnl_pct_old ≈ 20535.71 / 108024.71 ≈ 0.1901
+    # The ~1.5pp gap between 0.2054 and 0.1901 is the regression signal.
     assert len(result.trades) >= 1, "Expected at least one closing trade"
     trade = result.trades[0]
     assert trade.pnl_pct is not None
