@@ -88,3 +88,92 @@ def test_walk_forward_success(mock_chain):
 def test_run_backtest_missing_fields():
     resp = client.post("/api/backtest/run", json={"symbol": "TEST"})
     assert resp.status_code == 422
+
+
+# --- Regression tests for codex finding: strategy name collision ---
+
+def test_get_strategy_by_full_key_is_preferred():
+    """Regression test for codex finding: _get_strategy should prefer exact key
+    (module.class) match over class-name match.
+
+    Prior version scanned the registry and returned the FIRST class matching
+    either cls.__name__ or key == name, giving non-deterministic results when
+    two files registered classes with the same __name__.
+    """
+    from ez.api.routes.backtest import _get_strategy
+    from ez.strategy.base import Strategy
+
+    # Find any existing registered strategy to test with
+    assert len(Strategy._registry) > 0
+    full_key = next(iter(Strategy._registry.keys()))
+    cls = Strategy._registry[full_key]
+    # Resolve by exact key — must work
+    inst = _get_strategy(full_key, {})
+    assert isinstance(inst, cls)
+
+
+def test_get_strategy_by_name_works_when_unique():
+    """Class-name resolution is backward-compatible when the name is unique."""
+    from ez.api.routes.backtest import _get_strategy
+    from ez.strategy.base import Strategy
+
+    assert len(Strategy._registry) > 0
+    # Find a strategy whose __name__ is unique in the registry
+    name_counts: dict[str, int] = {}
+    for cls in Strategy._registry.values():
+        name_counts[cls.__name__] = name_counts.get(cls.__name__, 0) + 1
+    unique_name = next((n for n, c in name_counts.items() if c == 1), None)
+    if unique_name is None:
+        return  # all names collide — nothing to test
+    inst = _get_strategy(unique_name, {})
+    assert type(inst).__name__ == unique_name
+
+
+def test_get_strategy_ambiguous_name_raises_409():
+    """Regression test: when two files register Strategy subclasses with the
+    same __name__, _get_strategy must raise 409 instead of silently picking one.
+    """
+    from fastapi import HTTPException
+    from ez.api.routes.backtest import _get_strategy
+    from ez.strategy.base import Strategy
+
+    # Create two synthetic strategy classes with the same __name__ under
+    # different fake modules, register them temporarily
+    class _Fake1(Strategy):
+        def required_factors(self):
+            return []
+        def generate_signals(self, data):
+            import pandas as pd
+            return pd.Series([0.0] * len(data), index=data.index)
+    class _Fake2(Strategy):
+        def required_factors(self):
+            return []
+        def generate_signals(self, data):
+            import pandas as pd
+            return pd.Series([0.0] * len(data), index=data.index)
+
+    # Force both to have the same __name__ but distinct keys
+    _Fake1.__name__ = "AmbiguousTestStrat"
+    _Fake2.__name__ = "AmbiguousTestStrat"
+    key1 = "tests.fake_mod_1.AmbiguousTestStrat"
+    key2 = "tests.fake_mod_2.AmbiguousTestStrat"
+    Strategy._registry[key1] = _Fake1
+    Strategy._registry[key2] = _Fake2
+
+    try:
+        # Submitting just the __name__ is ambiguous → 409
+        try:
+            _get_strategy("AmbiguousTestStrat", {})
+            raise AssertionError("Expected 409 HTTPException for ambiguous name")
+        except HTTPException as e:
+            assert e.status_code == 409
+            assert "ambiguous" in e.detail.lower()
+            assert key1 in e.detail and key2 in e.detail
+        # But submitting the full key resolves unambiguously
+        inst1 = _get_strategy(key1, {})
+        assert inst1.__class__ is _Fake1
+        inst2 = _get_strategy(key2, {})
+        assert inst2.__class__ is _Fake2
+    finally:
+        Strategy._registry.pop(key1, None)
+        Strategy._registry.pop(key2, None)

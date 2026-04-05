@@ -6,7 +6,7 @@ Candidates that fail pre-filter are skipped from the expensive full pipeline.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pandas as pd
 
@@ -51,21 +51,16 @@ def prefilter(
     results = []
 
     for spec in specs:
-        quick_spec = RunSpec(
-            strategy_name=spec.strategy_name,
-            strategy_params=spec.strategy_params,
-            symbol=spec.symbol,
-            market=spec.market,
-            period=spec.period,
-            start_date=spec.start_date,
-            end_date=spec.end_date,
-            initial_capital=spec.initial_capital,
-            commission_rate=spec.commission_rate,
-            min_commission=spec.min_commission,
-            slippage_rate=spec.slippage_rate,
-            run_backtest=True,
-            run_wfo=False,
-        )
+        # V2.12.1 post-review fix (codex): previously this rebuilt RunSpec with a
+        # hand-picked subset of fields, silently DROPPING use_market_rules /
+        # t_plus_1 / price_limit_pct / lot_size. A candidate that passed prefilter
+        # with no A-share rules could then fail the full experiment once lot-size
+        # rounding, ±10% limits, and T+1 were enforced — making the gate verdicts
+        # inconsistent with the actual trading environment.
+        #
+        # Use dataclasses.replace() so every current and future RunSpec field
+        # is preserved, and only the run-mode flags are overridden.
+        quick_spec = replace(spec, run_backtest=True, run_wfo=False)
         run_result = runner.run(quick_spec, data)
 
         if run_result.status != "completed" or run_result.backtest is None:

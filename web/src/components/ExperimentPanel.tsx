@@ -34,7 +34,8 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
       const userStrategies = r.data.filter((s: StrategyInfo) => !s.key?.includes('research_'))
       setStrategies(userStrategies)
       if (userStrategies.length > 0) {
-        setStrategyName(userStrategies[0].name)
+        // V2.12.1 post-review fix (codex): select by full key to avoid name-collision picks
+        setStrategyName(userStrategies[0].key)
         const defaults: Record<string, number> = {}
         for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as any).default
         setParams(defaults)
@@ -55,9 +56,9 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
     }).catch(() => {}).finally(() => setLoading(false))
   }
 
-  const handleStrategyChange = (name: string) => {
-    setStrategyName(name)
-    const s = strategies.find(s => s.name === name)
+  const handleStrategyChange = (key: string) => {
+    setStrategyName(key)
+    const s = strategies.find(s => s.key === key)
     if (s) {
       const defaults: Record<string, number> = {}
       for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as any).default
@@ -157,7 +158,8 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>策略</label>
             <select value={strategyName} onChange={e => handleStrategyChange(e.target.value)}
               className="w-full px-2 py-1.5 rounded text-sm" style={inputStyle}>
-              {strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+              {/* Display class name, submit full key — avoids name collision picks */}
+              {strategies.map(s => <option key={s.key} value={s.key}>{s.name}</option>)}
             </select>
           </div>
           <div>

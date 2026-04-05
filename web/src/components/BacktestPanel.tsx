@@ -30,7 +30,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
       const userStrategies = r.data.filter((s: StrategyInfo) => !s.key?.includes('research_'))
       setStrategies(userStrategies)
       if (userStrategies.length > 0) {
-        setSelected(userStrategies[0].name)
+        // V2.12.1 post-review fix (codex): select by full key (module.class),
+        // not class name. Name collisions between builtin and user strategies,
+        // or after promote_research_strategy renames, would otherwise pick a
+        // non-deterministic class.
+        setSelected(userStrategies[0].key)
         const defaults: Record<string, number | string | boolean> = {}
         for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as any).default
         setParams(defaults)
@@ -48,6 +52,10 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     setLoading(true)
     setResult(null)
     setWfResult(null)
+    // Clear stale trade markers on EVERY run (codex fix): previously the
+    // walk-forward branch never called onTradesUpdate, so the KlineChart
+    // kept drawing the last single-backtest trades — misleading the user.
+    onTradesUpdate?.([])
     try {
       const costParams = {
         commission_rate: costSettings.buy_commission_rate,
@@ -78,9 +86,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     finally { setLoading(false) }
   }
 
-  const onStrategyChange = (name: string) => {
-    setSelected(name)
-    const s = strategies.find(s => s.name === name)
+  const onStrategyChange = (key: string) => {
+    setSelected(key)
+    const s = strategies.find(s => s.key === key)
     if (s) {
       const defaults: Record<string, number | string | boolean> = {}
       for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as any).default
@@ -179,17 +187,18 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>策略</label>
           <select value={selected} onChange={e => onStrategyChange(e.target.value)}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            {strategies.map(s => <option key={s.key} value={s.name}>{s.name}</option>)}
+            {/* Display class name, submit full key — avoids name collision picks */}
+            {strategies.map(s => <option key={s.key} value={s.key}>{s.name}</option>)}
           </select>
-          {selected && strategies.find(s => s.name === selected)?.description && (
+          {selected && strategies.find(s => s.key === selected)?.description && (
             <div className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-              {strategies.find(s => s.name === selected)?.description}
+              {strategies.find(s => s.key === selected)?.description}
             </div>
           )}
         </div>
         {/* Strategy params */}
         {Object.entries(params).map(([k, v]) => {
-          const schema = strategies.find(s => s.name === selected)?.parameters?.[k]
+          const schema = strategies.find(s => s.key === selected)?.parameters?.[k]
           const ptype = schema?.type || (typeof v)
           if (ptype === 'bool' || typeof v === 'boolean') {
             return (
