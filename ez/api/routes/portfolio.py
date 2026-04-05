@@ -865,7 +865,12 @@ def run_portfolio(req: PortfolioRunRequest):
             {"date": result.dates[i].isoformat() if i < len(result.dates) else "",
              "weights": result.weights_history[i]}
             for i in range(max(0, len(result.weights_history) - 20), len(result.weights_history))
-            if result.weights_history[i]  # skip empty weight entries (non-rebalance days)
+            # Skip empty weight entries in the display (pre-first-rebalance
+            # warmup days and the post-liquidation {} marker). Live display
+            # doesn't need these — `terminal_liquidated` flag above signals
+            # terminal-cash state. History reload via /holdings returns the
+            # full dense sequence including these entries.
+            if result.weights_history[i]
         ] if result.weights_history else [],
         "warnings": fund_warnings if fund_warnings else None,
         "risk_events": result.risk_events if result.risk_events else None,

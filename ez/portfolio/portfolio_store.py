@@ -56,12 +56,15 @@ class PortfolioStore:
         # index_benchmark/tracking_error plus the warnings the user saw at
         # run time. `dates` added so the compare-chart can align equity
         # curves by real trading days. `weights_history` stores the actual
-        # post-execution daily holdings (sparse: only non-empty days),
-        # distinct from `rebalance_weights` which stores the target weights
-        # at rebalance dates — prior version only persisted the target, so
-        # history page + pie chart + attribution all showed the rebalance
-        # intent instead of the realized holdings after lot rounding and
-        # risk manager turnover caps.
+        # post-execution daily holdings, 1:1 aligned with `dates`
+        # (including pre-first-rebalance empty entries and the terminal
+        # liquidation empty marker — round 4 stopped filtering these so
+        # history reload can detect terminal-cash state via the flag in
+        # /holdings). Distinct from `rebalance_weights` which stores the
+        # target weights at rebalance dates — prior version only
+        # persisted the target, so history page + pie chart + attribution
+        # all showed the rebalance intent instead of the realized
+        # holdings after lot rounding and risk manager turnover caps.
         for col, typ in [
             ("rebalance_weights", "TEXT"),
             ("trades", "TEXT"),

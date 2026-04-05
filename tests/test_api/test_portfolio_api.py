@@ -113,6 +113,62 @@ class TestRunEndToEnd:
         assert runs[0]["run_id"] == data["run_id"]
 
 
+class TestGetRunHoldings:
+    """V2.12.2 codex round 4: /runs/{run_id}/holdings endpoint."""
+
+    def test_holdings_not_found(self):
+        resp = client.get("/api/portfolio/runs/nonexistent/holdings")
+        assert resp.status_code == 404
+
+    def test_holdings_returns_weights_history(self, _patch_store):
+        _patch_store.save_run({
+            "run_id": "h1",
+            "strategy_name": "X",
+            "weights_history": [
+                {"date": "2024-01-02", "weights": {"A": 0.5, "B": 0.5}},
+                {"date": "2024-01-03", "weights": {"A": 0.6, "B": 0.4}},
+            ],
+        })
+        resp = client.get("/api/portfolio/runs/h1/holdings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["weights_history"]) == 2
+        assert data["latest_weights"] == {"A": 0.6, "B": 0.4}
+        assert data["terminal_liquidated"] is False
+
+    def test_holdings_terminal_liquidated_flag(self, _patch_store):
+        """Run that ended with final liquidation should flag terminal_liquidated=True
+        and still return the last non-empty rebalance target as latest_weights."""
+        _patch_store.save_run({
+            "run_id": "h_liq",
+            "strategy_name": "Y",
+            "weights_history": [
+                {"date": "2024-01-02", "weights": {"A": 1.0}},
+                {"date": "2024-01-15", "weights": {"A": 0.7, "B": 0.3}},
+                # Engine appends empty {} after post-period liquidation
+                {"date": "2024-01-16", "weights": {}},
+            ],
+        })
+        resp = client.get("/api/portfolio/runs/h_liq/holdings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["terminal_liquidated"] is True
+        # latest_weights is the last NON-EMPTY entry (useful for showing
+        # what was held right before the liquidation) — the terminal_
+        # liquidated flag tells the UI to label it appropriately.
+        assert data["latest_weights"] == {"A": 0.7, "B": 0.3}
+
+    def test_holdings_legacy_run_empty_graceful(self, _patch_store):
+        """Pre-V2.12.2 run without weights_history column returns empty gracefully."""
+        _patch_store.save_run({"run_id": "legacy", "strategy_name": "Z"})
+        resp = client.get("/api/portfolio/runs/legacy/holdings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["weights_history"] == []
+        assert data["latest_weights"] == {}
+        assert data["terminal_liquidated"] is False
+
+
 class TestRunValidation:
     def test_invalid_freq(self):
         resp = client.post("/api/portfolio/run", json={
