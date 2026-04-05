@@ -383,6 +383,136 @@ class TestMLAlphaEndToEndBacktest:
             f"NaN OOS Sharpes: {wf_result.oos_sharpes}"
         )
 
+    def test_random_forest_run_portfolio_backtest(self):
+        """V2.13 review round 2 MH1: RF must work through run_portfolio_backtest,
+        not just deepcopy/determinism unit tests. This closes the gap
+        flagged by codex — the whitelist claim "end-to-end verified" is
+        only true for Ridge until RF/GBR walk this path too.
+
+        Keep n_estimators small (5) and max_depth shallow (3) to control
+        runtime; n_jobs=1 enforced by the whitelist; random_state=0 for
+        deterministic CI.
+        """
+        from sklearn.ensemble import RandomForestRegressor
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=400, n_stocks=6)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(6)])
+
+        alpha = MLAlpha(
+            name="rf_e2e",
+            model_factory=lambda: RandomForestRegressor(
+                n_estimators=5, max_depth=3, n_jobs=1, random_state=0,
+            ),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        strategy = TopNRotation(factor=alpha, top_n=3)
+
+        result = run_portfolio_backtest(
+            strategy=strategy, universe=universe, universe_data=data,
+            calendar=cal, start=dates[100].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000,
+        )
+
+        assert result is not None
+        assert len(result.equity_curve) > 0
+        assert result.equity_curve[-1] > 0  # not bankrupt
+        assert alpha._retrain_count >= 3, (
+            f"Expected ≥3 retrains for RF; got {alpha._retrain_count}"
+        )
+
+    def test_random_forest_portfolio_walk_forward(self):
+        """V2.13 review round 2 MH1: RF must work through portfolio_walk_forward's
+        factory-freshness path, parallel to Ridge's test_ridge_momentum_
+        portfolio_walk_forward_factory_fresh_instances. This is what closes
+        the "end-to-end whitelist" claim for RF.
+        """
+        from sklearn.ensemble import RandomForestRegressor
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=500, n_stocks=6)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(6)])
+
+        created_alphas: list[MLAlpha] = []
+
+        def strategy_factory():
+            alpha = MLAlpha(
+                name="rf_wf",
+                model_factory=lambda: RandomForestRegressor(
+                    n_estimators=5, max_depth=3, n_jobs=1, random_state=0,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+            created_alphas.append(alpha)
+            return TopNRotation(factor=alpha, top_n=3)
+
+        wf_result = portfolio_walk_forward(
+            strategy_factory=strategy_factory,
+            universe=universe, universe_data=data, calendar=cal,
+            start=dates[60].date(), end=dates[-1].date(),
+            n_splits=3, train_ratio=0.7, freq="weekly",
+        )
+
+        # 3 splits × (IS + OOS) = 6 factory calls
+        assert len(created_alphas) == 6
+        # Distinct instances
+        assert len(set(id(a) for a in created_alphas)) == 6
+        # At least half the folds trained a model
+        trained = sum(1 for a in created_alphas if a._retrain_count >= 1)
+        assert trained >= 3
+        # Walk-forward produced finite results
+        assert wf_result.n_splits == 3
+        assert all(np.isfinite(s) for s in wf_result.oos_sharpes)
+
+    def test_gradient_boosting_run_portfolio_backtest(self):
+        """V2.13 review round 2 MH1: GBR end-to-end through
+        run_portfolio_backtest. Parallel to the RF test — closes the
+        whitelist "end-to-end verified" claim for GBR.
+        """
+        from sklearn.ensemble import GradientBoostingRegressor
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        data, dates = _make_data(n_days=400, n_stocks=6)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(6)])
+
+        alpha = MLAlpha(
+            name="gb_e2e",
+            model_factory=lambda: GradientBoostingRegressor(
+                n_estimators=5, max_depth=3, random_state=0,
+            ),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        strategy = TopNRotation(factor=alpha, top_n=3)
+
+        result = run_portfolio_backtest(
+            strategy=strategy, universe=universe, universe_data=data,
+            calendar=cal, start=dates[100].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000,
+        )
+
+        assert result is not None
+        assert len(result.equity_curve) > 0
+        assert result.equity_curve[-1] > 0
+        assert alpha._retrain_count >= 3
+
     def test_walk_forward_fresh_instances_have_no_cross_fold_state_bleed(self):
         """Stronger form: verify that each fold's MLAlpha instance starts
         with _current_model=None (no state bleed from prior folds). This

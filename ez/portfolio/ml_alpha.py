@@ -202,6 +202,26 @@ class MLAlpha(CrossSectionalFactor):
         purge_days: int,
         embargo_days: int = 0,
     ):
+        # Callable-ness validation. Do this FIRST (before the sklearn
+        # probe below) so that a None / str / int model_factory raises a
+        # TypeError that explicitly names the parameter, not a generic
+        # "'NoneType' object is not callable" from inside the probe.
+        if not callable(model_factory):
+            raise TypeError(
+                f"model_factory must be callable (returning a fresh unfit "
+                f"sklearn estimator), got {type(model_factory).__name__}"
+            )
+        if not callable(feature_fn):
+            raise TypeError(
+                f"feature_fn must be callable (DataFrame → DataFrame), "
+                f"got {type(feature_fn).__name__}"
+            )
+        if not callable(target_fn):
+            raise TypeError(
+                f"target_fn must be callable (DataFrame → Series), "
+                f"got {type(target_fn).__name__}"
+            )
+
         if train_window <= 0:
             raise ValueError(f"train_window must be > 0, got {train_window}")
         if retrain_freq <= 0:
@@ -225,7 +245,21 @@ class MLAlpha(CrossSectionalFactor):
         # or if n_jobs is set to something other than 1/None. This runs
         # once at construction so the user gets an immediate failure, not
         # a mysterious multiprocessing crash deep inside fit().
-        _assert_supported_estimator(model_factory())
+        #
+        # The model_factory() probe itself CAN raise — a config error,
+        # missing sklearn optional dep, etc. We intentionally let that
+        # propagate: at construction time, a broken factory is a hard
+        # configuration error that should fail fast. (At retrain time,
+        # a factory exception is wrapped and logged — see _retrain.)
+        try:
+            probe = model_factory()
+        except Exception as e:
+            raise TypeError(
+                f"model_factory() raised {type(e).__name__}: {e}. "
+                f"A valid model_factory must return a fresh unfit sklearn "
+                f"estimator without errors."
+            ) from e
+        _assert_supported_estimator(probe)
 
         # Runtime state. A fresh MLAlpha instance (from strategy_factory())
         # starts with _current_model=None, so portfolio walk-forward gets
@@ -236,9 +270,17 @@ class MLAlpha(CrossSectionalFactor):
         self._last_retrain_date: _date | None = None
         self._retrain_count: int = 0
         # One-shot warning flags to avoid log spam when the same user
-        # mistake repeats across many symbols / rebalances.
+        # mistake repeats across many symbols / rebalances. Each flag
+        # gates a distinct diagnostic message; the first occurrence is
+        # logged, subsequent occurrences are silenced.
         self._feature_type_warned: bool = False
         self._target_type_warned: bool = False
+        self._feature_fn_exception_warned: bool = False
+        self._target_fn_exception_warned: bool = False
+        self._predict_feature_exception_warned: bool = False
+        self._predict_call_exception_warned: bool = False
+        self._empty_panel_warned: bool = False
+        self._empty_predict_warned: bool = False
 
     @property
     def name(self) -> str:
@@ -286,10 +328,11 @@ class MLAlpha(CrossSectionalFactor):
     def _retrain(self, universe_data: dict[str, pd.DataFrame], current: _date) -> None:
         """Build a fresh training panel and fit a new model on it.
 
-        Skips retrain silently if the panel is empty or has too few
-        samples (< 10) — this can happen early in the universe data when
-        not enough history has accumulated to satisfy the train_window
-        after purge+embargo exclusion.
+        Skips retrain if the panel is empty or has too few samples
+        (< 10) — this can happen early in the universe data when not
+        enough history has accumulated to satisfy the train_window
+        after purge+embargo exclusion. A one-shot diagnostic warning
+        is emitted so the user can distinguish "no signal" from "no data".
 
         Non-finite values (``inf``/``-inf``) are filtered before fit —
         ``isna()`` alone does NOT catch these. A very plausible user
@@ -297,12 +340,24 @@ class MLAlpha(CrossSectionalFactor):
         suspended or delisted) produces ``inf`` that then crashes
         ``sklearn`` with ``ValueError("Input X contains infinity...")``.
 
-        If fit() itself raises for any other reason, the prior model is
-        kept (or remains ``None`` if this is the first retrain) and a
-        warning is logged. The backtest continues.
+        The factory and fit() are both wrapped: if either raises, the
+        prior model is kept (or remains ``None`` if this is the first
+        retrain) and a warning is logged. The backtest continues.
         """
         X, y = self._build_training_panel(universe_data, current)
         if X is None or y is None or len(X) < 10:
+            if not self._empty_panel_warned:
+                n_syms = len(universe_data)
+                _logger.warning(
+                    "MLAlpha[%s]: training panel at %s is empty or too "
+                    "small (< 10 rows) across %d symbols. Possible causes: "
+                    "feature_fn / target_fn errors, insufficient history, "
+                    "or all symbols failing the purge+embargo window. "
+                    "Check earlier warnings for feature/target errors. "
+                    "(one-shot warning)",
+                    self._name, current, n_syms,
+                )
+                self._empty_panel_warned = True
             return
 
         # Filter non-finite values. pandas isna() treats inf as present,
@@ -324,19 +379,37 @@ class MLAlpha(CrossSectionalFactor):
                 )
                 return
 
-        model = self._model_factory()
+        # Wrap the factory call. At __init__ time we let factory errors
+        # propagate as TypeError (hard config error). At retrain time we
+        # catch and log — keep the prior model, continue the backtest.
+        # This mirrors the fit() exception handling: the framework
+        # promises "failure is visible but never crashes the backtest"
+        # once initial construction has succeeded.
+        try:
+            model = self._model_factory()
+        except Exception as e:
+            _logger.warning(
+                "MLAlpha[%s]: model_factory() raised %s at %s: %s. "
+                "Keeping prior model (%s). The backtest continues.",
+                self._name, type(e).__name__, current, e,
+                "present" if self._current_model is not None else "None",
+            )
+            return
+
         # Re-check the factory output — user could return a different
         # estimator class on subsequent calls. V1 safety means whitelist
         # applies to every produced instance, not just the first probe.
+        # UnsupportedEstimatorError propagates (hard safety boundary, not
+        # a recoverable error).
         _assert_supported_estimator(model)
 
         try:
             model.fit(X_arr, y_arr)
         except Exception as e:
             _logger.warning(
-                "MLAlpha[%s]: fit() failed at %s: %s. Keeping prior model "
-                "(%s). The backtest continues.",
-                self._name, current, e,
+                "MLAlpha[%s]: fit() raised %s at %s: %s. Keeping prior "
+                "model (%s). The backtest continues.",
+                self._name, type(e).__name__, current, e,
                 "present" if self._current_model is not None else "None",
             )
             return
@@ -380,10 +453,35 @@ class MLAlpha(CrossSectionalFactor):
             if not isinstance(df.index, pd.DatetimeIndex):
                 continue
 
+            # Call feature_fn and target_fn separately so we can point
+            # the user at the specific callable that raised.
             try:
                 sym_features = self._feature_fn(df)
+            except Exception as e:
+                if not self._feature_fn_exception_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn raised %s for symbol %s: "
+                        "%s. Skipping this symbol. Common causes: column "
+                        "name typo (check df.columns), division by zero, "
+                        "empty DataFrame. (one-shot warning per error "
+                        "type — subsequent failures silenced)",
+                        self._name, type(e).__name__, sym, e,
+                    )
+                    self._feature_fn_exception_warned = True
+                continue
+            try:
                 sym_target = self._target_fn(df)
-            except Exception:
+            except Exception as e:
+                if not self._target_fn_exception_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] target_fn raised %s for symbol %s: "
+                        "%s. Skipping this symbol. Common causes: column "
+                        "name typo, shift(-k) with k > len(df). (one-shot "
+                        "warning per error type — subsequent failures "
+                        "silenced)",
+                        self._name, type(e).__name__, sym, e,
+                    )
+                    self._target_fn_exception_warned = True
                 continue
 
             if sym_features is None or sym_target is None:
@@ -493,13 +591,30 @@ class MLAlpha(CrossSectionalFactor):
             return pd.Series(dtype=float)
 
         predictions: dict[str, float] = {}
+        n_attempted = 0
         for sym, df in universe_data.items():
             if not isinstance(df.index, pd.DatetimeIndex):
                 continue
+            n_attempted += 1
+
+            # feature_fn exception at predict stage: one-shot warn.
+            # Reusing _feature_fn_exception_warned would mask the
+            # predict-stage error if training succeeded but prediction
+            # features fail (e.g., user's feature_fn has branching on
+            # data length), so we keep a separate flag.
             try:
                 sym_features = self._feature_fn(df)
-            except Exception:
+            except Exception as e:
+                if not self._predict_feature_exception_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn raised %s for symbol %s "
+                        "during predict: %s. Skipping this symbol. "
+                        "(one-shot warning)",
+                        self._name, type(e).__name__, sym, e,
+                    )
+                    self._predict_feature_exception_warned = True
                 continue
+
             if sym_features is None or not isinstance(sym_features, pd.DataFrame):
                 continue
             if sym_features.empty:
@@ -513,13 +628,40 @@ class MLAlpha(CrossSectionalFactor):
             if latest.isna().any().any():
                 continue
 
+            # model.predict exception: one-shot warn. Common causes:
+            # wrong feature count (model trained on N features, predict
+            # given M), wrong dtype, shape mismatch.
             try:
                 pred = float(self._current_model.predict(latest.to_numpy())[0])
-            except Exception:
+            except Exception as e:
+                if not self._predict_call_exception_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] model.predict raised %s for symbol %s: "
+                        "%s. feature shape at predict time: %s. "
+                        "Skipping this symbol. (one-shot warning — check "
+                        "that your feature_fn produces the same feature "
+                        "count at predict time as during training.)",
+                        self._name, type(e).__name__, sym, e,
+                        latest.shape,
+                    )
+                    self._predict_call_exception_warned = True
                 continue
             if not np.isfinite(pred):
                 continue
             predictions[sym] = pred
+
+        # M1 diagnostic: if we attempted at least one symbol but produced
+        # zero predictions, warn once. Distinguishes "no signal" (empty
+        # universe, no valid bars) from "all symbols failed at predict".
+        if n_attempted > 0 and not predictions and not self._empty_predict_warned:
+            _logger.warning(
+                "MLAlpha[%s]: predict at %s attempted %d symbols but "
+                "produced 0 predictions. Model is fitted but every symbol "
+                "was skipped. Check earlier warnings for feature/predict "
+                "errors. (one-shot warning)",
+                self._name, current, n_attempted,
+            )
+            self._empty_predict_warned = True
 
         return pd.Series(predictions, dtype=float)
 

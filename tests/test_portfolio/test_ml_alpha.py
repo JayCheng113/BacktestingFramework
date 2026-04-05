@@ -151,6 +151,47 @@ class TestMLAlphaValidation:
         alpha = MLAlpha(**valid_kwargs)
         assert alpha._embargo_days == 0
 
+    @pytest.mark.parametrize("bad", [None, "not_a_function", 42, [1, 2, 3]])
+    def test_model_factory_must_be_callable(self, valid_kwargs, bad):
+        """model_factory must be a callable. Non-callable raises TypeError
+        at construction — NOT later at compute() time."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["model_factory"] = bad
+        with pytest.raises(TypeError, match="model_factory"):
+            MLAlpha(**valid_kwargs)
+
+    @pytest.mark.parametrize("bad", [None, "not_a_function", 42, {"k": "v"}])
+    def test_feature_fn_must_be_callable(self, valid_kwargs, bad):
+        """feature_fn must be a callable. Fails at construction, not at
+        compute()."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["feature_fn"] = bad
+        with pytest.raises(TypeError, match="feature_fn"):
+            MLAlpha(**valid_kwargs)
+
+    @pytest.mark.parametrize("bad", [None, "str", 42, [1]])
+    def test_target_fn_must_be_callable(self, valid_kwargs, bad):
+        """target_fn must be a callable."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["target_fn"] = bad
+        with pytest.raises(TypeError, match="target_fn"):
+            MLAlpha(**valid_kwargs)
+
+    def test_callable_check_runs_before_model_factory_probe(self):
+        """If model_factory is None, the callable check must fire first,
+        not the _assert_supported_estimator probe (which would try to
+        call None() and raise a less helpful TypeError about NoneType
+        not being callable without mentioning 'model_factory')."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        with pytest.raises(TypeError, match="model_factory"):
+            MLAlpha(
+                name="t",
+                model_factory=None,  # type: ignore[arg-type]
+                feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"]}),
+                target_fn=lambda df: df["adj_close"].pct_change(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
 
 class TestMLAlphaEstimatorWhitelist:
     """V1 safety: only whitelisted sklearn estimator classes are accepted,
@@ -1111,6 +1152,79 @@ class TestMLAlphaFitExceptionHandling:
         # filter left too few samples.
         assert isinstance(scores, pd.Series)
 
+    def test_model_factory_exception_at_init_propagates(self):
+        """A model_factory() that raises at construction (the probe call)
+        is a hard configuration error — the exception propagates as a
+        TypeError wrapping the original. This is intentional: at init
+        time, the user gets immediate feedback. At retrain time (below),
+        the same exception is wrapped and logged without crashing."""
+        from ez.portfolio.ml_alpha import MLAlpha
+
+        def broken_factory():
+            raise RuntimeError("config is wrong")
+
+        with pytest.raises(TypeError, match="model_factory.*RuntimeError"):
+            MLAlpha(
+                name="t",
+                model_factory=broken_factory,
+                feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"]}),
+                target_fn=lambda df: df["adj_close"].pct_change(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+    def test_model_factory_exception_at_retrain_keeps_prior_model(self):
+        """If model_factory() succeeds at __init__ (probe) but then
+        raises on a later _retrain() call — e.g., a transient config
+        error, a race on shared state — the backtest must continue with
+        the prior fitted model (or no model if it's the first retrain).
+        """
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        call_count = {"n": 0}
+
+        def flaky_factory():
+            call_count["n"] += 1
+            # Call 1: probe at __init__ → succeed
+            # Call 2: first retrain → succeed
+            # Call 3: second retrain → raise
+            if call_count["n"] >= 3:
+                raise RuntimeError("transient config error")
+            return Ridge(alpha=1.0)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=flaky_factory,
+            feature_fn=lambda df: pd.DataFrame({
+                "ret": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+        # call_count == 1 after __init__ probe
+
+        # First compute triggers first retrain → succeed (call 2)
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._retrain_count == 1
+        assert alpha._current_model is not None
+
+        # Second compute past retrain_freq triggers second retrain → RAISE
+        # Must NOT crash; must keep prior model
+        try:
+            scores = alpha.compute(data, datetime(2022, 9, 15))
+        except RuntimeError:
+            pytest.fail("model_factory() exception at retrain leaked — "
+                        "should have been caught and logged")
+
+        # Prior model preserved
+        assert alpha._retrain_count == 1
+        assert alpha._current_model is not None
+        # Scores still produced (from prior model)
+        assert isinstance(scores, pd.Series)
+        assert len(scores) > 0
+
     def test_fit_exception_keeps_prior_model(self):
         """If model.fit() raises on a retrain call, the prior model must
         be kept (not reset to None). A logged warning documents the
@@ -1296,6 +1410,190 @@ class TestMLAlphaContractEdgeCases:
         scores = alpha.compute(data, datetime(2022, 8, 1))
         assert len(scores) == 0
         assert alpha._current_model is None
+
+    def test_feature_fn_exception_logs_once_and_skips(self):
+        """V2.13 H2 regression: feature_fn exceptions must be logged (not
+        silently swallowed) so users can diagnose column name typos /
+        shape bugs / division errors. Log must be one-shot to avoid spam."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def buggy_feature_fn(df):
+            # Simulates a column name typo: df['adj_CLOSE'] doesn't exist
+            return pd.DataFrame({"f": df["adj_CLOSE"].pct_change(1)}).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=buggy_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 1))
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        assert len(scores) == 0
+        # At least ONE warning mentions feature_fn and KeyError
+        feat_warnings = [m for m in captured if "feature_fn" in m and "KeyError" in m]
+        assert len(feat_warnings) >= 1, (
+            f"Expected a feature_fn KeyError warning, got: {captured}"
+        )
+        # One-shot: all 3 symbols fail the same way → only 1 warning
+        # (not 3). Exact count depends on whether compute also triggers
+        # predict stage (but since model never fits, predict is skipped)
+        assert len(feat_warnings) == 1, (
+            f"Expected exactly 1 one-shot warning, got {len(feat_warnings)}: {feat_warnings}"
+        )
+
+    def test_target_fn_exception_logs_once_and_skips(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        def buggy_target_fn(df):
+            # Column name typo
+            return df["Price"].pct_change(5).shift(-5)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=lambda df: pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=buggy_target_fn,
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            alpha.compute(data, datetime(2022, 8, 1))
+        finally:
+            logger.removeHandler(handler)
+
+        target_warnings = [m for m in captured if "target_fn" in m and "KeyError" in m]
+        assert len(target_warnings) == 1, (
+            f"Expected exactly 1 one-shot target_fn warning, got: {target_warnings}"
+        )
+
+    def test_predict_exception_logs_once(self):
+        """When model.predict() raises at predict stage (e.g., feature
+        count mismatch), the error must be logged once, not silently
+        returned as 'no prediction for this symbol'."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=300, n_stocks=4)
+
+        # First retrain uses feature_fn with 2 features. Then switch
+        # feature_fn to produce 3 features → predict shape mismatch.
+        call_state = {"n_features": 2}
+
+        def switching_feature_fn(df):
+            if call_state["n_features"] == 2:
+                return pd.DataFrame({
+                    "ret1": df["adj_close"].pct_change(1),
+                    "ret5": df["adj_close"].pct_change(5),
+                }).dropna()
+            return pd.DataFrame({
+                "ret1": df["adj_close"].pct_change(1),
+                "ret5": df["adj_close"].pct_change(5),
+                "ret20": df["adj_close"].pct_change(20),
+            }).dropna()
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=switching_feature_fn,
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+        # First compute: train with 2 features
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._current_model is not None
+
+        # Switch feature_fn to 3 features → predict will raise
+        # (model was trained on 2). Call within retrain_freq window so
+        # retrain doesn't happen — only predict runs with new features.
+        call_state["n_features"] = 3
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            scores = alpha.compute(data, datetime(2022, 8, 5))  # within freq
+        finally:
+            logger.removeHandler(handler)
+
+        # model.predict should have raised → all symbols skipped
+        assert len(scores) == 0
+        # Warning about predict exception
+        pred_warnings = [m for m in captured if "predict" in m.lower() and "shape" in m.lower()]
+        assert len(pred_warnings) >= 1, (
+            f"Expected at least 1 predict-stage warning with shape info, "
+            f"got: {captured}"
+        )
+
+    def test_empty_panel_warning_on_training_failure(self):
+        """When all symbols fail to produce training data (e.g., all
+        feature_fn calls raise), _retrain must emit a diagnostic warning
+        so the user knows the panel is empty — not just 'model didn't
+        produce a signal'."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200, n_stocks=3)
+
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(),
+            feature_fn=lambda df: (_ for _ in ()).throw(RuntimeError("nope")),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60, retrain_freq=20, purge_days=5,
+        )
+
+        import logging
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            alpha.compute(data, datetime(2022, 8, 1))
+        finally:
+            logger.removeHandler(handler)
+
+        # Expect BOTH the per-symbol feature_fn warning AND the empty-panel
+        # summary warning
+        empty_warnings = [m for m in captured if "empty or too small" in m]
+        assert len(empty_warnings) == 1, (
+            f"Expected exactly 1 empty-panel warning, got: {captured}"
+        )
 
     def test_factory_returning_different_class_on_retrain_rejected(self):
         """Model factory that returns a different estimator class on a
