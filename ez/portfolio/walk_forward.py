@@ -66,6 +66,7 @@ def portfolio_walk_forward(
     lot_size: int = 100,
     limit_pct: float = 0.10,
     benchmark_symbol: str = "",
+    t_plus_1: bool = True,  # V2.12.1 codex reviewer round 4: propagate to run_portfolio_backtest
 ) -> PortfolioWFResult:
     """Run walk-forward validation on a portfolio strategy.
 
@@ -117,6 +118,7 @@ def portfolio_walk_forward(
             freq=freq, initial_cash=initial_cash,
             cost_model=cost_model, lot_size=lot_size, limit_pct=limit_pct,
             benchmark_symbol=benchmark_symbol,
+            t_plus_1=t_plus_1,
         )
 
         # Run OOS
@@ -127,6 +129,7 @@ def portfolio_walk_forward(
             freq=freq, initial_cash=initial_cash,
             cost_model=cost_model, lot_size=lot_size, limit_pct=limit_pct,
             benchmark_symbol=benchmark_symbol,
+            t_plus_1=t_plus_1,
         )
 
         # Extract sharpe

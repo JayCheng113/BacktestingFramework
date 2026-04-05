@@ -178,22 +178,93 @@ class TestRunner:
         single_metrics = MetricsCalculator().compute(eq_series, bench)
         single_sharpe = single_metrics["sharpe_ratio"]
 
-        # Portfolio formula (replicated from engine.py)
+        # Portfolio formula (replicated from engine.py) with ddof=1 to match pandas
         returns = np.diff(eq_values) / eq_values[:-1]
         daily_rf = 0.03 / 252
         excess = returns - daily_rf
-        excess_std = float(np.std(excess))
+        excess_std = float(np.std(excess, ddof=1))
         portfolio_sharpe = (
             float(np.mean(excess) / excess_std * np.sqrt(252))
             if excess_std > 1e-10 else 0.0
         )
 
-        # Should match within small numerical tolerance (single-stock uses
-        # pandas std with ddof=1, portfolio uses np.std with ddof=0 — minor
-        # difference allowed)
-        assert abs(single_sharpe - portfolio_sharpe) < 0.05, (
+        # After dd8ab5e self-review fix (ddof=1): byte-identical match
+        assert abs(single_sharpe - portfolio_sharpe) < 1e-10, (
             f"Portfolio sharpe {portfolio_sharpe} differs from single-stock "
             f"{single_sharpe} — formulas are NOT aligned"
+        )
+
+    def test_portfolio_all_metrics_match_single_stock(self):
+        """Regression test for reviewer round 4 Important 1: portfolio engine
+        previously had divergent formulas for Sortino, alpha, beta (only Sharpe
+        was fixed in dd8ab5e). Now ALL four metrics match single-stock exactly.
+        """
+        import numpy as np
+        import pandas as pd
+        from ez.backtest.metrics import MetricsCalculator
+
+        np.random.seed(123)
+        rng = np.random.default_rng(123)
+        daily = rng.normal(0.0005, 0.01, 252)
+        eq_values = 100000 * np.cumprod(1 + daily)
+        # Non-flat benchmark so alpha/beta are meaningful
+        bench_values = 100000 * np.cumprod(1 + rng.normal(0.0003, 0.008, 252))
+        eq_s = pd.Series(eq_values)
+        bench_s = pd.Series(bench_values)
+
+        # Single-stock canonical formulas
+        single = MetricsCalculator().compute(eq_s, bench_s)
+
+        # Portfolio replica (exact copy of portfolio engine formulas)
+        returns = np.diff(eq_values) / eq_values[:-1]
+        daily_rf = 0.03 / 252
+        excess = returns - daily_rf
+        excess_std = float(np.std(excess, ddof=1))
+        sharpe_p = float(np.mean(excess) / excess_std * np.sqrt(252))
+        downside_sq = np.minimum(excess, 0) ** 2
+        downside_dev = float(np.sqrt(downside_sq.mean()))
+        sortino_p = float(np.mean(excess) / downside_dev * np.sqrt(252))
+
+        bench_returns = np.diff(bench_values) / bench_values[:-1]
+        excess_b = bench_returns - daily_rf
+        cov_sb = float(np.cov(excess, excess_b, ddof=1)[0, 1])
+        var_b = float(np.var(excess_b, ddof=1))
+        beta_p = cov_sb / var_b
+        alpha_p = float((np.mean(excess) - beta_p * np.mean(excess_b)) * 252)
+
+        # All four metrics must be byte-identical (or near) to single-stock
+        assert abs(single["sharpe_ratio"] - sharpe_p) < 1e-10
+        assert abs(single["sortino_ratio"] - sortino_p) < 1e-10, (
+            f"Sortino divergence: single={single['sortino_ratio']} vs "
+            f"portfolio={sortino_p}"
+        )
+        assert abs(single["alpha"] - alpha_p) < 1e-10, (
+            f"Alpha divergence: single={single['alpha']} vs portfolio={alpha_p}"
+        )
+        assert abs(single["beta"] - beta_p) < 1e-10, (
+            f"Beta divergence: single={single['beta']} vs portfolio={beta_p}"
+        )
+
+    def test_portfolio_walk_forward_propagates_t_plus_1(self):
+        """Regression test for reviewer round 4 Important 2: portfolio_walk_forward
+        previously always passed run_portfolio_backtest with the default
+        t_plus_1=True, so US/HK walk-forward validation incorrectly applied
+        A-share T+1 constraints. Fix: t_plus_1 parameter added and propagated.
+        """
+        import inspect
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        sig = inspect.signature(portfolio_walk_forward)
+        assert "t_plus_1" in sig.parameters, (
+            "portfolio_walk_forward missing t_plus_1 parameter"
+        )
+        # Default preserves backward compat (A-share)
+        assert sig.parameters["t_plus_1"].default is True
+        # Source must actually pass t_plus_1 to run_portfolio_backtest
+        src = inspect.getsource(portfolio_walk_forward)
+        # Both IS and OOS calls pass t_plus_1
+        assert src.count("t_plus_1=t_plus_1") >= 2, (
+            "portfolio_walk_forward must propagate t_plus_1 to both IS and OOS "
+            "run_portfolio_backtest calls"
         )
 
     def test_oos_metrics_recomputed_from_combined_curve(self, sample_data):

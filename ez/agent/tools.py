@@ -589,11 +589,17 @@ def run_portfolio_backtest_tool(
     calendar = TradingCalendar.from_dates(sorted(all_dates))
     universe = Universe(symbols)
 
-    # A-share rules gated on market (lot_size / T+1 / limit_pct only for cn_stock)
+    # A-share rules gated on market (lot_size / T+1 / limit_pct / stamp_tax
+    # only for cn_stock). V2.12.1 reviewer round 4 Important 3: prior version
+    # didn't pass cost_model, so default CostModel() with stamp_tax_rate=0.0005
+    # applied A-share sell stamp tax to US/HK portfolios, overcharging by 5bp.
+    from ez.portfolio.engine import CostModel as _CostModel
     is_cn = market == "cn_stock"
+    cost_model = _CostModel(stamp_tax_rate=0.0005 if is_cn else 0.0)
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,
         calendar=calendar, start=start, end=end, freq=freq,
+        cost_model=cost_model,
         lot_size=100 if is_cn else 1,
         limit_pct=0.10 if is_cn else 0.0,
         t_plus_1=is_cn,

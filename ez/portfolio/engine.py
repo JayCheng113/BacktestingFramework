@@ -96,37 +96,31 @@ def run_portfolio_backtest(
     # rebalance days, biasing results with no error.
     try:
         strategy_lb = int(getattr(strategy, 'lookback_days', 252))
-        sample_date = next(iter(calendar.trading_days_between(start, end)), None)
-        if sample_date is not None:
-            sliced_sample = slice_universe_data(universe_data, sample_date, strategy_lb)
-            # Probe required factor warmups if the strategy exposes them
-            req_warmups: list[int] = []
-            for sym_df in sliced_sample.values():
-                pass  # sliced presence verifies slice works
-            # Walk factor dependencies where available (both TopN and MultiFactor)
-            for attr in ("factor", "factors"):
-                f = getattr(strategy, attr, None)
-                if f is None:
-                    continue
-                if isinstance(f, list):
-                    for fi in f:
-                        w = int(getattr(fi, 'warmup_period', 0) or 0)
-                        if w:
-                            req_warmups.append(w)
-                else:
-                    w = int(getattr(f, 'warmup_period', 0) or 0)
+        req_warmups: list[int] = []
+        # Walk factor dependencies where available (both TopN and MultiFactor)
+        for attr in ("factor", "factors"):
+            f = getattr(strategy, attr, None)
+            if f is None:
+                continue
+            if isinstance(f, list):
+                for fi in f:
+                    w = int(getattr(fi, 'warmup_period', 0) or 0)
                     if w:
                         req_warmups.append(w)
-            if req_warmups:
-                max_req = max(req_warmups)
-                if strategy_lb < max_req:
-                    import logging as _lg
-                    _lg.getLogger(__name__).warning(
-                        "Strategy %s lookback_days=%d is less than max factor "
-                        "warmup_period=%d — early rebalances will see truncated "
-                        "history. Set strategy.lookback_days >= %d.",
-                        type(strategy).__name__, strategy_lb, max_req, max_req,
-                    )
+            else:
+                w = int(getattr(f, 'warmup_period', 0) or 0)
+                if w:
+                    req_warmups.append(w)
+        if req_warmups:
+            max_req = max(req_warmups)
+            if strategy_lb < max_req:
+                import logging as _lg
+                _lg.getLogger(__name__).warning(
+                    "Strategy %s lookback_days=%d is less than max factor "
+                    "warmup_period=%d — early rebalances will see truncated "
+                    "history. Set strategy.lookback_days >= %d.",
+                    type(strategy).__name__, strategy_lb, max_req, max_req,
+                )
     except Exception:
         # Defensive: validation must never fail the backtest itself
         pass
@@ -538,10 +532,16 @@ def run_portfolio_backtest(
             else:
                 dd_dur = 0
 
-        # Sortino ratio (downside deviation)
-        downside = returns[returns < 0]
-        downside_std = np.std(downside) * np.sqrt(252) if len(downside) > 1 else 0
-        sortino = ann_ret / downside_std if downside_std > 0 else 0
+        # Sortino ratio (downside deviation of EXCESS returns).
+        # V2.12.1 reviewer round 4 Important 1: match ez/backtest/metrics.py
+        # formula — prior version used `ann_ret / (std(returns[<0]) × √252)`
+        # with total returns (not excess) and ddof=0, producing values ~30%
+        # higher than single-stock engine for the same input. Now uses the
+        # downside semi-deviation of excess returns:
+        #     sortino = excess.mean() / sqrt(mean(min(excess, 0)²)) × √252
+        downside_sq = np.minimum(excess, 0) ** 2
+        downside_dev = float(np.sqrt(downside_sq.mean())) if len(excess) > 0 else 0.0
+        sortino = float(np.mean(excess) / downside_dev * np.sqrt(252)) if downside_dev > 1e-10 else 0.0
 
         # Benchmark metrics
         bench_ret = 0.0
@@ -552,11 +552,20 @@ def run_portfolio_backtest(
             bench_returns = np.diff(bench) / bench[:-1]
             bench_ret = bench[-1] / bench[0] - 1 if bench[0] > 0 else 0
 
-            # Alpha / Beta (CAPM)
-            if len(bench_returns) > 1 and np.std(bench_returns) > 0:
-                cov = np.cov(returns, bench_returns)
-                beta = float(cov[0, 1] / cov[1, 1]) if cov[1, 1] > 0 else 0
-                alpha = float(ann_ret - beta * (bench_ret / max(n_years, 0.01)))
+            # Alpha / Beta (CAPM regression: R_s - Rf = alpha + beta × (R_b - Rf)).
+            # V2.12.1 reviewer round 4 Important 1: match ez/backtest/metrics.py.
+            # Prior version computed alpha as (ann_ret - beta × ann_bench_ret)
+            # without subtracting the risk-free rate, so portfolio alpha diverged
+            # from single-stock alpha by ~5-6 percentage points.
+            if len(bench_returns) > 1 and np.std(bench_returns, ddof=1) > 1e-10:
+                excess_b = bench_returns - daily_rf
+                excess_s = returns - daily_rf
+                # Sample covariance (ddof=1) to match pd.Series.cov default
+                cov_sb = float(np.cov(excess_s, excess_b, ddof=1)[0, 1])
+                var_b = float(np.var(excess_b, ddof=1))
+                beta = cov_sb / var_b if var_b > 0 else 0.0
+                # Annualized alpha: (mean daily excess_s - beta × mean daily excess_b) × 252
+                alpha = float((np.mean(excess_s) - beta * np.mean(excess_b)) * 252)
 
         # Turnover (average per rebalance)
         total_trade_value = sum(t["shares"] * t["price"] for t in result.trades if not t.get("liquidation"))

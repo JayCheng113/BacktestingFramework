@@ -767,6 +767,7 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             freq=req.freq, initial_cash=req.initial_cash, cost_model=cost_model,
             lot_size=req.lot_size, limit_pct=req.limit_pct,
             benchmark_symbol=req.benchmark_symbol,
+            t_plus_1=(req.market == "cn_stock"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
