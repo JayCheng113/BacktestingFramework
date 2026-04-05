@@ -56,12 +56,22 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   // market, period, dates). Prior version kept the old result visible
   // on-screen even though the inputs no longer matched the run, misleading
   // the user into thinking the metrics applied to the new inputs.
+  //
+  // Round 5 codex: also track params, costSettings, and nSplits — ALL of
+  // these feed the /backtest/run or /backtest/walk-forward request. Prior
+  // version left stale result visible when only strategy params or cost
+  // settings changed.
   useEffect(() => {
     setResult(null)
     setWfResult(null)
     onTradesUpdate?.([])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, market, period, startDate, endDate])
+  }, [
+    symbol, market, period, startDate, endDate,
+    JSON.stringify(params),
+    JSON.stringify(costSettings),
+    nSplits,
+  ])
 
   const handleRun = async () => {
     if (!selected || !symbol) return

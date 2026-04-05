@@ -32,11 +32,24 @@ class MetricsCalculator:
             ann_return = (1 + total_return) ** (1 / years) - 1
         else:
             ann_return = 0.0
-        ann_vol = float(daily_returns.std() * np.sqrt(self._td))
+        # V2.12.2 codex round 5: pandas std() defaults to ddof=1, which
+        # returns NaN for a single-sample series. Guard with len >= 2 so
+        # very short backtests (e.g. 2-bar smoke tests, degenerate WF
+        # folds) report annualized_volatility = 0.0 instead of NaN that
+        # leaks through to frontend display.
+        if n_days >= 2:
+            daily_std = float(daily_returns.std())
+            ann_vol = daily_std * np.sqrt(self._td) if not np.isnan(daily_std) else 0.0
+        else:
+            ann_vol = 0.0
 
         daily_rf = self._rf / self._td
         excess = daily_returns - daily_rf
-        sharpe = float(excess.mean() / excess.std() * np.sqrt(self._td)) if excess.std() > 1e-10 else 0.0
+        # Same guard: excess.std() is NaN on single-sample series with ddof=1
+        excess_std = float(excess.std()) if n_days >= 2 else 0.0
+        if np.isnan(excess_std):
+            excess_std = 0.0
+        sharpe = float(excess.mean() / excess_std * np.sqrt(self._td)) if excess_std > 1e-10 else 0.0
 
         # Downside deviation: sqrt(mean(min(excess, 0)^2)) over ALL days
         downside_sq = np.minimum(excess, 0) ** 2

@@ -73,50 +73,6 @@ export default function PortfolioPanel() {
   // Clear stale quality report when inputs change
   useEffect(() => { setQualityReport([]); setFundaStatus('') }, [symbols, startDate, endDate])
 
-  // V2.12.2 codex: clear stale result/wfResult when any run input changes.
-  // Prior version only the market-change useEffect did this, so symbol /
-  // date / strategy / freq changes left the previous run's curve and
-  // metrics visible. Users could believe they had already run the current
-  // configuration when they hadn't. This mirrors BacktestPanel's pattern.
-  useEffect(() => {
-    setResult(null)
-    setWfResult(null)
-    setSearchResults([])
-    setSearchMeta(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbols, startDate, endDate, freq, selected])
-
-  // V2.12.2 codex: market change must fully reset market-sensitive state.
-  // Prior version only set `market` and let all downstream state (settings
-  // cost model, index benchmark, tracking error, eval/corr/search/quality
-  // results) leak from the previous market. Backend silently accepted the
-  // stale A-share cost model and index benchmark when user ran US/HK runs.
-  useEffect(() => {
-    // Re-apply market-appropriate cost model + rules
-    setSettings(getDefaultSettings(market))
-    // Non-cn_stock has no A-share index benchmark — reset to "none"
-    // AND reset tracking error to default, since TE is A-share specific
-    // (CSI300/500/1000 index enhancement).
-    if (market !== 'cn_stock') {
-      setIndexBenchmark('')
-      setTrackingError(5)
-    }
-    // Clear stale evaluation / search / quality results from previous market
-    setEvalResult(null)
-    setCorrResult(null)
-    setSearchResults([])
-    setQualityReport([])
-    setFundaStatus('')
-    // Clear backtest result + WF result + full-weights snapshot — they
-    // were computed under the previous market's rules.
-    setResult(null)
-    setWfResult(null)
-    // Clear cross-run compare data — comparing runs from different
-    // markets would yield meaningless overlays.
-    setCompareData([])
-    setSelectedRuns(new Set())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [market])
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
@@ -175,6 +131,64 @@ export default function PortfolioPanel() {
     setSearchMeta(null)
     setExpandedParams({})
   }, [currentSchema])
+
+  // V2.12.2 codex: clear stale result/wfResult when any run input changes.
+  // Prior version only the market-change useEffect did this, so symbol /
+  // date / strategy / freq changes left the previous run's curve and
+  // metrics visible. Users could believe they had already run the current
+  // configuration when they hadn't. This mirrors BacktestPanel's pattern.
+  //
+  // Round 5 codex: also track strategyParams, settings, optimizer/risk/
+  // index config — ALL of these are sent to the backend and affect the
+  // run's output. Prior version left results stale when users changed
+  // optimizer or cost model. Using JSON stringify for deep equality on
+  // dict-shaped state (acceptable overhead for ~10 KB).
+  useEffect(() => {
+    setResult(null)
+    setWfResult(null)
+    setSearchResults([])
+    setSearchMeta(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    symbols, startDate, endDate, freq, selected,
+    JSON.stringify(strategyParams),
+    JSON.stringify(settings),
+    optimizer, riskAversion, maxWeight, maxIndustryWeight, covLookback,
+    riskControl, maxDrawdown, drawdownReduce, drawdownRecovery, maxTurnover,
+    indexBenchmark, trackingError,
+  ])
+
+  // V2.12.2 codex: market change must fully reset market-sensitive state.
+  // Prior version only set `market` and let all downstream state (settings
+  // cost model, index benchmark, tracking error, eval/corr/search/quality
+  // results) leak from the previous market. Backend silently accepted the
+  // stale A-share cost model and index benchmark when user ran US/HK runs.
+  useEffect(() => {
+    // Re-apply market-appropriate cost model + rules
+    setSettings(getDefaultSettings(market))
+    // Non-cn_stock has no A-share index benchmark — reset to "none"
+    // AND reset tracking error to default, since TE is A-share specific
+    // (CSI300/500/1000 index enhancement).
+    if (market !== 'cn_stock') {
+      setIndexBenchmark('')
+      setTrackingError(5)
+    }
+    // Clear stale evaluation / search / quality results from previous market
+    setEvalResult(null)
+    setCorrResult(null)
+    setSearchResults([])
+    setQualityReport([])
+    setFundaStatus('')
+    // Clear backtest result + WF result + full-weights snapshot — they
+    // were computed under the previous market's rules.
+    setResult(null)
+    setWfResult(null)
+    // Clear cross-run compare data — comparing runs from different
+    // markets would yield meaningless overlays.
+    setCompareData([])
+    setSelectedRuns(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [market])
 
   useEffect(() => {
     listPortfolioStrategies().then(r => {

@@ -253,6 +253,65 @@ class VectorizedBacktestEngine:
             if equity_arr[i - 1] > 0:
                 daily_ret[i] = (equity_arr[i] / equity_arr[i - 1]) - 1
 
+        # V2.12.2 codex round 5: terminal liquidation TRADE RECORD so
+        # held-to-end strategies get proper round-trip metrics. Prior
+        # version only recorded a TradeRecord when a position was
+        # explicitly closed by a signal flip to zero. Buy-and-hold and
+        # "hold to period end" strategies produced trade_count=0,
+        # win_rate=0.0, profit_factor=0.0, avg_holding_days=0 — the
+        # metrics silently dropped the final open position.
+        #
+        # IMPORTANT: this synthesizes a virtual TradeRecord only; it
+        # does NOT modify equity_arr or daily_ret. The equity curve
+        # remains mark-to-market consistent with the shadow
+        # reconstruction invariants (test_shadow_equity_matches_engine).
+        # The assumption is that the user sees the equity curve as
+        # "what you had at period end" and the trade record as
+        # "what you would have realized if you closed it". Keeping
+        # equity_arr untouched preserves the existing accounting
+        # invariants while letting trade-level metrics see the
+        # terminal position.
+        #
+        # Use last bar's adj_close as the theoretical exit price.
+        # No slippage/commission is charged into equity because the
+        # trade is virtual — but the TradeRecord's pnl and commission
+        # fields are populated using the inner matcher (minus market
+        # rules wrapper) so profit_factor / avg_holding_days / win_rate
+        # reflect realistic cost impact.
+        if shares > 0 and entry_time is not None and n > 0:
+            liq_idx = n - 1
+            liq_price = prices[liq_idx]
+            if not np.isnan(liq_price) and liq_price > 0:
+                # Unwrap MarketRulesMatcher (skip T+1/limit/lot for terminal
+                # close; keep _SellSideTaxMatcher + base commission layer).
+                try:
+                    from ez.core.market_rules import MarketRulesMatcher
+                    inner_matcher = matcher
+                    while isinstance(inner_matcher, MarketRulesMatcher):
+                        inner_matcher = inner_matcher._inner
+                except ImportError:
+                    inner_matcher = matcher
+                fill = inner_matcher.fill_sell(liq_price, shares)
+                if fill.shares > 0:
+                    virtual_pnl = (fill.fill_price - entry_price) * fill.shares - fill.commission
+                    total_pnl = partial_pnl + virtual_pnl - entry_comm
+                    total_comm = entry_comm + partial_comm + fill.commission
+                    cost_basis = (
+                        (entry_price * peak_shares + entry_comm)
+                        if peak_shares > 0
+                        else (entry_price * fill.shares + entry_comm)
+                    )
+                    trades.append(TradeRecord(
+                        entry_time=entry_time,
+                        exit_time=time_list[liq_idx],
+                        entry_price=entry_price,
+                        exit_price=fill.fill_price,
+                        weight=prev_weight,
+                        pnl=total_pnl,
+                        pnl_pct=total_pnl / cost_basis if cost_basis > 0 else 0,
+                        commission=total_comm,
+                    ))
+
         equity = pd.Series(equity_arr, index=df.index)
         daily_returns = pd.Series(daily_ret, index=df.index)
         return equity, trades, daily_returns

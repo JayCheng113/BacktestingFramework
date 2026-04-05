@@ -457,9 +457,24 @@ def run_portfolio_backtest(
         assert equity > 0, \
             f"Non-positive equity on {day}: equity={equity:.2f}, cash={cash:.2f}, pos={position_value:.2f}"
 
+        # V2.12.2 codex round 5: compute actual daily weights from current
+        # holdings × today's prices / equity, reflecting intra-rebalance
+        # drift from price moves. Prior version appended `prev_weights`
+        # (the post-rebalance snapshot from the last rebalance day), so
+        # weights_history claimed "daily holdings" but actually showed
+        # repeated rebalance snapshots — price drift was invisible. Now
+        # `weights_history[i]` is the TRUE weight of each symbol at the
+        # close of day i, which is what downstream analysis (drift
+        # diagnostics, drawdown-by-asset, etc.) requires.
+        daily_weights: dict[str, float] = {}
+        if equity > 0:
+            for sym, sh in holdings.items():
+                if sh > 0 and sym in prices and prices[sym] > 0:
+                    daily_weights[sym] = (sh * prices[sym]) / equity
+
         result.equity_curve.append(equity)
         result.dates.append(day)
-        result.weights_history.append(dict(prev_weights))
+        result.weights_history.append(daily_weights)
 
         prev_prices = dict(prices)
         prev_raw_close = dict(raw_close_today)

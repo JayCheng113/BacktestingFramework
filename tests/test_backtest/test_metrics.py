@@ -66,3 +66,19 @@ def test_alpha_beta_with_benchmark():
     metrics = calc.compute(strat, bench)
     assert metrics["beta"] > 0  # positively correlated
     assert "alpha" in metrics  # alpha computed
+
+
+def test_short_sample_annualized_volatility_not_nan(calc):
+    """V2.12.2 codex round 5: single-sample daily_returns with ddof=1 std
+    returns NaN, propagating to annualized_volatility. Guard must force
+    0.0 fallback so short backtests display cleanly in frontend."""
+    # 2-bar equity curve → 1 daily return sample → std(ddof=1) = NaN
+    equity = pd.Series([100000, 100500])
+    bench = pd.Series([100000, 100500])
+    metrics = calc.compute(equity, bench)
+    assert not np.isnan(metrics["annualized_volatility"]), (
+        "Single-sample backtest should report 0.0 volatility, not NaN"
+    )
+    assert metrics["annualized_volatility"] == 0.0
+    assert not np.isnan(metrics["sharpe_ratio"])
+    assert metrics["sharpe_ratio"] == 0.0

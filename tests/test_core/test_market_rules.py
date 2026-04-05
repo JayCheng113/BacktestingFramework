@@ -111,6 +111,51 @@ class TestLotSize:
         assert fill.shares > 0
         assert fill.shares % 100 != 0 or fill.shares == 0  # not necessarily multiple
 
+    def test_lot_rounding_respects_min_commission_floor(self):
+        """V2.12.2 codex round 5: lot-rounding must re-apply the
+        min_commission floor on the adjusted trade. Prior version scaled
+        commission linearly (`fill.commission * ratio`), which drops
+        BELOW the floor when the original commission was floor-capped —
+        leading to under-charged fees and inflated returns on small
+        trades.
+        """
+        # Small trade where original commission hits min floor:
+        # 1200 cash @ 10/share → ~120 shares → rounds to 100 shares
+        # Original comm: max(1200 * 0.0003, 5) = 5 (floor)
+        # Prior bug: scaled to 5 * (100/120) = 4.17 (below floor!)
+        # Fixed: max(100 * 10 * 0.0003, 5) = max(0.3, 5) = 5 (stays at floor)
+        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+        matcher = MarketRulesMatcher(inner, t_plus_1=False, lot_size=100, price_limit_pct=0)
+        matcher.on_bar(bar_index=1, prev_close=10.0)
+        fill = matcher.fill_buy(10.0, 1200)
+        assert fill.shares == 100
+        # Commission must be at least the floor (5.0), not below
+        assert fill.commission >= 5.0 - 1e-6, (
+            f"Lot-rounding dropped commission below min_commission floor: "
+            f"{fill.commission} (expected >= 5.0)"
+        )
+        # Exact expected: max(100 * 10 * 0.0003, 5) = max(0.3, 5) = 5
+        assert abs(fill.commission - 5.0) < 1e-6
+
+    def test_lot_rounding_rate_based_commission(self):
+        """When commission is rate-based (above floor), lot rounding
+        recomputes based on actual value × rate, still within budget."""
+        # Large trade where rate-based commission dominates:
+        # 100000 cash @ 10/share → ~10000 shares → rounds to 9900 (1% lot loss)
+        # Original comm: max(100000 * 0.001, 5) = 100
+        # Fixed: max(9900 * 10 * 0.001, 5) = max(99, 5) = 99
+        # Prior bug also got ~99 via linear scaling — not a regression here
+        inner = SimpleMatcher(commission_rate=0.001, min_commission=5.0)
+        matcher = MarketRulesMatcher(inner, t_plus_1=False, lot_size=100, price_limit_pct=0)
+        matcher.on_bar(bar_index=1, prev_close=10.0)
+        fill = matcher.fill_buy(10.0, 100000)
+        assert fill.shares > 0 and fill.shares % 100 == 0
+        actual_value = fill.shares * fill.fill_price
+        expected_comm = max(actual_value * 0.001, 5.0)
+        assert abs(fill.commission - expected_comm) < 0.01
+        # Budget preservation: -net_amount (cash spent) should be <= 100000
+        assert -fill.net_amount <= 100000 + 1e-6
+
 
 class TestRetryAfterReject:
     """C1 regression: engine must retry on next bar when fill is rejected."""

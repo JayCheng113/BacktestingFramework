@@ -68,11 +68,31 @@ class MarketRulesMatcher(Matcher):
                 return _zero_fill(price)
             actual_shares = lots * self._lot
             if actual_shares < fill.shares:
-                # Recompute commission proportionally instead of re-calling inner
-                # (re-calling with a buffer can exceed the original budget)
-                ratio = actual_shares / fill.shares
-                adj_commission = fill.commission * ratio
-                adj_amount = actual_shares * fill.fill_price + adj_commission
+                # V2.12.2 codex round 5: recompute commission respecting
+                # the min_commission floor. Prior `fill.commission * ratio`
+                # underestimated when the original commission was capped at
+                # the floor — the floor still applies after lot rounding.
+                # Small trades that originally paid `min_commission` would
+                # have the scaled commission fall BELOW the floor,
+                # over-estimating cash and inflating returns.
+                #
+                # Walk the inner chain to find base (rate, min_comm).
+                # SimpleMatcher and SlippageMatcher both expose `_rate`
+                # and `_min_comm`. If config is unavailable (custom
+                # matcher), fall back to linear scaling as before.
+                actual_value = actual_shares * fill.fill_price
+                base = self._inner
+                while hasattr(base, '_inner'):
+                    base = base._inner
+                base_rate = getattr(base, '_rate', None)
+                base_min = getattr(base, '_min_comm', None)
+                if base_rate is not None and base_min is not None:
+                    adj_commission = max(actual_value * base_rate, base_min)
+                else:
+                    # Custom matcher without exposed config — fall back
+                    ratio = actual_shares / fill.shares
+                    adj_commission = fill.commission * ratio
+                adj_amount = actual_value + adj_commission
                 fill = FillResult(
                     shares=actual_shares,
                     fill_price=fill.fill_price,
