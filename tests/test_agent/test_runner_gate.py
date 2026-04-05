@@ -570,14 +570,14 @@ class TestRunner:
         )
 
     def test_portfolio_request_config_parity(self):
-        """Regression test for reviewer round 6 Critical C1: PortfolioRunRequest,
-        PortfolioWFRequest and PortfolioSearchRequest must resolve to the same
-        default values for every optimizer/risk/index/cost field. Prior version
-        declared the fields separately on each request model with drifted
-        defaults (e.g. max_weight /run=0.10 vs /walk-forward=1.0), so "same
-        user input" produced different strategies across endpoints.
+        """Regression test for reviewer round 6 Critical C1 + round 7 I2:
+        PortfolioRunRequest, PortfolioWFRequest, PortfolioSearchRequest must
+        resolve to the same default values AND the same Field constraints
+        (ge/le/gt/lt/pattern) for every mixin field. Prior version declared
+        the fields separately with drifted defaults AND constraints.
 
-        Mixin approach: all three inherit from PortfolioCommonConfig.
+        Mixin approach: all three inherit from PortfolioCommonConfig and do
+        not shadow any inherited field.
         """
         from ez.api.routes.portfolio import (
             PortfolioRunRequest, PortfolioWFRequest, PortfolioSearchRequest,
@@ -593,17 +593,39 @@ class TestRunner:
         wf = PortfolioWFRequest(symbols=["000001.SZ"])
         search = PortfolioSearchRequest(symbols=["000001.SZ"])
 
-        # Every field in PortfolioCommonConfig must have the same value in all 3
         common_fields = PortfolioCommonConfig.model_fields
+        run_fields = PortfolioRunRequest.model_fields
+        wf_fields = PortfolioWFRequest.model_fields
+        search_fields = PortfolioSearchRequest.model_fields
+
         for field_name in common_fields:
+            # Default value parity (caught round 6 C1)
             run_val = getattr(run, field_name)
             wf_val = getattr(wf, field_name)
             search_val = getattr(search, field_name)
             assert run_val == wf_val, (
-                f"Field '{field_name}' drifts: run={run_val} vs wf={wf_val}"
+                f"Default drift: '{field_name}' run={run_val} vs wf={wf_val}"
             )
             assert run_val == search_val, (
-                f"Field '{field_name}' drifts: run={run_val} vs search={search_val}"
+                f"Default drift: '{field_name}' run={run_val} vs search={search_val}"
+            )
+
+            # Field constraint parity (round 7 I2: reviewer asked we also
+            # check metadata). The subclasses must not shadow the mixin field;
+            # if they do, Pydantic allows tighter constraints which silently
+            # breaks validation parity across endpoints.
+            mixin_meta = common_fields[field_name].metadata
+            run_meta = run_fields[field_name].metadata
+            wf_meta = wf_fields[field_name].metadata
+            search_meta = search_fields[field_name].metadata
+            assert str(run_meta) == str(mixin_meta), (
+                f"Constraint drift: '{field_name}' run={run_meta} vs mixin={mixin_meta}"
+            )
+            assert str(wf_meta) == str(mixin_meta), (
+                f"Constraint drift: '{field_name}' wf={wf_meta} vs mixin={mixin_meta}"
+            )
+            assert str(search_meta) == str(mixin_meta), (
+                f"Constraint drift: '{field_name}' search={search_meta} vs mixin={mixin_meta}"
             )
 
     def test_portfolio_walk_forward_uses_optimizer_factory(self):
@@ -692,24 +714,115 @@ class TestRunner:
             f"by the engine ({len(instances)} instances, 0 calls)"
         )
 
-    def test_portfolio_walk_forward_surfaces_fallback_events(self):
-        """Regression integration test for reviewer round 6 I1: walk-forward
-        must aggregate optimizer.fallback_events across folds into
-        PortfolioWFResult.optimizer_fallback_events so the API can surface them.
+    def test_portfolio_search_aggregates_fallback_events(self):
+        """Regression test for reviewer round 7 I1: /portfolio/search must
+        aggregate optimizer.fallback_events across ALL combos, mirroring
+        /walk-forward's per-fold aggregation. Prior version discarded events
+        per combo — users running parameter search could see all candidates
+        silently fall back to equal-weight with no indication.
+
+        This is a structural check on the endpoint source (integration would
+        require FastAPI TestClient + DB fixtures); combined with the fact that
+        the aggregation helper is module-scoped and shared across all 3
+        endpoints, source inspection is sufficient here.
         """
         import inspect
-        from ez.portfolio.walk_forward import PortfolioWFResult, portfolio_walk_forward
-        # Field must exist on the result dataclass
+        from ez.api.routes import portfolio as _p
+        src = inspect.getsource(_p.portfolio_search)
+        # Must aggregate per combo
+        assert "search_optimizer_fallback_events" in src, (
+            "portfolio_search must initialize a fallback events list"
+        )
+        assert ".append" in src and "combo_opt" in src, (
+            "portfolio_search must capture combo_opt and append its fallback events"
+        )
+        assert "search_risk_events" in src, (
+            "portfolio_search must also aggregate engine risk_events per combo"
+        )
+        # Must surface in response
+        assert '"risk_events"' in src and "search_risk_events" in src, (
+            "portfolio_search must include risk_events in the response"
+        )
+
+    def test_portfolio_walk_forward_surfaces_fallback_events(self):
+        """Regression integration test for reviewer round 6 I1 + round 7 I3:
+        walk-forward must aggregate optimizer.fallback_events across folds
+        into PortfolioWFResult.optimizer_fallback_events AT RUNTIME, not just
+        in source inspection. Uses a spy optimizer that always records a
+        fallback event on every optimize() call to verify the aggregation
+        path is actually exercised.
+        """
+        import numpy as np
+        import pandas as pd
+        from ez.portfolio.walk_forward import (
+            PortfolioWFResult, portfolio_walk_forward,
+        )
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+        from ez.portfolio.cross_factor import MomentumRank
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.optimizer import PortfolioOptimizer, OptimizationConstraints
+
+        # Static field presence
         assert "optimizer_fallback_events" in PortfolioWFResult.__dataclass_fields__
         assert "risk_events" in PortfolioWFResult.__dataclass_fields__
-        # Function source must aggregate per-fold events
-        src = inspect.getsource(portfolio_walk_forward)
-        assert "optimizer_fallback_events.append" in src, (
-            "portfolio_walk_forward must aggregate optimizer fallback events across folds"
+
+        # Spy optimizer that records a fake fallback event on every call
+        class _FallbackSpyOptimizer(PortfolioOptimizer):
+            def __init__(self):
+                super().__init__(OptimizationConstraints(max_weight=1.0), cov_lookback=30)
+
+            def _optimize(self, alpha, sigma, symbols):
+                import numpy as np
+                return np.ones(len(symbols)) / len(symbols)
+
+            def optimize(self, alpha_weights):
+                # Simulate a fallback on every call
+                self._record_fallback("spy: forced fallback for testing")
+                syms = [s for s, w in alpha_weights.items() if w > 0]
+                if not syms:
+                    return {}
+                return {s: 1.0 / len(syms) for s in syms}
+
+        symbols = [f"S{i}" for i in range(5)]
+        rng = np.random.default_rng(11)
+        dates = pd.date_range("2023-01-02", periods=250, freq="B")
+        data = {}
+        for i, sym in enumerate(symbols):
+            prices = 10 * (i + 1) * np.cumprod(1 + rng.normal(0.001, 0.015, 250))
+            data[sym] = pd.DataFrame({
+                "open": prices, "high": prices * 1.01, "low": prices * 0.99,
+                "close": prices, "adj_close": prices,
+                "volume": rng.integers(100000, 5000000, 250),
+            }, index=dates)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+
+        def _strat():
+            return TopNRotation(MomentumRank(20), top_n=3)
+
+        result = portfolio_walk_forward(
+            strategy_factory=_strat,
+            universe=Universe(symbols), universe_data=data, calendar=cal,
+            start=dates[30].date(), end=dates[-1].date(),
+            n_splits=3, train_ratio=0.7, initial_cash=1_000_000,
+            optimizer_factory=_FallbackSpyOptimizer,
         )
-        assert "result.risk_events.append" in src, (
-            "portfolio_walk_forward must aggregate risk_events across folds"
+
+        # Runtime verification: aggregation loop populated the result field
+        assert len(result.optimizer_fallback_events) > 0, (
+            "portfolio_walk_forward did not aggregate fallback events — the "
+            ".append path in the source is not actually executed at runtime"
         )
+        # Both IS and OOS phases must contribute events (n_splits=3 * 2 phases)
+        phases = {ev["phase"] for ev in result.optimizer_fallback_events}
+        assert "IS" in phases, "IS-phase fallback events missing"
+        assert "OOS" in phases, "OOS-phase fallback events missing"
+        # Fold index must be set
+        folds = {ev["fold"] for ev in result.optimizer_fallback_events}
+        assert len(folds) >= 1 and all(isinstance(f, int) for f in folds)
+        # Event reason propagates correctly
+        assert any("spy: forced fallback" in ev["reason"]
+                   for ev in result.optimizer_fallback_events)
 
 
 class TestGate:

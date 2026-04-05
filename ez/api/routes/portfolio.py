@@ -307,14 +307,21 @@ class PortfolioRunRequest(PortfolioCommonConfig):
 def _build_optimizer_risk_factories(req):
     """Build optimizer_factory / risk_manager_factory from a PortfolioCommonConfig request.
 
-    V2.12.1 reviewer round 6 C1+I3: shared helper used by /run, /walk-forward,
-    and /search so all three endpoints construct optimizer and risk manager
-    the same way from the same config fields. Returns (opt_factory, rm_factory,
-    index_weights) — factories (not instances) because both carry state across
-    days and need fresh copies for each backtest/fold/combo.
+    V2.12.1 reviewer round 6 C1+I3 + round 7 M1: shared helper used by /run,
+    /walk-forward, and /search so all three endpoints construct optimizer and
+    risk manager the same way from the same config fields.
 
-    /run uses the factory once (single backtest), /walk-forward per fold,
-    /search per combo.
+    Returns (opt_factory, rm_factory, index_weights):
+    - opt_factory: callable returning a fresh PortfolioOptimizer (or None)
+    - rm_factory: callable returning a fresh RiskManager (or None)
+    - index_weights: pre-fetched constituent weights for the index benchmark
+      (empty dict if req.index_benchmark is unset or fetch failed)
+
+    Factories (not instances) because both classes carry state across days
+    and need fresh copies for each backtest/fold/combo:
+    - /run: single call, instantiate once via opt_factory() / rm_factory()
+    - /walk-forward: per fold, n_splits × 2 (IS + OOS) instances
+    - /search: per combo, one optimizer + one risk_manager per parameter combo
     """
     index_weights: dict[str, float] = {}
     if getattr(req, "index_benchmark", "") and req.index_benchmark:
@@ -667,64 +674,30 @@ def run_portfolio(req: PortfolioRunRequest):
         slippage_rate=req.slippage_rate,
     )
 
-    # V2.12.1: Index enhancement — fetch constituent weights
-    index_weights: dict[str, float] = {}
-    if req.index_benchmark:
-        try:
-            from ez.portfolio.index_data import IndexDataProvider
-            idx_provider = IndexDataProvider()
-            index_weights = idx_provider.get_weights(req.index_benchmark)
-            if not index_weights:
-                fund_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
-        except Exception as e:
-            fund_warnings.append(f"指数数据获取失败: {e}")
-
-    # V2.12: Optimizer
-    optimizer_instance = None
-    if req.optimizer != "none":
-        from ez.portfolio.optimizer import (
-            MeanVarianceOptimizer, MinVarianceOptimizer,
-            RiskParityOptimizer, OptimizationConstraints,
+    # V2.12.1 reviewer round 7 M1: reuse _build_optimizer_risk_factories so
+    # /run, /walk-forward, /search all construct optimizer + risk manager
+    # identically from the shared PortfolioCommonConfig fields.
+    if req.risk_control and req.drawdown_recovery >= req.max_drawdown:
+        raise HTTPException(
+            422,
+            f"drawdown_recovery({req.drawdown_recovery}) must be < "
+            f"max_drawdown({req.max_drawdown})",
         )
-        industry_map = {}
+    opt_factory, rm_factory, index_weights = _build_optimizer_risk_factories(req)
+    if req.index_benchmark and not index_weights:
+        fund_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
+    if req.optimizer != "none" and req.max_industry_weight < 1.0:
+        # Industry constraint requires fundamental store to have industry data
         try:
             from ez.api.deps import get_fundamental_store
             fstore = get_fundamental_store()
-            if fstore:
-                industry_map = fstore.get_all_industries()
+            if fstore and not fstore.get_all_industries():
+                fund_warnings.append("无行业分类数据，行业约束不生效。请先获取基本面数据。")
         except Exception:
-            pass
-        if not industry_map and req.max_industry_weight < 1.0:
             fund_warnings.append("无行业分类数据，行业约束不生效。请先获取基本面数据。")
-        constraints = OptimizationConstraints(
-            max_weight=req.max_weight,
-            max_industry_weight=req.max_industry_weight,
-            industry_map=industry_map,
-        )
-        # V2.12.1: pass index weights + TE to optimizer
-        opt_extra = {}
-        if index_weights:
-            opt_extra = {"benchmark_weights": index_weights, "max_tracking_error": req.max_tracking_error}
-        opt_map = {
-            "mean_variance": lambda: MeanVarianceOptimizer(
-                risk_aversion=req.risk_aversion, constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra),
-            "min_variance": lambda: MinVarianceOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra),
-            "risk_parity": lambda: RiskParityOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra),
-        }
-        optimizer_instance = opt_map[req.optimizer]()
-
-    # V2.12: Risk control
-    risk_mgr = None
-    if req.risk_control:
-        if req.drawdown_recovery >= req.max_drawdown:
-            raise HTTPException(422, f"drawdown_recovery({req.drawdown_recovery}) must be < max_drawdown({req.max_drawdown})")
-        from ez.portfolio.risk_manager import RiskManager, RiskConfig
-        risk_mgr = RiskManager(RiskConfig(
-            max_drawdown_threshold=req.max_drawdown,
-            drawdown_reduce_ratio=req.drawdown_reduce,
-            drawdown_recovery_ratio=req.drawdown_recovery,
-            max_turnover=req.max_turnover,
-        ))
+    # Single backtest — instantiate factories once
+    optimizer_instance = opt_factory() if opt_factory else None
+    risk_mgr = rm_factory() if rm_factory else None
 
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,
@@ -871,72 +844,18 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
         slippage_rate=req.slippage_rate,
     )
 
-    # V2.12.1 codex follow-up: build optimizer / risk_manager factories matching
-    # the /run endpoint so walk-forward uses the same config as the main backtest.
-    # Factories are used (not instances) because both carry state across days —
-    # every fold needs a fresh copy.
-    index_weights: dict[str, float] = {}
-    if req.index_benchmark:
-        try:
-            from ez.portfolio.index_data import IndexDataProvider
-            idx_provider = IndexDataProvider()
-            index_weights = idx_provider.get_weights(req.index_benchmark)
-            if not index_weights:
-                wf_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
-        except Exception as e:
-            wf_warnings.append(f"指数数据获取失败: {e}")
-
-    optimizer_factory = None
-    if req.optimizer != "none":
-        from ez.portfolio.optimizer import (
-            MeanVarianceOptimizer, MinVarianceOptimizer,
-            RiskParityOptimizer, OptimizationConstraints,
+    # V2.12.1 reviewer round 7 M1: use the shared _build_optimizer_risk_factories
+    # helper so /run, /walk-forward, /search all construct optimizer + risk
+    # manager identically from the shared mixin fields.
+    if req.risk_control and req.drawdown_recovery >= req.max_drawdown:
+        raise HTTPException(
+            422,
+            f"drawdown_recovery({req.drawdown_recovery}) must be < "
+            f"max_drawdown({req.max_drawdown})",
         )
-        industry_map = {}
-        try:
-            from ez.api.deps import get_fundamental_store
-            fstore = get_fundamental_store()
-            if fstore:
-                industry_map = fstore.get_all_industries()
-        except Exception:
-            pass
-        constraints = OptimizationConstraints(
-            max_weight=req.max_weight,
-            max_industry_weight=req.max_industry_weight,
-            industry_map=industry_map,
-        )
-        opt_extra = {}
-        if index_weights:
-            opt_extra = {"benchmark_weights": index_weights, "max_tracking_error": req.max_tracking_error}
-
-        def _make_optimizer():
-            if req.optimizer == "mean_variance":
-                return MeanVarianceOptimizer(
-                    risk_aversion=req.risk_aversion, constraints=constraints,
-                    cov_lookback=req.cov_lookback, **opt_extra)
-            elif req.optimizer == "min_variance":
-                return MinVarianceOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra)
-            else:  # risk_parity
-                return RiskParityOptimizer(constraints=constraints, cov_lookback=req.cov_lookback, **opt_extra)
-        optimizer_factory = _make_optimizer
-
-    risk_manager_factory = None
-    if req.risk_control:
-        if req.drawdown_recovery >= req.max_drawdown:
-            raise HTTPException(
-                422,
-                f"drawdown_recovery({req.drawdown_recovery}) must be < max_drawdown({req.max_drawdown})",
-            )
-        from ez.portfolio.risk_manager import RiskManager, RiskConfig
-
-        def _make_risk_mgr():
-            return RiskManager(RiskConfig(
-                max_drawdown_threshold=req.max_drawdown,
-                drawdown_reduce_ratio=req.drawdown_reduce,
-                drawdown_recovery_ratio=req.drawdown_recovery,
-                max_turnover=req.max_turnover,
-            ))
-        risk_manager_factory = _make_risk_mgr
+    optimizer_factory, risk_manager_factory, index_weights = _build_optimizer_risk_factories(req)
+    if req.index_benchmark and not index_weights:
+        wf_warnings.append(f"无法获取指数 {req.index_benchmark} 成分数据")
 
     try:
         wf_result = portfolio_walk_forward(
@@ -1090,11 +1009,20 @@ def portfolio_search(req: PortfolioSearchRequest):
     _opt_factory, _rm_factory, _index_weights = _build_optimizer_risk_factories(req)
 
     results = []
+    # V2.12.1 reviewer round 7: aggregate optimizer fallback events and engine
+    # risk events across ALL combos so search users see the same warnings
+    # /run and /walk-forward users do. Prior version discarded these per combo,
+    # leaving users unaware when their optimizer silently degenerated to equal-
+    # weight across many combos.
+    search_optimizer_fallback_events: list[dict] = []
+    search_risk_events: list[dict] = []
     for i, params in enumerate(combos):
         try:
             strategy, _ = _create_strategy(req.strategy_name, params,
                                            symbols=req.symbols, start=start, end=end,
                                            market=req.market, skip_ensure=True)
+            combo_opt = _opt_factory() if _opt_factory else None
+            combo_rm = _rm_factory() if _rm_factory else None
             result = run_portfolio_backtest(
                 strategy=strategy, universe=Universe(req.symbols),
                 universe_data=universe_data, calendar=calendar,
@@ -1103,9 +1031,16 @@ def portfolio_search(req: PortfolioSearchRequest):
                 lot_size=req.lot_size, limit_pct=req.limit_pct,
                 benchmark_symbol=req.benchmark_symbol,
                 t_plus_1=(req.market == "cn_stock"),
-                optimizer=_opt_factory() if _opt_factory else None,
-                risk_manager=_rm_factory() if _rm_factory else None,
+                optimizer=combo_opt,
+                risk_manager=combo_rm,
             )
+            # Capture per-combo optimizer fallbacks and engine risk events
+            if combo_opt is not None and combo_opt.fallback_events:
+                for ev in combo_opt.fallback_events:
+                    search_optimizer_fallback_events.append({**ev, "combo": i})
+            for ev in result.risk_events:
+                search_risk_events.append({**ev, "combo": i})
+
             m = result.metrics
             results.append({
                 "rank": 0,
@@ -1130,8 +1065,18 @@ def portfolio_search(req: PortfolioSearchRequest):
 
     resp = {"results": results, "total_combinations": total_before_truncation, "sampled": len(combos), "completed": len(results)}
     all_search_warns = (search_funda_warn or []) + ([search_bench_warn] if search_bench_warn else [])
+    # Surface optimizer fallback events as a search-wide warning
+    if search_optimizer_fallback_events:
+        n = len(search_optimizer_fallback_events)
+        reasons = {ev["reason"] for ev in search_optimizer_fallback_events}
+        all_search_warns.append(
+            f"优化器在参数搜索中共 {n} 次退化为等权 "
+            f"(原因: {', '.join(sorted(reasons))[:200]})"
+        )
     if all_search_warns:
         resp["warnings"] = all_search_warns
+    if search_risk_events:
+        resp["risk_events"] = search_risk_events
     return resp
 
 
