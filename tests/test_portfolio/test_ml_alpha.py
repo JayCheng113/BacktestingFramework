@@ -86,3 +86,67 @@ def test_mlalpha_fresh_instance_has_no_fitted_state():
     assert alpha._current_model is None
     assert alpha._last_retrain_date is None
     assert alpha._retrain_count == 0
+
+
+class TestMLAlphaValidation:
+    """Constructor must reject invalid size parameters early. These are
+    simple ValueError checks — the whitelist / n_jobs safety layer is
+    tested in TestMLAlphaEstimatorWhitelist."""
+
+    @pytest.fixture
+    def valid_kwargs(self):
+        from sklearn.linear_model import Ridge
+        return dict(
+            name="x",
+            model_factory=lambda: Ridge(),
+            feature_fn=lambda df: pd.DataFrame({"f": df["adj_close"].pct_change(1)}).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60,
+            retrain_freq=20,
+            purge_days=5,
+            embargo_days=0,
+        )
+
+    @pytest.mark.parametrize("bad", [0, -1, -100])
+    def test_train_window_must_be_positive(self, valid_kwargs, bad):
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["train_window"] = bad
+        with pytest.raises(ValueError, match="train_window"):
+            MLAlpha(**valid_kwargs)
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_retrain_freq_must_be_positive(self, valid_kwargs, bad):
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["retrain_freq"] = bad
+        with pytest.raises(ValueError, match="retrain_freq"):
+            MLAlpha(**valid_kwargs)
+
+    @pytest.mark.parametrize("bad", [-1, -5])
+    def test_purge_days_must_be_non_negative(self, valid_kwargs, bad):
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["purge_days"] = bad
+        with pytest.raises(ValueError, match="purge_days"):
+            MLAlpha(**valid_kwargs)
+
+    @pytest.mark.parametrize("bad", [-1, -3])
+    def test_embargo_days_must_be_non_negative(self, valid_kwargs, bad):
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["embargo_days"] = bad
+        with pytest.raises(ValueError, match="embargo_days"):
+            MLAlpha(**valid_kwargs)
+
+    def test_purge_days_zero_allowed(self, valid_kwargs):
+        """purge_days=0 is allowed (no purge window). User must then
+        ensure their target_fn doesn't look forward, otherwise there's
+        no protection against label leakage."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        valid_kwargs["purge_days"] = 0
+        alpha = MLAlpha(**valid_kwargs)
+        assert alpha.warmup_period == 60  # train_window + 0 + 0
+
+    def test_embargo_days_zero_default(self, valid_kwargs):
+        """embargo_days defaults to 0 when not provided."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        del valid_kwargs["embargo_days"]
+        alpha = MLAlpha(**valid_kwargs)
+        assert alpha._embargo_days == 0
