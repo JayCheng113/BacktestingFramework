@@ -134,8 +134,8 @@ class Monitor:
                     ),
                 })
 
-            # 4. Consecutive errors
-            if h.error_count > self.DEFAULT_MAX_CONSECUTIVE_ERRORS:
+            # 4. Consecutive errors (alert at 2, scheduler escalates to error at 3)
+            if h.error_count >= self.DEFAULT_MAX_CONSECUTIVE_ERRORS - 1:
                 alerts.append({
                     "deployment_id": h.deployment_id,
                     "alert_type": "consecutive_errors",

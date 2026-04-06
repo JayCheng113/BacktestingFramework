@@ -466,7 +466,7 @@ class TestPauseResume:
         store = _make_store()
         spec = _make_spec()
         store.save_spec(spec)
-        record = _make_record(spec, status="running")
+        record = _make_record(spec, status="paused")  # must be paused to resume
         store.save_record(record)
 
         scheduler = Scheduler(store=store, data_chain=MagicMock())

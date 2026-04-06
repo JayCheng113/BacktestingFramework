@@ -622,9 +622,8 @@ class TestAlertsConsecutiveErrors:
         store.save_record(rec)
         store.update_status(rec.deployment_id, "running")
 
-        # Only 2 errors (threshold is > 3, so 3 errors should still NOT trigger)
-        for _ in range(3):
-            store.increment_error_count(rec.deployment_id)
+        # 1 error — below the alert threshold of >= 2 (alert fires at 2, scheduler escalates at 3)
+        store.increment_error_count(rec.deployment_id)
 
         monitor = Monitor(store)
         alerts = monitor.check_alerts()

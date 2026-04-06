@@ -202,11 +202,21 @@ def create_deployment(req: DeployRequest):
     except Exception as e:
         raise HTTPException(400, f"无法从回测记录构建部署配置: {e}")
 
-    # 3. Create record
+    # 3. Create record (with code_commit for audit trail)
+    def _get_git_sha() -> str:
+        try:
+            import subprocess
+            return subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], text=True, timeout=5
+            ).strip()[:12]
+        except Exception:
+            return ""
+
     record = DeploymentRecord(
         spec_id=spec.spec_id,
         name=req.name,
         source_run_id=req.source_run_id,
+        code_commit=_get_git_sha(),
     )
     # Stash wf_metrics in gate_verdict temporarily as JSON for approve to read
     if req.wf_metrics:

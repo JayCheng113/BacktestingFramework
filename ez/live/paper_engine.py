@@ -54,6 +54,7 @@ class PaperTradingEngine:
         self.prev_weights: dict[str, float] = {}
         self.prev_returns: dict[str, float] = {}
         self.risk_events: list[dict] = []
+        self._last_prices: dict[str, float] = {}  # cache for mark-to-market on data gaps
 
     # ------------------------------------------------------------------
     # Main entry point — called by Scheduler once per trading day
@@ -67,13 +68,14 @@ class PaperTradingEngine:
         """
         universe_data = self._fetch_latest(today)
         if not universe_data:
-            # No data available — record equity as-is (cash only)
-            equity = self._mark_to_market({})
+            # No data available — use last known prices for mark-to-market
+            # (don't estimate holdings at 0, which would falsely crash equity)
+            equity = self._mark_to_market({})  # uses _last_prices cache
             self.equity_curve.append(equity)
             self.dates.append(today)
             return {
                 "date": str(today), "equity": equity, "cash": self.cash,
-                "holdings": dict(self.holdings), "weights": {},
+                "holdings": dict(self.holdings), "weights": self.prev_weights,
                 "prev_returns": {}, "trades": [],
                 "risk_events": [], "rebalanced": False,
             }
@@ -206,10 +208,22 @@ class PaperTradingEngine:
     # ------------------------------------------------------------------
 
     def _mark_to_market(self, prices: dict[str, float]) -> float:
-        """Cash + sum(holdings * price)."""
-        position_value = sum(
-            self.holdings.get(s, 0) * prices.get(s, 0) for s in self.holdings
-        )
+        """Cash + sum(holdings * price).
+
+        For symbols with no current price (data gap / suspension), uses the
+        last known price from _last_prices cache. Never estimates at 0 —
+        that would falsely crash equity and trigger spurious risk events.
+        """
+        position_value = 0.0
+        for s, shares in self.holdings.items():
+            if shares == 0:
+                continue
+            p = prices.get(s)
+            if p is not None and p > 0:
+                self._last_prices[s] = p  # cache for future gaps
+            else:
+                p = self._last_prices.get(s, 0)  # use last known
+            position_value += shares * p
         return self.cash + position_value
 
     def _fetch_latest(self, today: date) -> dict[str, pd.DataFrame]:

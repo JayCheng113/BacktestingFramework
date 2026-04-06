@@ -44,6 +44,7 @@ class Scheduler:
 
     async def resume_all(self) -> int:
         """Startup: restore all status='running' deployments from DB.
+        On engine init failure, rolls back status to 'error' (not phantom running).
         Returns the number of engines successfully restored."""
         records = self.store.list_deployments(status="running")
         restored = 0
@@ -55,10 +56,13 @@ class Scheduler:
                 logger.info("Restored deployment %s", dep_id)
             except Exception:
                 logger.error("Failed to restore deployment %s", dep_id, exc_info=True)
+                # Roll back to error — don't leave phantom "running" in DB
+                self.store.update_status(dep_id, "error", stop_reason="恢复引擎失败")
         return restored
 
     async def start_deployment(self, deployment_id: str) -> None:
-        """Start approved deployment. Checks status=='approved' — hard gate."""
+        """Start approved deployment. Checks status=='approved' — hard gate.
+        Engine init happens BEFORE status update to prevent phantom running."""
         record = self.store.get_record(deployment_id)
         if record is None:
             raise ValueError(f"Deployment {deployment_id!r} not found")
@@ -67,9 +71,10 @@ class Scheduler:
                 f"Cannot start deployment {deployment_id!r}: "
                 f"status is {record.status!r}, must be 'approved'"
             )
-        # Transition to running
-        self.store.update_status(deployment_id, "running")
+        # Build engine FIRST — if it fails, status stays "approved"
         await self._start_engine(deployment_id)
+        # Only update status after engine is successfully running
+        self.store.update_status(deployment_id, "running")
         logger.info("Started deployment %s", deployment_id)
 
     async def pause_deployment(self, deployment_id: str) -> None:
@@ -81,9 +86,16 @@ class Scheduler:
         logger.info("Paused deployment %s", deployment_id)
 
     async def resume_deployment(self, deployment_id: str) -> None:
-        """Resume: remove from _paused, rebuild engine if needed."""
-        if deployment_id in self._paused:
-            self._paused.discard(deployment_id)
+        """Resume: only from 'paused' status. Hard gate — cannot resume stopped/error/pending."""
+        record = self.store.get_record(deployment_id)
+        if record is None:
+            raise ValueError(f"Deployment {deployment_id!r} not found")
+        if record.status != "paused":
+            raise ValueError(
+                f"Cannot resume deployment {deployment_id!r}: "
+                f"status is {record.status!r}, must be 'paused'"
+            )
+        self._paused.discard(deployment_id)
         # Rebuild engine if it was evicted (e.g. after restart)
         if deployment_id not in self._engines:
             await self._start_engine(deployment_id)
