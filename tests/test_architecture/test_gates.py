@@ -134,15 +134,18 @@ class TestLayerDependencies:
         )
 
     def test_future_modules_not_imported_by_core(self):
-        """Core/data/factor/strategy/backtest must not import ez.live/ops (unimplemented)."""
+        """Core/data/factor/strategy/backtest must not import ez.live/ops.
+        API layer (ez.api) is allowed to import from ez.live (it's downstream)."""
         forbidden = ("ez.live", "ez.ops")
+        # Modules allowed to import from live/ops (presentation + live itself)
+        allowed_importers = ("ez.live", "ez.ops", "ez.api")
         violations = []
         for py_file in EZ_ROOT.rglob("*.py"):
             if "__pycache__" in str(py_file):
                 continue
             module_name = _module_name_from_path(py_file)
-            # Only check non-future modules
-            if any(module_name.startswith(f) for f in forbidden):
+            # Skip modules allowed to import from future/live
+            if any(module_name.startswith(a) for a in allowed_importers):
                 continue
             for imp in _extract_ez_imports(py_file):
                 if any(imp.startswith(f) for f in forbidden):
