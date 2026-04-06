@@ -1,11 +1,15 @@
+import { useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import DateRangePicker from './DateRangePicker'
+import { mlAlphaDiagnostics } from '../api'
+import type { DiagnosticsResult } from '../types'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 const CATEGORY_LABELS: Record<string, string> = {
   technical: '量价', value: '估值', quality: '质量', growth: '成长',
-  size: '规模', liquidity: '流动性', leverage: '杠杆', industry: '行业', other: '其他',
+  size: '规模', liquidity: '流动性', leverage: '杠杆', industry: '行业',
+  ml_alpha: 'ML Alpha', other: '其他',
 }
 
 const FACTOR_LABELS: Record<string, string> = {
@@ -276,6 +280,159 @@ export default function PortfolioFactorContent(props: Props) {
             </div>
           )})()}
         </div>
+      )}
+
+      {/* V2.13.2 G2b: ML Alpha Diagnostics */}
+      <MLDiagnosticsPanel
+        symbols={symbols} market={market}
+        startDate={startDate} endDate={endDate}
+        factorCategories={factorCategories}
+      />
+    </div>
+  )
+}
+
+
+// ─── ML Diagnostics Panel ────────────────────────────────────────
+
+const VERDICT_COLORS: Record<string, string> = {
+  healthy: '#22c55e', mild_overfit: '#eab308', severe_overfit: '#ef4444',
+  unstable: '#f97316', insufficient_data: '#6b7280', unknown: '#6b7280',
+}
+const VERDICT_LABELS: Record<string, string> = {
+  healthy: '健康', mild_overfit: '轻度过拟合', severe_overfit: '严重过拟合',
+  unstable: '信号不稳定', insufficient_data: '数据不足', unknown: '未知',
+}
+
+function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategories }: {
+  symbols: string; market: string; startDate: string; endDate: string
+  factorCategories: { key: string; label: string; factors: any[] }[]
+}) {
+  const [selectedAlpha, setSelectedAlpha] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<DiagnosticsResult | null>(null)
+  const [error, setError] = useState('')
+
+  // Get ML alpha names from factorCategories
+  const mlCat = factorCategories.find(c => c.key === 'ml_alpha')
+  const mlAlphas: string[] = mlCat
+    ? (mlCat.factors as any[]).map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
+    : []
+
+  const runDiagnostics = async () => {
+    if (!selectedAlpha) return
+    const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
+    if (symbolList.length === 0) { setError('请填写股票池'); return }
+    setLoading(true); setError(''); setResult(null)
+    try {
+      const resp = await mlAlphaDiagnostics({
+        ml_alpha_name: selectedAlpha,
+        symbols: symbolList,
+        market,
+        start_date: startDate,
+        end_date: endDate,
+      })
+      setResult(resp.data)
+    } catch (e: any) {
+      setError(e.response?.data?.detail || '诊断失败')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="mt-4 p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+      <h4 className="text-sm font-medium mb-2">ML Alpha 诊断</h4>
+      <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
+        评估 ML Alpha 的过拟合风险：训练/验证 IC 衰减 + 特征重要性稳定性 + 换手分析
+      </p>
+
+      {mlAlphas.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          暂无已注册的 ML Alpha。请在代码编辑器中创建并保存 ML Alpha 文件。
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 mb-2">
+            <select value={selectedAlpha} onChange={e => setSelectedAlpha(e.target.value)}
+              className="text-xs px-2 py-1 rounded flex-1" style={inputStyle}>
+              <option value="">选择 ML Alpha...</option>
+              {mlAlphas.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <button onClick={runDiagnostics} disabled={loading || !selectedAlpha}
+              className="text-xs px-3 py-1 rounded font-medium"
+              style={{ backgroundColor: '#059669', color: '#fff', opacity: loading || !selectedAlpha ? 0.5 : 1 }}>
+              {loading ? '诊断中...' : '运行诊断'}
+            </button>
+          </div>
+
+          {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+
+          {result && (
+            <div className="space-y-3">
+              {/* Verdict badge */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium px-2 py-0.5 rounded"
+                  style={{ backgroundColor: VERDICT_COLORS[result.verdict] || '#6b7280', color: '#fff' }}>
+                  {VERDICT_LABELS[result.verdict] || result.verdict}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  过拟合分数: {result.overfitting_score != null ? result.overfitting_score.toFixed(3) : '-'}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  | 换手: {(result.avg_turnover * 100).toFixed(1)}%
+                </span>
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  | 重训次数: {result.retrain_count}
+                </span>
+              </div>
+
+              {/* Warnings */}
+              {result.warnings.length > 0 && (
+                <div className="text-xs p-2 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
+                  {result.warnings.map((w, i) => <p key={i} className="mb-0.5">⚠️ {w}</p>)}
+                </div>
+              )}
+
+              {/* Feature importance CV table */}
+              {Object.keys(result.feature_importance_cv).length > 0 && (
+                <div>
+                  <h5 className="text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>特征重要性稳定性 (CV, 越低越稳)</h5>
+                  <div className="grid grid-cols-2 gap-1 text-xs">
+                    {Object.entries(result.feature_importance_cv).map(([feat, cv]) => (
+                      <div key={feat} className="flex justify-between px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                        <span>{feat}</span>
+                        <span style={{ color: cv != null && cv > 2 ? '#ef4444' : cv != null && cv > 1 ? '#eab308' : '#22c55e' }}>
+                          {cv != null ? cv.toFixed(3) : '-'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* IS/OOS IC chart */}
+              {result.ic_series.length > 0 && (
+                <div>
+                  <h5 className="text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                    IS/OOS IC ({result.ic_series.length} 次重训)
+                    <span className="ml-2">平均 IS: {fmt(result.mean_train_ic)} | OOS: {fmt(result.mean_oos_ic)}</span>
+                  </h5>
+                  <ReactECharts option={{
+                    backgroundColor: 'transparent',
+                    grid: { top: 30, right: 20, bottom: 30, left: 50 },
+                    tooltip: { trigger: 'axis' },
+                    legend: { data: ['IS IC', 'OOS IC'], textStyle: { color: '#8b949e', fontSize: 10 } },
+                    xAxis: { type: 'category', data: result.ic_series.map(e => e.retrain_date), axisLabel: { color: '#8b949e', fontSize: 9 } },
+                    yAxis: { type: 'value', axisLabel: { color: '#8b949e', fontSize: 9 } },
+                    series: [
+                      { name: 'IS IC', type: 'line', data: result.ic_series.map(e => e.train_ic), lineStyle: { color: '#3b82f6' }, itemStyle: { color: '#3b82f6' } },
+                      { name: 'OOS IC', type: 'line', data: result.ic_series.map(e => e.oos_ic), lineStyle: { color: '#f97316' }, itemStyle: { color: '#f97316' } },
+                    ],
+                  }} style={{ height: 200 }} />
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

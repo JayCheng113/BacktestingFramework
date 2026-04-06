@@ -614,6 +614,22 @@ def list_portfolio_strategies():
             if cat_factors:
                 categories.append({"key": cat_key, "label": CATEGORY_LABELS.get(cat_key, cat_key), "factors": cat_factors})
 
+        # V2.13.2 G2b: ML Alpha category — user-registered MLAlpha subclasses
+        try:
+            from ez.portfolio.ml_alpha import MLAlpha
+            ml_alpha_factors = []
+            for f in factor_list:
+                if f in categorized_keys or f == "alpha_combiner":
+                    continue
+                cls = factor_map.get(f)
+                if cls and isinstance(cls, type) and issubclass(cls, MLAlpha):
+                    ml_alpha_factors.append(f)
+                    categorized_keys.add(f)
+            if ml_alpha_factors:
+                categories.append({"key": "ml_alpha", "label": "ML Alpha", "factors": ml_alpha_factors})
+        except ImportError:
+            pass  # sklearn not installed — no ML alphas
+
         # "Other" category: user-registered factors not in any category above
         # Exclude alpha_combiner (special construct, not evaluable as single factor)
         other_factors = [f for f in factor_list if f not in categorized_keys and f != "alpha_combiner"]
