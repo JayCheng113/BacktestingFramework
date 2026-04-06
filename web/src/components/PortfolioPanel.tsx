@@ -68,6 +68,7 @@ export default function PortfolioPanel() {
   const [trackingError, setTrackingError] = useState(5)
   // Parameter search state -- dynamic from schema
   const [searchMode, setSearchMode] = useState(false)
+  const [comboSearch, setComboSearch] = useState(false)
   const [searchGrid, setSearchGrid] = useState<Record<string, string>>({})
   const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({})
   const [searchLoading, setSearchLoading] = useState(false)
@@ -449,18 +450,36 @@ export default function PortfolioPanel() {
         const vals = raw.split(',').filter(Boolean)
         if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
       } else if (schema.type === 'multi_select') {
-        // V2.12.2 codex: `|` separates subsets, `,` separates items within a
-        // subset. User input "ep,bp,sp" → ONE combo with the 3-factor list.
-        // User input "ep,bp|ep,sp" → 2 subsets. Prior version mapped each
-        // comma-separated value to its own single-element list, producing
-        // N single-factor combos — yielding N single-factor backtest runs
-        // instead of the user's intended multi-factor composition.
-        const subsets = raw.split('|')
-          .map(s => s.split(',').map(x => x.trim()).filter(Boolean))
-          .filter(a => a.length > 0)
-        if (subsets.length > 0) {
-          paramGrid[key] = subsets
-          totalCombos *= subsets.length
+        if (comboSearch) {
+          // V2.14: Power-set mode — auto-generate all non-empty subsets
+          const items = raw.split(',').map(x => x.trim()).filter(Boolean)
+          if (items.length > 0) {
+            const subsets: string[][] = []
+            for (let mask = 1; mask < (1 << items.length); mask++) {
+              const subset: string[] = []
+              for (let j = 0; j < items.length; j++) {
+                if (mask & (1 << j)) subset.push(items[j])
+              }
+              subsets.push(subset)
+            }
+            if (subsets.length > 64) {
+              alert(`因子组合数 ${subsets.length} 超过 64 上限，请减少选中因子数`)
+              return
+            }
+            paramGrid[key] = subsets
+            totalCombos *= subsets.length
+          }
+        } else {
+          // V2.12.2 codex: `|` separates subsets, `,` separates items within a
+          // subset. User input "ep,bp,sp" → ONE combo with the 3-factor list.
+          // User input "ep,bp|ep,sp" → 2 subsets.
+          const subsets = raw.split('|')
+            .map(s => s.split(',').map(x => x.trim()).filter(Boolean))
+            .filter(a => a.length > 0)
+          if (subsets.length > 0) {
+            paramGrid[key] = subsets
+            totalCombos *= subsets.length
+          }
         }
       } else if (schema.type === 'int') {
         const vals = raw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
@@ -702,6 +721,7 @@ export default function PortfolioPanel() {
           showRiskControl={showRiskControl} setShowRiskControl={setShowRiskControl}
           showAttribution={showAttribution} setShowAttribution={setShowAttribution}
           searchMode={searchMode} setSearchMode={setSearchMode}
+          comboSearch={comboSearch} setComboSearch={setComboSearch}
           searchGrid={searchGrid} setSearchGrid={setSearchGrid}
           expandedParams={expandedParams} setExpandedParams={setExpandedParams}
           searchLoading={searchLoading} searchResults={searchResults}
