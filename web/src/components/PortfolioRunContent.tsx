@@ -175,7 +175,10 @@ export default function PortfolioRunContent(props: Props) {
     ],
   } : null
 
-  const weightsToShow = fullWeights || result?.weights_history
+  // BUG-07: guard on result existence — never show stale fullWeights when
+  // result is null (input changed, no current run). Timing-proof: doesn't
+  // depend on useEffect ordering or React batching.
+  const weightsToShow = result ? (fullWeights || result.weights_history) : undefined
 
   return (
     <>
@@ -296,9 +299,13 @@ export default function PortfolioRunContent(props: Props) {
                 <label className="block text-xs" style={{ color: 'var(--text-secondary)' }}>指数基准
                   <select value={indexBenchmark} onChange={e => setIndexBenchmark(e.target.value)} className="w-full mt-1 rounded px-2 py-1 text-sm" style={inputStyle}>
                     <option value="">无 (绝对收益)</option>
-                    <option value="000300">沪深300</option>
-                    <option value="000905">中证500</option>
-                    <option value="000852">中证1000</option>
+                    {market === 'cn_stock' ? <>
+                      <option value="000300">沪深300</option>
+                      <option value="000905">中证500</option>
+                      <option value="000852">中证1000</option>
+                    </> : (
+                      <option value="" disabled>暂不支持非A股指数基准</option>
+                    )}
                   </select>
                 </label>
                 {indexBenchmark && (
