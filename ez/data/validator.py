@@ -42,6 +42,11 @@ class DataValidator:
     @staticmethod
     def _check_bar(bar: Bar) -> list[str]:
         errors = []
+        # Reject negative prices (corrupt data from API errors)
+        for field in ("open", "high", "low", "close"):
+            val = getattr(bar, field)
+            if val < 0:
+                errors.append(f"Negative {field} ({val}) for {bar.symbol} at {bar.time}")
         if bar.low > bar.high:
             errors.append(f"OHLC consistency: low ({bar.low}) > high ({bar.high}) for {bar.symbol} at {bar.time}")
         if bar.low > bar.open or bar.low > bar.close:

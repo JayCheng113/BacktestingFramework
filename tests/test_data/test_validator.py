@@ -34,3 +34,19 @@ def test_mixed_valid_invalid():
     result = DataValidator.validate_bars(bars)
     assert result.valid_count == 2
     assert result.invalid_count == 1
+
+
+def test_negative_price_fails():
+    """Negative prices must be rejected by validator."""
+    result = DataValidator.validate_bars([_bar(close=-5.0)])
+    assert result.invalid_count == 1
+    assert any("negative" in e.lower() for e in result.errors)
+
+    result2 = DataValidator.validate_bars([_bar(open=-1.0)])
+    assert result2.invalid_count == 1
+
+    result3 = DataValidator.validate_bars([_bar(high=-0.5)])
+    assert result3.invalid_count == 1
+
+    result4 = DataValidator.validate_bars([_bar(low=-2.0)])
+    assert result4.invalid_count == 1
