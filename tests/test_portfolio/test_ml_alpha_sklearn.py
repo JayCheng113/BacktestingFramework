@@ -779,3 +779,49 @@ class TestMLAlphaEndToEndBacktest:
             assert is_none is True, f"Fold call {idx}: _current_model was not None"
             assert count == 0, f"Fold call {idx}: _retrain_count was {count}"
             assert last_dt is None, f"Fold call {idx}: _last_retrain_date was {last_dt}"
+
+
+class TestStrictLookback:
+    """V2.13.2: strict_lookback=True raises ValueError on insufficient lookback."""
+
+    def test_strict_lookback_raises_on_insufficient(self):
+        from sklearn.linear_model import Ridge
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+        from ez.portfolio.cross_factor import MomentumRank
+
+        data, dates = _make_data(n_days=300, n_stocks=4)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(4)])
+
+        # Strategy with default lookback=252 but factor warmup=20 — OK normally
+        strategy = TopNRotation(factor=MomentumRank(period=20), top_n=3)
+
+        # Create a custom strategy with intentionally LOW lookback
+        class _ShortLookback(TopNRotation):
+            @property
+            def lookback_days(self) -> int:
+                return 10  # way too short for any factor
+
+        short = _ShortLookback(factor=MomentumRank(period=20), top_n=3)
+
+        # strict_lookback=False (default) — should warn but not raise
+        result = run_portfolio_backtest(
+            strategy=short, universe=universe, universe_data=data,
+            calendar=cal, start=dates[60].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000,
+            strict_lookback=False,
+        )
+        assert result is not None  # completed despite warning
+
+        # strict_lookback=True — should raise ValueError
+        import pytest
+        with pytest.raises(ValueError, match="lookback_days"):
+            run_portfolio_backtest(
+                strategy=short, universe=universe, universe_data=data,
+                calendar=cal, start=dates[60].date(), end=dates[-1].date(),
+                freq="weekly", initial_cash=1_000_000,
+                strict_lookback=True,
+            )

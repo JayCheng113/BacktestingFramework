@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
 import DateRangePicker from './DateRangePicker'
 import { mlAlphaDiagnostics } from '../api'
@@ -312,6 +312,20 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<DiagnosticsResult | null>(null)
   const [error, setError] = useState('')
+
+  // Clear stale diagnostics when inputs change — prevents user from
+  // seeing results computed on a different market/symbols/date range.
+  useEffect(() => {
+    setResult(null)
+    setError('')
+  }, [symbols, market, startDate, endDate])
+
+  // Reset selection when available alphas change (e.g., registry refresh)
+  useEffect(() => {
+    setSelectedAlpha('')
+    setResult(null)
+    setError('')
+  }, [factorCategories])
 
   // Get ML alpha names from factorCategories
   const mlCat = factorCategories.find(c => c.key === 'ml_alpha')
