@@ -319,15 +319,29 @@ class DeploymentStore:
     # -- Error tracking ----------------------------------------------------
 
     def save_error(self, deployment_id: str, snapshot_date: date, error: str) -> None:
-        """Save an error snapshot (equity/cash = 0, error text populated). Advances last_processed_date."""
+        """Record an error for this date WITHOUT writing a zero-asset snapshot.
+
+        Only advances last_processed_date and writes error text.
+        Does NOT create/overwrite a snapshot row with equity=0/cash=0 —
+        that would corrupt _restore_full_state on next resume.
+        """
         self._conn.begin()
         try:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO deployment_snapshots
-                   (deployment_id, snapshot_date, equity, cash, holdings, weights, error)
-                   VALUES (?, ?, 0.0, 0.0, '{}', '{}', ?)""",
-                [deployment_id, snapshot_date, error],
-            )
+            # Check if a normal snapshot already exists for this date
+            existing = self._conn.execute(
+                "SELECT 1 FROM deployment_snapshots WHERE deployment_id = ? AND snapshot_date = ?",
+                [deployment_id, snapshot_date],
+            ).fetchone()
+            if existing:
+                # Update error column on existing snapshot (don't overwrite equity/cash)
+                self._conn.execute(
+                    "UPDATE deployment_snapshots SET error = ? WHERE deployment_id = ? AND snapshot_date = ?",
+                    [error, deployment_id, snapshot_date],
+                )
+            # else: no snapshot for this date — that's fine, _restore_full_state
+            # will use the latest successful snapshot
+
+            # Always advance last_processed_date (so scheduler doesn't re-attempt)
             self._conn.execute(
                 "UPDATE deployment_records SET last_processed_date = ? WHERE deployment_id = ?",
                 [snapshot_date, deployment_id],

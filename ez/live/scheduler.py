@@ -62,52 +62,56 @@ class Scheduler:
 
     async def start_deployment(self, deployment_id: str) -> None:
         """Start approved deployment. Checks status=='approved' — hard gate.
-        Engine init happens BEFORE status update to prevent phantom running."""
-        record = self.store.get_record(deployment_id)
-        if record is None:
-            raise ValueError(f"Deployment {deployment_id!r} not found")
-        if record.status != "approved":
-            raise ValueError(
-                f"Cannot start deployment {deployment_id!r}: "
-                f"status is {record.status!r}, must be 'approved'"
-            )
-        # Build engine FIRST — if it fails, status stays "approved"
-        await self._start_engine(deployment_id)
-        # Only update status after engine is successfully running
-        self.store.update_status(deployment_id, "running")
-        logger.info("Started deployment %s", deployment_id)
+        Engine init happens BEFORE status update to prevent phantom running.
+        Locked with same _lock as tick() to prevent concurrent mutation."""
+        async with self._lock:
+            record = self.store.get_record(deployment_id)
+            if record is None:
+                raise ValueError(f"Deployment {deployment_id!r} not found")
+            if record.status != "approved":
+                raise ValueError(
+                    f"Cannot start deployment {deployment_id!r}: "
+                    f"status is {record.status!r}, must be 'approved'"
+                )
+            # Build engine FIRST — if it fails, status stays "approved"
+            await self._start_engine(deployment_id)
+            # Only update status after engine is successfully running
+            self.store.update_status(deployment_id, "running")
+            logger.info("Started deployment %s", deployment_id)
 
     async def pause_deployment(self, deployment_id: str) -> None:
-        """Pause: engine stays in memory, tick skips."""
-        if deployment_id not in self._engines:
-            raise ValueError(f"Deployment {deployment_id!r} not running")
-        self._paused.add(deployment_id)
-        self.store.update_status(deployment_id, "paused")
-        logger.info("Paused deployment %s", deployment_id)
+        """Pause: engine stays in memory, tick skips. Locked."""
+        async with self._lock:
+            if deployment_id not in self._engines:
+                raise ValueError(f"Deployment {deployment_id!r} not running")
+            self._paused.add(deployment_id)
+            self.store.update_status(deployment_id, "paused")
+            logger.info("Paused deployment %s", deployment_id)
 
     async def resume_deployment(self, deployment_id: str) -> None:
-        """Resume: only from 'paused' status. Hard gate — cannot resume stopped/error/pending."""
-        record = self.store.get_record(deployment_id)
-        if record is None:
-            raise ValueError(f"Deployment {deployment_id!r} not found")
-        if record.status != "paused":
-            raise ValueError(
-                f"Cannot resume deployment {deployment_id!r}: "
-                f"status is {record.status!r}, must be 'paused'"
-            )
-        self._paused.discard(deployment_id)
-        # Rebuild engine if it was evicted (e.g. after restart)
-        if deployment_id not in self._engines:
-            await self._start_engine(deployment_id)
-        self.store.update_status(deployment_id, "running")
-        logger.info("Resumed deployment %s", deployment_id)
+        """Resume: only from 'paused' status. Locked."""
+        async with self._lock:
+            record = self.store.get_record(deployment_id)
+            if record is None:
+                raise ValueError(f"Deployment {deployment_id!r} not found")
+            if record.status != "paused":
+                raise ValueError(
+                    f"Cannot resume deployment {deployment_id!r}: "
+                    f"status is {record.status!r}, must be 'paused'"
+                )
+            self._paused.discard(deployment_id)
+            if deployment_id not in self._engines:
+                await self._start_engine(deployment_id)
+            self.store.update_status(deployment_id, "running")
+            logger.info("Resumed deployment %s", deployment_id)
 
     async def stop_deployment(self, deployment_id: str, reason: str) -> None:
-        """Stop: release engine, update DB status."""
-        self._engines.pop(deployment_id, None)
-        self._paused.discard(deployment_id)
-        self.store.update_status(deployment_id, "stopped", stop_reason=reason)
-        logger.info("Stopped deployment %s: %s", deployment_id, reason)
+        """Stop: release engine, update DB status. Locked."""
+        async with self._lock:
+            self._engines.pop(deployment_id, None)
+            self._paused.discard(deployment_id)
+            self.store.update_status(deployment_id, "stopped", stop_reason=reason)
+            logger.info("Stopped deployment %s: %s", deployment_id, reason)
 
     # ------------------------------------------------------------------
     # Tick — daily execution
@@ -263,6 +267,18 @@ class Scheduler:
         engine.dates = dates
         engine.trades = all_trades
         engine.risk_events = all_risk_events
+
+        # Rebuild _last_prices from latest snapshot holdings + weights
+        # This prevents mark-to-market from estimating holdings at 0 after restart
+        if engine.holdings and latest.get("weights"):
+            weights = latest["weights"]
+            equity = latest["equity"]
+            if equity > 0:
+                for sym, shares in engine.holdings.items():
+                    w = weights.get(sym, 0)
+                    if shares > 0 and w > 0:
+                        # Reconstruct price: price = (equity * weight) / shares
+                        engine._last_prices[sym] = (equity * w) / shares
 
         # Replay equity curve into risk manager to restore drawdown state machine
         if engine.risk_manager and equity_curve:

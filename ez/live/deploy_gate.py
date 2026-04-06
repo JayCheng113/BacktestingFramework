@@ -203,7 +203,7 @@ class DeployGate:
         reasons.append(
             GateReason(
                 rule="freq_valid",
-                passed=spec.freq in ("daily", "weekly", "monthly"),
+                passed=spec.freq in ("daily", "weekly", "monthly", "quarterly"),
                 value=0,
                 threshold=0,
                 message=f"调仓频率 {spec.freq}",

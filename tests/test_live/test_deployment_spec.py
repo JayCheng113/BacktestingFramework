@@ -308,15 +308,18 @@ class TestDeploymentStore:
     def test_get_latest_snapshot_none(self, store):
         assert store.get_latest_snapshot("nonexistent") is None
 
-    def test_save_error(self, store, sample_spec):
+    def test_save_error_no_zero_snapshot(self, store, sample_spec):
+        """save_error does NOT create zero-asset snapshot (would corrupt restore).
+        Only advances last_processed_date."""
         store.save_spec(sample_spec)
         store.save_record(DeploymentRecord(
             deployment_id="d1", spec_id=sample_spec.spec_id, name="A",
         ))
         store.save_error("d1", date(2025, 1, 6), "Connection timeout")
         snap = store.get_latest_snapshot("d1")
-        assert snap is not None
-        assert snap["error"] == "Connection timeout"
+        assert snap is None  # no zero-asset snapshot created
+        # But last_processed_date still advanced
+        assert store.get_last_processed_date("d1") == date(2025, 1, 6)
 
     def test_increment_and_reset_error_count(self, store, sample_spec):
         store.save_spec(sample_spec)

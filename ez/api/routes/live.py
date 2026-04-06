@@ -203,6 +203,10 @@ def create_deployment(req: DeployRequest):
         raise HTTPException(400, f"无法从回测记录构建部署配置: {e}")
 
     # 3. Create record (with code_commit for audit trail)
+    # NOTE: code_commit is the git HEAD at deployment creation time, not the
+    # commit that produced the source backtest run (portfolio_runs has no commit
+    # field). This is a best-effort audit trail — for strict reproducibility,
+    # portfolio_runs would need a code_commit column (V3.0 scope).
     def _get_git_sha() -> str:
         try:
             import subprocess
@@ -306,8 +310,8 @@ def approve_deployment(deployment_id: str):
         wf_metrics=wf_metrics,
     )
 
-    # Serialize verdict
-    verdict_json = json.dumps({
+    # Serialize verdict — preserve wf_metrics so retry is possible
+    verdict_data = {
         "passed": verdict.passed,
         "summary": verdict.summary,
         "reasons": [
@@ -320,19 +324,20 @@ def approve_deployment(deployment_id: str):
             }
             for r in verdict.reasons
         ],
-    }, ensure_ascii=False)
+        "wf_metrics": wf_metrics,  # preserve for retry
+    }
+    verdict_json = json.dumps(verdict_data, ensure_ascii=False)
 
     if verdict.passed:
         store.update_status(deployment_id, "approved")
-        # Update gate_verdict with full verdict
         store.update_gate_verdict(deployment_id, verdict_json)
         return {
             "deployment_id": deployment_id,
             "status": "approved",
-            "verdict": json.loads(verdict_json),
+            "verdict": verdict_data,
         }
     else:
-        # Save verdict but keep status as pending
+        # Save verdict (with wf_metrics) but keep status as pending — retryable
         store.update_gate_verdict(deployment_id, verdict_json)
         raise HTTPException(400, detail={
             "message": "部署门禁未通过",
