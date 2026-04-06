@@ -105,3 +105,38 @@ def test_ml_diagnostics_run_returns_result():
     result = diag.run(data, cal, dates[100].date(), dates[-1].date())
     assert isinstance(result, DiagnosticsResult)
     assert result.expected_retrain_freq == 20
+
+
+# ─── Task 2.2: Walk-through loop tests ──────────────────────────────
+
+class TestDiagnosticsWalkthrough:
+    def test_retrain_cadence_matches_expected(self):
+        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        data, cal, dates = _make_universe(n_days=400)
+        alpha = _make_alpha(train_window=60, retrain_freq=20, purge_days=5)
+        diag = MLDiagnostics(alpha)
+        result = diag.run(data, cal, dates[100].date(), dates[-1].date())
+
+        assert result.retrain_count >= 3, f"Expected >= 3 retrains, got {result.retrain_count}"
+        assert result.expected_retrain_freq == 20
+        assert len(result.retrain_dates) == result.retrain_count
+        # Average gap should be close to retrain_freq (±40% tolerance for
+        # calendar vs trading day differences + weekly eval sampling)
+        assert 12 <= result.actual_avg_gap_days <= 30, (
+            f"Expected ~20 day gaps, got {result.actual_avg_gap_days:.1f}"
+        )
+
+    def test_diagnostic_alpha_does_not_modify_original(self):
+        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        data, cal, dates = _make_universe(n_days=400)
+        alpha = _make_alpha()
+        snap_before = alpha.diagnostics_snapshot()
+        assert snap_before["retrain_count"] == 0
+        assert snap_before["has_model"] is False
+
+        diag = MLDiagnostics(alpha)
+        diag.run(data, cal, dates[100].date(), dates[-1].date())
+
+        snap_after = alpha.diagnostics_snapshot()
+        assert snap_after["retrain_count"] == 0, "Original alpha was modified by diagnostics"
+        assert snap_after["has_model"] is False

@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from ez.portfolio.calendar import TradingCalendar
 from ez.portfolio.ml_alpha import MLAlpha
 
 _logger = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ class MLDiagnostics:
     def run(
         self,
         universe_data: dict[str, pd.DataFrame],
-        calendar: "TradingCalendar",
+        calendar: TradingCalendar,
         start: _date,
         end: _date,
         eval_freq: str = "weekly",
@@ -139,8 +140,60 @@ class MLDiagnostics:
         MLAlpha through the date range, capture retrain snapshots, and
         compute all diagnostic metrics.
         """
+        config = self._source_alpha.config_dict()
         result = DiagnosticsResult(
-            expected_retrain_freq=self._source_alpha._retrain_freq,
+            expected_retrain_freq=config["retrain_freq"],
         )
-        # TODO: Tasks 2.2-2.6 implement the walk-through + metrics
+
+        # ── 1. Create a fresh diagnostic alpha (source is untouched) ──
+        diag_alpha = MLAlpha(**config)
+
+        # ── 2. Get eval dates ──
+        eval_dates = calendar.rebalance_dates(start, end, eval_freq)
+        if not eval_dates:
+            _logger.warning("MLDiagnostics: no eval dates in [%s, %s]", start, end)
+            return result
+
+        # ── 3. Walk-through loop ──
+        prev_retrain_count = 0
+        # Collectors for Tasks 2.3-2.5
+        retrain_snapshots: list[dict] = []   # snapshot at each retrain event (Task 2.3)
+        all_scores: list[tuple[_date, pd.Series]] = []  # (eval_date, scores) (Task 2.5)
+
+        for eval_date in eval_dates:
+            # compute() expects a datetime, not a date
+            dt = datetime.combine(eval_date, datetime.min.time())
+            scores = diag_alpha.compute(universe_data, dt)
+            all_scores.append((eval_date, scores))
+
+            # Poll for retrain event
+            snapshot = diag_alpha.diagnostics_snapshot()
+            current_retrain_count = snapshot["retrain_count"]
+
+            if current_retrain_count > prev_retrain_count:
+                # Retrain happened — record the date
+                retrain_date_str = snapshot["last_retrain_date"]
+                result.retrain_dates.append(retrain_date_str)
+                retrain_snapshots.append(snapshot)
+                prev_retrain_count = current_retrain_count
+
+        # ── 4. Retrain cadence metrics ──
+        result.retrain_count = len(result.retrain_dates)
+
+        if result.retrain_count >= 2:
+            # Compute mean calendar-day gap between consecutive retrains
+            retrain_date_objs = [
+                _date.fromisoformat(d) for d in result.retrain_dates
+            ]
+            gaps = [
+                (retrain_date_objs[i + 1] - retrain_date_objs[i]).days
+                for i in range(len(retrain_date_objs) - 1)
+            ]
+            result.actual_avg_gap_days = float(np.mean(gaps))
+        elif result.retrain_count == 1:
+            result.actual_avg_gap_days = 0.0
+
+        # TODO: Task 2.3 — feature importance stability (uses retrain_snapshots)
+        # TODO: Task 2.5 — turnover analysis (uses all_scores)
+
         return result
