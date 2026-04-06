@@ -143,7 +143,7 @@ class AKShareDataProvider(DataProvider):
                     open=raw["open"] if raw else float(open_v),
                     high=raw["high"] if raw else float(high_v),
                     low=raw["low"] if raw else float(low_v),
-                    close=raw["close"] if raw else adj_close,   # raw price for limit checks
+                    close=raw["close"] if raw else float("nan"),  # raw price for limit checks; NaN when unavailable
                     adj_close=adj_close,                         # forward-adjusted for returns
                     volume=raw["volume"] if raw else int(float(volume_v)),
                 ))

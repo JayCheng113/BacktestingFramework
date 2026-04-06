@@ -59,7 +59,8 @@ class TestAKShareProvider:
         assert b.high == 10.7        # from raw
 
     def test_raw_fallback_to_adj(self):
-        """When raw data is empty, fall back to adj values."""
+        """When raw data is empty, close is NaN (raw unavailable)."""
+        import math
         from ez.data.providers.akshare_provider import AKShareDataProvider
 
         df_adj = pd.DataFrame({
@@ -73,8 +74,27 @@ class TestAKShareProvider:
             bars = p.get_kline("000001.SZ", "cn_stock", "daily", date(2024, 1, 1), date(2024, 1, 3))
 
         assert len(bars) == 1
-        assert bars[0].close == 11.0  # fallback to adj
+        assert math.isnan(bars[0].close)
         assert bars[0].adj_close == 11.0
+
+    def test_raw_fetch_exception_produces_nan_close(self):
+        """When raw fetch raises exception, close must be NaN, not qfq adj_close."""
+        import math
+        from ez.data.providers.akshare_provider import AKShareDataProvider
+
+        df_adj = pd.DataFrame({
+            "日期": ["2024-01-02"], "开盘": [10.5], "收盘": [11.0],
+            "最高": [11.2], "最低": [10.3], "成交量": [100000],
+        })
+
+        with patch("akshare.stock_zh_a_hist", side_effect=[df_adj, RuntimeError("raw failed")]):
+            p = AKShareDataProvider()
+            p._last_call_time = 0
+            bars = p.get_kline("000001.SZ", "cn_stock", "daily", date(2024, 1, 1), date(2024, 1, 3))
+
+        assert len(bars) == 1
+        assert bars[0].adj_close == 11.0
+        assert math.isnan(bars[0].close), f"close should be NaN when raw fetch fails, got {bars[0].close}"
 
     def test_period_passed_through(self):
         """Verify weekly/monthly period is passed, not hardcoded daily."""
