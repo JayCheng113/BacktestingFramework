@@ -39,6 +39,7 @@ _PORTFOLIO_STRATEGIES_DIR = _user_dir_root() / "portfolio_strategies"
 _CROSS_FACTORS_DIR = _user_dir_root() / "cross_factors"
 
 _FACTORS_DIR = _user_dir_root() / "factors"
+_ML_ALPHAS_DIR = _user_dir_root() / "ml_alphas"  # V2.13 Phase 4
 
 
 def _is_frozen() -> bool:
@@ -76,6 +77,7 @@ _KIND_DIR_MAP = {
     "factor": _FACTORS_DIR,
     "portfolio_strategy": _PORTFOLIO_STRATEGIES_DIR,
     "cross_factor": _CROSS_FACTORS_DIR,
+    "ml_alpha": _ML_ALPHAS_DIR,  # V2.13 Phase 4
 }
 
 
@@ -246,6 +248,7 @@ def get_template(kind: str = "strategy", class_name: str = "", description: str 
         "factor": ("MyFactor", "Custom factor"),
         "portfolio_strategy": ("MyPortfolioStrategy", "Custom portfolio strategy"),
         "cross_factor": ("MyCrossFactor", "Custom cross-sectional factor"),
+        "ml_alpha": ("MyMLAlpha", "Custom ML alpha factor"),  # V2.13 Phase 4
     }
     default_name, default_desc = defaults.get(kind, ("MyStrategy", "Custom strategy"))
     if not class_name:
@@ -261,6 +264,15 @@ def get_template(kind: str = "strategy", class_name: str = "", description: str 
     if kind == "cross_factor":
         factor_name = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
         return _CROSS_FACTOR_TEMPLATE.format(class_name=class_name, description=description, factor_name=factor_name)
+    if kind == "ml_alpha":
+        # V2.13 Phase 4: use ML_ALPHA_TEMPLATE from ez.portfolio.ml_alpha
+        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE
+        factor_name = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
+        return ML_ALPHA_TEMPLATE.format(
+            class_name=class_name,
+            description=description,
+            name=factor_name,
+        )
     return _STRATEGY_TEMPLATE.format(class_name=class_name, description=description)
 
 
@@ -821,6 +833,33 @@ for k, v in w.items():
 assert sum(w.values()) <= 1.001, f'Weights sum {{sum(w.values())}} > 1.0'
 print(f'OK: {{cls.__name__}} weights={{w}}')
 """
+    elif kind == "ml_alpha":
+        # V2.13 Phase 4: MLAlpha contract test. MLAlpha subclasses need
+        # sklearn AND do a whitelist probe in __init__, so the subprocess
+        # must have sklearn installed. The test validates:
+        # 1. File exports an MLAlpha subclass
+        # 2. Subclass can be instantiated (triggers whitelist + n_jobs check)
+        # 3. compute() returns a pd.Series on mock data
+        test_code = f"""
+import importlib.util, numpy as np, pandas as pd
+from datetime import datetime
+spec = importlib.util.spec_from_file_location('_check', {safe_path_repr})
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+from ez.portfolio.ml_alpha import MLAlpha
+classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, MLAlpha) and v is not MLAlpha]
+assert classes, 'No MLAlpha subclass found'
+cls = classes[0]
+inst = cls()  # triggers _assert_supported_estimator (whitelist + n_jobs)
+rng = np.random.default_rng(42)
+dates = pd.date_range('2024-01-01', periods=200, freq='B')
+data = {{}}
+for s in ['T001', 'T002', 'T003']:
+    p = 100 * np.cumprod(1 + rng.normal(0.0005, 0.01, 200))
+    data[s] = pd.DataFrame({{'open': p, 'high': p*1.01, 'low': p*0.99, 'close': p, 'adj_close': p, 'volume': rng.integers(100000, 999999, 200).astype(float)}}, index=dates)
+result = inst.compute(data, datetime(2024, 7, 1))
+assert isinstance(result, pd.Series), f'compute must return Series, got {{type(result)}}'
+print(f'OK: {{cls.__name__}} warmup={{inst.warmup_period}}')
+"""
     else:  # cross_factor
         test_code = f"""
 import importlib.util, numpy as np, pandas as pd
@@ -873,7 +912,9 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
             old_full_keys = [k for k, v in PortfolioStrategy._registry_by_key.items() if v.__module__ == module_name]
             for k in old_full_keys:
                 del PortfolioStrategy._registry_by_key[k]
-        elif kind == "cross_factor":
+        elif kind in ("cross_factor", "ml_alpha"):
+            # V2.13 Phase 4: ml_alpha is a CrossSectionalFactor subclass,
+            # shares the same dual-dict registry. Same cleanup path.
             from ez.portfolio.cross_factor import CrossSectionalFactor
             # V2.12.2 codex: dual-dict registry — clean BOTH dicts or the
             # full-key dict leaks zombies on hot-reload.

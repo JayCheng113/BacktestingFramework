@@ -58,7 +58,9 @@ def _get_all_registries_for_kind(kind: str) -> list[dict]:
     elif kind == "portfolio_strategy":
         from ez.portfolio.portfolio_strategy import PortfolioStrategy
         return [PortfolioStrategy._registry, PortfolioStrategy._registry_by_key]
-    elif kind == "cross_factor":
+    elif kind in ("cross_factor", "ml_alpha"):
+        # V2.13 Phase 4: ml_alpha is a CrossSectionalFactor subclass,
+        # shares the same dual-dict registry. Same cleanup path.
         from ez.portfolio.cross_factor import CrossSectionalFactor
         return [CrossSectionalFactor._registry, CrossSectionalFactor._registry_by_key]
     return []

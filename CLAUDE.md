@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 2002 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.13 | Tests: 2009 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -147,7 +147,8 @@ No version tag without review pass. No push without critical issues resolved.
   - `DiagnosticsResult.to_dict()` JSON-serializable (numpy 标量自动转换).
   - **21 tests**, 覆盖 skeleton/cadence/importance/IC/turnover/verdict/config/e2e-JSON. 1942 → 1963 (+21).
 - **V2.13 Phase 3 — StrategyEnsemble** (`ez/portfolio/ensemble.py`, plan `docs/superpowers/plans/2026-04-06-v213-phase3-strategy-ensemble.md`): D5 multi-strategy composition-layer heuristic orchestrator (**NOT** a statistical meta-optimizer). 4 modes: `equal` (exact) / `manual` (exact) / `return_weighted` (proxy, not IC) / `inverse_vol` (proxy, not risk parity). Sub-strategy `copy.deepcopy` at construction (ownership isolation). Hypothetical-return ledger in `self.state` (pure dict/list/float). Combination Formula: cash intent preserved, exception ≠ no-signal, per-sub one-shot warning. `correlation_warnings` (warn-only, Pearson, structured payload `{sub_i, sub_j, correlation, n_samples}`). Nested ensembles: "only leaf adds buffer" lookback rule, inner state isolated. Registry popped (Python-only, no dropdown). **38 tests**, 覆盖 skeleton/validation/deepcopy/equal/manual/ledger/return_weighted/inverse_vol/warmup-dual-gate/correlation/nesting/e2e-backtest/e2e-walk-forward/all-empty-cash/exception-vs-no-signal/nan-inf-weights/defensive-copy/corr-threshold-range/sub-output-nan-filter. 1964 → 2002 (+38).
-- **Next: V2.13 Phase 4** — Sandbox `ml_alpha` kind (F7). Phase 5 (API endpoints), Phase 6 (Frontend) 待实施
+- **V2.13 Phase 4 — Sandbox `ml_alpha` kind** (`ez/agent/sandbox.py` + `ez/api/routes/code.py`): F7 最小可用入口. `_KIND_DIR_MAP` 新增 `"ml_alpha" → ml_alphas/` 目录. `get_template("ml_alpha")` 用 `ML_ALPHA_TEMPLATE` 生成含 Ridge + feature_fn + target_fn 的完整文件. `_reload_portfolio_code` 和 `_run_portfolio_contract_test` 路由 `ml_alpha → cross_factor` 分支 (MLAlpha IS CrossSectionalFactor). `_get_all_registries_for_kind("ml_alpha")` 返回 CrossSectionalFactor 双字典. 7 sandbox tests. 1964 → 2009 (+7 sandbox + Phase 3 的 38).
+- **V2.13 核心能力层完成**: F8 ✓ F9 ✓ D5 ✓ F7 ✓. Phase 5 (API endpoints) 和 Phase 6 (Frontend panel) defer 到 V2.13.1 作为 UX 增强
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
