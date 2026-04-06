@@ -94,11 +94,14 @@ class UnsupportedEstimatorError(TypeError):
 
 
 def _build_supported_estimator_set() -> frozenset[type]:
-    """Construct the V1 whitelist of sklearn estimator classes.
+    """Construct the estimator whitelist.
 
     Built lazily (not at module import) so that ``import
     ez.portfolio.ml_alpha`` works even when sklearn is not installed —
     only the first ``MLAlpha`` construction triggers the sklearn import.
+
+    V1 core: 7 sklearn classes (always required).
+    V2.14 extensions: LightGBM + XGBoost (optional, graceful skip).
 
     Adding a class to this set is NOT free: it requires
     (1) a deepcopy/determinism regression test in
@@ -123,7 +126,8 @@ def _build_supported_estimator_set() -> frozenset[type]:
             "scikit-learn>=1.5 is required for MLAlpha. "
             "Install with: pip install -e '.[ml]'"
         ) from e
-    return frozenset({
+
+    estimators: set[type] = {
         Ridge,
         Lasso,
         LinearRegression,
@@ -131,7 +135,23 @@ def _build_supported_estimator_set() -> frozenset[type]:
         DecisionTreeRegressor,
         RandomForestRegressor,
         GradientBoostingRegressor,
-    })
+    }
+
+    # V2.14: LightGBM (optional — skip if not installed)
+    try:
+        from lightgbm import LGBMRegressor, LGBMClassifier
+        estimators.update({LGBMRegressor, LGBMClassifier})
+    except ImportError:
+        pass
+
+    # V2.14: XGBoost (optional — skip if not installed)
+    try:
+        from xgboost import XGBRegressor, XGBClassifier
+        estimators.update({XGBRegressor, XGBClassifier})
+    except ImportError:
+        pass
+
+    return frozenset(estimators)
 
 
 _SUPPORTED_ESTIMATOR_CACHE: frozenset[type] | None = None
@@ -166,6 +186,14 @@ def _assert_supported_estimator(instance: Any) -> None:
             f"Estimator {cls.__name__} has n_jobs={n_jobs}, but the "
             f"sandbox blocks `multiprocessing`. Construct with "
             f"n_jobs=1 explicitly."
+        )
+
+    # V2.14: block GPU tree methods (XGBoost/LightGBM)
+    tree_method = getattr(instance, "tree_method", None)
+    if tree_method and "gpu" in str(tree_method).lower():
+        raise UnsupportedEstimatorError(
+            f"Estimator {cls.__name__} uses GPU tree_method='{tree_method}'. "
+            f"Only CPU methods are allowed in the sandbox."
         )
 
 
