@@ -76,6 +76,7 @@ def run_portfolio_backtest(
     optimizer: PortfolioOptimizer | None = None,  # V2.12: 组合优化器
     risk_manager: RiskManager | None = None,      # V2.12: 风控管理器
     t_plus_1: bool = True,  # V2.12.1 codex: A-share only; set False for US/HK
+    strict_lookback: bool = False,  # V2.13.2 G1.4: raise on insufficient lookback
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -114,13 +115,18 @@ def run_portfolio_backtest(
         if req_warmups:
             max_req = max(req_warmups)
             if strategy_lb < max_req:
-                import logging as _lg
-                _lg.getLogger(__name__).warning(
-                    "Strategy %s lookback_days=%d is less than max factor "
-                    "warmup_period=%d — early rebalances will see truncated "
-                    "history. Set strategy.lookback_days >= %d.",
-                    type(strategy).__name__, strategy_lb, max_req, max_req,
+                msg = (
+                    f"Strategy {type(strategy).__name__} lookback_days="
+                    f"{strategy_lb} is less than max factor warmup_period="
+                    f"{max_req} — early rebalances will see truncated "
+                    f"history. Set strategy.lookback_days >= {max_req}."
                 )
+                if strict_lookback:
+                    raise ValueError(msg)
+                import logging as _lg
+                _lg.getLogger(__name__).warning(msg)
+    except ValueError:
+        raise  # strict_lookback ValueError must propagate
     except Exception:
         # Defensive: validation must never fail the backtest itself
         pass

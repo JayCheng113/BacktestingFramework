@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ez.api.deps import get_chain
 from ez.portfolio.calendar import TradingCalendar
@@ -212,7 +212,11 @@ def _compute_alpha_weights(factors, symbols, market, start, end, method,
     from ez.factor.builtin.fundamental import FundamentalCrossFactor, NEEDS_FINA
 
     train_end = start - timedelta(days=1)
-    train_start = start - timedelta(days=365)
+    # V2.13.2 G1.3: dynamic training window. Previously fixed at 365 days,
+    # which starved long-warmup factors (e.g., MLAlpha(train_window=400)).
+    max_warmup = _max_factor_warmup(factors)
+    train_days = max(365, max_warmup * 2)
+    train_start = start - timedelta(days=train_days)
 
     try:
         # Dynamic lookback: respect factor warmup instead of hardcoded 300
@@ -275,6 +279,17 @@ class PortfolioCommonConfig(BaseModel):
     sell_commission_rate: float = Field(default=0.0003, ge=0)
     min_commission: float = Field(default=5.0, ge=0)
     stamp_tax_rate: float = Field(default=0.0005, ge=0)
+    # V2.13.2 G1.2: stamp_tax is A-share specific (0.05% sell-side).
+    # For non-CN markets, zero it unless user explicitly set it.
+    # Uses model_fields_set to distinguish "user passed 0.0005" from
+    # "Pydantic filled in the default 0.0005".
+
+    @model_validator(mode="after")
+    def _gate_stamp_tax_by_market(self):
+        market = getattr(self, "market", "cn_stock")
+        if market != "cn_stock" and "stamp_tax_rate" not in self.model_fields_set:
+            self.stamp_tax_rate = 0.0
+        return self
     slippage_rate: float = Field(default=0.0, ge=0)
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)

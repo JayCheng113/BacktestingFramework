@@ -626,6 +626,64 @@ class TestCorrelationWarnings:
 
 # ─── Task 3.5: Nested ensembles + e2e ────────────────────────────
 
+class TestCorrelationDedup:
+    """V2.13.2 G3.5: correlation warnings must not grow on repeated
+    generate_weights calls — the warned_pairs dedup should prevent
+    re-emitting the same (i, j) pair."""
+
+    def test_correlation_warning_not_duplicated_across_calls(self):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        # Two identical subs → will trigger corr warning after warmup
+        sub_a = _StaticStrategy({"A": 1.0})
+        sub_b = _StaticStrategy({"A": 1.0})  # identical weights
+        data, dates = _make_universe(n_days=100, symbols=["A"])
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="equal",
+            warmup_rebalances=3,
+            correlation_threshold=0.5,  # low threshold to trigger
+        )
+        # Drive through enough rebalances for warmup + multiple post-warmup calls
+        for i in range(0, 80, 5):
+            ens.generate_weights(data, dates[i].to_pydatetime(), {}, {})
+
+        # Should have exactly 1 warning (not one per call)
+        warnings = ens.state["correlation_warnings"]
+        assert len(warnings) == 1, (
+            f"Expected exactly 1 deduped warning, got {len(warnings)}"
+        )
+
+
+class TestDeepcopPopulatedEnsemble:
+    """V2.13.2 G3.6: copy.deepcopy on an ensemble with populated state
+    must produce fully independent copies."""
+
+    def test_deepcopy_populated_ensemble(self):
+        import copy
+        from ez.portfolio.ensemble import StrategyEnsemble
+
+        sub = _StaticStrategy({"A": 1.0})
+        data, dates = _make_universe(n_days=30, symbols=["A"])
+        ens = StrategyEnsemble(strategies=[sub], mode="equal")
+
+        # Populate state
+        ens.generate_weights(data, dates[5].to_pydatetime(), {}, {})
+        ens.generate_weights(data, dates[15].to_pydatetime(), {}, {})
+        assert len(ens.state["sub_target_weights"][0]) >= 2
+
+        # Deepcopy
+        clone = copy.deepcopy(ens)
+
+        # Independent state
+        assert clone.state is not ens.state
+        assert clone._strategies is not ens._strategies
+        assert clone._sub_exception_warned is not ens._sub_exception_warned
+
+        # Mutating clone doesn't affect original
+        clone.state["sub_hypothetical_returns"][0].append(999.0)
+        assert 999.0 not in ens.state["sub_hypothetical_returns"][0]
+
+
 class TestNestedEnsembles:
     def test_nested_ensemble_works_recursively(self):
         """StrategyEnsemble([EnsembleA, EnsembleB, Static]) works."""

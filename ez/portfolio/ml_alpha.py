@@ -344,6 +344,7 @@ class MLAlpha(CrossSectionalFactor):
         self._target_fn_exception_warned: bool = False
         self._predict_feature_exception_warned: bool = False
         self._predict_feature_type_warned: bool = False
+        self._predict_none_warned: bool = False
         self._predict_call_exception_warned: bool = False
         self._empty_panel_warned: bool = False
         self._empty_predict_warned: bool = False
@@ -915,6 +916,13 @@ class MLAlpha(CrossSectionalFactor):
                 continue
 
             if sym_features is None:
+                if not self._predict_none_warned:
+                    _logger.warning(
+                        "MLAlpha[%s] feature_fn returned None for symbol %s "
+                        "at predict stage. Skipping this symbol. (one-shot)",
+                        self._name, sym,
+                    )
+                    self._predict_none_warned = True
                 continue
             if not isinstance(sym_features, pd.DataFrame):
                 # V2.13 round 3 codex-MH: feature_fn returned a non-DataFrame

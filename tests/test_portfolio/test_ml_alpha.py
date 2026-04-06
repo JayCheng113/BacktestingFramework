@@ -541,6 +541,33 @@ class TestMLAlphaLazyRetrain:
         alpha.compute(data, datetime(2022, 9, 1))
         assert alpha._retrain_count == 2
 
+    def test_retrain_at_exact_boundary(self):
+        """V2.13.2 G3.4: elapsed == retrain_freq must trigger retrain
+        (>= not >). Tests the exact boundary that previous test missed."""
+        from ez.portfolio.ml_alpha import MLAlpha
+        from sklearn.linear_model import Ridge
+
+        data, dates = _make_universe_df(n_days=200)
+        alpha = MLAlpha(
+            name="t",
+            model_factory=lambda: Ridge(alpha=1.0),
+            feature_fn=lambda df: pd.DataFrame({
+                "f": df["adj_close"].pct_change(1),
+            }).dropna(),
+            target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+            train_window=60,
+            retrain_freq=20,
+            purge_days=5,
+        )
+        alpha.compute(data, datetime(2022, 8, 1))
+        assert alpha._retrain_count == 1
+
+        # Exactly 20 calendar days later — must retrain (>= not >)
+        alpha.compute(data, datetime(2022, 8, 21))
+        assert alpha._retrain_count == 2, (
+            "elapsed == retrain_freq should trigger retrain"
+        )
+
 
 class TestBuildTrainingPanel:
     """Training panel must exclude samples within purge+embargo window."""

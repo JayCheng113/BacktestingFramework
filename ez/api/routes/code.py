@@ -19,27 +19,6 @@ from ez.agent.sandbox import (
 )
 
 
-def _get_registry_for_kind(kind: str) -> dict | None:
-    """Get the name-keyed _registry dict for a given kind (read path).
-
-    Read callers can use this single dict since it is the backward-compat
-    view. Cleanup callers must use `_get_all_registries_for_kind` instead.
-    """
-    if kind == "strategy":
-        from ez.strategy.base import Strategy
-        return Strategy._registry
-    elif kind == "factor":
-        from ez.factor.base import Factor
-        return Factor._registry
-    elif kind == "portfolio_strategy":
-        from ez.portfolio.portfolio_strategy import PortfolioStrategy
-        return PortfolioStrategy._registry
-    elif kind == "cross_factor":
-        from ez.portfolio.cross_factor import CrossSectionalFactor
-        return CrossSectionalFactor._registry
-    return None
-
-
 def _get_all_registries_for_kind(kind: str) -> list[dict]:
     """Get ALL registry dicts for a given kind (cleanup path).
 
@@ -78,7 +57,7 @@ _STRATEGIES_DIR = _PROJECT_ROOT / "strategies"
 
 
 class TemplateRequest(BaseModel):
-    kind: str = "strategy"  # "strategy" | "factor" | "portfolio_strategy" | "cross_factor"
+    kind: str = "strategy"  # "strategy" | "factor" | "portfolio_strategy" | "cross_factor" | "ml_alpha"
     class_name: str = ""
     description: str = ""
 
@@ -122,7 +101,7 @@ def save_code(req: SaveRequest):
 
 @router.get("/files")
 def list_files(kind: str = Query(default="")):
-    """List user code files. kind: empty/strategy/factor=strategies, portfolio_strategy, cross_factor."""
+    """List user code files. kind: empty/strategy/factor=strategies, portfolio_strategy, cross_factor, ml_alpha."""
     if kind in ("portfolio_strategy", "cross_factor", "factor", "ml_alpha"):
         return list_portfolio_files(kind)
     if kind and kind not in ("", "strategy"):
@@ -259,11 +238,21 @@ def get_registry():
                 builtin.append(info)
         return {"builtin": builtin, "user": user}
 
+    # V2.13.2 G1.1: ml_alpha is a 5th category. MLAlpha subclasses live
+    # in CrossSectionalFactor registry but have module prefix "ml_alphas."
+    # (not "cross_factors."). Split them so the frontend can distinguish.
+    cross_reg = CrossSectionalFactor.get_registry()
+    cross_only = {k: v for k, v in cross_reg.items()
+                  if not (v.__module__ or "").startswith("ml_alphas.")}
+    ml_only = {k: v for k, v in cross_reg.items()
+               if (v.__module__ or "").startswith("ml_alphas.")}
+
     return {
         "strategy": _classify(Strategy.get_registry(), ("strategies.",)),
         "factor": _classify(Factor.get_registry(), ("factors.",)),
         "portfolio_strategy": _classify(PortfolioStrategy.get_registry(), ("portfolio_strategies.",)),
-        "cross_factor": _classify(CrossSectionalFactor.get_registry(), ("cross_factors.",)),
+        "cross_factor": _classify(cross_only, ("cross_factors.",)),
+        "ml_alpha": _classify(ml_only, ("ml_alphas.",)),
     }
 
 
