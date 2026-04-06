@@ -15,3 +15,6 @@ from ez.portfolio.ml_diagnostics import (  # noqa: F401
     DiagnosticsResult,
     DiagnosticsConfig,
 )
+
+# V2.13 Phase 3: StrategyEnsemble (multi-strategy composition)
+from ez.portfolio.ensemble import StrategyEnsemble  # noqa: F401
