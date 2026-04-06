@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 1993 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.12.2 | Tests: 1996 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -146,7 +146,7 @@ No version tag without review pass. No push without critical issues resolved.
   - **Verdict**: `DiagnosticsConfig` 参数化阈值 (severe_overfit=0.5, mild_overfit=0.2, high_turnover=0.6), 生成 human-readable warnings.
   - `DiagnosticsResult.to_dict()` JSON-serializable (numpy 标量自动转换).
   - **21 tests**, 覆盖 skeleton/cadence/importance/IC/turnover/verdict/config/e2e-JSON. 1942 → 1963 (+21).
-- **V2.13 Phase 3 — StrategyEnsemble** (`ez/portfolio/ensemble.py`, plan `docs/superpowers/plans/2026-04-06-v213-phase3-strategy-ensemble.md`): D5 multi-strategy composition-layer heuristic orchestrator (**NOT** a statistical meta-optimizer). 4 modes: `equal` (exact) / `manual` (exact) / `return_weighted` (proxy, not IC) / `inverse_vol` (proxy, not risk parity). Sub-strategy `copy.deepcopy` at construction (ownership isolation). Hypothetical-return ledger in `self.state` (pure dict/list/float). Combination Formula: cash intent preserved, exception ≠ no-signal, per-sub one-shot warning. `correlation_warnings` (warn-only, Pearson, structured payload `{sub_i, sub_j, correlation, n_samples}`). Nested ensembles: "only leaf adds buffer" lookback rule, inner state isolated. Registry popped (Python-only, no dropdown). **29 tests**, 覆盖 skeleton/validation/deepcopy/equal/manual/ledger/return_weighted/inverse_vol/warmup/correlation/nesting/e2e. 1964 → 1993 (+29).
+- **V2.13 Phase 3 — StrategyEnsemble** (`ez/portfolio/ensemble.py`, plan `docs/superpowers/plans/2026-04-06-v213-phase3-strategy-ensemble.md`): D5 multi-strategy composition-layer heuristic orchestrator (**NOT** a statistical meta-optimizer). 4 modes: `equal` (exact) / `manual` (exact) / `return_weighted` (proxy, not IC) / `inverse_vol` (proxy, not risk parity). Sub-strategy `copy.deepcopy` at construction (ownership isolation). Hypothetical-return ledger in `self.state` (pure dict/list/float). Combination Formula: cash intent preserved, exception ≠ no-signal, per-sub one-shot warning. `correlation_warnings` (warn-only, Pearson, structured payload `{sub_i, sub_j, correlation, n_samples}`). Nested ensembles: "only leaf adds buffer" lookback rule, inner state isolated. Registry popped (Python-only, no dropdown). **32 tests**, 覆盖 skeleton/validation/deepcopy/equal/manual/ledger/return_weighted/inverse_vol/warmup-dual-gate/correlation/nesting/e2e/all-empty-cash/exception-vs-no-signal. 1964 → 1996 (+32).
 - **Next: V2.13 Phase 4** — Sandbox `ml_alpha` kind (F7). Phase 5 (API endpoints), Phase 6 (Frontend) 待实施
 
 ## A 股约束 (贯穿所有版本)
