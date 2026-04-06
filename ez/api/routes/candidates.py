@@ -19,7 +19,7 @@ router = APIRouter()
 
 class ParamRangeRequest(BaseModel):
     name: str
-    values: list[int | float]
+    values: list[int | float | str | bool]
 
 
 class SearchRequest(BaseModel):

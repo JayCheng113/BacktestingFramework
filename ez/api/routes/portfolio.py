@@ -485,6 +485,41 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
             warnings = _ensure_fundamental_data(symbols, start, end, need_fina=need_fina)
         top_n = p.pop("top_n", 10)
         return MultiFactorRotation(factors=factors, top_n=top_n, **p), warnings
+    elif name == "StrategyEnsemble":
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_defs: list[dict] = p.pop("sub_strategies", [])
+        if not sub_defs or len(sub_defs) < 2:
+            raise HTTPException(400, "StrategyEnsemble 需要至少 2 个子策略")
+        mode = p.pop("mode", "equal")
+        ensemble_weights = p.pop("ensemble_weights", None)
+        warmup_rebalances = p.pop("warmup_rebalances", 8)
+        correlation_threshold = p.pop("correlation_threshold", 0.9)
+
+        sub_strategies = []
+        all_warnings: list[str] = []
+        for sub_def in sub_defs:
+            sub_name = sub_def.get("name", "")
+            sp = dict(sub_def.get("params", {}))
+            if not sub_name:
+                raise HTTPException(400, "子策略 name 不能为空")
+            sub_strat, sub_warn = _create_strategy(
+                sub_name, sp, symbols=symbols, start=start, end=end,
+                market=market, skip_ensure=skip_ensure,
+            )
+            sub_strategies.append(sub_strat)
+            all_warnings.extend(sub_warn)
+
+        try:
+            ensemble = StrategyEnsemble(
+                strategies=sub_strategies,
+                mode=mode,
+                ensemble_weights=ensemble_weights,
+                warmup_rebalances=warmup_rebalances,
+                correlation_threshold=correlation_threshold,
+            )
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e))
+        return ensemble, all_warnings
     elif name in PortfolioStrategy.get_registry():
         cls = PortfolioStrategy.get_registry()[name]
         return cls(**p), []
@@ -645,6 +680,20 @@ def list_portfolio_strategies():
 
     except ImportError:
         categories = [{"key": "technical", "label": "量价 (Technical)", "factors": factor_list}]
+
+    # V2.14 B3: Append StrategyEnsemble metadata (not in registry)
+    result.append({
+        "name": "StrategyEnsemble",
+        "description": "多策略组合: 等权/手动权重/收益加权/反向波动率",
+        "parameters": {
+            "mode": {"type": "select", "options": ["equal", "manual", "return_weighted", "inverse_vol"], "default": "equal", "label": "组合模式"},
+            "sub_strategies": {"type": "ensemble_subs", "default": [], "label": "子策略列表"},
+            "ensemble_weights": {"type": "weights", "default": None, "label": "手动权重 (mode=manual 时)"},
+            "warmup_rebalances": {"type": "int", "default": 8, "min": 1, "max": 50, "label": "预热再平衡次数"},
+            "correlation_threshold": {"type": "float", "default": 0.9, "min": 0.0, "max": 1.0, "label": "相关性警告阈值"},
+        },
+        "is_ensemble": True,
+    })
 
     return {"strategies": result, "available_factors": factor_list, "factor_categories": categories}
 

@@ -5,6 +5,8 @@ import BacktestSettings from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import { useState, useEffect, useRef } from 'react'
 import { getPortfolioRunHoldings } from '../api'
+import EnsembleBuilder from './EnsembleBuilder'
+import type { EnsembleConfig } from './EnsembleBuilder'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -64,8 +66,11 @@ interface Props {
   showOptimizer: boolean; setShowOptimizer: (v: boolean) => void
   showRiskControl: boolean; setShowRiskControl: (v: boolean) => void
   showAttribution: boolean; setShowAttribution: (v: boolean) => void
+  // Ensemble
+  ensembleConfigRef: React.MutableRefObject<EnsembleConfig | null>
   // Search
   searchMode: boolean; setSearchMode: (v: boolean) => void
+  comboSearch: boolean; setComboSearch: (v: boolean) => void
   searchGrid: Record<string, string>; setSearchGrid: (v: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void
   expandedParams: Record<string, boolean>; setExpandedParams: (v: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void
   searchLoading: boolean; searchResults: any[]
@@ -99,11 +104,16 @@ export default function PortfolioRunContent(props: Props) {
     riskControl, setRiskControl, maxDrawdown, setMaxDrawdown, drawdownReduce, setDrawdownReduce,
     drawdownRecovery, setDrawdownRecovery, maxTurnover, setMaxTurnover,
     showOptimizer, setShowOptimizer, showRiskControl, setShowRiskControl, showAttribution, setShowAttribution,
-    searchMode, setSearchMode, searchGrid, setSearchGrid,
+    ensembleConfigRef,
+    searchMode, setSearchMode, comboSearch, setComboSearch, searchGrid, setSearchGrid,
     searchLoading, searchResults, searchMeta,
     handleRun, handleWalkForward, handleSearch, exportEquityCurve, exportTrades,
     renderParamInput,
   } = props
+
+  // V2.14 B3: Ensemble configuration
+  const [ensembleConfig, setEnsembleConfig] = useState<EnsembleConfig | null>(null)
+  const isEnsemble = selected === 'StrategyEnsemble'
 
   // Local state for full weights loading
   const [fullWeights, setFullWeights] = useState<{ date: string; weights: Record<string, number> }[] | null>(null)
@@ -132,6 +142,7 @@ export default function PortfolioRunContent(props: Props) {
   // point to the old run's data).
   useEffect(() => {
     setFullWeights(null)
+    setWeightsLoading(false)
   }, [result?.run_id])
 
   const handleLoadFullWeights = async () => {
@@ -191,8 +202,18 @@ export default function PortfolioRunContent(props: Props) {
               {strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
             </select>
           </div>
-          {/* Dynamic strategy parameters from schema */}
-          {Object.entries(currentSchema).map(([key, schema]) => renderParamInput(key, schema))}
+          {/* Dynamic strategy parameters from schema — or EnsembleBuilder */}
+          {!isEnsemble && Object.entries(currentSchema).map(([key, schema]) => renderParamInput(key, schema))}
+          {/* V2.14 B3: EnsembleBuilder when StrategyEnsemble selected */}
+          {isEnsemble && (
+            <div className="w-full mt-2">
+              <EnsembleBuilder
+                strategies={strategies}
+                factors={factors}
+                onChange={(cfg) => { setEnsembleConfig(cfg); ensembleConfigRef.current = cfg }}
+              />
+            </div>
+          )}
           {/* V2.11.1: AlphaCombiner sub-panel when factor=alpha_combiner */}
           {strategyParams.factor === 'alpha_combiner' && (
             <div className="col-span-full p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
@@ -351,10 +372,12 @@ export default function PortfolioRunContent(props: Props) {
           <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
             {wfLoading ? '验证中...' : '前推验证'}
           </button>
-          <button onClick={() => setSearchMode(!searchMode)} className="px-3 py-1.5 rounded text-sm font-medium"
-            style={{ backgroundColor: searchMode ? '#1e6b3a' : 'var(--bg-primary)', color: searchMode ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-            参数搜索
-          </button>
+          {!isEnsemble && (
+            <button onClick={() => setSearchMode(!searchMode)} className="px-3 py-1.5 rounded text-sm font-medium"
+              style={{ backgroundColor: searchMode ? '#1e6b3a' : 'var(--bg-primary)', color: searchMode ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              参数搜索
+            </button>
+          )}
           <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
             className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle} title="折数" />
           <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>折</span>
@@ -371,6 +394,27 @@ export default function PortfolioRunContent(props: Props) {
           <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
             为当前策略的每个参数设置多个候选值（逗号分隔），系统自动组合并按夏普排名。
           </p>
+          {/* V2.14 B2: combo search toggle for multi_select params */}
+          {Object.values(currentSchema).some(s => s.type === 'multi_select') && (
+            <div className="flex items-center gap-3 mb-2">
+              <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={comboSearch} onChange={e => setComboSearch(e.target.checked)} />
+                组合搜索 (自动生成所有因子子集)
+              </label>
+              {comboSearch && (() => {
+                const msKey = Object.entries(currentSchema).find(([, s]) => s.type === 'multi_select')?.[0]
+                const selCount = msKey ? (searchGrid[msKey] || '').split(',').filter(Boolean).length : 0
+                const psSize = selCount > 0 ? (1 << selCount) - 1 : 0
+                const over = psSize > 64
+                return (
+                  <span className="text-xs" style={{ color: over ? '#ef4444' : 'var(--text-secondary)' }}>
+                    {selCount > 0 ? `${selCount} 因子 → ${psSize} 种组合` : '请先选择因子'}
+                    {over && ' (超过 64 上限，请减少因子)'}
+                  </span>
+                )
+              })()}
+            </div>
+          )}
           <div className="space-y-2 mb-3">
             {Object.entries(currentSchema).map(([key, schema]) => {
               const label = schema.label || key
@@ -390,7 +434,11 @@ export default function PortfolioRunContent(props: Props) {
                 return (
                   <div key={key}>
                     <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {label} {schema.type === 'multi_select' ? '(多选，所有勾选作为一个组合)' : '(多选)'}
+                      {label} {comboSearch && schema.type === 'multi_select'
+                        ? '(选中因子将自动生成所有子集组合)'
+                        : schema.type === 'multi_select'
+                          ? '(多选，所有勾选作为一个组合)'
+                          : '(多选)'}
                     </label>
                     {useCategories ? factorCategories.map(cat => {
                       const catFactors = (Array.isArray(cat.factors) ? cat.factors : [])

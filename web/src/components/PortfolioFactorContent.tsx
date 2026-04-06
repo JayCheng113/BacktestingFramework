@@ -339,7 +339,7 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
     } catch (e: any) {
       if (diagTokenRef.current !== token) return
       setError(e.response?.data?.detail || '诊断失败')
-    } finally { setLoading(false) }
+    } finally { if (diagTokenRef.current === token) setLoading(false) }
   }
 
   return (

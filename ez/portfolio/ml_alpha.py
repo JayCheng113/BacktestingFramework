@@ -94,11 +94,14 @@ class UnsupportedEstimatorError(TypeError):
 
 
 def _build_supported_estimator_set() -> frozenset[type]:
-    """Construct the V1 whitelist of sklearn estimator classes.
+    """Construct the estimator whitelist.
 
     Built lazily (not at module import) so that ``import
     ez.portfolio.ml_alpha`` works even when sklearn is not installed —
     only the first ``MLAlpha`` construction triggers the sklearn import.
+
+    V1 core: 7 sklearn classes (always required).
+    V2.14 extensions: LightGBM + XGBoost (optional, graceful skip).
 
     Adding a class to this set is NOT free: it requires
     (1) a deepcopy/determinism regression test in
@@ -123,7 +126,8 @@ def _build_supported_estimator_set() -> frozenset[type]:
             "scikit-learn>=1.5 is required for MLAlpha. "
             "Install with: pip install -e '.[ml]'"
         ) from e
-    return frozenset({
+
+    estimators: set[type] = {
         Ridge,
         Lasso,
         LinearRegression,
@@ -131,27 +135,43 @@ def _build_supported_estimator_set() -> frozenset[type]:
         DecisionTreeRegressor,
         RandomForestRegressor,
         GradientBoostingRegressor,
-    })
+    }
 
+    # V2.14: LightGBM (optional — regressor only, classifier deferred
+    # until a classification contract is defined)
+    try:
+        from lightgbm import LGBMRegressor
+        estimators.add(LGBMRegressor)
+    except ImportError:
+        pass
 
-_SUPPORTED_ESTIMATOR_CACHE: frozenset[type] | None = None
+    # V2.14: XGBoost (optional — regressor only, classifier deferred)
+    try:
+        from xgboost import XGBRegressor
+        estimators.add(XGBRegressor)
+    except ImportError:
+        pass
+
+    return frozenset(estimators)
 
 
 def _assert_supported_estimator(instance: Any) -> None:
-    """Enforce the V1 estimator whitelist + ``n_jobs=1`` rule at runtime.
+    """Enforce the estimator whitelist + ``n_jobs=1`` + GPU rejection.
 
     Uses ``type(instance)`` identity comparison rather than ``isinstance``
     to avoid accidentally accepting user subclasses that might override
     ``fit()`` with unsafe behavior. If an advanced user legitimately
     needs a subclass, they can add it to the whitelist explicitly.
+
+    The whitelist is rebuilt on every call (no caching) so that libraries
+    installed after the first MLAlpha construction are picked up without
+    requiring a server restart. The cost is trivial (a few try/import).
     """
-    global _SUPPORTED_ESTIMATOR_CACHE
-    if _SUPPORTED_ESTIMATOR_CACHE is None:
-        _SUPPORTED_ESTIMATOR_CACHE = _build_supported_estimator_set()
+    supported = _build_supported_estimator_set()
 
     cls = type(instance)
-    if cls not in _SUPPORTED_ESTIMATOR_CACHE:
-        allowed = sorted(c.__name__ for c in _SUPPORTED_ESTIMATOR_CACHE)
+    if cls not in supported:
+        allowed = sorted(c.__name__ for c in supported)
         raise UnsupportedEstimatorError(
             f"Estimator class {cls.__module__}.{cls.__name__} is not on "
             f"the V1 MLAlpha whitelist. Supported classes: {allowed}. "
@@ -166,6 +186,26 @@ def _assert_supported_estimator(instance: Any) -> None:
             f"Estimator {cls.__name__} has n_jobs={n_jobs}, but the "
             f"sandbox blocks `multiprocessing`. Construct with "
             f"n_jobs=1 explicitly."
+        )
+
+    # V2.14: block GPU acceleration (XGBoost tree_method/device, LightGBM device_type)
+    tree_method = getattr(instance, "tree_method", None)
+    if tree_method and "gpu" in str(tree_method).lower():
+        raise UnsupportedEstimatorError(
+            f"Estimator {cls.__name__} uses GPU tree_method='{tree_method}'. "
+            f"Only CPU methods are allowed in the sandbox."
+        )
+    device = getattr(instance, "device", None)
+    if device and str(device).lower() in ("cuda", "gpu"):
+        raise UnsupportedEstimatorError(
+            f"Estimator {cls.__name__} uses device='{device}'. "
+            f"Only CPU devices are allowed in the sandbox."
+        )
+    device_type = getattr(instance, "device_type", None)
+    if device_type and "gpu" in str(device_type).lower():
+        raise UnsupportedEstimatorError(
+            f"Estimator {cls.__name__} uses device_type='{device_type}'. "
+            f"Only CPU devices are allowed in the sandbox."
         )
 
 

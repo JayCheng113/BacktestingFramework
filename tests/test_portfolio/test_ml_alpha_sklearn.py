@@ -825,3 +825,227 @@ class TestStrictLookback:
                 freq="weekly", initial_cash=1_000_000,
                 strict_lookback=True,
             )
+
+
+# ─── V2.14 B4: Fill coverage gaps for V1 whitelist estimators ─────
+
+def _run_deepcopy_round_trip(estimator_factory, name_suffix: str):
+    """Shared helper: fit → deepcopy → compare predictions."""
+    data, dates = _make_data(n_days=300)
+    alpha = MLAlpha(
+        name=f"_dc_{name_suffix}",
+        model_factory=estimator_factory,
+        feature_fn=_simple_feature_fn,
+        target_fn=_forward_return_target(5),
+        train_window=100, retrain_freq=20, purge_days=5,
+    )
+    scores_orig = alpha.compute(data, dates[150].to_pydatetime())
+    assert alpha._current_model is not None
+    clone = copy.deepcopy(alpha)
+    scores_clone = clone.compute(data, dates[150].to_pydatetime())
+    pd.testing.assert_series_equal(scores_orig, scores_clone)
+
+
+class TestMLAlphaLassoDeepcopy:
+    def test_lasso_deepcopy(self):
+        from sklearn.linear_model import Lasso
+        _run_deepcopy_round_trip(lambda: Lasso(alpha=0.01), "lasso")
+
+
+class TestMLAlphaLinearRegressionDeepcopy:
+    def test_lr_deepcopy(self):
+        from sklearn.linear_model import LinearRegression
+        _run_deepcopy_round_trip(LinearRegression, "lr")
+
+
+class TestMLAlphaElasticNetDeepcopy:
+    def test_en_deepcopy(self):
+        from sklearn.linear_model import ElasticNet
+        _run_deepcopy_round_trip(lambda: ElasticNet(alpha=0.01), "en")
+
+
+class TestMLAlphaDecisionTreeDeepcopy:
+    def test_dt_deepcopy(self):
+        from sklearn.tree import DecisionTreeRegressor
+        _run_deepcopy_round_trip(
+            lambda: DecisionTreeRegressor(max_depth=3, random_state=42), "dt"
+        )
+
+
+class TestMLAlphaGBRCrossInstanceDeterminism:
+    """Fill gap: GBR was missing from cross-instance determinism tests."""
+
+    def test_two_fresh_gbr_instances_produce_same_predictions(self):
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        data, dates = _make_data(n_days=300)
+
+        def build():
+            return MLAlpha(
+                name="gbr",
+                model_factory=lambda: GradientBoostingRegressor(
+                    n_estimators=10, max_depth=3, random_state=0,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=80, retrain_freq=20, purge_days=5,
+            )
+
+        a1 = build()
+        a2 = build()
+        s1 = a1.compute(data, dates[150].to_pydatetime())
+        s2 = a2.compute(data, dates[150].to_pydatetime())
+        pd.testing.assert_series_equal(s1, s2)
+
+
+# ─── V2.14 B4: LightGBM + XGBoost (optional, skip if not installed) ─
+
+class TestMLAlphaLightGBM:
+    """LightGBM integration: deepcopy + e2e backtest."""
+
+    @pytest.fixture(autouse=True)
+    def _skip(self):
+        pytest.importorskip("lightgbm", reason="LightGBM tests need lightgbm>=4.0")
+
+    def test_lgbm_deepcopy(self):
+        from lightgbm import LGBMRegressor
+        _run_deepcopy_round_trip(
+            lambda: LGBMRegressor(
+                n_estimators=10, max_depth=3, n_jobs=1,
+                random_state=42, verbose=-1,
+            ),
+            "lgbm",
+        )
+
+    def test_lgbm_e2e_backtest(self):
+        from lightgbm import LGBMRegressor
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.universe import Universe
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.portfolio_strategy import TopNRotation
+
+        data, dates = _make_data(n_days=300, n_stocks=5)
+        symbols = list(data.keys())
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+
+        alpha = MLAlpha(
+            name="_lgbm_e2e",
+            model_factory=lambda: LGBMRegressor(
+                n_estimators=10, max_depth=3, n_jobs=1,
+                random_state=42, verbose=-1,
+            ),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+        strategy = TopNRotation(factor=alpha, top_n=3)
+        result = run_portfolio_backtest(
+            strategy=strategy, universe=universe, universe_data=data,
+            calendar=cal, start=dates[120].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000,
+        )
+        assert result is not None
+        assert result.metrics.get("total_return") is not None
+
+
+class TestMLAlphaXGBoost:
+    """XGBoost integration: deepcopy + e2e backtest + GPU rejection."""
+
+    @pytest.fixture(autouse=True)
+    def _skip(self):
+        pytest.importorskip("xgboost", reason="XGBoost tests need xgboost>=2.0")
+
+    def test_xgb_deepcopy(self):
+        from xgboost import XGBRegressor
+        _run_deepcopy_round_trip(
+            lambda: XGBRegressor(
+                n_estimators=10, max_depth=3, n_jobs=1,
+                random_state=42, verbosity=0,
+            ),
+            "xgb",
+        )
+
+    def test_xgb_e2e_backtest(self):
+        from xgboost import XGBRegressor
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.universe import Universe
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.portfolio_strategy import TopNRotation
+
+        data, dates = _make_data(n_days=300, n_stocks=5)
+        symbols = list(data.keys())
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe(symbols)
+
+        alpha = MLAlpha(
+            name="_xgb_e2e",
+            model_factory=lambda: XGBRegressor(
+                n_estimators=10, max_depth=3, n_jobs=1,
+                random_state=42, verbosity=0,
+            ),
+            feature_fn=_simple_feature_fn,
+            target_fn=_forward_return_target(5),
+            train_window=80, retrain_freq=20, purge_days=5,
+        )
+        strategy = TopNRotation(factor=alpha, top_n=3)
+        result = run_portfolio_backtest(
+            strategy=strategy, universe=universe, universe_data=data,
+            calendar=cal, start=dates[120].date(), end=dates[-1].date(),
+            freq="weekly", initial_cash=1_000_000,
+        )
+        assert result is not None
+        assert result.metrics.get("total_return") is not None
+
+    def test_xgb_gpu_tree_method_rejected(self):
+        from xgboost import XGBRegressor
+        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+
+        with pytest.raises(UnsupportedEstimatorError, match="[Gg][Pp][Uu]"):
+            MLAlpha(
+                name="_xgb_gpu",
+                model_factory=lambda: XGBRegressor(
+                    tree_method="gpu_hist", n_jobs=1,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+    def test_xgb_device_cuda_rejected(self):
+        from xgboost import XGBRegressor
+        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+
+        with pytest.raises(UnsupportedEstimatorError, match="device.*cuda"):
+            MLAlpha(
+                name="_xgb_cuda",
+                model_factory=lambda: XGBRegressor(
+                    device="cuda", n_jobs=1,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+
+class TestMLAlphaLightGBMGPU:
+    """LightGBM device_type=gpu rejection."""
+
+    @pytest.fixture(autouse=True)
+    def _skip(self):
+        pytest.importorskip("lightgbm", reason="LightGBM GPU rejection test needs lightgbm")
+
+    def test_lgbm_device_type_gpu_rejected(self):
+        from lightgbm import LGBMRegressor
+        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+
+        with pytest.raises(UnsupportedEstimatorError, match="device_type.*gpu"):
+            MLAlpha(
+                name="_lgbm_gpu",
+                model_factory=lambda: LGBMRegressor(
+                    device_type="gpu", n_jobs=1, verbose=-1,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )

@@ -3,6 +3,7 @@ import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, delet
 import { DEFAULT_SETTINGS, getDefaultSettings } from './BacktestSettings'
 import type { PortfolioRunResult, HistoryRun, ParamSchema } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
+import type { EnsembleConfig } from './EnsembleBuilder'
 import PortfolioRunContent from './PortfolioRunContent'
 import PortfolioFactorContent from './PortfolioFactorContent'
 import PortfolioHistoryContent from './PortfolioHistoryContent'
@@ -66,8 +67,12 @@ export default function PortfolioPanel() {
   // V2.12.1: Index benchmark
   const [indexBenchmark, setIndexBenchmark] = useState('')
   const [trackingError, setTrackingError] = useState(5)
+  // V2.14 B3: Ensemble config ref (updated by EnsembleBuilder via callback)
+  const ensembleConfigRef = useRef<EnsembleConfig | null>(null)
+
   // Parameter search state -- dynamic from schema
   const [searchMode, setSearchMode] = useState(false)
+  const [comboSearch, setComboSearch] = useState(false)
   const [searchGrid, setSearchGrid] = useState<Record<string, string>>({})
   const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({})
   const [searchLoading, setSearchLoading] = useState(false)
@@ -135,10 +140,13 @@ export default function PortfolioPanel() {
     runTokenRef.current += 1
     wfTokenRef.current += 1
     searchTokenRef.current += 1
-    setResult(null)
-    setWfResult(null)
-    setSearchResults([])
+    // Clear results AND loading — superseded in-flight requests will see
+    // token mismatch in finally and skip, so we must clear loading here.
+    setResult(null); setLoading(false)
+    setWfResult(null); setWfLoading(false)
+    setSearchResults([]); setSearchLoading(false)
     setSearchMeta(null)
+    setCompareData([]); setComparing(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     symbols, startDate, endDate, freq, selected,
@@ -148,6 +156,16 @@ export default function PortfolioPanel() {
     riskControl, maxDrawdown, drawdownReduce, drawdownRecovery, maxTurnover,
     indexBenchmark, trackingError,
   ])
+
+  // V2.14 codex: clear stale search results when search-specific conditions change.
+  // searchGrid/comboSearch determine the search output but are NOT run inputs,
+  // so they must not be in the run-invalidation effect above.
+  useEffect(() => {
+    searchTokenRef.current += 1
+    setSearchResults([]); setSearchLoading(false)
+    setSearchMeta(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(searchGrid), comboSearch])
 
   // V2.12.2 codex: market change must fully reset market-sensitive state.
   // Prior version only set `market` and let all downstream state (settings
@@ -171,18 +189,19 @@ export default function PortfolioPanel() {
       setTrackingError(5)
     }
     // Clear stale evaluation / search / quality results from previous market
-    setEvalResult(null)
+    setEvalResult(null); setEvalLoading(false)
     setCorrResult(null)
-    setSearchResults([])
+    setSearchResults([]); setSearchLoading(false)
+    setSearchMeta(null)
     setQualityReport([])
-    setFundaStatus('')
+    setFundaStatus(''); setFetchingFunda(false)
     // Clear backtest result + WF result + full-weights snapshot — they
     // were computed under the previous market's rules.
-    setResult(null)
-    setWfResult(null)
+    setResult(null); setLoading(false)
+    setWfResult(null); setWfLoading(false)
     // Clear cross-run compare data — comparing runs from different
     // markets would yield meaningless overlays.
-    setCompareData([])
+    setCompareData([]); setComparing(false)
     setSelectedRuns(new Set())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [market])
@@ -218,41 +237,37 @@ export default function PortfolioPanel() {
     const myToken = ++compareTokenRef.current
     setComparing(true)
     setCompareData([])
-    const results: typeof compareData = []
-    let errors: string[] = []
-    for (const id of ids) {
-      try {
-        const res = await getPortfolioRun(id)
-        const d = res.data
-        const ec = d.equity_curve || d.equity || []
-        // V2.12.2 codex: propagate per-bar dates from the run so the
-        // compare chart can align runs by real trading days. Prior version
-        // left `dates: []` which forced PortfolioHistoryContent into an
-        // index-based x-axis that visually aligns runs with different
-        // date ranges or trading-day gaps, producing misleading overlays.
-        // Pre-V2.12.2 runs have no stored dates → empty list, chart falls
-        // back to index-based rendering for those legacy rows only.
-        const dates = Array.isArray(d.dates) ? d.dates : []
-        results.push({
-          id, name: `${d.strategy_name || '未知'} (${(d.start_date || '').slice(0, 10)}~${(d.end_date || '').slice(0, 10)})`,
-          equity: ec.map((v: number) => v / (ec[0] || 1)),
-          dates,
-          metrics: d.metrics || {},
-        })
-      } catch (e: any) {
-        errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
+    try {
+      const results: typeof compareData = []
+      const errors: string[] = []
+      for (const id of ids) {
+        try {
+          const res = await getPortfolioRun(id)
+          const d = res.data
+          const ec = d.equity_curve || d.equity || []
+          const dates = Array.isArray(d.dates) ? d.dates : []
+          results.push({
+            id, name: `${d.strategy_name || '未知'} (${(d.start_date || '').slice(0, 10)}~${(d.end_date || '').slice(0, 10)})`,
+            equity: ec.map((v: number) => v / (ec[0] || 1)),
+            dates,
+            metrics: d.metrics || {},
+          })
+        } catch (e: any) {
+          errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
+        }
       }
+      if (compareTokenRef.current !== myToken) return  // superseded
+      if (results.length >= 2) {
+        setCompareData(results)
+      } else if (errors.length > 0) {
+        alert('对比加载失败:\n' + errors.join('\n'))
+        loadHistory()
+      } else {
+        alert('对比数据不足（需至少 2 条有效记录）')
+      }
+    } finally {
+      if (compareTokenRef.current === myToken) setComparing(false)
     }
-    if (compareTokenRef.current !== myToken) return  // superseded
-    if (results.length >= 2) {
-      setCompareData(results)
-    } else if (errors.length > 0) {
-      alert('对比加载失败:\n' + errors.join('\n'))
-      loadHistory()
-    } else {
-      alert('对比数据不足（需至少 2 条有效记录）')
-    }
-    setComparing(false)
   }
 
   const handleEvaluateFactors = async () => {
@@ -345,7 +360,9 @@ export default function PortfolioPanel() {
     setLoading(true); setResult(null); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
-      const cleanParams = Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_')))
+      const cleanParams = selected === 'StrategyEnsemble' && ensembleConfigRef.current
+        ? ensembleConfigRef.current
+        : Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_')))
       const res = await runPortfolioBacktest({
         strategy_name: selected, symbols: symbolList,
         market,
@@ -401,7 +418,9 @@ export default function PortfolioPanel() {
         strategy_name: selected, symbols: symbolList,
         market,
         start_date: startDate, end_date: endDate, freq,
-        strategy_params: Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
+        strategy_params: selected === 'StrategyEnsemble' && ensembleConfigRef.current
+          ? ensembleConfigRef.current
+          : Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
         initial_cash: settings.initial_cash,
         n_splits: wfSplits, train_ratio: wfTrainRatio,
         benchmark_symbol: settings.benchmark,
@@ -449,18 +468,36 @@ export default function PortfolioPanel() {
         const vals = raw.split(',').filter(Boolean)
         if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
       } else if (schema.type === 'multi_select') {
-        // V2.12.2 codex: `|` separates subsets, `,` separates items within a
-        // subset. User input "ep,bp,sp" → ONE combo with the 3-factor list.
-        // User input "ep,bp|ep,sp" → 2 subsets. Prior version mapped each
-        // comma-separated value to its own single-element list, producing
-        // N single-factor combos — yielding N single-factor backtest runs
-        // instead of the user's intended multi-factor composition.
-        const subsets = raw.split('|')
-          .map(s => s.split(',').map(x => x.trim()).filter(Boolean))
-          .filter(a => a.length > 0)
-        if (subsets.length > 0) {
-          paramGrid[key] = subsets
-          totalCombos *= subsets.length
+        if (comboSearch) {
+          // V2.14: Power-set mode — auto-generate all non-empty subsets
+          const items = raw.split(',').map(x => x.trim()).filter(Boolean)
+          if (items.length > 0) {
+            const subsets: string[][] = []
+            for (let mask = 1; mask < (1 << items.length); mask++) {
+              const subset: string[] = []
+              for (let j = 0; j < items.length; j++) {
+                if (mask & (1 << j)) subset.push(items[j])
+              }
+              subsets.push(subset)
+            }
+            if (subsets.length > 64) {
+              alert(`因子组合数 ${subsets.length} 超过 64 上限，请减少选中因子数`)
+              return
+            }
+            paramGrid[key] = subsets
+            totalCombos *= subsets.length
+          }
+        } else {
+          // V2.12.2 codex: `|` separates subsets, `,` separates items within a
+          // subset. User input "ep,bp,sp" → ONE combo with the 3-factor list.
+          // User input "ep,bp|ep,sp" → 2 subsets.
+          const subsets = raw.split('|')
+            .map(s => s.split(',').map(x => x.trim()).filter(Boolean))
+            .filter(a => a.length > 0)
+          if (subsets.length > 0) {
+            paramGrid[key] = subsets
+            totalCombos *= subsets.length
+          }
         }
       } else if (schema.type === 'int') {
         const vals = raw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
@@ -702,6 +739,8 @@ export default function PortfolioPanel() {
           showRiskControl={showRiskControl} setShowRiskControl={setShowRiskControl}
           showAttribution={showAttribution} setShowAttribution={setShowAttribution}
           searchMode={searchMode} setSearchMode={setSearchMode}
+          comboSearch={comboSearch} setComboSearch={setComboSearch}
+          ensembleConfigRef={ensembleConfigRef}
           searchGrid={searchGrid} setSearchGrid={setSearchGrid}
           expandedParams={expandedParams} setExpandedParams={setExpandedParams}
           searchLoading={searchLoading} searchResults={searchResults}
