@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from datetime import date
 
@@ -84,7 +85,8 @@ class DataProviderChain:
     # infinite refetch loop on every subsequent call for the same symbol.
     # Key: (symbol, market, period) — range-independent so a 1-month query
     # and 6-month query share the same "known sparse" flag.
-    _known_sparse_symbols: set[tuple[str, str, str]] = set()
+    _known_sparse_symbols: dict[tuple[str, str, str], float] = {}
+    _SPARSE_TTL_SECONDS: float = 86400.0
 
     def __init__(self, providers: list[DataProvider], store: DataStore):
         self._providers = providers
@@ -142,7 +144,11 @@ class DataProviderChain:
         # Skip density check for symbols already known to be sparse (e.g. niche
         # ETFs, new listings) to avoid refetch loops on legitimately thin data.
         sparse_key = (symbol, market, period)
-        skip_density = sparse_key in self._known_sparse_symbols
+        _ts = self._known_sparse_symbols.get(sparse_key)
+        if _ts is not None and (time.monotonic() - _ts) >= self._SPARSE_TTL_SECONDS:
+            del self._known_sparse_symbols[sparse_key]
+            _ts = None
+        skip_density = _ts is not None
         cached = self._store.query_kline(symbol, market, period, start_date, end_date)
         if cached:
             complete, reason = self._is_cache_complete(
@@ -189,7 +195,7 @@ class DataProviderChain:
                         # the (last) provider confirmed this is all the data available,
                         # so future cache checks should skip density to avoid refetch loops.
                         if req_days > 30 and actual_bars < expected_bars * 0.75:
-                            self._known_sparse_symbols.add(sparse_key)
+                            self._known_sparse_symbols[sparse_key] = time.monotonic()
                             logger.info("Marked %s as known-sparse (%d/%d bars)",
                                         symbol, actual_bars, expected_bars)
                         return result.valid_bars
@@ -221,7 +227,12 @@ class DataProviderChain:
         missing: list[str] = []
         for sym in symbols:
             bars = cached.get(sym, [])
-            skip_density = (sym, market, period) in self._known_sparse_symbols
+            _batch_key = (sym, market, period)
+            _batch_ts = self._known_sparse_symbols.get(_batch_key)
+            if _batch_ts is not None and (time.monotonic() - _batch_ts) >= self._SPARSE_TTL_SECONDS:
+                del self._known_sparse_symbols[_batch_key]
+                _batch_ts = None
+            skip_density = _batch_ts is not None
             complete, reason = self._is_cache_complete(
                 bars, start_date, end_date, skip_density=skip_density,
             ) if bars else (False, "empty")
