@@ -233,41 +233,37 @@ export default function PortfolioPanel() {
     const myToken = ++compareTokenRef.current
     setComparing(true)
     setCompareData([])
-    const results: typeof compareData = []
-    let errors: string[] = []
-    for (const id of ids) {
-      try {
-        const res = await getPortfolioRun(id)
-        const d = res.data
-        const ec = d.equity_curve || d.equity || []
-        // V2.12.2 codex: propagate per-bar dates from the run so the
-        // compare chart can align runs by real trading days. Prior version
-        // left `dates: []` which forced PortfolioHistoryContent into an
-        // index-based x-axis that visually aligns runs with different
-        // date ranges or trading-day gaps, producing misleading overlays.
-        // Pre-V2.12.2 runs have no stored dates → empty list, chart falls
-        // back to index-based rendering for those legacy rows only.
-        const dates = Array.isArray(d.dates) ? d.dates : []
-        results.push({
-          id, name: `${d.strategy_name || '未知'} (${(d.start_date || '').slice(0, 10)}~${(d.end_date || '').slice(0, 10)})`,
-          equity: ec.map((v: number) => v / (ec[0] || 1)),
-          dates,
-          metrics: d.metrics || {},
-        })
-      } catch (e: any) {
-        errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
+    try {
+      const results: typeof compareData = []
+      const errors: string[] = []
+      for (const id of ids) {
+        try {
+          const res = await getPortfolioRun(id)
+          const d = res.data
+          const ec = d.equity_curve || d.equity || []
+          const dates = Array.isArray(d.dates) ? d.dates : []
+          results.push({
+            id, name: `${d.strategy_name || '未知'} (${(d.start_date || '').slice(0, 10)}~${(d.end_date || '').slice(0, 10)})`,
+            equity: ec.map((v: number) => v / (ec[0] || 1)),
+            dates,
+            metrics: d.metrics || {},
+          })
+        } catch (e: any) {
+          errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
+        }
       }
+      if (compareTokenRef.current !== myToken) return  // superseded
+      if (results.length >= 2) {
+        setCompareData(results)
+      } else if (errors.length > 0) {
+        alert('对比加载失败:\n' + errors.join('\n'))
+        loadHistory()
+      } else {
+        alert('对比数据不足（需至少 2 条有效记录）')
+      }
+    } finally {
+      setComparing(false)
     }
-    if (compareTokenRef.current !== myToken) { setComparing(false); return }
-    if (results.length >= 2) {
-      setCompareData(results)
-    } else if (errors.length > 0) {
-      alert('对比加载失败:\n' + errors.join('\n'))
-      loadHistory()
-    } else {
-      alert('对比数据不足（需至少 2 条有效记录）')
-    }
-    setComparing(false)
   }
 
   const handleEvaluateFactors = async () => {

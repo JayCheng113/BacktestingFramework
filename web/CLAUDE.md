@@ -65,7 +65,7 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **CandidateSearch bool/enum 参数**: ParamRangeState 改 discriminated union (NumericParamRange/BoolParamRange/EnumParamRange), bool 参数显示 checkbox, enum/select 显示按钮组, 后端 ParamRangeRequest 放宽 `list[int|float|str|bool]`.
 - **multi_select 组合搜索**: PortfolioPanel "组合搜索" checkbox → 自动 power-set (bitmask 生成所有非空子集), 64 上限硬限 (>6 因子禁用按钮), 原 `|` 分隔模式保留.
 - **StrategyEnsemble UI**: 新 `EnsembleBuilder.tsx` 组件 — 4 mode radio (等权/手动/收益加权/反向波动率) + 子策略卡片 (参数编辑+同名序号) + 手动权重输入 + 高级设置折叠. PortfolioRunContent 检测 `selected === 'StrategyEnsemble'` 切换渲染. 后端 `_create_strategy` 新增 Ensemble 分支 (列表格式 sub_strategies 避免同名 key 冲突).
-- **LightGBM/XGBoost 白名单**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor/LGBMClassifier` + `XGBRegressor/XGBClassifier`, GPU tree_method 拦截, `pyproject.toml` 新增 `[ml-extra]` group.
+- **LightGBM/XGBoost 白名单**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor` + `XGBRegressor` (仅 regressor, classifier 待定义分类契约), GPU 拦截 (tree_method/device/device_type), `pyproject.toml` 新增 `[ml-extra]` group.
 
 ## Running
 ```bash

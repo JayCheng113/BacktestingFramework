@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ParamSchema } from '../types'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -38,22 +38,27 @@ interface Props {
   onChange: (config: EnsembleConfig) => void
 }
 
+interface SubEntry extends SubStrategyDef {
+  _id: number  // stable key for React reconciliation, stripped before onChange
+}
+
 export default function EnsembleBuilder({ strategies, factors, onChange }: Props) {
   const [mode, setMode] = useState<EnsembleMode>('equal')
-  const [subs, setSubs] = useState<SubStrategyDef[]>([])
+  const [subs, setSubs] = useState<SubEntry[]>([])
   const [weights, setWeights] = useState<number[]>([])
+  const nextId = useRef(0)
   const [warmup, setWarmup] = useState(8)
   const [corrThreshold, setCorrThreshold] = useState(0.9)
 
   useEffect(() => {
     onChange({
       mode,
-      sub_strategies: subs,
+      sub_strategies: subs.map(({ name, params }) => ({ name, params })),
       ensemble_weights: mode === 'manual' ? weights : undefined,
       warmup_rebalances: warmup,
       correlation_threshold: corrThreshold,
     })
-  }, [mode, subs, weights, warmup, corrThreshold])
+  }, [mode, subs, weights, warmup, corrThreshold, onChange])
 
   const availableStrategies = strategies.filter(s => !s.is_ensemble)
 
@@ -66,7 +71,7 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
         defaults[k] = v.default
       }
     }
-    setSubs(prev => [...prev, { name, params: defaults }])
+    setSubs(prev => [...prev, { _id: nextId.current++, name, params: defaults }])
     setWeights(prev => [...prev, 1])
   }
 
@@ -120,7 +125,7 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
         const dupeCount = subs.filter(x => x.name === sub.name).length
         const dupeIdx = subs.slice(0, idx).filter(x => x.name === sub.name).length + 1
         return (
-          <div key={idx} className="p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+          <div key={sub._id} className="p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 {sub.name}{dupeCount > 1 ? ` #${dupeIdx}` : ''}
