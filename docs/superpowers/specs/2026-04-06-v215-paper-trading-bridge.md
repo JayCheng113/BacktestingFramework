@@ -90,60 +90,106 @@ ez/live/ 不依赖:
 **DeploymentSpec** — 纯不可变策略配置 (参与哈希)：
 
 ```python
-@dataclass
 class DeploymentSpec:
-    """纯策略配置 — 不含任何运行时/审批元数据。
-    所有字段参与 spec_id 哈希。
+    """纯不可变策略配置 — 构造后不可修改。
 
-    Canonicalization 规则 (哈希前):
-    - symbols: sorted()
-    - strategy_params: 递归 key-sorted JSON
-    - optimizer_params / risk_params: sorted by key
+    不可变性保证:
+    - 不用 @dataclass(frozen=True) (dict 字段不支持)
+    - 构造时深冻结: strategy_params 存为 canonical JSON str, 不存 dict
+    - __setattr__ / __delattr__ 在 __init__ 完成后禁用
+    - 所有集合类型用 tuple (不用 list/dict)
+
+    所有字段显式参与 spec_id (无 '...' 占位符)。
     """
 
-    # 策略配置 (和 PortfolioRunRequest 对齐)
-    strategy_name: str          # "TopNRotation" / "StrategyEnsemble" / ...
-    strategy_params: dict       # 含 sub_strategies (Ensemble) 或 factor/top_n
-    symbols: tuple[str, ...]    # tuple 不可变, 哈希前 sorted()
-    market: str                 # "cn_stock" / "us_stock" / "hk_stock"
-    freq: str                   # "daily" / "weekly" / "monthly"
+    __slots__ = (
+        '_strategy_name', '_strategy_params_json', '_symbols',
+        '_market', '_freq', '_t_plus_1', '_price_limit_pct', '_lot_size',
+        '_buy_commission_rate', '_sell_commission_rate', '_stamp_tax_rate',
+        '_slippage_rate', '_min_commission',
+        '_optimizer', '_optimizer_params', '_risk_control', '_risk_params',
+        '_initial_cash', '_frozen',
+    )
 
-    # 市场规则 (完整承接 RunSpec/PortfolioCommonConfig)
-    t_plus_1: bool = True               # T+1 约束
-    price_limit_pct: float = 0.1        # 涨跌停幅度
-    lot_size: int = 100                 # 最小交易单位
+    def __init__(
+        self,
+        strategy_name: str,
+        strategy_params: dict,          # 构造时接收 dict, 内部存 canonical JSON
+        symbols: tuple[str, ...] | list[str],
+        market: str,
+        freq: str,
+        t_plus_1: bool = True,
+        price_limit_pct: float = 0.1,
+        lot_size: int = 100,
+        buy_commission_rate: float = 0.0003,
+        sell_commission_rate: float = 0.0003,
+        stamp_tax_rate: float = 0.0005,
+        slippage_rate: float = 0.001,
+        min_commission: float = 5.0,
+        optimizer: str | None = None,
+        optimizer_params: tuple = (),
+        risk_control: bool = False,
+        risk_params: tuple = (),
+        initial_cash: float = 1_000_000.0,
+    ):
+        object.__setattr__(self, '_frozen', False)
+        self._strategy_name = strategy_name
+        # 深冻结: dict → canonical JSON string (不可变, 确定性哈希)
+        self._strategy_params_json = json.dumps(
+            _sort_keys_recursive(strategy_params), sort_keys=True)
+        self._symbols = tuple(sorted(symbols))  # canonical sort + freeze
+        self._market = market
+        self._freq = freq
+        self._t_plus_1 = t_plus_1
+        self._price_limit_pct = price_limit_pct
+        self._lot_size = lot_size
+        self._buy_commission_rate = buy_commission_rate
+        self._sell_commission_rate = sell_commission_rate
+        self._stamp_tax_rate = stamp_tax_rate
+        self._slippage_rate = slippage_rate
+        self._min_commission = min_commission
+        self._optimizer = optimizer
+        self._optimizer_params = tuple(sorted(optimizer_params))
+        self._risk_control = risk_control
+        self._risk_params = tuple(sorted(risk_params))
+        self._initial_cash = initial_cash
+        object.__setattr__(self, '_frozen', True)
 
-    # 成本模型
-    buy_commission_rate: float = 0.0003
-    sell_commission_rate: float = 0.0003
-    stamp_tax_rate: float = 0.0005
-    slippage_rate: float = 0.001
-    min_commission: float = 5.0
+    def __setattr__(self, key, value):
+        if getattr(self, '_frozen', False):
+            raise AttributeError("DeploymentSpec is immutable after construction")
+        object.__setattr__(self, key, value)
 
-    # 优化器 + 风控
-    optimizer: str | None = None
-    optimizer_params: tuple = ()      # tuple of (k,v) pairs, 哈希前 key-sorted
-    risk_control: bool = False
-    risk_params: tuple = ()           # tuple of (k,v) pairs, 哈希前 key-sorted
+    @property
+    def strategy_params(self) -> dict:
+        return json.loads(self._strategy_params_json)
 
-    # 资金
-    initial_cash: float = 1_000_000.0
+    # ... 所有字段的 @property getter
 
     @property
     def spec_id(self) -> str:
-        """内容哈希 — 所有字段参与, canonical sort 后 SHA-256[:16]"""
-        canonical = {
-            "strategy_name": self.strategy_name,
-            "strategy_params": _sort_keys_recursive(self.strategy_params),
-            "symbols": sorted(self.symbols),  # canonical sort
-            "market": self.market,
-            "freq": self.freq,
-            "t_plus_1": self.t_plus_1,
-            "price_limit_pct": self.price_limit_pct,
-            "lot_size": self.lot_size,
-            # ... 所有字段, key-sorted
-        }
-        return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:16]
+        """内容哈希 — 显式枚举所有字段, 无遗漏"""
+        canonical = json.dumps({
+            "strategy_name": self._strategy_name,
+            "strategy_params_json": self._strategy_params_json,  # 已 canonical
+            "symbols": list(self._symbols),  # 已 sorted
+            "market": self._market,
+            "freq": self._freq,
+            "t_plus_1": self._t_plus_1,
+            "price_limit_pct": self._price_limit_pct,
+            "lot_size": self._lot_size,
+            "buy_commission_rate": self._buy_commission_rate,
+            "sell_commission_rate": self._sell_commission_rate,
+            "stamp_tax_rate": self._stamp_tax_rate,
+            "slippage_rate": self._slippage_rate,
+            "min_commission": self._min_commission,
+            "optimizer": self._optimizer,
+            "optimizer_params": list(self._optimizer_params),
+            "risk_control": self._risk_control,
+            "risk_params": list(self._risk_params),
+            "initial_cash": self._initial_cash,
+        }, sort_keys=True)
+        return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 ```
 
 **DeploymentRecord** — 可变运行时记录 (不参与哈希)：
@@ -335,18 +381,20 @@ class DeployGate:
             value=n_syms, threshold=self.config.min_symbols,
             message=f"标的数 {n_syms}"))
 
-        # 集中度: 从 weights_history 最后一期取 max weight
+        # 集中度: 全周期最大单股权重 (不用 [-1], 因为终局清仓是 {})
         weights_hist = json.loads(run.weights_history) if run.weights_history else []
-        if weights_hist:
-            last_weights = weights_hist[-1]  # dict[str, float]
-            max_w = max(last_weights.values()) if last_weights else 0
-        else:
-            max_w = 1.0  # 无数据 = 最保守假设
+        max_w = 0.0
+        for w_dict in weights_hist:
+            if w_dict:  # 跳过空 dict (清仓/初始)
+                period_max = max(w_dict.values())
+                max_w = max(max_w, period_max)
+        if not weights_hist or max_w == 0.0:
+            max_w = 1.0  # 无有效数据 = 最保守假设
         reasons.append(GateReason(
             rule="max_concentration",
             passed=max_w <= self.config.max_concentration,
             value=max_w, threshold=self.config.max_concentration,
-            message=f"最大单股权重 {max_w:.1%}"))
+            message=f"全周期最大单股权重 {max_w:.1%}"))
 
         # WFO 必须存在 (如果 require_wfo)
         if self.config.require_wfo:
@@ -602,6 +650,19 @@ class Scheduler:
         async with self._lock:
             if deployment_id in self._engines:
                 raise ValueError("已在运行")
+            # 硬门禁 1: 必须是 approved 状态才能启动
+            record = self.store.get_record(deployment_id)
+            if not record or record.status != "approved":
+                raise ValueError(
+                    f"部署 {deployment_id} 状态为 '{record.status if record else 'not found'}',"
+                    f" 只有 'approved' 状态才能启动")
+            # 硬门禁 2: 代码版本必须匹配审批时的 commit
+            # 防止审批后代码被热加载更改、注册表扫描更新
+            current_commit = _get_git_sha()
+            if record.code_commit and current_commit != record.code_commit:
+                raise ValueError(
+                    f"代码版本不匹配: 审批时 {record.code_commit[:8]}, "
+                    f"当前 {current_commit[:8]}. 请重新审批或确认代码一致")
             await self._start_engine(deployment_id)
             self.store.update_status(deployment_id, "running")
 
@@ -626,40 +687,53 @@ class Scheduler:
 
     async def tick(self, business_date: date) -> list[dict]:
         """
-        每日触发。按每个部署的市场获取对应交易日历。
+        每日触发。asyncio.Lock 覆盖整个 tick, 防止并发重复执行。
+        按每个部署的市场获取对应交易日历。
 
-        幂等: 同一 deployment × 同一 business_date 只执行一次。
-        非交易日: 跳过该部署 (不同市场交易日不同)。
+        幂等保证:
+        - _lock 防并发 (两个 tick 请求串行)
+        - last_processed_date 防重试 (同日第二次直接跳过)
+        - save_daily_snapshot 原子更新 last_processed_date (同一 DuckDB 事务)
         """
-        results = []
-        for dep_id, engine in list(self._engines.items()):
-            spec = engine.spec
-            cal = self._get_calendar(spec.market)
+        async with self._lock:  # 整个 tick 串行, 防并发
+            results = []
+            for dep_id, engine in list(self._engines.items()):
+                # paused 跳过 (内存标记, 不查 DB)
+                if dep_id in self._paused:
+                    results.append({"deployment_id": dep_id, "skipped": "已暂停"})
+                    continue
 
-            # 非该市场交易日 → 跳过
-            if not cal.is_trading_day(business_date):
-                results.append({"deployment_id": dep_id, "skipped": f"{spec.market} 非交易日"})
-                continue
+                spec = engine.spec
+                cal = self._get_calendar(spec.market)
 
-            # 幂等检查
-            last = self.store.get_last_processed_date(dep_id)
-            if last and last >= business_date:
-                results.append({"deployment_id": dep_id, "skipped": "已执行"})
-                continue
+                # 非该市场交易日 → 跳过
+                if not cal.is_trading_day(business_date):
+                    results.append({"deployment_id": dep_id, "skipped": f"{spec.market} 非交易日"})
+                    continue
 
-            # paused 跳过 (内存标记, 不查 DB)
-            if dep_id in self._paused:
-                results.append({"deployment_id": dep_id, "skipped": "已暂停"})
-                continue
+                # 幂等检查
+                last = self.store.get_last_processed_date(dep_id)
+                if last and last >= business_date:
+                    results.append({"deployment_id": dep_id, "skipped": "已执行"})
+                    continue
 
-            try:
-                result = engine.execute_day(business_date)
-                self.store.save_daily_snapshot(dep_id, business_date, result)
-                results.append({"deployment_id": dep_id, **result})
-            except Exception as e:
-                self.store.save_error(dep_id, business_date, str(e))
-                results.append({"deployment_id": dep_id, "error": str(e)})
-        return results
+                try:
+                    result = engine.execute_day(business_date)
+                    # 原子: snapshot + last_processed_date 在同一事务
+                    self.store.save_daily_snapshot_atomic(dep_id, business_date, result)
+                    # 连续失败计数: 成功则归零
+                    self.store.reset_error_count(dep_id)
+                    results.append({"deployment_id": dep_id, **result})
+                except Exception as e:
+                    self.store.save_error(dep_id, business_date, str(e))
+                    # 连续失败递增, 达到 3 次 → error 状态
+                    err_count = self.store.increment_error_count(dep_id)
+                    if err_count >= 3:
+                        self._engines.pop(dep_id, None)
+                        self.store.update_status(dep_id, "error",
+                                                  stop_reason=f"连续失败 {err_count} 次")
+                    results.append({"deployment_id": dep_id, "error": str(e)})
+            return results
 
     def _get_calendar(self, market: str) -> TradingCalendar:
         """按市场获取交易日历 (缓存)。
@@ -709,20 +783,17 @@ class Scheduler:
 
 ```python
 # POST /api/live/tick
-# 接收业务日期。不传时用当天 (如果是交易日) 或前一个交易日。
-# 每个部署按自己的 market 获取对应日历, 无全局 default_market。
+# 业务日期必须显式传入。不提供默认值 — 调用方 (外部 cron 或用户)
+# 必须自行确定今天对哪个市场是交易日。
+# Scheduler 内部按每个部署的 market 用对应日历判断是否执行。
 @router.post("/tick")
-async def trigger_daily_tick(business_date: date | None = None):
-    if business_date is None:
-        # 默认策略: 当天如果是任一市场的交易日则用当天,
-        # 否则向前找最近的 (用 cn_stock 日历作为 fallback)
-        from ez.portfolio.calendar import TradingCalendar
-        cn_cal = TradingCalendar.from_market("cn_stock")
-        today = date.today()
-        business_date = today if cn_cal.is_trading_day(today) else cn_cal.prev_trading_day(today)
+async def trigger_daily_tick(business_date: date):
+    """business_date 必传。Scheduler 按部署市场判断是否该日执行。"""
     results = await scheduler.tick(business_date)
     return {"business_date": str(business_date), "results": results}
 ```
+
+**为什么不提供默认值**: 不同市场交易日不同 (A股/美股/港股)。如果 API 自动选一个市场的日历做 fallback, 其他市场的部署会被错误跳过或误执行。Scheduler 内部已按 `spec.market` 做 per-deployment 日历判断, 所以只需要调用方传一个"今天是几号", 不需要它判断是否交易日。
 
 V3.0 时替换为内置 APScheduler 或 Celery。
 
@@ -816,6 +887,7 @@ CREATE TABLE deployment_records (
     code_commit VARCHAR,
     gate_verdict TEXT,                  -- JSON: Deploy Gate 结果
     last_processed_date DATE,           -- 幂等键: 最后执行的业务日期
+    consecutive_errors INTEGER DEFAULT 0,  -- 连续失败计数 (成功归零, 失败递增, >=3 → error)
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     approved_at TIMESTAMPTZ,
     started_at TIMESTAMPTZ,
