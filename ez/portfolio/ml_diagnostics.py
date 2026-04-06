@@ -193,7 +193,284 @@ class MLDiagnostics:
         elif result.retrain_count == 1:
             result.actual_avg_gap_days = 0.0
 
-        # TODO: Task 2.3 — feature importance stability (uses retrain_snapshots)
-        # TODO: Task 2.5 — turnover analysis (uses all_scores)
+        # ── 5. Task 2.3 — Feature importance stability ──
+        self._compute_feature_importance(retrain_snapshots, result)
+
+        # ── 6. Task 2.4 — IS/OOS IC decay ──
+        self._compute_ic_decay(
+            diag_alpha, universe_data, retrain_snapshots,
+            all_scores, eval_dates, result,
+        )
+
+        # ── 7. Task 2.5 — Turnover analysis ──
+        self._compute_turnover(all_scores, result)
+
+        # ── 8. Task 2.6 — Verdict + warnings ──
+        self._compute_verdict(result)
 
         return result
+
+    # ── Task 2.3: Feature importance stability ──────────────────────
+
+    def _compute_feature_importance(
+        self,
+        retrain_snapshots: list[dict],
+        result: DiagnosticsResult,
+    ) -> None:
+        """Collect feature importance across retrains, compute per-feature CV."""
+        if not retrain_snapshots:
+            return
+
+        for snap in retrain_snapshots:
+            imp = snap.get("feature_importance", {})
+            for feat_name, value in imp.items():
+                result.feature_importance.setdefault(feat_name, []).append(value)
+
+        for feat_name, values in result.feature_importance.items():
+            if len(values) < 2:
+                result.feature_importance_cv[feat_name] = float("inf")
+                continue
+            arr = np.array(values, dtype=float)
+            mean = float(np.mean(arr))
+            std = float(np.std(arr, ddof=1))
+            cv = std / abs(mean) if abs(mean) > 1e-10 else float("inf")
+            result.feature_importance_cv[feat_name] = cv
+
+    # ── Task 2.4: IS/OOS IC decay ──────────────────────────────────
+
+    def _compute_ic_decay(
+        self,
+        diag_alpha: MLAlpha,
+        universe_data: dict[str, pd.DataFrame],
+        retrain_snapshots: list[dict],
+        all_scores: list[tuple[_date, pd.Series]],
+        eval_dates: list[_date],
+        result: DiagnosticsResult,
+    ) -> None:
+        """Compute per-retrain IS IC and OOS IC."""
+        if not retrain_snapshots:
+            return
+
+        retrain_freq = self._source_alpha.config_dict()["retrain_freq"]
+        oos_window = min(max(retrain_freq, 21), 42)
+
+        # Build a date→scores lookup for OOS IC computation
+        scores_by_date: dict[_date, pd.Series] = {d: s for d, s in all_scores}
+
+        # Build a date→forward_return lookup. For each symbol, pre-compute
+        # 5-day forward close-to-close return at each eval date.
+        fwd_returns_by_date: dict[_date, dict[str, float]] = {}
+        for eval_date, scores in all_scores:
+            fwd = {}
+            for sym, df in universe_data.items():
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    continue
+                # Find the close at eval_date and eval_date + ~5 trading days
+                mask_at = df.index.date <= eval_date
+                mask_fwd = df.index.date > eval_date
+                if not mask_at.any() or not mask_fwd.any():
+                    continue
+                close_at = float(df.loc[mask_at, "adj_close"].iloc[-1])
+                # Forward: take the 5th trading day after eval_date (or fewer if near end)
+                fwd_bars = df.loc[mask_fwd]
+                if len(fwd_bars) < 5:
+                    continue
+                close_fwd = float(fwd_bars["adj_close"].iloc[4])
+                if close_at > 0:
+                    fwd[sym] = close_fwd / close_at - 1.0
+            fwd_returns_by_date[eval_date] = fwd
+
+        train_ics: list[float] = []
+        oos_ics: list[float] = []
+
+        for snap in retrain_snapshots:
+            retrain_date_str = snap["last_retrain_date"]
+            if retrain_date_str is None:
+                continue
+            retrain_date = _date.fromisoformat(retrain_date_str)
+
+            # ── IS IC: model predictions vs actual labels on training panel ──
+            train_ic = self._compute_is_ic(diag_alpha, universe_data, retrain_date)
+
+            # ── OOS IC: model predictions vs forward returns on next window ──
+            oos_ic = self._compute_oos_ic(
+                retrain_date, oos_window, eval_dates,
+                scores_by_date, fwd_returns_by_date,
+            )
+
+            entry = {
+                "retrain_date": retrain_date_str,
+                "train_ic": train_ic,
+                "oos_ic": oos_ic,
+            }
+            result.ic_series.append(entry)
+            if np.isfinite(train_ic):
+                train_ics.append(train_ic)
+            if np.isfinite(oos_ic):
+                oos_ics.append(oos_ic)
+
+        result.mean_train_ic = float(np.mean(train_ics)) if train_ics else 0.0
+        result.mean_oos_ic = float(np.mean(oos_ics)) if oos_ics else 0.0
+        denom = max(abs(result.mean_train_ic), 1e-6)
+        result.overfitting_score = max(
+            0.0, (result.mean_train_ic - result.mean_oos_ic) / denom,
+        )
+
+    def _compute_is_ic(
+        self,
+        diag_alpha: MLAlpha,
+        universe_data: dict[str, pd.DataFrame],
+        retrain_date: _date,
+    ) -> float:
+        """Compute IS IC: spearman(model_predictions, actual_labels) on
+        the training panel.
+
+        This is the ONE case where we call MLAlpha._build_training_panel
+        (a private method). Justified: read-only, same package, no public
+        equivalent without code duplication.
+        """
+        try:
+            X, y = diag_alpha._build_training_panel(universe_data, retrain_date)
+        except Exception:
+            return float("nan")
+        if X is None or y is None or len(X) < 10:
+            return float("nan")
+
+        model = diag_alpha._current_model
+        if model is None:
+            return float("nan")
+
+        try:
+            X_arr = np.asarray(X.to_numpy(), dtype=float)
+            y_arr = np.asarray(y.to_numpy(), dtype=float)
+            preds = model.predict(X_arr)
+        except Exception:
+            return float("nan")
+
+        finite = np.isfinite(preds) & np.isfinite(y_arr)
+        if finite.sum() < 5:
+            return float("nan")
+
+        try:
+            ic = float(stats.spearmanr(preds[finite], y_arr[finite]).statistic)
+        except Exception:
+            ic = float("nan")
+        return ic
+
+    def _compute_oos_ic(
+        self,
+        retrain_date: _date,
+        oos_window: int,
+        eval_dates: list[_date],
+        scores_by_date: dict[_date, pd.Series],
+        fwd_returns_by_date: dict[_date, dict[str, float]],
+    ) -> float:
+        """Compute OOS IC: average spearman(factor_scores, forward_returns)
+        over the next oos_window calendar days after retrain_date."""
+        from datetime import timedelta
+
+        oos_end = retrain_date + timedelta(days=oos_window)
+        oos_ics: list[float] = []
+
+        for ed in eval_dates:
+            if ed <= retrain_date or ed > oos_end:
+                continue
+            scores = scores_by_date.get(ed)
+            fwd = fwd_returns_by_date.get(ed, {})
+            if scores is None or scores.empty or not fwd:
+                continue
+
+            common = sorted(set(scores.index) & set(fwd.keys()))
+            if len(common) < 5:
+                continue
+
+            s = np.array([float(scores[sym]) for sym in common])
+            r = np.array([fwd[sym] for sym in common])
+            finite = np.isfinite(s) & np.isfinite(r)
+            if finite.sum() < 5:
+                continue
+
+            try:
+                ic = float(stats.spearmanr(s[finite], r[finite]).statistic)
+                oos_ics.append(ic)
+            except Exception:
+                continue
+
+        return float(np.mean(oos_ics)) if oos_ics else float("nan")
+
+    # ── Task 2.5: Turnover analysis ────────────────────────────────
+
+    def _compute_turnover(
+        self,
+        all_scores: list[tuple[_date, pd.Series]],
+        result: DiagnosticsResult,
+    ) -> None:
+        """Compute top-N retention rate across consecutive eval dates."""
+        top_n = self._config.top_n_for_turnover
+        prev_top: set[str] | None = None
+
+        for eval_date, scores in all_scores:
+            if scores.empty:
+                continue
+            current_top = set(scores.nlargest(min(top_n, len(scores))).index)
+
+            if prev_top is not None and current_top:
+                retention = len(current_top & prev_top) / max(len(prev_top), 1)
+                result.turnover_series.append({
+                    "date": eval_date.isoformat(),
+                    "retention_rate": round(retention, 4),
+                })
+
+            prev_top = current_top
+
+        if result.turnover_series:
+            rates = [e["retention_rate"] for e in result.turnover_series]
+            result.avg_turnover = round(1.0 - float(np.mean(rates)), 4)
+
+    # ── Task 2.6: Verdict + warnings ───────────────────────────────
+
+    def _compute_verdict(self, result: DiagnosticsResult) -> None:
+        """Compute summary verdict and human-readable warnings."""
+        cfg = self._config
+
+        # Overfitting verdict
+        if result.overfitting_score > cfg.severe_overfit_threshold:
+            result.verdict = "severe_overfit"
+            result.warnings.append(
+                f"IS IC ({result.mean_train_ic:.3f}) >> OOS IC "
+                f"({result.mean_oos_ic:.3f}) — overfitting_score="
+                f"{result.overfitting_score:.2f} > {cfg.severe_overfit_threshold}"
+            )
+        elif result.overfitting_score > cfg.mild_overfit_threshold:
+            result.verdict = "mild_overfit"
+            result.warnings.append(
+                f"Mild IS→OOS IC decay: overfitting_score="
+                f"{result.overfitting_score:.2f}"
+            )
+        elif result.avg_turnover > cfg.high_turnover_threshold:
+            result.verdict = "unstable"
+            result.warnings.append(
+                f"High turnover: {result.avg_turnover:.2f} — signal "
+                f"may be noise-driven"
+            )
+        else:
+            result.verdict = "healthy"
+
+        # Feature stability warnings
+        for feat, cv in result.feature_importance_cv.items():
+            if cv > 2.0:
+                result.warnings.append(
+                    f"Feature '{feat}' has very high CV={cv:.2f} — "
+                    f"unstable importance across retrains"
+                )
+
+        # Retrain cadence warnings
+        if result.retrain_count >= 2:
+            expected = result.expected_retrain_freq
+            actual = result.actual_avg_gap_days
+            if actual > expected * 1.5:
+                result.warnings.append(
+                    f"Retrain gap ({actual:.0f} days) is much larger "
+                    f"than expected ({expected} days) — possible data "
+                    f"scarcity or warmup issues"
+                )
