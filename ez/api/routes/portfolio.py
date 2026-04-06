@@ -1584,7 +1584,7 @@ def ml_alpha_diagnostics(req: MLDiagnosticsRequest):
             detail=f"Data fetch failed: {type(e).__name__}: {e}",
         )
 
-    # 4. Run diagnostics
+    # 4. Run diagnostics (wrap to prevent raw 500 on user code errors)
     config = DiagnosticsConfig(
         forward_horizon=req.forward_horizon,
         severe_overfit_threshold=req.severe_overfit_threshold,
@@ -1593,6 +1593,12 @@ def ml_alpha_diagnostics(req: MLDiagnosticsRequest):
         top_n_for_turnover=req.top_n_for_turnover,
     )
     diag = MLDiagnostics(alpha, config=config)
-    result = diag.run(universe_data, calendar, start_dt, end_dt, req.eval_freq)
+    try:
+        result = diag.run(universe_data, calendar, start_dt, end_dt, req.eval_freq)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Diagnostics run failed: {type(e).__name__}: {e}",
+        )
 
     return result.to_dict()

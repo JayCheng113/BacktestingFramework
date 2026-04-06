@@ -332,9 +332,17 @@ def refresh_registries():
     from ez.portfolio.portfolio_strategy import PortfolioStrategy
     from ez.portfolio.cross_factor import CrossSectionalFactor
 
+    # V2.13.1: ml_alphas are in CrossSectionalFactor registry but have
+    # distinct module prefix. Surface a separate count so API consumers
+    # (and Phase 6 frontend) can distinguish ML alphas from regular factors.
+    ml_alpha_count = sum(
+        1 for v in CrossSectionalFactor.get_registry().values()
+        if (v.__module__ or "").startswith("ml_alphas.")
+    )
     return {
         "strategies": len(Strategy.get_registry()),
         "factors": len(Factor.get_registry()),
         "portfolio_strategies": len(PortfolioStrategy.get_registry()),
-        "cross_factors": len(CrossSectionalFactor.get_registry()),
+        "cross_factors": len(CrossSectionalFactor.get_registry()) - ml_alpha_count,
+        "ml_alphas": ml_alpha_count,
     }
