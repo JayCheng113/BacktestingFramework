@@ -506,3 +506,137 @@ class TestCorrelationWarnings:
 
         ens._check_correlation_warnings()
         assert len(ens.state["correlation_warnings"]) == 0
+
+
+# ─── Task 3.5: Nested ensembles + e2e ────────────────────────────
+
+class TestNestedEnsembles:
+    def test_nested_ensemble_works_recursively(self):
+        """StrategyEnsemble([EnsembleA, EnsembleB, Static]) works."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+
+        inner_a = StrategyEnsemble(
+            strategies=[_StaticStrategy({"X": 1.0}), _StaticStrategy({"Y": 1.0})],
+            mode="equal",
+        )
+        inner_b = StrategyEnsemble(
+            strategies=[_StaticStrategy({"Z": 1.0})],
+            mode="equal",
+        )
+        outer = StrategyEnsemble(
+            strategies=[inner_a, inner_b, _StaticStrategy({"W": 1.0})],
+            mode="equal",
+        )
+        combined = outer.generate_weights({}, datetime(2024, 1, 1), {}, {})
+        # 3 subs at outer level, each gets 1/3 weight
+        # inner_a: {X:0.5, Y:0.5} × 1/3 → X:1/6, Y:1/6
+        # inner_b: {Z:1.0} × 1/3 → Z:1/3
+        # static: {W:1.0} × 1/3 → W:1/3
+        assert abs(combined.get("X", 0) - 1/6) < 1e-6
+        assert abs(combined.get("Y", 0) - 1/6) < 1e-6
+        assert abs(combined.get("Z", 0) - 1/3) < 1e-6
+        assert abs(combined.get("W", 0) - 1/3) < 1e-6
+
+    def test_inner_state_isolated_from_outer(self):
+        """Inner ensemble's self.state must not pollute outer's."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+
+        inner = StrategyEnsemble(
+            strategies=[_StaticStrategy({"A": 1.0})],
+            mode="equal",
+        )
+        outer = StrategyEnsemble(
+            strategies=[inner, _StaticStrategy({"B": 1.0})],
+            mode="equal",
+        )
+
+        data, dates = _make_universe(n_days=30, symbols=["A", "B"])
+        outer.generate_weights(data, dates[5].to_pydatetime(), {}, {})
+        outer.generate_weights(data, dates[15].to_pydatetime(), {}, {})
+
+        # Outer has its own ledger entries
+        assert len(outer.state["sub_target_weights"]) == 2
+        # Inner (deepcopied inside outer) has its own separate ledger
+        inner_in_outer = outer._strategies[0]
+        assert inner_in_outer is not inner  # deepcopy
+        # Inner's state is independent (has its own ledger from its own generate_weights calls)
+        assert id(inner_in_outer.state) != id(outer.state)
+
+    def test_nested_lookback_no_double_buffer(self):
+        """Inner ensemble lookback=300. Outer should NOT add another buffer.
+        Outer lookback = max(inner=300, other_sub=252) = 300."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+
+        # Create a sub-strategy with high lookback
+        class _HighLookbackStrategy(PortfolioStrategy):
+            @property
+            def lookback_days(self) -> int:
+                return 300
+            def generate_weights(self, data, date, pw, pr):
+                return {"A": 1.0}
+
+        inner = StrategyEnsemble(
+            strategies=[_HighLookbackStrategy()],
+            mode="equal",
+        )
+        assert inner.lookback_days == 300  # max of subs, no buffer
+
+        outer = StrategyEnsemble(
+            strategies=[inner, _StaticStrategy({"B": 1.0})],
+            mode="equal",
+        )
+        # outer.lookback = max(inner=300, static=252) = 300
+        # NOT 300 + 20 + 20 (double buffer inflation)
+        assert outer.lookback_days == 300
+
+
+class TestEndToEndIntegration:
+    def test_ensemble_through_run_portfolio_backtest(self):
+        """StrategyEnsemble wrapping two TopNRotation subs through a
+        real run_portfolio_backtest produces valid results."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        from ez.portfolio.cross_factor import MomentumRank, VolumeRank
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.engine import run_portfolio_backtest
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        rng = np.random.default_rng(42)
+        n_days = 300
+        n_stocks = 6
+        dates = pd.date_range("2022-01-03", periods=n_days, freq="B")
+        data = {}
+        for i in range(n_stocks):
+            prices = 100 * np.cumprod(1 + rng.normal(0.0003 * (i + 1), 0.012, n_days))
+            data[f"S{i:02d}"] = pd.DataFrame({
+                "open": prices, "high": prices * 1.005, "low": prices * 0.995,
+                "close": prices, "adj_close": prices,
+                "volume": rng.integers(100_000, 1_000_000, n_days).astype(float),
+            }, index=dates)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(n_stocks)])
+
+        sub_mom = TopNRotation(factor=MomentumRank(period=20), top_n=3)
+        sub_vol = TopNRotation(factor=VolumeRank(period=10), top_n=3)
+
+        ensemble = StrategyEnsemble(
+            strategies=[sub_mom, sub_vol],
+            mode="equal",
+        )
+
+        result = run_portfolio_backtest(
+            strategy=ensemble,
+            universe=universe,
+            universe_data=data,
+            calendar=cal,
+            start=dates[60].date(),
+            end=dates[-1].date(),
+            freq="weekly",
+            initial_cash=1_000_000,
+        )
+
+        assert result is not None
+        assert len(result.equity_curve) > 0
+        assert result.equity_curve[-1] > 0  # not bankrupt
+        # Ensemble had at least some rebalances
+        assert len(result.rebalance_dates) > 5
