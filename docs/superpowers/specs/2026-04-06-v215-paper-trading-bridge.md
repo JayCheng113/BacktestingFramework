@@ -93,14 +93,25 @@ ez/live/ 不依赖:
 @dataclass
 class DeploymentSpec:
     """纯策略配置 — 不含任何运行时/审批元数据。
-    所有字段参与 spec_id 哈希。JSON 序列化后深冻结。"""
+    所有字段参与 spec_id 哈希。
+
+    Canonicalization 规则 (哈希前):
+    - symbols: sorted()
+    - strategy_params: 递归 key-sorted JSON
+    - optimizer_params / risk_params: sorted by key
+    """
 
     # 策略配置 (和 PortfolioRunRequest 对齐)
     strategy_name: str          # "TopNRotation" / "StrategyEnsemble" / ...
     strategy_params: dict       # 含 sub_strategies (Ensemble) 或 factor/top_n
-    symbols: tuple[str, ...]    # tuple 不可变 (不用 list)
+    symbols: tuple[str, ...]    # tuple 不可变, 哈希前 sorted()
     market: str                 # "cn_stock" / "us_stock" / "hk_stock"
     freq: str                   # "daily" / "weekly" / "monthly"
+
+    # 市场规则 (完整承接 RunSpec/PortfolioCommonConfig)
+    t_plus_1: bool = True               # T+1 约束
+    price_limit_pct: float = 0.1        # 涨跌停幅度
+    lot_size: int = 100                 # 最小交易单位
 
     # 成本模型
     buy_commission_rate: float = 0.0003
@@ -108,25 +119,31 @@ class DeploymentSpec:
     stamp_tax_rate: float = 0.0005
     slippage_rate: float = 0.001
     min_commission: float = 5.0
-    lot_size: int = 100
-    limit_pct: float = 0.1
 
     # 优化器 + 风控
     optimizer: str | None = None
-    optimizer_params: tuple = ()      # tuple of (k,v) pairs, 不可变
+    optimizer_params: tuple = ()      # tuple of (k,v) pairs, 哈希前 key-sorted
     risk_control: bool = False
-    risk_params: tuple = ()           # tuple of (k,v) pairs
+    risk_params: tuple = ()           # tuple of (k,v) pairs, 哈希前 key-sorted
 
     # 资金
     initial_cash: float = 1_000_000.0
 
     @property
     def spec_id(self) -> str:
-        """内容哈希 — 所有字段参与, 无例外"""
-        # SHA-256 of canonical JSON → [:16]
-
-    def to_json(self) -> str:
-        """序列化 (symbols/optimizer_params/risk_params → list/dict)"""
+        """内容哈希 — 所有字段参与, canonical sort 后 SHA-256[:16]"""
+        canonical = {
+            "strategy_name": self.strategy_name,
+            "strategy_params": _sort_keys_recursive(self.strategy_params),
+            "symbols": sorted(self.symbols),  # canonical sort
+            "market": self.market,
+            "freq": self.freq,
+            "t_plus_1": self.t_plus_1,
+            "price_limit_pct": self.price_limit_pct,
+            "lot_size": self.lot_size,
+            # ... 所有字段, key-sorted
+        }
+        return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:16]
 ```
 
 **DeploymentRecord** — 可变运行时记录 (不参与哈希)：
@@ -138,7 +155,7 @@ class DeploymentRecord:
     deployment_id: str              # UUID, 非内容哈希 (每次部署唯一)
     spec_id: str                    # 指向 DeploymentSpec
     name: str                       # 用户可读名称
-    status: str = "pending"         # pending → approved → running → stopped/error
+    status: str = "pending"         # 状态机见下
     stop_reason: str = ""
 
     # 来源追溯
@@ -152,6 +169,24 @@ class DeploymentRecord:
     started_at: datetime | None = None
     stopped_at: datetime | None = None
 ```
+
+### 状态机
+
+```
+pending → approved → running ⇄ paused → stopped
+                       ↓                    ↑
+                     error ─────────────────┘
+```
+
+| 转换 | 触发 | 约束 |
+|------|------|------|
+| pending → approved | DeployGate.evaluate() 全通过 | 硬门禁 |
+| approved → running | 用户点 "开始模拟" | — |
+| running → paused | 用户点 "暂停" | tick 跳过 paused 部署 |
+| paused → running | 用户点 "恢复" | 不重新过 gate |
+| running → stopped | 用户点 "停止" 或连续错误 | 释放 engine |
+| paused → stopped | 用户点 "停止" | — |
+| running → error | execute_day 连续失败 3 次 | 自动降级 |
 
 ### 从回测结果创建
 
@@ -229,15 +264,16 @@ class DeployGate:
         self,
         spec: DeploymentSpec,
         source_run_id: str,               # 必传 — 来源回测 run ID
-        portfolio_store: PortfolioStore,   # 必传 — 读取回测结果
+        portfolio_store: PortfolioStore,   # 必传 — 读取回测结果 + 权重历史
     ) -> GateVerdict:
         """
-        三阶段硬检查 (全部必须通过):
-        1. 从 source_run_id 拉回测结果 → 内部重算研究门禁
-        2. 部署专属检查 (回测时长、标的数、集中度)
-        3. 配置完整性检查
+        四阶段硬检查 (全部必须通过):
+        1. 来源回测存在性
+        2. 研究门禁重算 (sharpe/drawdown/trades/p-value/overfitting)
+        3. 部署专属检查 (回测时长、标的数、集中度、WFO)
+        4. 配置完整性
 
-        所有参数都是必传的, 没有 Optional 可以绕过。
+        所有参数必传, 无 Optional。指标全部从 DB 重算, 不接受外部传入。
         """
         reasons: list[GateReason] = []
 
@@ -252,7 +288,7 @@ class DeployGate:
 
         metrics = json.loads(run.metrics) if run.metrics else {}
 
-        # Phase 1: 内部重算研究门禁 (不接受外部传入)
+        # Phase 1: 研究门禁重算 (从 DB 指标, 不信任外部)
         sharpe = metrics.get("sharpe_ratio", 0)
         reasons.append(GateReason(
             rule="min_sharpe", passed=sharpe >= self.config.min_sharpe,
@@ -271,6 +307,20 @@ class DeployGate:
             value=trades, threshold=self.config.min_trades,
             message=f"交易次数 {trades}"))
 
+        # p-value: 从 run 的 config 看是否跑了 WF + significance
+        p_value = metrics.get("p_value", 1.0)
+        reasons.append(GateReason(
+            rule="max_p_value", passed=p_value <= self.config.max_p_value,
+            value=p_value, threshold=self.config.max_p_value,
+            message=f"显著性 p={p_value:.3f}"))
+
+        overfit = metrics.get("overfitting_score", 1.0)
+        reasons.append(GateReason(
+            rule="max_overfitting_score",
+            passed=overfit <= self.config.max_overfitting_score,
+            value=overfit, threshold=self.config.max_overfitting_score,
+            message=f"过拟合评分 {overfit:.2f}"))
+
         # Phase 2: 部署专属检查
         n_days = len(json.loads(run.dates)) if run.dates else 0
         reasons.append(GateReason(
@@ -284,6 +334,27 @@ class DeployGate:
             rule="min_symbols", passed=n_syms >= self.config.min_symbols,
             value=n_syms, threshold=self.config.min_symbols,
             message=f"标的数 {n_syms}"))
+
+        # 集中度: 从 weights_history 最后一期取 max weight
+        weights_hist = json.loads(run.weights_history) if run.weights_history else []
+        if weights_hist:
+            last_weights = weights_hist[-1]  # dict[str, float]
+            max_w = max(last_weights.values()) if last_weights else 0
+        else:
+            max_w = 1.0  # 无数据 = 最保守假设
+        reasons.append(GateReason(
+            rule="max_concentration",
+            passed=max_w <= self.config.max_concentration,
+            value=max_w, threshold=self.config.max_concentration,
+            message=f"最大单股权重 {max_w:.1%}"))
+
+        # WFO 必须存在 (如果 require_wfo)
+        if self.config.require_wfo:
+            has_wfo = p_value < 1.0 and overfit < 1.0  # 有效值 = 跑过 WF
+            reasons.append(GateReason(
+                rule="require_wfo", passed=has_wfo,
+                value=int(has_wfo), threshold=1,
+                message="前推验证" + ("已完成" if has_wfo else "未执行")))
 
         # Phase 3: 配置完整性
         reasons.append(GateReason(
@@ -301,7 +372,9 @@ class DeployGate:
 ### 不可绕过性保证
 
 - `source_run_id` 和 `portfolio_store` 都是必传参数 (非 Optional)
-- 门禁从 DB 自己拉指标重算, 不接受调用方声称的 "研究已通过"
+- 门禁从 DB 自己拉 metrics + weights_history 重算, 不接受调用方传入的 verdict
+- 集中度从 `weights_history` 末期实际权重计算 (不是目标权重)
+- p-value / overfitting 用 `1.0` 默认值 = 未跑 WF 自动不通过
 - API 层在 `/deploy` 端点内部构造 DeployGate + 传入 store, 前端无法跳过
 
 ### 审批流程
@@ -375,43 +448,48 @@ class PaperTradingEngine:
         # 1. 获取最新行情 (today 的收盘价)
         universe_data = self._fetch_latest(today)
 
-        # 2. Mark-to-market
-        equity = self._mark_to_market(universe_data, today)
+        # 2. 盘前 mark-to-market (交易前权益)
+        pre_trade_equity = self._mark_to_market(universe_data, today)
 
-        # 3. 风控检查
+        # 3. 风控检查 (基于交易前权益)
+        day_risk_events = []
         if self.risk_manager:
-            event = self.risk_manager.check_drawdown(self.equity_curve + [equity])
+            event = self.risk_manager.check_drawdown(
+                self.equity_curve + [pre_trade_equity])
             if event:
-                self.risk_events.append({"date": str(today), **event})
+                day_risk_events.append({"date": str(today), **event})
 
-        # 4. 是否调仓日?
+        # 4. 交易执行
+        day_trades = []
         if self._is_rebalance_day(today):
-            # 切片历史数据 [today-lookback, today-1] — 和回测完全相同
             sliced = self._slice_history(universe_data, today)
-
-            # 调用策略 — 完全相同的接口
             target_weights = self.strategy.generate_weights(
-                sliced, today, self.prev_weights, self.prev_returns
-            )
-
-            # 优化器
+                sliced, today, self.prev_weights, self.prev_returns)
             if self.optimizer:
                 self.optimizer.set_context(today, sliced)
                 target_weights = self.optimizer.optimize(target_weights)
-
-            # 执行交易 — 复用回测的成交逻辑
-            day_trades = self._execute_trades(target_weights, universe_data, today)
+            # 复用共享成交函数
+            day_trades, self.holdings, self.cash = execute_portfolio_trades(
+                target_weights, self.holdings, pre_trade_equity, self.cash, ...)
             self.trades.extend(day_trades)
 
-        # 5. 记录
-        self.equity_curve.append(equity)
+        # 5. 盘后 mark-to-market (交易后权益, 含成交成本)
+        post_trade_equity = self._mark_to_market(universe_data, today)
+
+        # 6. 记录 — 用交易后权益
+        self.equity_curve.append(post_trade_equity)
         self.dates.append(today)
+        self.risk_events.extend(day_risk_events)
+        # 更新 prev_returns 供下次策略调用
+        self.prev_returns = self._compute_returns(universe_data, today)
+        self.prev_weights = self._current_weights(universe_data, today)
 
         return {
             "date": str(today),
-            "equity": equity,
-            "trades": day_trades if self._is_rebalance_day(today) else [],
-            "risk_events": [e for e in self.risk_events if e["date"] == str(today)],
+            "equity": post_trade_equity,
+            "prev_returns": self.prev_returns,
+            "trades": day_trades,
+            "risk_events": day_risk_events,
             "rebalanced": self._is_rebalance_day(today),
         }
 
@@ -525,27 +603,50 @@ class Scheduler:
             await self._start_engine(deployment_id)
             self.store.update_status(deployment_id, "running")
 
+    async def pause_deployment(self, deployment_id: str) -> None:
+        """暂停 — engine 保留在内存, tick 跳过, 恢复时无需重建"""
+        async with self._lock:
+            self.store.update_status(deployment_id, "paused")
+
+    async def resume_deployment(self, deployment_id: str) -> None:
+        """恢复 — 如果 engine 在内存直接改状态, 否则重建"""
+        async with self._lock:
+            if deployment_id not in self._engines:
+                await self._start_engine(deployment_id)
+            self.store.update_status(deployment_id, "running")
+
     async def stop_deployment(self, deployment_id: str, reason: str = "user_stop") -> None:
         async with self._lock:
-            self._engines.pop(deployment_id, None)
+            self._engines.pop(deployment_id, None)  # 释放内存
             self.store.update_status(deployment_id, "stopped", stop_reason=reason)
 
-    async def tick(self, business_date: date, calendar: TradingCalendar) -> list[dict]:
+    async def tick(self, business_date: date) -> list[dict]:
         """
-        每日触发。
+        每日触发。按每个部署的市场获取对应交易日历。
 
         幂等: 同一 deployment × 同一 business_date 只执行一次。
-        非交易日: 跳过执行, 记录 "非交易日" 状态。
+        非交易日: 跳过该部署 (不同市场交易日不同)。
         """
-        if not calendar.is_trading_day(business_date):
-            return [{"date": str(business_date), "skipped": "非交易日"}]
-
         results = []
         for dep_id, engine in list(self._engines.items()):
+            spec = engine.spec
+            cal = self._get_calendar(spec.market)
+
+            # 非该市场交易日 → 跳过
+            if not cal.is_trading_day(business_date):
+                results.append({"deployment_id": dep_id, "skipped": f"{spec.market} 非交易日"})
+                continue
+
             # 幂等检查
             last = self.store.get_last_processed_date(dep_id)
             if last and last >= business_date:
                 results.append({"deployment_id": dep_id, "skipped": "已执行"})
+                continue
+
+            # paused 跳过
+            record = self.store.get_record(dep_id)
+            if record and record.status == "paused":
+                results.append({"deployment_id": dep_id, "skipped": "已暂停"})
                 continue
 
             try:
@@ -557,6 +658,11 @@ class Scheduler:
                 results.append({"deployment_id": dep_id, "error": str(e)})
         return results
 
+    def _get_calendar(self, market: str) -> TradingCalendar:
+        """按市场获取交易日历 (缓存)"""
+        # cn_stock → 上交所日历, us_stock → NYSE 日历, hk_stock → 港交所日历
+        ...
+
     async def _start_engine(self, deployment_id: str) -> None:
         """内部: 实例化 engine + 完整状态恢复"""
         record = self.store.get_record(deployment_id)
@@ -567,16 +673,16 @@ class Scheduler:
         self._engines[deployment_id] = engine
 
     def _restore_full_state(self, engine: PaperTradingEngine, deployment_id: str):
-        """完整状态恢复 — 所有影响策略行为的字段"""
+        """完整状态恢复 — 所有影响策略/风控行为的字段"""
         snapshots = self.store.get_all_snapshots(deployment_id)
         if not snapshots:
             return
         latest = snapshots[-1]
         engine.cash = latest["cash"]
-        engine.holdings = latest["holdings"]
-        engine.prev_weights = latest["weights"]
-        engine.prev_returns = latest.get("prev_returns", {})
-        # 恢复完整历史 (策略可能需要)
+        engine.holdings = json.loads(latest["holdings"])
+        engine.prev_weights = json.loads(latest["weights"])
+        engine.prev_returns = json.loads(latest.get("prev_returns", "{}"))
+        # 恢复完整历史 (策略和风控都可能需要)
         engine.equity_curve = [s["equity"] for s in snapshots]
         engine.dates = [date.fromisoformat(s["snapshot_date"]) for s in snapshots]
         engine.trades = []
@@ -584,19 +690,28 @@ class Scheduler:
         for s in snapshots:
             engine.trades.extend(json.loads(s.get("trades", "[]")))
             engine.risk_events.extend(json.loads(s.get("risk_events", "[]")))
+        # 恢复 risk_manager 内部状态 (drawdown state machine)
+        if engine.risk_manager and engine.equity_curve:
+            engine.risk_manager.replay_equity(engine.equity_curve)
 ```
 
 ### 触发方式
 
 ```python
 # POST /api/live/tick
-# 接收业务日期 (非 date.today()), 由调用方确定
+# 接收业务日期。不传时用当天 (如果是交易日) 或前一个交易日。
+# 每个部署按自己的 market 获取对应日历, 无全局 default_market。
 @router.post("/tick")
 async def trigger_daily_tick(business_date: date | None = None):
-    cal = TradingCalendar.from_market(scheduler.default_market)
-    bd = business_date or cal.previous_trading_day(date.today())
-    results = await scheduler.tick(bd, cal)
-    return {"business_date": str(bd), "results": results}
+    if business_date is None:
+        # 默认策略: 当天如果是任一市场的交易日则用当天,
+        # 否则向前找最近的 (用 cn_stock 日历作为 fallback)
+        from ez.portfolio.calendar import TradingCalendar
+        cn_cal = TradingCalendar.from_market("cn_stock")
+        today = date.today()
+        business_date = today if cn_cal.is_trading_day(today) else cn_cal.prev_trading_day(today)
+    results = await scheduler.tick(business_date)
+    return {"business_date": str(business_date), "results": results}
 ```
 
 V3.0 时替换为内置 APScheduler 或 Celery。
