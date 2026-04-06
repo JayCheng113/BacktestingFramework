@@ -110,6 +110,41 @@ class TestAKShareProvider:
         assert mock.call_args_list[0][1]["period"] == "weekly"
 
 
+class TestRawFallbackNaN:
+    """BUG-02 regression: always runs regardless of akshare installation.
+
+    Mocks the akshare import so the provider code path executes without
+    the real package. Verifies close == NaN when raw data is unavailable.
+    """
+
+    def test_raw_unavailable_close_is_nan(self):
+        """Bar construction uses NaN for close when raw_map has no entry."""
+        import math
+        import sys
+        from unittest.mock import MagicMock
+
+        # Ensure akshare is "importable" even if not installed
+        fake_ak = MagicMock()
+        df_adj = pd.DataFrame({
+            "日期": ["2024-01-02"], "开盘": [10.5], "收盘": [11.0],
+            "最高": [11.2], "最低": [10.3], "成交量": [100000],
+        })
+        # qfq succeeds, raw returns empty → raw_map empty → fallback path
+        fake_ak.stock_zh_a_hist.side_effect = [df_adj, pd.DataFrame()]
+
+        with patch.dict(sys.modules, {"akshare": fake_ak}):
+            from ez.data.providers.akshare_provider import AKShareDataProvider
+            p = AKShareDataProvider()
+            p._last_call_time = 0
+            bars = p.get_kline("000001.SZ", "cn_stock", "daily",
+                               date(2024, 1, 1), date(2024, 1, 3))
+
+        assert len(bars) == 1
+        assert math.isnan(bars[0].close), \
+            f"close must be NaN when raw unavailable, got {bars[0].close}"
+        assert bars[0].adj_close == 11.0
+
+
 class TestTushareETFRouting:
     def test_is_fund_code(self):
         from ez.data.providers.tushare_provider import TushareDataProvider
