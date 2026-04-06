@@ -19,7 +19,7 @@ class ParamRange:
     """Search space for a single parameter."""
 
     name: str
-    values: list[int | float]  # discrete choices for grid; sample pool for random
+    values: list[int | float | str | bool]  # discrete choices for grid; sample pool for random
 
 
 @dataclass
