@@ -67,7 +67,7 @@ interface Props {
   showRiskControl: boolean; setShowRiskControl: (v: boolean) => void
   showAttribution: boolean; setShowAttribution: (v: boolean) => void
   // Ensemble
-  ensembleConfigRef: React.MutableRefObject<any>
+  ensembleConfigRef: React.MutableRefObject<EnsembleConfig | null>
   // Search
   searchMode: boolean; setSearchMode: (v: boolean) => void
   comboSearch: boolean; setComboSearch: (v: boolean) => void
@@ -371,10 +371,12 @@ export default function PortfolioRunContent(props: Props) {
           <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
             {wfLoading ? '验证中...' : '前推验证'}
           </button>
-          <button onClick={() => setSearchMode(!searchMode)} className="px-3 py-1.5 rounded text-sm font-medium"
-            style={{ backgroundColor: searchMode ? '#1e6b3a' : 'var(--bg-primary)', color: searchMode ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-            参数搜索
-          </button>
+          {!isEnsemble && (
+            <button onClick={() => setSearchMode(!searchMode)} className="px-3 py-1.5 rounded text-sm font-medium"
+              style={{ backgroundColor: searchMode ? '#1e6b3a' : 'var(--bg-primary)', color: searchMode ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              参数搜索
+            </button>
+          )}
           <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
             className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle} title="折数" />
           <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>折</span>

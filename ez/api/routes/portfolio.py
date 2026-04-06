@@ -688,6 +688,7 @@ def list_portfolio_strategies():
         "parameters": {
             "mode": {"type": "select", "options": ["equal", "manual", "return_weighted", "inverse_vol"], "default": "equal", "label": "组合模式"},
             "sub_strategies": {"type": "ensemble_subs", "default": [], "label": "子策略列表"},
+            "ensemble_weights": {"type": "weights", "default": None, "label": "手动权重 (mode=manual 时)"},
             "warmup_rebalances": {"type": "int", "default": 8, "min": 1, "max": 50, "label": "预热再平衡次数"},
             "correlation_threshold": {"type": "float", "default": 0.9, "min": 0.0, "max": 1.0, "label": "相关性警告阈值"},
         },

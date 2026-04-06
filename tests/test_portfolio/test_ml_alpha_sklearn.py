@@ -1011,3 +1011,41 @@ class TestMLAlphaXGBoost:
                 target_fn=_forward_return_target(5),
                 train_window=60, retrain_freq=20, purge_days=5,
             )
+
+    def test_xgb_device_cuda_rejected(self):
+        from xgboost import XGBRegressor
+        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+
+        with pytest.raises(UnsupportedEstimatorError, match="device.*cuda"):
+            MLAlpha(
+                name="_xgb_cuda",
+                model_factory=lambda: XGBRegressor(
+                    device="cuda", n_jobs=1,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )
+
+
+class TestMLAlphaLightGBMGPU:
+    """LightGBM device_type=gpu rejection."""
+
+    @pytest.fixture(autouse=True)
+    def _skip(self):
+        pytest.importorskip("lightgbm", reason="LightGBM GPU rejection test needs lightgbm")
+
+    def test_lgbm_device_type_gpu_rejected(self):
+        from lightgbm import LGBMRegressor
+        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+
+        with pytest.raises(UnsupportedEstimatorError, match="device_type.*gpu"):
+            MLAlpha(
+                name="_lgbm_gpu",
+                model_factory=lambda: LGBMRegressor(
+                    device_type="gpu", n_jobs=1, verbose=-1,
+                ),
+                feature_fn=_simple_feature_fn,
+                target_fn=_forward_return_target(5),
+                train_window=60, retrain_freq=20, purge_days=5,
+            )

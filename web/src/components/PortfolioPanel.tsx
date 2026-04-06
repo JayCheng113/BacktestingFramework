@@ -3,6 +3,7 @@ import { listPortfolioStrategies, runPortfolioBacktest, listPortfolioRuns, delet
 import { DEFAULT_SETTINGS, getDefaultSettings } from './BacktestSettings'
 import type { PortfolioRunResult, HistoryRun, ParamSchema } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
+import type { EnsembleConfig } from './EnsembleBuilder'
 import PortfolioRunContent from './PortfolioRunContent'
 import PortfolioFactorContent from './PortfolioFactorContent'
 import PortfolioHistoryContent from './PortfolioHistoryContent'
@@ -67,7 +68,7 @@ export default function PortfolioPanel() {
   const [indexBenchmark, setIndexBenchmark] = useState('')
   const [trackingError, setTrackingError] = useState(5)
   // V2.14 B3: Ensemble config ref (updated by EnsembleBuilder via callback)
-  const ensembleConfigRef = useRef<any>(null)
+  const ensembleConfigRef = useRef<EnsembleConfig | null>(null)
 
   // Parameter search state -- dynamic from schema
   const [searchMode, setSearchMode] = useState(false)
