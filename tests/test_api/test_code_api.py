@@ -70,7 +70,10 @@ class TestHealthVersion:
     def test_version_updated(self):
         resp = client.get("/api/health")
         assert resp.status_code == 200
-        assert resp.json()["version"] == "0.2.12.2"
+        import tomllib
+        from pathlib import Path
+        expected = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+        assert resp.json()["version"] == expected
 
 
 class TestPromote:

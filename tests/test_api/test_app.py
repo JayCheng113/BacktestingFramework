@@ -13,7 +13,11 @@ def test_health_endpoint():
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["version"] == "0.2.12.2"
+    # Version should match pyproject.toml (single source of truth)
+    import tomllib
+    from pathlib import Path
+    expected = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+    assert data["version"] == expected
     assert "strategies_registered" in data
 
 

@@ -46,7 +46,33 @@ async def lifespan(app: FastAPI):
     close_resources()
 
 
-app = FastAPI(title="ez-trading", version="0.2.12.2", lifespan=lifespan)
+def _get_version() -> str:
+    """Read version from pyproject.toml (single source of truth).
+
+    Priority:
+    1. pyproject.toml on disk (works in dev, editable install, CI)
+    2. importlib.metadata (works in frozen/packaged mode where pyproject.toml is absent)
+    3. Hardcoded fallback
+    """
+    try:
+        import tomllib
+        from pathlib import Path
+        pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+        if pyproject.exists():
+            data = tomllib.loads(pyproject.read_text())
+            return data["project"]["version"]
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+        return version("ez-trading")
+    except Exception:
+        pass
+    return "0.2.13"
+
+_APP_VERSION = _get_version()
+
+app = FastAPI(title="ez-trading", version=_APP_VERSION, lifespan=lifespan)
 
 config = load_config()
 app.add_middleware(
@@ -99,7 +125,7 @@ def health():
     from ez.strategy.base import Strategy
     return {
         "status": "ok",
-        "version": "0.2.12.2",
+        "version": _APP_VERSION,
         "strategies_registered": len(Strategy._registry),
     }
 
