@@ -5,6 +5,7 @@ import BacktestSettings from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import { useState, useEffect, useRef } from 'react'
 import { getPortfolioRunHoldings } from '../api'
+import { deployToLive } from '../api/live'
 import EnsembleBuilder from './EnsembleBuilder'
 import type { EnsembleConfig } from './EnsembleBuilder'
 
@@ -114,6 +115,24 @@ export default function PortfolioRunContent(props: Props) {
   // V2.14 B3: Ensemble configuration
   const [ensembleConfig, setEnsembleConfig] = useState<EnsembleConfig | null>(null)
   const isEnsemble = selected === 'StrategyEnsemble'
+
+  // V2.15 C3: Deploy to paper trading
+  const [deployLoading, setDeployLoading] = useState(false)
+  const handleDeploy = async () => {
+    if (!result?.run_id) return
+    const name = window.prompt('部署名称', selected || '策略')
+    if (!name) return
+    setDeployLoading(true)
+    try {
+      const res = await deployToLive({ source_run_id: result.run_id, name })
+      alert(`部署成功！ID: ${res.data.deployment_id}\n请前往 "模拟盘" 页面查看和审批。`)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      alert('部署失败: ' + (err?.response?.data?.detail || err?.message || ''))
+    } finally {
+      setDeployLoading(false)
+    }
+  }
 
   // Local state for full weights loading
   const [fullWeights, setFullWeights] = useState<{ date: string; weights: Record<string, number> }[] | null>(null)
@@ -376,6 +395,12 @@ export default function PortfolioRunContent(props: Props) {
             <button onClick={() => setSearchMode(!searchMode)} className="px-3 py-1.5 rounded text-sm font-medium"
               style={{ backgroundColor: searchMode ? '#1e6b3a' : 'var(--bg-primary)', color: searchMode ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
               参数搜索
+            </button>
+          )}
+          {result && (
+            <button onClick={handleDeploy} disabled={deployLoading} className="px-3 py-1.5 rounded text-sm font-medium text-white"
+              style={{ backgroundColor: deployLoading ? '#30363d' : '#059669' }}>
+              {deployLoading ? '部署中...' : '部署到模拟盘'}
             </button>
           )}
           <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
