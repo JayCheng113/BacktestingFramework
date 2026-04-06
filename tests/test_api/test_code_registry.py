@@ -6,7 +6,8 @@ client = TestClient(app)
 
 
 class TestRegistryEndpoint:
-    def test_returns_4_categories(self):
+    def test_returns_5_categories(self):
+        """V2.13.2 G1.1: /registry returns 5 categories including ml_alpha."""
         resp = client.get("/api/code/registry")
         assert resp.status_code == 200
         data = resp.json()
@@ -14,11 +15,12 @@ class TestRegistryEndpoint:
         assert "factor" in data
         assert "portfolio_strategy" in data
         assert "cross_factor" in data
+        assert "ml_alpha" in data  # V2.13.2
 
     def test_each_category_has_builtin_and_user(self):
         resp = client.get("/api/code/registry")
         data = resp.json()
-        for kind in ["strategy", "factor", "portfolio_strategy", "cross_factor"]:
+        for kind in ["strategy", "factor", "portfolio_strategy", "cross_factor", "ml_alpha"]:
             assert "builtin" in data[kind]
             assert "user" in data[kind]
             assert isinstance(data[kind]["builtin"], list)
@@ -91,7 +93,7 @@ class TestDeleteAndRefresh:
         data = resp2.json()
         # All user entries should have existing files
         import os
-        for kind in ["strategy", "factor", "portfolio_strategy", "cross_factor"]:
+        for kind in ["strategy", "factor", "portfolio_strategy", "cross_factor", "ml_alpha"]:
             for entry in data[kind]["user"]:
                 # entry has "filename" — verify file exists
                 assert "filename" in entry or "name" in entry

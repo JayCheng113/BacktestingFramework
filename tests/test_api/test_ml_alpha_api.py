@@ -73,6 +73,25 @@ class TestCodeAPIMLAlphaRouting:
 
 # ─── Startup-scan + refresh regression (codex gap #2) ─────────────
 
+class TestRegistryMLAlpha:
+    """G1.1 regression: /registry must include ml_alpha as a 5th category."""
+
+    def test_registry_has_ml_alpha_category(self):
+        resp = client.get("/api/code/registry")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ml_alpha" in data, f"Missing ml_alpha key, got: {sorted(data.keys())}"
+        assert "builtin" in data["ml_alpha"]
+        assert "user" in data["ml_alpha"]
+
+    def test_refresh_preserves_ml_alpha_category(self):
+        """After /refresh, ml_alpha must still be present in /registry."""
+        client.post("/api/code/refresh")
+        resp = client.get("/api/code/registry")
+        assert resp.status_code == 200
+        assert "ml_alpha" in resp.json()
+
+
 class TestStartupScanAndRefresh:
     """Regression tests for the root cause Phase 5 was built to fix:
     ml_alphas/ must be scanned at startup AND cleaned+reloaded on
