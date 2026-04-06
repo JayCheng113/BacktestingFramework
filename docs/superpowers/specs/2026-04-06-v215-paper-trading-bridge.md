@@ -452,12 +452,13 @@ class PaperTradingEngine:
         pre_trade_equity = self._mark_to_market(universe_data, today)
 
         # 3. 风控检查 (基于交易前权益)
+        # NOTE: RiskManager.check_drawdown(equity: float) 接收单个 float,
+        # 返回 tuple[float, str | None]. 这里传当日权益, 非列表。
         day_risk_events = []
         if self.risk_manager:
-            event = self.risk_manager.check_drawdown(
-                self.equity_curve + [pre_trade_equity])
-            if event:
-                day_risk_events.append({"date": str(today), **event})
+            dd_pct, dd_action = self.risk_manager.check_drawdown(pre_trade_equity)
+            if dd_action:
+                day_risk_events.append({"date": str(today), "drawdown": dd_pct, "action": dd_action})
 
         # 4. 交易执行
         day_trades = []
@@ -517,7 +518,7 @@ class PaperTradingEngine:
 
 ### 关键设计决策
 
-1. **`execute_day()` 是幂等函数** — 同一 business_date 重复调用不产生新交易 (见 Scheduler 幂等键)
+1. **幂等性是 Scheduler 层保证** — `execute_day()` 本身不检查重复 (会 append), Scheduler.tick() 通过 `last_processed_date` 幂等键阻止重复调用
 2. **数据获取复用 DataProviderChain** — 同一个数据源，只是 end_date = business_date
 3. **成交逻辑从 portfolio engine 提取** — 不是复制粘贴，而是提取共享函数：
 
@@ -581,6 +582,7 @@ class Scheduler:
         self.store = store
         self.data_chain = data_chain
         self._engines: dict[str, PaperTradingEngine] = {}
+        self._paused: set[str] = set()  # 内存中 paused 标记, 避免 tick 每次查 DB
         self._lock = asyncio.Lock()
 
     async def resume_all(self) -> int:
@@ -606,11 +608,13 @@ class Scheduler:
     async def pause_deployment(self, deployment_id: str) -> None:
         """暂停 — engine 保留在内存, tick 跳过, 恢复时无需重建"""
         async with self._lock:
+            self._paused.add(deployment_id)  # 内存标记, 避免 tick 每次查 DB
             self.store.update_status(deployment_id, "paused")
 
     async def resume_deployment(self, deployment_id: str) -> None:
         """恢复 — 如果 engine 在内存直接改状态, 否则重建"""
         async with self._lock:
+            self._paused.discard(deployment_id)
             if deployment_id not in self._engines:
                 await self._start_engine(deployment_id)
             self.store.update_status(deployment_id, "running")
@@ -643,9 +647,8 @@ class Scheduler:
                 results.append({"deployment_id": dep_id, "skipped": "已执行"})
                 continue
 
-            # paused 跳过
-            record = self.store.get_record(dep_id)
-            if record and record.status == "paused":
+            # paused 跳过 (内存标记, 不查 DB)
+            if dep_id in self._paused:
                 results.append({"deployment_id": dep_id, "skipped": "已暂停"})
                 continue
 
@@ -659,8 +662,12 @@ class Scheduler:
         return results
 
     def _get_calendar(self, market: str) -> TradingCalendar:
-        """按市场获取交易日历 (缓存)"""
-        # cn_stock → 上交所日历, us_stock → NYSE 日历, hk_stock → 港交所日历
+        """按市场获取交易日历 (缓存)。
+        NOTE: TradingCalendar.from_market(market) 是 V2.15 新增工厂方法
+        (当前只有 from_dates() 和 weekday_fallback())。
+        实现: 从 Tushare trade_cal API 按交易所获取交易日 → from_dates()。
+        cn_stock → SSE, us_stock → NYSE, hk_stock → HKEX。
+        """
         ...
 
     async def _start_engine(self, deployment_id: str) -> None:
@@ -691,6 +698,9 @@ class Scheduler:
             engine.trades.extend(json.loads(s.get("trades", "[]")))
             engine.risk_events.extend(json.loads(s.get("risk_events", "[]")))
         # 恢复 risk_manager 内部状态 (drawdown state machine)
+        # NOTE: replay_equity() 是 V2.15 新增方法 (当前 RiskManager 没有):
+        # 遍历 equity_curve 重建 _peak_equity 和 _is_breached 状态。
+        # 实现: for eq in equity_curve: self.check_drawdown(eq)
         if engine.risk_manager and engine.equity_curve:
             engine.risk_manager.replay_equity(engine.equity_curve)
 ```
@@ -800,7 +810,7 @@ CREATE TABLE deployment_records (
     deployment_id VARCHAR PRIMARY KEY,
     spec_id VARCHAR NOT NULL REFERENCES deployment_specs(spec_id),
     name VARCHAR NOT NULL,
-    status VARCHAR DEFAULT 'pending',   -- pending/approved/running/stopped/error
+    status VARCHAR DEFAULT 'pending',   -- pending/approved/running/paused/stopped/error
     stop_reason VARCHAR DEFAULT '',
     source_run_id VARCHAR,              -- 来源回测 ID
     code_commit VARCHAR,
