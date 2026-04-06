@@ -137,17 +137,18 @@ def _build_supported_estimator_set() -> frozenset[type]:
         GradientBoostingRegressor,
     }
 
-    # V2.14: LightGBM (optional — skip if not installed)
+    # V2.14: LightGBM (optional — regressor only, classifier deferred
+    # until a classification contract is defined)
     try:
-        from lightgbm import LGBMRegressor, LGBMClassifier
-        estimators.update({LGBMRegressor, LGBMClassifier})
+        from lightgbm import LGBMRegressor
+        estimators.add(LGBMRegressor)
     except ImportError:
         pass
 
-    # V2.14: XGBoost (optional — skip if not installed)
+    # V2.14: XGBoost (optional — regressor only, classifier deferred)
     try:
-        from xgboost import XGBRegressor, XGBClassifier
-        estimators.update({XGBRegressor, XGBClassifier})
+        from xgboost import XGBRegressor
+        estimators.add(XGBRegressor)
     except ImportError:
         pass
 

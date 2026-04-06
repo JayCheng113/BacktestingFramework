@@ -154,6 +154,16 @@ export default function PortfolioPanel() {
     indexBenchmark, trackingError,
   ])
 
+  // V2.14 codex: clear stale search results when search-specific conditions change.
+  // searchGrid/comboSearch determine the search output but are NOT run inputs,
+  // so they must not be in the run-invalidation effect above.
+  useEffect(() => {
+    searchTokenRef.current += 1
+    setSearchResults([])
+    setSearchMeta(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(searchGrid), comboSearch])
+
   // V2.12.2 codex: market change must fully reset market-sensitive state.
   // Prior version only set `market` and let all downstream state (settings
   // cost model, index benchmark, tracking error, eval/corr/search/quality
@@ -248,7 +258,7 @@ export default function PortfolioPanel() {
         errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
       }
     }
-    if (compareTokenRef.current !== myToken) return  // superseded
+    if (compareTokenRef.current !== myToken) { setComparing(false); return }
     if (results.length >= 2) {
       setCompareData(results)
     } else if (errors.length > 0) {
@@ -277,7 +287,7 @@ export default function PortfolioPanel() {
       setEvalResult(evalRes.data)
       if (corrRes) setCorrResult(corrRes.data)
     } catch (e: any) { if (evalTokenRef.current === myToken) alert(e?.response?.data?.detail || e?.message || '评估失败') }
-    finally { if (evalTokenRef.current === myToken) setEvalLoading(false) }
+    finally { setEvalLoading(false) }
   }
 
   const handleFetchFundamental = async () => {
@@ -300,7 +310,7 @@ export default function PortfolioPanel() {
       if (fundaTokenRef.current !== myToken) return
       setQualityReport(qr.data.report || [])
     } catch (e: any) { if (fundaTokenRef.current === myToken) setFundaStatus(e.response?.data?.detail || '获取失败') }
-    finally { if (fundaTokenRef.current === myToken) setFetchingFunda(false) }
+    finally { setFetchingFunda(false) }
   }
 
   const downloadCSV = (filename: string, content: string) => {
@@ -388,7 +398,9 @@ export default function PortfolioPanel() {
         alert(e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
       }
     } finally {
-      if (runTokenRef.current === myToken) setLoading(false)
+      // Always clear loading — even if superseded. Prior version kept
+      // loading=true when token mismatched, causing UI freeze.
+      setLoading(false)
     }
   }
 
@@ -441,7 +453,7 @@ export default function PortfolioPanel() {
         alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
       }
     } finally {
-      if (wfTokenRef.current === myToken) setWfLoading(false)
+      setWfLoading(false)
     }
   }
 
@@ -545,7 +557,7 @@ export default function PortfolioPanel() {
     } catch (e: any) {
       if (searchTokenRef.current === myToken) alert(e?.response?.data?.detail || '搜索失败')
     } finally {
-      if (searchTokenRef.current === myToken) setSearchLoading(false)
+      setSearchLoading(false)
     }
   }
 

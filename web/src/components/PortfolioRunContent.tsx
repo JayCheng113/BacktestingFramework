@@ -167,7 +167,7 @@ export default function PortfolioRunContent(props: Props) {
         alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
       }
     } finally {
-      if (currentRunIdRef.current === requestedRunId) setWeightsLoading(false)
+      setWeightsLoading(false)
     }
   }
 
