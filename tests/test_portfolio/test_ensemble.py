@@ -219,3 +219,107 @@ class TestEnsembleSkeleton:
         # No warning for the empty sub — it's legitimate
         sub_warnings = [m for m in captured if "sub-strategy" in m]
         assert len(sub_warnings) == 0
+
+
+# ─── Task 3.2: Hypothetical-return ledger ─────────────────────────
+
+class TestHypotheticalReturnLedger:
+    def test_ledger_reconstruction_matches_close_to_close(self):
+        """Two static subs with known weights, known close prices.
+        Verify the hypothetical return matches hand-calculated values.
+
+        Data layout (30 business days):
+        - indices 0-7: close = 100 for all symbols (baseline)
+        - indices 8+: A=110, B=105, C=120 (price jump)
+
+        Rebalances:
+        - dates[5]: first rebalance → prev_close = 100 (still in baseline)
+        - dates[15]: second rebalance → close at dates[14] = 110/105/120
+          (jumped at index 8, well before dates[14])
+
+        Expected returns:
+        - sub_ab: 0.5*(110/100-1) + 0.5*(105/100-1) = 0.075
+        - sub_c: 1.0*(120/100-1) = 0.20
+        """
+        from ez.portfolio.ensemble import StrategyEnsemble
+
+        dates = pd.date_range("2022-01-03", periods=30, freq="B")
+        data = {
+            "A": pd.DataFrame({
+                "close": np.concatenate([np.full(8, 100.0), np.full(22, 110.0)]),
+                "adj_close": np.concatenate([np.full(8, 100.0), np.full(22, 110.0)]),
+            }, index=dates),
+            "B": pd.DataFrame({
+                "close": np.concatenate([np.full(8, 100.0), np.full(22, 105.0)]),
+                "adj_close": np.concatenate([np.full(8, 100.0), np.full(22, 105.0)]),
+            }, index=dates),
+            "C": pd.DataFrame({
+                "close": np.concatenate([np.full(8, 100.0), np.full(22, 120.0)]),
+                "adj_close": np.concatenate([np.full(8, 100.0), np.full(22, 120.0)]),
+            }, index=dates),
+        }
+
+        sub_ab = _StaticStrategy({"A": 0.5, "B": 0.5})
+        sub_c = _StaticStrategy({"C": 1.0})
+        ens = StrategyEnsemble(strategies=[sub_ab, sub_c], mode="equal")
+
+        # First rebalance at dates[5] — seeds the ledger (close=100 baseline)
+        ens.generate_weights(data, dates[5].to_pydatetime(), {}, {})
+        # Second rebalance at dates[15] — triggers ledger update
+        # prev_close at dates[5] = 100, current_close at dates[14] = 110/105/120
+        ens.generate_weights(data, dates[15].to_pydatetime(), {}, {})
+
+        r_ab = ens.state["sub_hypothetical_returns"][0]
+        r_c = ens.state["sub_hypothetical_returns"][1]
+        assert len(r_ab) == 1
+        assert len(r_c) == 1
+        # sub_ab: 0.5*(110/100-1) + 0.5*(105/100-1) = 0.075
+        assert abs(r_ab[0] - 0.075) < 1e-6
+        # sub_c: 1.0*(120/100-1) = 0.20
+        assert abs(r_c[0] - 0.20) < 1e-6
+
+    def test_zero_weight_sub_returns_zero(self):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        data, dates = _make_universe(n_days=30)
+        empty = _StaticStrategy({})
+        full = _StaticStrategy({"A": 1.0})
+        ens = StrategyEnsemble(strategies=[empty, full], mode="equal")
+
+        ens.generate_weights(data, dates[10].to_pydatetime(), {}, {})
+        ens.generate_weights(data, dates[20].to_pydatetime(), {}, {})
+
+        # Empty sub has 0.0 return (it held nothing)
+        r_empty = ens.state["sub_hypothetical_returns"][0]
+        assert len(r_empty) == 1
+        assert r_empty[0] == 0.0
+
+    def test_missing_symbol_graceful_skip(self):
+        """If a sub holds a symbol not in universe_data, skip it."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        data, dates = _make_universe(n_days=30, symbols=["A", "B"])
+
+        # Sub holds "Z" which is NOT in universe_data
+        sub = _StaticStrategy({"Z": 0.5, "A": 0.5})
+        ens = StrategyEnsemble(strategies=[sub], mode="equal")
+
+        ens.generate_weights(data, dates[10].to_pydatetime(), {}, {})
+        ens.generate_weights(data, dates[20].to_pydatetime(), {}, {})
+
+        # Return only includes A's contribution (Z skipped)
+        r = ens.state["sub_hypothetical_returns"][0]
+        assert len(r) == 1
+        assert isinstance(r[0], float)
+
+    def test_ledger_state_is_json_serializable(self):
+        """State must be pure dict/list/float — no pandas."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        data, dates = _make_universe(n_days=30)
+        sub = _StaticStrategy({"A": 1.0})
+        ens = StrategyEnsemble(strategies=[sub], mode="equal")
+
+        ens.generate_weights(data, dates[10].to_pydatetime(), {}, {})
+        ens.generate_weights(data, dates[20].to_pydatetime(), {}, {})
+
+        # json.dumps on the entire state dict must not raise
+        json_str = json.dumps(ens.state)
+        assert len(json_str) > 10

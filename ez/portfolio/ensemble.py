@@ -289,14 +289,66 @@ class StrategyEnsemble(PortfolioStrategy):
     ) -> None:
         """Reconstruct per-sub hypothetical return since last rebalance.
 
-        Formula: ``r_i = sum(w_sym * (close[current-1] / close[prev] - 1))``
-        Uses ``close`` (not ``adj_close``) because the engine trades on
-        close prices. Ignores costs, slippage, optimizer, risk-manager.
+        For each sub-strategy, compute the close-to-close return of its
+        target weight vector between the previous rebalance date and the
+        current date:
 
-        Placeholder for Task 3.2 — returns immediately for now.
+            ``r_i = sum(w_sym * (close[current-1] / close[prev] - 1))``
+
+        Uses ``close`` prices (what the engine actually trades on).
+        **Ignores** costs, slippage, optimizer override, risk-manager
+        reduction, lot-size rounding. This is a pure-alpha approximation.
+
+        Only runs if there's a previous rebalance recorded (first call
+        has no prior weights to reconstruct returns from).
         """
-        # TODO: Task 3.2 implements the actual ledger update
-        pass
+        last_rebal_str = self.state.get("last_rebalance_date")
+        if last_rebal_str is None:
+            return  # first rebalance — nothing to reconstruct yet
+
+        prev_date = _date.fromisoformat(last_rebal_str)
+        if prev_date >= current:
+            return  # same date or going backwards — skip
+
+        for i, sub_records in enumerate(self.state["sub_target_weights"]):
+            if not sub_records:
+                # Sub has never produced weights — 0 return
+                self.state["sub_hypothetical_returns"][i].append(0.0)
+                continue
+
+            prev_entry = sub_records[-1]
+            prev_weights = prev_entry.get("weights", {})
+            if not prev_weights:
+                self.state["sub_hypothetical_returns"][i].append(0.0)
+                continue
+
+            period_return = 0.0
+            for sym, w in prev_weights.items():
+                if w <= 0 or sym not in universe_data:
+                    continue
+                df = universe_data[sym]
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    continue
+
+                # Close at previous rebalance date
+                mask_prev = df.index.date <= prev_date
+                if not mask_prev.any():
+                    continue
+                prev_close = float(df.loc[mask_prev, "close"].iloc[-1])
+                if prev_close <= 0:
+                    continue
+
+                # Close at latest bar before current date (anti-lookahead:
+                # < current, matching engine's slice_universe_data convention)
+                mask_current = df.index.date < current
+                if not mask_current.any():
+                    continue
+                current_close = float(df.loc[mask_current, "close"].iloc[-1])
+
+                sym_ret = current_close / prev_close - 1.0
+                period_return += w * sym_ret
+
+            self.state["sub_hypothetical_returns"][i].append(period_return)
 
     def _check_correlation_warnings(self) -> None:
         """Pairwise correlation check on hypothetical return series.
