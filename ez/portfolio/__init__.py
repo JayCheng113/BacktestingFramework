@@ -8,3 +8,10 @@ from ez.portfolio.ml_alpha import (  # noqa: F401
     ML_ALPHA_TEMPLATE,
     UnsupportedEstimatorError,
 )
+
+# V2.13 Phase 2: MLDiagnostics (overfitting detection for MLAlpha)
+from ez.portfolio.ml_diagnostics import (  # noqa: F401
+    MLDiagnostics,
+    DiagnosticsResult,
+    DiagnosticsConfig,
+)
