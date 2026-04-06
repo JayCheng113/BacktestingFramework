@@ -1139,10 +1139,13 @@ anti-lookahead via purge/embargo. You provide:
 - target_fn: extracts the forward-looking label
 
 IMPORTANT:
-- V1 supports only a small whitelist of sklearn estimator classes
-  (Ridge, Lasso, LinearRegression, ElasticNet, DecisionTreeRegressor,
-  RandomForestRegressor, GradientBoostingRegressor). Adding others
-  requires explicit plan-file approval. If you try to use, e.g., SVR,
+- Supported estimators (regressor only):
+  sklearn: Ridge, Lasso, LinearRegression, ElasticNet,
+           DecisionTreeRegressor, RandomForestRegressor,
+           GradientBoostingRegressor
+  lightgbm (optional): LGBMRegressor — pip install lightgbm>=4.0
+  xgboost  (optional): XGBRegressor  — pip install xgboost>=2.0
+  If you try to use an unsupported class (e.g., SVR, LGBMClassifier),
   MLAlpha construction will raise UnsupportedEstimatorError.
 - Set n_jobs=1 on all estimators. The sandbox blocks multiprocessing,
   and MLAlpha enforces this at construction by inspecting the estimator

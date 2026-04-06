@@ -100,3 +100,4 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
   - TopNRotation/MultiFactorRotation: `factor`/`factors` 公开 property + `lookback_days` 从 `factor.warmup_period` 推
   - 15 一次性 warning flags + 容错: feature_fn/target_fn/predict/model_factory/fit 异常全 catch + log
   - **123 tests** (1813 → 1936), Ridge/RF/GBR 三个 estimator × backtest + walk_forward 端到端.
+- **V2.14 — ML 白名单扩展**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor` (lightgbm) + `XGBRegressor` (xgboost), 仅 regressor (classifier 待分类契约). GPU 拦截 (tree_method/device/device_type). 白名单不缓存 (每次 rebuild). 补齐 V1 sklearn deepcopy 缺口 (Lasso/LR/EN/DT + GBR cross-instance). +12 tests.

@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.13.2 | Tests: 2028 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.14 | Tests: 2054 with sklearn+lgbm+xgb / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -151,6 +151,15 @@ No version tag without review pass. No push without critical issues resolved.
 - **V2.13.1 Phase 5 — API endpoints** (`ez/api/routes/portfolio.py` + `ez/portfolio/loader.py` + `ez/api/routes/code.py`): 补全 REST API 层. `load_ml_alphas()` startup scan 让 `ml_alphas/` 在服务重启后自动注册. `/refresh` 完整清理+重载 ml_alpha 条目. `/template` + `/files` 支持 ml_alpha kind. 新增 `POST /api/portfolio/ml-alpha/diagnostics` endpoint (resolve class → instantiate → fetch data → MLDiagnostics.run → to_dict). 错误处理: sklearn 缺失→422, class 未找到→404, 非 MLAlpha→422, instantiation 失败→422, data fetch 失败→502. 6 tests (含 mocked happy path). `/evaluate-factors` 天然兼容 MLAlpha (无代码修改, 只需 loader scan).
 - **V2.13.2 — Frontend Phase 6 + Backend Polish** (核心交付完成, legacy G4.1/G4.2 + 扩展 G5 明确延期到独立 PR/V2.14): CodeEditor `+ ML Alpha` 按钮 + sidebar group + TS types (`DiagnosticsResult`/`MLDiagnosticsRequest`) + typed API client. PortfolioPanel ML Alpha 因子分类 (backend 自动 categorize via `issubclass(MLAlpha)`). PortfolioFactorContent ML 诊断面板 (verdict badge + IC chart + importance table + warnings). /registry 5th category. stamp_tax market gate (`model_fields_set`). alpha_combiner dynamic window. strict_lookback option. Race token 全覆盖 (3 handlers). Strategy deepcopy doc. Dead code cleanup. _predict None warning. 4 test additions. G4.1 (bool/enum search) + G4.2 (power-set cap) deferred. G5 (LightGBM/XGBoost) deferred to V2.14.
 
+- **V2.14**: 搜索增强 + ML 扩展 + Ensemble UI — 实现 V2.13.2 延期的 G4.1/G4.2/G5 + 新增 B3 Ensemble:
+  - **B1 Bool/Enum 参数搜索** (G4.1): `CandidateSearch.tsx` 重构为 discriminated union (NumericParamRange/BoolParamRange/EnumParamRange), bool 参数显示 checkbox pair, enum/select 显示按钮组. 后端 `ParamRangeRequest.values` 和 `ParamRange.values` 放宽为 `list[int|float|str|bool]`. 后端 grid/random search 已经是类型无关的, 零后端逻辑改动.
+  - **B2 multi_select 组合搜索** (G4.2): PortfolioPanel "组合搜索" checkbox → bitmask 生成所有 2^N-1 非空子集. 64 上限硬限 (>6 因子禁用按钮 + handleSearch defense). 原 `|` 分隔模式保留. searchGrid/comboSearch 变化自动清搜索结果.
+  - **B3 StrategyEnsemble UI**: 新 `EnsembleBuilder.tsx` 组件 (4 mode radio + 子策略卡片 + 手动权重 + 高级设置). 后端 `_create_strategy` 新增 Ensemble 分支 (列表格式 `sub_strategies: [{name, params}, ...]` 避免同名 key 冲突). `/strategies` endpoint 追加 Ensemble 元信息 (`is_ensemble: true`). 搜索按钮在 Ensemble 模式下隐藏. 6 个 API 测试.
+  - **B4 LightGBM/XGBoost 白名单** (G5): `_build_supported_estimator_set` 可选加载 `LGBMRegressor` + `XGBRegressor` (仅 regressor, classifier 待定义分类契约). GPU 拦截 (tree_method + device + device_type). 白名单不缓存 (每次 rebuild, 支持运行时安装库). `pyproject.toml` 新增 `[ml-extra]` group. 补齐 V1 sklearn 测试缺口 (Lasso/LR/EN/DT deepcopy + GBR cross-instance). 12 个新测试.
+  - **异步 loading 状态机统一**: 7 个 PortfolioPanel handler + PortfolioFactorContent diagnostics 全部统一为 "token-driven loading lifecycle" 模式: finally 条件清 (`if token === myToken`) + invalidation effect 同步清 loading. 消除 superseded 请求覆盖新请求 loading 和 loading 卡死两类 bug.
+  - **陈旧结果清理**: run-input 变化清 compareData, market 变化清 searchMeta, searchGrid/comboSearch 变化清 searchResults.
+  - 2028 → 2054 tests (+26: 6 ensemble API + 12 ML sklearn gap-fill/lgbm/xgb + 2 GPU rejection + 6 existing).
+
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
 - T+1 / 涨跌停 / 整手 — V2.6 已实现
@@ -168,9 +177,9 @@ No version tag without review pass. No push without critical issues resolved.
 - AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log)
 - 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)
 - AI助手SSE流式输出无法前端强制中断 (需后端cancel机制, 当前只能等输出完成)
-- **MLAlpha V1 whitelist 仅覆盖 7 个 sklearn estimator** — 其中 Ridge/RF/GBR 有 `run_portfolio_backtest` + `portfolio_walk_forward` 端到端集成测试, Lasso/LinearRegression/ElasticNet/DecisionTreeRegressor 只有单元层 whitelist acceptance 测试 (没有单独的 portfolio 集成测试). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task.
+- **MLAlpha whitelist 覆盖 9 个 estimator** (V2.14 扩展) — 7 sklearn (Ridge/Lasso/LR/EN/DT/RF/GBR) + LGBMRegressor + XGBRegressor. 其中 Ridge/RF/GBR/LGBM/XGB 有 deepcopy + e2e backtest 测试, Lasso/LR/EN/DT 有 deepcopy 测试. **Classifier (LGBMClassifier/XGBClassifier) 未列入** — 需要先定义分类契约 (predict 输出语义 + TopNRotation 兼容性). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task.
 - **MLAlpha `feature_warmup_days` 默认 0** — 用户的 `feature_fn` 若含 `rolling(N)` / `pct_change(N)` 等有 NaN head 的操作, 必须显式设置 `feature_warmup_days=N`, 否则训练 panel 的有效行数可能 < `train_window`. Runtime shortfall detection 在行数 < `train_window × 0.9` 时发一次性 warning, 但不 raise. `TopNRotation.lookback_days` 有 +20 buffer 作为未声明用户的 safety net, 但大 N (>20) 仍会 shortfall.
-- **MLAlpha V1 不支持 LightGBM/XGBoost** — defer to V2.13.1. V1 限制于 sklearn 内置 estimator 以保持 pickle/deepcopy/n_jobs 问题可控.
+- ~~**MLAlpha V1 不支持 LightGBM/XGBoost**~~ — ✅ **已关闭** (V2.14 B4: LGBMRegressor + XGBRegressor 加入白名单, GPU 拦截, `[ml-extra]` optional group. Classifier 待定义分类契约)
 
 ## V2.12.2 指标公式语义变更 (⚠ 非 backward compat)
 V2.12.2 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest/engine.py`
@@ -185,9 +194,9 @@ V2.12.2 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest
 **影响**: V2.12.2 之前存入 `experiment_runs` 和 `portfolio_runs` 的指标使用旧公式, V2.12.2 之后新建 run 使用新公式. 历史 run 和新 run 的这 5 个指标不可直接比较. 没有迁移脚本 — 历史值保留为记录 (old-formula), 新运行以新公式为准. UI 不区分新旧.
 
 ## V2.12.2 遗留项 (V2.13+ 处理)
-- **#7 候选搜索不支持 bool/enum 参数** — web/src/components/CandidateSearch.tsx 的 ParamRangeState 只支持 int/float, generateValues/countValues 也是数值逻辑, 布尔/枚举参数的搜索需要前端 UX 重设计 + 后端 ParamRangeRequest 支持 list[str]/list[bool]. 当前策略作者可以绕过: 用整数编码枚举. 不影响数据正确性.
+- ~~**#7 候选搜索不支持 bool/enum 参数**~~ — ✅ **已关闭** (V2.14 B1: CandidateSearch discriminated union + ParamRangeRequest 放宽 `list[int|float|str|bool]`)
 - **#18 alpha_combiner 训练窗口固定 365 天** — ez/api/routes/portfolio.py::_compute_alpha_weights 用 start-timedelta(days=365) 作训练区间. 长 warmup 的自定义因子会被喂不足历史. #9 修复后 lookback 已动态, 但训练窗口长度本身还是固定的. 动态化需要更多设计 (训练窗口大小 vs 因子 warmup 的权衡). 暂时把默认值留在 365, 用户可以覆盖 forward_days 间接调整.
-- **#20 multi_select 参数搜索 UX 语义** — PortfolioPanel.tsx 的 paramGrid[key] = vals.map(v => [v]) 让每个候选值独立成一个 combo. 用户输入 "EP,BP,SP,DP" 得到 4 次单因子运行, 而不是多因子组合. 这是产品设计折衷 (单因子搜索 vs 多因子组合空间爆炸), 真正的多因子子集搜索需要 power-set UX. 和上面 "multi_select 参数搜索只搜单因子组合" 同根.
+- ~~**#20 multi_select 参数搜索 UX 语义**~~ — ✅ **已关闭** (V2.14 B2: "组合搜索" checkbox → power-set 2^N-1 子集, 64 上限, 原 `|` 模式保留)
 - ~~**Portfolio 引擎 lookback 硬校验只 warn 不 raise**~~ — ✅ **已关闭** (V2.13.2 G1.4 `strict_lookback: bool = False` option, True 时 raise ValueError, 通过 PortfolioCommonConfig 暴露到 /run + /walk-forward + /search 三条 API 路由)
 - **WalkForward deepcopy 对 unpicklable state 敏感** — ez/backtest/walk_forward.py 每折 copy.deepcopy(strategy) 防 IS/OOS 状态污染. 对 hold DuckDB 连接 / 文件句柄 / httpx client 的 strategy 会 raise TypeError. 当前 single-stock builtin strategies 都没有这类字段, 但用户自定义策略需要避免 (或者改用 strategy_factory 模式, 组合 WF 已经这样做). 文档提醒: Strategy 子类尽量只 hold 纯数据字段, 避免 DB/file/network refs.
 - ~~**API 层 stamp_tax_rate 默认 0.0005 不按 market gate**~~ — ✅ **已关闭** (V2.13.2 G1.2 `model_fields_set` gate: 非 CN market 未显式传 stamp_tax_rate 时自动归零)

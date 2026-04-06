@@ -12,6 +12,7 @@ const sections = [
   { id: 'data', label: '数据源' },
   { id: 'api', label: 'API 参考' },
   { id: 'ai', label: 'AI 助手' },
+  { id: 'ml-alpha', label: 'ML Alpha' },
   { id: 'examples', label: '完整示例' },
   { id: 'faq', label: '常见问题' },
 ]
@@ -815,6 +816,14 @@ OOS = Out-of-Sample (样本外) — 真正衡量预测能力
 # FDR 校正后的 fdr_adjusted_p 会更大
 # 只有 fdr_adjusted_p < 0.05 的才是真正显著的`}</pre>
           <p style={ps}>批量搜索结果中的 <code>fdr_adjusted_p</code> 列就是 FDR 校正后的 p 值。优先关注这个值而非原始 p 值。</p>
+
+          <div style={h3s}>布尔 / 枚举参数搜索 (V2.14)</div>
+          <p style={ps}>参数搜索支持所有参数类型，不仅仅是数值：</p>
+          <table style={tbl}><thead><tr><th style={ths}>参数类型</th><th style={ths}>界面</th><th style={ths}>搜索方式</th></tr></thead><tbody>
+            <tr><td style={tds}>int / float</td><td style={tds}>最小值 / 最大值 / 步长</td><td style={tds}>按步长枚举</td></tr>
+            <tr><td style={tds}>bool</td><td style={tds}>True / False 勾选框</td><td style={tds}>勾选的值全部参与组合</td></tr>
+            <tr><td style={tds}>select / enum</td><td style={tds}>可点选按钮组</td><td style={tds}>选中的选项全部参与组合</td></tr>
+          </tbody></table>
         </>}
 
         {/* ================================================================ */}
@@ -1091,6 +1100,20 @@ class MyRotation(PortfolioStrategy):
           <div style={note}>
             数据只取一次，所有参数组合复用同一份数据，不重复获取。超过 50 个组合时自动随机采样。
           </div>
+
+          <div style={h3s}>组合搜索 — 因子子集 (V2.14)</div>
+          <p style={ps}>勾选"组合搜索"后，系统自动生成所有选中因子的子集组合 (power-set)。例如选 EP/BP/SP 三个因子，将生成 7 种组合 (3个单因子 + 3个双因子 + 1个三因子)。</p>
+          <div style={note}>上限 6 个因子 (2^6 = 64 种子集)。超过时搜索按钮禁用。不勾选"组合搜索"时仍可用 | 分隔符手动指定子集。</div>
+
+          <div style={h3s}>策略组合 — StrategyEnsemble (V2.14)</div>
+          <p style={ps}>在策略下拉中选择"StrategyEnsemble"，可将多个子策略组合使用。提供 4 种组合模式：</p>
+          <table style={tbl}><thead><tr><th style={ths}>模式</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>等权</td><td style={tds}>所有子策略权重相同</td></tr>
+            <tr><td style={tds}>手动权重</td><td style={tds}>用户指定各子策略权重值</td></tr>
+            <tr><td style={tds}>收益加权</td><td style={tds}>按历史假想收益自动调整 (需预热期)</td></tr>
+            <tr><td style={tds}>反向波动率</td><td style={tds}>波动率低的子策略获得更高权重</td></tr>
+          </tbody></table>
+          <p style={ps}>最多 5 个子策略，各自独立设置参数。允许同一策略添加多次 (不同参数)。</p>
 
           <div style={h3s}>前推验证</div>
           <p style={ps}>将回测区间分 N 折，训练集拟合 + 测试集验证，检查策略是否过拟合。输出样本外夏普、过拟合评分、Bootstrap 置信区间。</p>
@@ -1733,6 +1756,71 @@ llm:
             </tbody>
           </table>
           <p style={ps}>回测由研究框架直接调用 API，不通过 LLM 工具，避免 Agent 绕过预算控制。</p>
+        </>}
+
+        {/* ================================================================ */}
+        {/*  ML Alpha (V2.13+V2.14)                                          */}
+        {/* ================================================================ */}
+        {active === 'ml-alpha' && <>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>ML Alpha</h1>
+
+          <div style={h2s}>什么是 ML Alpha</div>
+          <p style={ps}>ML Alpha 是一种用机器学习模型驱动的截面因子。传统因子 (如动量、市盈率) 用固定公式计算排名；ML Alpha 用 sklearn/LightGBM/XGBoost 模型从多个特征中学习排名信号，并自动在回测过程中周期性重训练。</p>
+          <pre style={code}>{`特征 (feature_fn)  →  训练集  →  模型  →  预测分数  →  排名  →  组合权重
+      ↑                                                     ↑
+  自定义提取                                          自动 walk-forward 重训`}</pre>
+
+          <div style={h2s}>支持的模型</div>
+          <table style={tbl}><thead><tr><th style={ths}>库</th><th style={ths}>模型</th><th style={ths}>安装</th></tr></thead><tbody>
+            <tr><td style={tds}>sklearn (必需)</td><td style={tds}>Ridge, Lasso, LinearRegression, ElasticNet, DecisionTreeRegressor, RandomForestRegressor, GradientBoostingRegressor</td><td style={tds}>pip install -e ".[ml]"</td></tr>
+            <tr><td style={tds}>lightgbm (可选)</td><td style={tds}>LGBMRegressor</td><td style={tds}>pip install lightgbm&gt;=4.0</td></tr>
+            <tr><td style={tds}>xgboost (可选)</td><td style={tds}>XGBRegressor</td><td style={tds}>pip install xgboost&gt;=2.0</td></tr>
+          </tbody></table>
+          <div style={note}>仅支持回归器 (Regressor)。Classifier 需要先定义分类契约。GPU 模式被禁用 (tree_method/device/device_type 检查)。所有模型必须 n_jobs=1。</div>
+
+          <div style={h2s}>创建 ML Alpha</div>
+          <p style={ps}>代码编辑器 → 点击 "+ ML Alpha" → 编辑模板 → 保存。模板已包含完整骨架代码：</p>
+          <pre style={code}>{`class MyAlpha(MLAlpha):
+    def __init__(self):
+        super().__init__(
+            name="my_alpha",
+            model_factory=lambda: Ridge(alpha=1.0),  # 每次重训新建模型
+            feature_fn=my_features,     # 提取特征 DataFrame
+            target_fn=my_target,        # 提取前瞻收益 Series
+            train_window=120,           # 训练窗口 (交易日)
+            retrain_freq=20,            # 每 20 个交易日重训
+            purge_days=5,               # 清洗天数 (防 label 泄漏)
+            feature_warmup_days=20,     # 特征 warmup (如 rolling(20))
+        )`}</pre>
+
+          <div style={h2s}>关键参数</div>
+          <table style={tbl}><thead><tr><th style={ths}>参数</th><th style={ths}>说明</th><th style={ths}>建议值</th></tr></thead><tbody>
+            <tr><td style={tds}>model_factory</td><td style={tds}>返回全新未训练模型的函数 (每次重训调用)</td><td style={tds}>lambda: Ridge(alpha=1.0)</td></tr>
+            <tr><td style={tds}>feature_fn</td><td style={tds}>从单股 DataFrame 提取特征，返回 DataFrame</td><td style={tds}>包含 pct_change、rolling 等</td></tr>
+            <tr><td style={tds}>target_fn</td><td style={tds}>提取前瞻收益 Series (带 shift(-N))</td><td style={tds}>5-20 日 forward return</td></tr>
+            <tr><td style={tds}>train_window</td><td style={tds}>每次训练用多少交易日数据</td><td style={tds}>60-252</td></tr>
+            <tr><td style={tds}>retrain_freq</td><td style={tds}>每隔多少交易日重新训练</td><td style={tds}>20-60</td></tr>
+            <tr><td style={tds}>purge_days</td><td style={tds}>训练集末尾清除天数 (防 label 泄漏)</td><td style={tds}>&gt;= target horizon</td></tr>
+            <tr><td style={tds}>feature_warmup_days</td><td style={tds}>特征函数需要的 warmup 天数</td><td style={tds}>最大 rolling 窗口</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>ML 诊断</div>
+          <p style={ps}>组合回测 → 选股因子研究 → 底部 "ML Alpha 诊断" 面板。选择一个 ML Alpha → 点击"运行诊断"。</p>
+          <p style={ps}>诊断评估过拟合风险，输出：</p>
+          <table style={tbl}><thead><tr><th style={ths}>指标</th><th style={ths}>含义</th><th style={ths}>健康标准</th></tr></thead><tbody>
+            <tr><td style={tds}>IS/OOS IC</td><td style={tds}>训练集/验证集的信息系数</td><td style={tds}>OOS IC {'>'} 0 且接近 IS IC</td></tr>
+            <tr><td style={tds}>特征重要性 CV</td><td style={tds}>特征重要性跨重训的变异系数</td><td style={tds}>CV {'<'} 2.0</td></tr>
+            <tr><td style={tds}>换手率</td><td style={tds}>Top-N 持仓跨调仓的留存率</td><td style={tds}>换手 {'<'} 60%</td></tr>
+            <tr><td style={tds}>Verdict</td><td style={tds}>综合判定 (5 级: healthy → severe_overfit)</td><td style={tds}>healthy 或 mild_overfit</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>安全限制</div>
+          <table style={tbl}><thead><tr><th style={ths}>限制</th><th style={ths}>原因</th></tr></thead><tbody>
+            <tr><td style={tds}>n_jobs=1</td><td style={tds}>沙箱禁止多进程</td></tr>
+            <tr><td style={tds}>禁止 GPU</td><td style={tds}>tree_method/device/device_type 检查</td></tr>
+            <tr><td style={tds}>白名单模型</td><td style={tds}>确保 deepcopy/pickle 安全</td></tr>
+            <tr><td style={tds}>固定 random_state</td><td style={tds}>确保回测结果可复现</td></tr>
+          </tbody></table>
         </>}
 
         {/* ================================================================ */}

@@ -485,10 +485,16 @@ export default function PortfolioRunContent(props: Props) {
               )
             })}
           </div>
-          <button onClick={handleSearch} disabled={searchLoading}
-            className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: searchLoading ? '#30363d' : '#1e6b3a' }}>
-            {searchLoading ? '搜索中...' : '开始搜索'}
-          </button>
+          {(() => {
+            const msKey = comboSearch ? Object.entries(currentSchema).find(([, s]) => s.type === 'multi_select')?.[0] : undefined
+            const psOver = msKey ? ((1 << (searchGrid[msKey] || '').split(',').filter(Boolean).length) - 1) > 64 : false
+            return (
+              <button onClick={handleSearch} disabled={searchLoading || psOver}
+                className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: (searchLoading || psOver) ? '#30363d' : '#1e6b3a' }}>
+                {searchLoading ? '搜索中...' : psOver ? '因子过多' : '开始搜索'}
+              </button>
+            )
+          })()}
           {/* V2.12.2 codex: show sampled/completed/failed counts so users
               can see when combos were silently dropped due to errors. */}
           {searchMeta && (searchMeta.sampled > 0 || searchMeta.failed > 0) && (
