@@ -323,3 +323,115 @@ class TestHypotheticalReturnLedger:
         # json.dumps on the entire state dict must not raise
         json_str = json.dumps(ens.state)
         assert len(json_str) > 10
+
+
+# ─── Task 3.3: return_weighted + inverse_vol ──────────────────────
+
+class TestReturnWeightedMode:
+    def _build_and_warm(self, sub_a_ret: float, sub_b_ret: float, n_warmup: int = 10):
+        """Build an ensemble with two subs and manually fill the ledger
+        with known hypothetical returns to bypass the actual price-based
+        reconstruction."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0}, name="sub_a")
+        sub_b = _StaticStrategy({"Y": 1.0}, name="sub_b")
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="return_weighted",
+            warmup_rebalances=n_warmup,
+        )
+        # Manually fill ledger to simulate n_warmup rebalances
+        for i in range(n_warmup):
+            ens.state["sub_hypothetical_returns"][0].append(sub_a_ret)
+            ens.state["sub_hypothetical_returns"][1].append(sub_b_ret)
+            ens.state["sub_target_weights"][0].append({
+                "date": f"2022-01-{10+i:02d}", "weights": {"X": 1.0},
+            })
+            ens.state["sub_target_weights"][1].append({
+                "date": f"2022-01-{10+i:02d}", "weights": {"Y": 1.0},
+            })
+        ens.state["first_rebalance_date"] = "2022-01-10"
+        # Ensure elapsed days > _min_warmup_days (= n_warmup * 7)
+        # Set to 3 months later to comfortably pass the date gate
+        ens.state["last_rebalance_date"] = "2022-04-10"
+        return ens
+
+    def test_prefers_higher_return_sub(self):
+        ens = self._build_and_warm(sub_a_ret=0.05, sub_b_ret=0.01, n_warmup=10)
+        # return_weighted: weight ∝ max(0, mean). A=0.05, B=0.01
+        weights = ens._compute_ensemble_weights([True, True])
+        assert weights[0] > weights[1], (
+            f"Expected sub_a (mean=0.05) > sub_b (mean=0.01), got {weights}"
+        )
+
+    def test_all_negative_falls_back_to_equal(self):
+        ens = self._build_and_warm(sub_a_ret=-0.02, sub_b_ret=-0.03, n_warmup=10)
+        weights = ens._compute_ensemble_weights([True, True])
+        # All negative → equal fallback
+        assert abs(weights[0] - 0.5) < 1e-6
+        assert abs(weights[1] - 0.5) < 1e-6
+
+    def test_falls_back_during_warmup(self):
+        """Before warmup_rebalances entries, use equal weights."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0})
+        sub_b = _StaticStrategy({"Y": 1.0})
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="return_weighted",
+            warmup_rebalances=8,
+        )
+        # Only 3 entries — below warmup threshold
+        for _ in range(3):
+            ens.state["sub_hypothetical_returns"][0].append(0.10)
+            ens.state["sub_hypothetical_returns"][1].append(0.01)
+        ens.state["first_rebalance_date"] = "2022-01-10"
+        ens.state["last_rebalance_date"] = "2022-01-20"
+
+        weights = ens._compute_ensemble_weights([True, True])
+        # During warmup → equal
+        assert abs(weights[0] - 0.5) < 1e-6
+
+
+class TestInverseVolMode:
+    def test_assigns_more_weight_to_lower_vol_sub(self):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0})
+        sub_b = _StaticStrategy({"Y": 1.0})
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="inverse_vol",
+            warmup_rebalances=8,
+        )
+        # Sub A: low vol returns
+        rng = np.random.default_rng(42)
+        for _ in range(12):
+            ens.state["sub_hypothetical_returns"][0].append(0.01 + rng.normal(0, 0.001))
+            ens.state["sub_hypothetical_returns"][1].append(0.01 + rng.normal(0, 0.05))
+            ens.state["sub_target_weights"][0].append({"date": "2022-01-10", "weights": {}})
+            ens.state["sub_target_weights"][1].append({"date": "2022-01-10", "weights": {}})
+        ens.state["first_rebalance_date"] = "2022-01-10"
+        ens.state["last_rebalance_date"] = "2022-04-10"
+
+        weights = ens._compute_ensemble_weights([True, True])
+        # Sub A has lower vol → should get higher weight
+        assert weights[0] > weights[1], (
+            f"Expected low-vol sub_a > high-vol sub_b, got {weights}"
+        )
+
+    def test_falls_back_during_warmup(self):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0})
+        sub_b = _StaticStrategy({"Y": 1.0})
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="inverse_vol",
+            warmup_rebalances=8,
+        )
+        # Only 3 entries — warmup
+        for _ in range(3):
+            ens.state["sub_hypothetical_returns"][0].append(0.01)
+            ens.state["sub_hypothetical_returns"][1].append(0.05)
+
+        weights = ens._compute_ensemble_weights([True, True])
+        assert abs(weights[0] - 0.5) < 1e-6
