@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.12.2 | Tests: 1936 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.12.2 | Tests: 1963 with sklearn / 1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -139,7 +139,14 @@ No version tag without review pass. No push without critical issues resolved.
   - **用户 API**: `ML_ALPHA_TEMPLATE` 字符串 (含 `feature_warmup_days` 参数 + 白名单限制文档), `UnsupportedEstimatorError` 公开异常, 三个符号从 `ez.portfolio` 顶层 export. MLAlpha 基类不自动注册 (dual-dict pop).
   - **测试覆盖**: **123 个新测试** (`tests/test_portfolio/test_ml_alpha.py` 106 + `test_ml_alpha_sklearn.py` 17). 覆盖: 构造器 callable/validation/whitelist (28) + lazy retrain/purge+embargo (10) + anti-lookahead outlier+boundary (5) + determinism (3) + cache (2) + feature error handling+mixed partial failure (6) + fit exception/inf/non-numeric/datetime64 (11) + contract edge cases (17) + template (3) + package exports (3) + sklearn deepcopy Ridge/RF/GBR (7) + cross-instance determinism (2) + end-to-end backtest+walk_forward Ridge/RF/GBR (10) + warmup propagation (3) + factory freshness (2).
   - **依赖**: `scikit-learn>=1.5` (新增 `[ml]` optional group, 与 numpy>=2.0 ABI 兼容). 1813 → 1936 tests (+123).
-- **Next: V2.13 Phase 2** — MLDiagnostics (F9): feature importance stability / IS/OOS IC decay / turnover. Phase 3 (StrategyEnsemble D5), Phase 4 (Sandbox ml_alpha kind F7), Phase 5 (API endpoints), Phase 6 (Frontend) 待实施
+- **V2.13 Phase 2 — MLDiagnostics** (`ez/portfolio/ml_diagnostics.py`, plan `docs/superpowers/plans/2026-04-06-v213-phase2-ml-diagnostics.md`): F9 overfitting 检测. 用 Option C (fresh instance + polling via `config_dict()` + `diagnostics_snapshot()`) 驱动. 4 个诊断指标:
+  - **Feature importance stability**: 每次 retrain 采集 `coef_` / `feature_importances_`, 计算 per-feature CV. CV > 2.0 警告不稳定特征.
+  - **IS/OOS IC decay**: IS IC 用 `_build_training_panel` + `model.predict` + spearmanr; OOS IC 用后续 `min(max(retrain_freq, 21), 42)` 自适应窗口内的 factor scores vs forward returns. `overfitting_score = max(0, (IS - OOS) / |IS|)`.
+  - **Turnover analysis**: top-N symbols retention rate 跨 rebalance. `avg_turnover = 1 - mean(retention)`.
+  - **Verdict**: `DiagnosticsConfig` 参数化阈值 (severe_overfit=0.5, mild_overfit=0.2, high_turnover=0.6), 生成 human-readable warnings.
+  - `DiagnosticsResult.to_dict()` JSON-serializable (numpy 标量自动转换).
+  - **21 tests**, 覆盖 skeleton/cadence/importance/IC/turnover/verdict/config/e2e-JSON. 1942 → 1963 (+21).
+- **Next: V2.13 Phase 3** — StrategyEnsemble (D5). Phase 4 (Sandbox ml_alpha kind F7), Phase 5 (API endpoints), Phase 6 (Frontend) 待实施
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)

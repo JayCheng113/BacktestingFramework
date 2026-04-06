@@ -43,6 +43,7 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 | attribution.py | BrinsonAttribution + compute_attribution(): Brinson decomposition (V2.12) |
 | loader.py | Startup scanner for portfolio_strategies/ and cross_factors/ |
 | ml_alpha.py | MLAlpha(CrossSectionalFactor): walk-forward ML factor framework + V1 whitelist + n_jobs runtime enforcement + positional purge/embargo (trading days) + ML_ALPHA_TEMPLATE + UnsupportedEstimatorError (V2.13 Phase 1) |
+| ml_diagnostics.py | MLDiagnostics: overfitting detection for MLAlpha — feature importance CV, IS/OOS IC decay, turnover, verdict (V2.13 Phase 2) |
 
 ## Key Design Decisions
 - Anti-lookahead: engine slices data to [date-lookback, date-1] before calling strategy
