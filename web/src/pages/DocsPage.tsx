@@ -13,6 +13,7 @@ const sections = [
   { id: 'api', label: 'API 参考' },
   { id: 'ai', label: 'AI 助手' },
   { id: 'ml-alpha', label: 'ML Alpha' },
+  { id: 'paper-trading', label: '模拟盘' },
   { id: 'examples', label: '完整示例' },
   { id: 'faq', label: '常见问题' },
 ]
@@ -1821,6 +1822,131 @@ llm:
             <tr><td style={tds}>白名单模型</td><td style={tds}>确保 deepcopy/pickle 安全</td></tr>
             <tr><td style={tds}>固定 random_state</td><td style={tds}>确保回测结果可复现</td></tr>
           </tbody></table>
+        </>}
+
+        {/* ================================================================ */}
+        {/*  15. 模拟盘                                                       */}
+        {/* ================================================================ */}
+        {active === 'paper-trading' && <>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>模拟盘 (Paper Trading)</h1>
+
+          <div style={h2s}>什么是模拟盘</div>
+          <p style={ps}>模拟盘是从回测研究到实盘交易的中间桥梁。策略通过回测验证后，部署到模拟盘中，用每日真实行情数据驱动仿真交易，但不连接真实券商，不产生真实委托。</p>
+          <p style={ps}>模拟盘复用回测引擎的策略接口、交易成本模型、A 股规则（T+1、涨跌停、整手），确保仿真结果和回测逻辑一致。</p>
+          <pre style={code}>{`研究 → 回测 → 前推验证 → 部署门控 → 模拟盘 → (未来) 实盘
+                                ↑ 10 项硬检查
+                                  不可跳过`}</pre>
+
+          <div style={h2s}>部署流程</div>
+          <p style={ps}>完整的部署生命周期：</p>
+          <pre style={code}>{`1. 组合回测 → 运行策略，确认效果
+2. 点击 "部署到模拟盘" 按钮 → 创建 DeploymentSpec (状态: pending)
+3. 在模拟盘页面点击 "审批" → 运行 Deploy Gate (10 项检查)
+4. 审批通过 → 状态变为 approved
+5. 点击 "启动" → 状态变为 running，Scheduler 开始每日驱动
+6. 每个交易日 → Scheduler.tick() → PaperTradingEngine 执行当日仿真交易
+7. 可随时暂停/恢复/停止`}</pre>
+
+          <div style={h3s}>状态机</div>
+          <table style={tbl}><thead><tr><th style={ths}>状态</th><th style={ths}>含义</th><th style={ths}>可转换到</th></tr></thead><tbody>
+            <tr><td style={tds}>pending</td><td style={tds}>已创建，等待审批</td><td style={tds}>approved (审批通过)</td></tr>
+            <tr><td style={tds}>approved</td><td style={tds}>审批通过，可启动</td><td style={tds}>running (启动)</td></tr>
+            <tr><td style={tds}>running</td><td style={tds}>运行中，每日执行</td><td style={tds}>paused / stopped / error</td></tr>
+            <tr><td style={tds}>paused</td><td style={tds}>暂停，不执行 tick</td><td style={tds}>running (恢复) / stopped</td></tr>
+            <tr><td style={tds}>stopped</td><td style={tds}>已停止，终态</td><td style={tds}>-</td></tr>
+            <tr><td style={tds}>error</td><td style={tds}>连续 3 次错误，自动停止</td><td style={tds}>-</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>Deploy Gate (部署门控)</div>
+          <p style={ps}>Deploy Gate 是不可跳过的 10 项硬检查，比研究门控 (Research Gate) 更严格。只有全部通过才能部署。</p>
+          <table style={tbl}><thead><tr><th style={ths}>#</th><th style={ths}>检查项</th><th style={ths}>阈值</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>1</td><td style={tds}>来源回测存在</td><td style={tds}>-</td><td style={tds}>对应的 portfolio_run 必须存在于数据库</td></tr>
+            <tr><td style={tds}>2</td><td style={tds}>Sharpe Ratio</td><td style={tds}>&gt;= 0.5</td><td style={tds}>回测夏普比率达标 (研究门控是 0.3)</td></tr>
+            <tr><td style={tds}>3</td><td style={tds}>最大回撤</td><td style={tds}>&lt;= 25%</td><td style={tds}>风险可控</td></tr>
+            <tr><td style={tds}>4</td><td style={tds}>交易次数</td><td style={tds}>&gt;= 20</td><td style={tds}>样本量充足</td></tr>
+            <tr><td style={tds}>5</td><td style={tds}>显著性 p-value</td><td style={tds}>&lt;= 0.05</td><td style={tds}>策略收益非偶然</td></tr>
+            <tr><td style={tds}>6</td><td style={tds}>过拟合评分</td><td style={tds}>&lt;= 0.3</td><td style={tds}>OOS/IS 差距可接受</td></tr>
+            <tr><td style={tds}>7</td><td style={tds}>回测天数</td><td style={tds}>&gt;= 504</td><td style={tds}>约 2 年数据，覆盖牛熊</td></tr>
+            <tr><td style={tds}>8</td><td style={tds}>标的数量</td><td style={tds}>&gt;= 5</td><td style={tds}>组合分散化</td></tr>
+            <tr><td style={tds}>9</td><td style={tds}>最大集中度</td><td style={tds}>&lt;= 40%</td><td style={tds}>单票不超过 40% 权重</td></tr>
+            <tr><td style={tds}>10</td><td style={tds}>前推验证</td><td style={tds}>必须</td><td style={tds}>要求有 walk-forward 验证结果</td></tr>
+          </tbody></table>
+          <div style={note}>门控阈值在 DeployGateConfig 中定义，可在后端代码中调整，但前端不暴露修改入口（防止降低标准）。</div>
+
+          <div style={h2s}>日常运行</div>
+          <div style={h3s}>Scheduler 调度器</div>
+          <p style={ps}>Scheduler 是单进程、幂等的调度器。核心行为：</p>
+          <table style={tbl}><thead><tr><th style={ths}>特性</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>幂等</td><td style={tds}>每个部署记录 last_processed_date，同一天重复 tick 自动跳过</td></tr>
+            <tr><td style={tds}>按市场日历</td><td style={tds}>A 股/美股/港股各有独立交易日历，非交易日自动跳过</td></tr>
+            <tr><td style={tds}>串行执行</td><td style={tds}>asyncio.Lock 保护，tick() 不会并发执行</td></tr>
+            <tr><td style={tds}>错误升级</td><td style={tds}>连续 3 次执行错误 → 自动转 error 状态并移除引擎</td></tr>
+            <tr><td style={tds}>自动恢复</td><td style={tds}>进程重启时 resume_all() 从数据库恢复所有 running 状态的部署</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>每日执行流程</div>
+          <pre style={code}>{`Scheduler.tick(target_date)
+  ├─ 获取 asyncio.Lock
+  ├─ 遍历所有 running 引擎:
+  │   ├─ 跳过 paused 部署
+  │   ├─ 检查 last_processed_date (幂等)
+  │   ├─ 检查 TradingCalendar (非交易日跳过)
+  │   ├─ PaperTradingEngine.execute_day(target_date)
+  │   │   ├─ 获取当日行情数据 (DataProviderChain)
+  │   │   ├─ 策略生成权重 (generate_weights)
+  │   │   ├─ 优化器处理 (可选)
+  │   │   ├─ 风控检查 (可选)
+  │   │   ├─ 执行交易 (execute_portfolio_trades)
+  │   │   └─ 更新权益曲线、持仓、交易记录
+  │   ├─ 保存快照到数据库
+  │   └─ 更新 last_processed_date
+  └─ 释放 Lock`}</pre>
+
+          <div style={h2s}>暂停 / 恢复 / 停止</div>
+          <table style={tbl}><thead><tr><th style={ths}>操作</th><th style={ths}>效果</th><th style={ths}>备注</th></tr></thead><tbody>
+            <tr><td style={tds}>暂停</td><td style={tds}>标记为 paused，tick 时跳过</td><td style={tds}>引擎保留在内存中，恢复后继续</td></tr>
+            <tr><td style={tds}>恢复</td><td style={tds}>取消 paused 标记，下次 tick 恢复执行</td><td style={tds}>恢复后会回补暂停期间的交易日</td></tr>
+            <tr><td style={tds}>停止</td><td style={tds}>终态，引擎从调度器移除</td><td style={tds}>不会自动清仓（已知限制）</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>监控仪表板</div>
+          <p style={ps}>模拟盘页面顶部显示所有部署的健康状态汇总，底部可查看单个部署的详细信息。</p>
+          <div style={h3s}>健康指标</div>
+          <table style={tbl}><thead><tr><th style={ths}>指标</th><th style={ths}>说明</th></tr></thead><tbody>
+            <tr><td style={tds}>累计收益</td><td style={tds}>从启动至今的总收益率</td></tr>
+            <tr><td style={tds}>最大回撤</td><td style={tds}>权益曲线的最大回撤</td></tr>
+            <tr><td style={tds}>Sharpe Ratio</td><td style={tds}>年化夏普比率 (ddof=1, rf=3%)</td></tr>
+            <tr><td style={tds}>今日盈亏</td><td style={tds}>当日损益金额</td></tr>
+            <tr><td style={tds}>连续亏损天数</td><td style={tds}>连续日收益 &lt; 0 的天数</td></tr>
+            <tr><td style={tds}>风控事件</td><td style={tds}>当日/累计触发的风控事件数</td></tr>
+          </tbody></table>
+
+          <div style={h3s}>预警规则</div>
+          <p style={ps}>Monitor 自动检测以下异常并生成预警：</p>
+          <table style={tbl}><thead><tr><th style={ths}>预警</th><th style={ths}>触发条件</th></tr></thead><tbody>
+            <tr><td style={tds}>回撤预警</td><td style={tds}>最大回撤 &gt; 20%</td></tr>
+            <tr><td style={tds}>连续亏损</td><td style={tds}>连续亏损 &gt; 5 天</td></tr>
+            <tr><td style={tds}>执行停滞</td><td style={tds}>最近 3 个交易日无执行记录</td></tr>
+            <tr><td style={tds}>错误累积</td><td style={tds}>累计错误次数 &gt; 0</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>数据持久化</div>
+          <p style={ps}>所有部署数据存储在 DuckDB 中，共 3 张表：</p>
+          <table style={tbl}><thead><tr><th style={ths}>表</th><th style={ths}>内容</th></tr></thead><tbody>
+            <tr><td style={tds}>deployment_specs</td><td style={tds}>策略配置快照（不可变，content hash 去重）</td></tr>
+            <tr><td style={tds}>deployment_records</td><td style={tds}>部署生命周期记录（状态、门控结果、时间戳）</td></tr>
+            <tr><td style={tds}>deployment_snapshots</td><td style={tds}>每日快照（权益、持仓、交易、风控事件）</td></tr>
+          </tbody></table>
+
+          <div style={h2s}>已知限制</div>
+          <table style={tbl}><thead><tr><th style={ths}>限制</th><th style={ths}>说明</th><th style={ths}>影响</th></tr></thead><tbody>
+            <tr><td style={tds}>strategy.state 不持久化</td><td style={tds}>进程重启后策略内部状态丢失</td><td style={tds}>有状态策略（如 MLAlpha 模型）重启后首个 rebalance 从零训练</td></tr>
+            <tr><td style={tds}>数据时效性</td><td style={tds}>依赖数据源更新速度</td><td style={tds}>tick 时数据可能尚未更新，需在收盘后足够时间执行</td></tr>
+            <tr><td style={tds}>停止不清仓</td><td style={tds}>停止部署不会执行清仓操作</td><td style={tds}>不影响模拟盘（无真实持仓），但期末持仓指标会高估</td></tr>
+            <tr><td style={tds}>单进程</td><td style={tds}>Scheduler 无多 worker 支持</td><td style={tds}>大量部署时 tick 串行处理较慢</td></tr>
+            <tr><td style={tds}>无 crash recovery</td><td style={tds}>tick 执行中途崩溃可能丢失当天快照</td><td style={tds}>下次 tick 会补执行（幂等保护）</td></tr>
+          </tbody></table>
+          <div style={warn}>模拟盘目前是实验性功能 (V2.15)。建议在收盘后 1-2 小时手动触发 tick，确保数据源已更新。</div>
         </>}
 
         {/* ================================================================ */}

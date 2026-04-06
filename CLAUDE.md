@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.14 | Tests: 2054 passed + 10 skipped (2064 collected) with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.15 | Tests: 2236 collected with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -23,7 +23,7 @@ Version: 0.2.14 | Tests: 2054 passed + 10 skipped (2064 collected) with sklearn+
 - `ez/llm/` — LLM provider abstraction: DeepSeek/Qwen/Local/OpenAI (V2.7) [CLAUDE.md](ez/llm/CLAUDE.md)
 - `ez/agent/` — Agent loop: RunSpec, Runner, Gates, Report, ExperimentStore, CandidateSearch, BatchRunner, Prefilter, Tools, Assistant, Sandbox, FDR + V2.8 Research Agent [CLAUDE.md](ez/agent/CLAUDE.md)
 - `ez/portfolio/` — Portfolio backtesting: Universe, CrossSectionalFactor, PortfolioStrategy, Allocator, Engine, 5 built-in strategies, CrossSectionalEvaluator, PortfolioWalkForward (V2.9+V2.10) [CLAUDE.md](ez/portfolio/CLAUDE.md)
-- `ez/live/` — Deploy Gate, OMS, Broker (V2.6+, planned)
+- `ez/live/` — Paper Trading Bridge: DeploymentSpec, DeployGate, PaperTradingEngine, Scheduler, Monitor, DeploymentStore (V2.15) [CLAUDE.md](ez/live/CLAUDE.md)
 - `ez/ops/` — Scheduling, monitoring, audit (V3.2+, planned)
 
 ## Dependency Flow
@@ -160,6 +160,22 @@ No version tag without review pass. No push without critical issues resolved.
   - **陈旧结果清理**: run-input 变化清 compareData, market 变化清 searchMeta, searchGrid/comboSearch 变化清 searchResults.
   - 2028 → 2054 tests (+26: 6 ensemble API + 12 ML sklearn gap-fill/lgbm/xgb + 2 GPU rejection + 6 existing).
 
+- **V2.15**: Paper Trading Bridge — 模拟盘部署生命周期 (research → deploy → paper trade → monitor):
+  - **DeploymentSpec** (不可变, content-hash): 策略配置快照, SHA-256[:16] content-addressed ID, sorted symbols/params 保证幂等, 完整交易成本+市场规则字段, optimizer/risk 可选
+  - **DeploymentRecord**: 可变运行时记录, 6 状态状态机 (pending→approved→running⇄paused→stopped/error), 门控结果/时间戳/错误计数
+  - **DeploymentStore**: DuckDB 持久化 (deployment_specs+deployment_records+deployment_snapshots 3 张表), 每日快照 (equity/holdings/trades/risk_events)
+  - **DeployGate**: 不可跳过的 10 项硬检查 (4 阶段: 来源存在→研究指标→WF 指标→部署专属), 比 ResearchGate 更严格 (sharpe>=0.5, dd<=25%, trades>=20, p<=0.05, overfit<=0.3, days>=504, symbols>=5, concentration<=40%, require_wfo)
+  - **PaperTradingEngine**: 日线驱动仿真执行, 复用 PortfolioStrategy.generate_weights + execute_portfolio_trades + CostModel + MarketRules, 从 DataProviderChain 获取实时数据
+  - **Scheduler**: 单进程幂等调度器, asyncio.Lock 串行, per-deployment last_processed_date 防重复, per-market TradingCalendar 非交易日跳过, 连续 3 错误→error 状态自动升级, resume_all() 进程重启恢复
+  - **Monitor**: 健康仪表板 (cumulative_return/max_drawdown/sharpe/today_pnl/risk_events/consecutive_loss_days) + 预警规则 (回撤>20%/连续亏损>5天/执行停滞/错误累积)
+  - **API** (13 端点): POST /deploy, GET /deployments, GET /deployments/{id}, POST /approve, POST /start, POST /stop, POST /pause, POST /resume, POST /tick, GET /dashboard, GET /snapshots, GET /trades, GET /stream (SSE)
+  - **前端**: PaperTradingPage (部署列表+权益曲线+指标+交易记录+控制面板), Navbar "模拟盘" tab, PortfolioRunContent "部署到模拟盘" 按钮
+  - **execution 模块抽取**: execute_portfolio_trades() 从 PortfolioEngine 提取到 ez/portfolio/execution.py, 回测+模拟盘共享
+  - **RiskManager.replay_equity()**: 从历史权益曲线恢复风控状态 (peak/drawdown), 支持 resume 场景
+  - **TradingCalendar.from_market()**: 类方法, 按 market 字符串构造日历实例
+  - **DocsPage Ch15 模拟盘**: 部署流程/门控/调度/监控/已知限制
+  - 2054 → 2236 tests (+182)
+
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
 - T+1 / 涨跌停 / 整手 — V2.6 已实现
@@ -180,6 +196,10 @@ No version tag without review pass. No push without critical issues resolved.
 - **MLAlpha whitelist 覆盖 9 个 estimator** (V2.14 扩展) — 7 sklearn (Ridge/Lasso/LR/EN/DT/RF/GBR) + LGBMRegressor + XGBRegressor. 其中 Ridge/RF/GBR/LGBM/XGB 有 deepcopy + e2e backtest 测试, Lasso/LR/EN/DT 有 deepcopy 测试. **Classifier (LGBMClassifier/XGBClassifier) 未列入** — 需要先定义分类契约 (predict 输出语义 + TopNRotation 兼容性). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task.
 - **MLAlpha `feature_warmup_days` 默认 0** — 用户的 `feature_fn` 若含 `rolling(N)` / `pct_change(N)` 等有 NaN head 的操作, 必须显式设置 `feature_warmup_days=N`, 否则训练 panel 的有效行数可能 < `train_window`. Runtime shortfall detection 在行数 < `train_window × 0.9` 时发一次性 warning, 但不 raise. `TopNRotation.lookback_days` 有 +20 buffer 作为未声明用户的 safety net, 但大 N (>20) 仍会 shortfall.
 - ~~**MLAlpha V1 不支持 LightGBM/XGBoost**~~ — ✅ **已关闭** (V2.14 B4: LGBMRegressor + XGBRegressor 加入白名单, GPU 拦截, `[ml-extra]` optional group. Classifier 待定义分类契约)
+- **模拟盘 strategy.state 不持久化** — PaperTradingEngine 进程重启后策略内部状态 (如 MLAlpha 已训练的模型) 丢失. resume_all() 从 DB 恢复 holdings/equity 但不恢复 strategy.state. 有状态策略首个 rebalance 从零训练. 需要 strategy state serialization 协议 (V3.x).
+- **模拟盘数据时效性** — tick 执行时依赖 DataProviderChain 返回当日数据. 如果数据源尚未更新 (收盘后延迟), 可能获取到前一日数据导致信号错误. 建议收盘后 1-2 小时再触发 tick.
+- **模拟盘停止不清仓** — 停止部署不执行自动清仓操作. 对模拟盘无实际影响 (不产生真实委托), 但权益曲线末端的持仓不会被平掉, 期末收益指标可能高估或低估.
+- **Scheduler 单进程** — 无多 worker 支持, tick() 串行处理所有部署. 大量部署 (>50) 时可能在交易日窗口内处理不完.
 
 ## V2.12.2 指标公式语义变更 (⚠ 非 backward compat)
 V2.12.2 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest/engine.py`

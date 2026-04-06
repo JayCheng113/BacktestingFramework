@@ -55,6 +55,19 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 - `POST /api/fundamental/quality` — Data quality report for symbols (V2.11)
 - `GET /api/fundamental/factors` — List fundamental factors with categories (V2.11)
 - `POST /api/portfolio/ml-alpha/diagnostics` — Run MLDiagnostics on a user MLAlpha (overfitting assessment: feature importance CV, IS/OOS IC, turnover, verdict) (V2.13.1)
+- `POST /api/live/deploy` — Create deployment from portfolio run (V2.15)
+- `GET /api/live/deployments` — List all deployments with optional status filter (V2.15)
+- `GET /api/live/deployments/{id}` — Deployment detail + latest snapshot (V2.15)
+- `POST /api/live/deployments/{id}/approve` — Run DeployGate, approve if passed (V2.15)
+- `POST /api/live/deployments/{id}/start` — Start paper trading (V2.15)
+- `POST /api/live/deployments/{id}/stop` — Stop deployment (terminal) (V2.15)
+- `POST /api/live/deployments/{id}/pause` — Pause deployment (V2.15)
+- `POST /api/live/deployments/{id}/resume` — Resume paused deployment (V2.15)
+- `POST /api/live/tick` — Trigger daily tick for all running deployments (V2.15)
+- `GET /api/live/dashboard` — Monitor dashboard: health summaries + alerts (V2.15)
+- `GET /api/live/deployments/{id}/snapshots` — Historical daily snapshots (V2.15)
+- `GET /api/live/deployments/{id}/trades` — Trade records for deployment (V2.15)
+- `GET /api/live/deployments/{id}/stream` — SSE live stream for deployment events (V2.15)
 
 ## Files
 | File | Role |
@@ -72,6 +85,7 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 | routes/portfolio.py | Portfolio: strategies/run/runs/detail/delete + factor evaluation/correlation + walk-forward + fundamental factor injection (V2.9+V2.10+V2.11) |
 | routes/fundamental.py | Fundamental: fetch/quality/factors endpoints (V2.11) |
 | routes/research.py | Autonomous research: start/list/detail/cancel/stream + serialization guard (V2.8) |
+| routes/live.py | Paper trading: deploy/list/detail/approve/start/stop/pause/resume/tick/dashboard/snapshots/trades/stream (V2.15) |
 
 ## Dependencies
 - Upstream: All ez modules (including ez/agent/ for experiments, ez/llm/ for chat)
@@ -113,3 +127,4 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
   - **/run 持久化完整上下文**: PortfolioStore 新增 `config` / `warnings` / `dates` 三列 (ALTER 迁移), `/run` endpoint 打包 market/optimizer/risk/index/cost 到 `run_config` dict, 历史对比图表可按真实交易日 time axis 对齐 (替代原 index-based 硬拼).
   - **routes/code.py dual-dict cleanup**: 新增 `_get_all_registries_for_kind()` 返回 dict list, delete 路由 + `/refresh` endpoint 统一清理名字键 + 全键两个 dict, 避免 Factor/CrossSectionalFactor/PortfolioStrategy 的 `_registry_by_key` 在删除/刷新时泄漏 zombie 类.
 - V2.14: `_create_strategy` StrategyEnsemble 分支 (列表格式 sub_strategies, 递归子策略实例化), `/strategies` 追加 Ensemble 元信息 (is_ensemble: true), `ParamRangeRequest.values` 放宽为 `list[int|float|str|bool]`, candidates.py 搜索支持 bool/str 参数
+- V2.15: Paper trading 13 endpoints (routes/live.py): deploy/list/detail/approve/start/stop/pause/resume/tick/dashboard/snapshots/trades/stream. Lazy singleton pattern (DeploymentStore/Scheduler/Monitor). SSE stream for live updates. Scheduler resume_all() in app lifespan.

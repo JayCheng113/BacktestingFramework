@@ -16,12 +16,13 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | CodeEditor | Monaco编辑器 + 5类新建(策略/因子/组合策略/截面因子/ML Alpha) + registry侧栏(系统内置折叠+用户文件+注册状态) + 刷新/清理研究 + AI对话 |
 | ChatPanel | AI助手 — SSE流式, 中文工具标签, 文件绑定对话, 多会话 |
 | SettingsModal | LLM + Tushare 配置面板 |
-| DocsPage | 开发文档 — 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明) |
+| DocsPage | 开发文档 — 15章 (V2.15: +Ch15 模拟盘) |
 | ResearchPanel | 自主研究: 目标表单 + SSE中文进度 + 任务列表 + 报告 + 注册到全局 |
 | PortfolioPanel | 组合回测: 3-tab (组合回测/选股因子研究/历史记录). 组合回测: 策略参数+多因子合成UI+参数搜索面板+股票池预设+净值曲线+指标+持仓饼图+CSV+多回测对比. 选股因子研究: 因子分类(7大类中文标签)+行业中性化开关+选股能力表+时序图+信号持续性+分档收益+因子相关性+前推验证+数据质量报告 (V2.10+V2.11+V2.11.1) |
 | EnsembleBuilder | 策略组合构建器: mode radio + 子策略卡片 + 权重输入 + 高级设置 (V2.14) |
 | DateRangePicker | 日期范围选择器 (react-datepicker): 开始/结束 + 快捷按钮 |
 | BacktestSettings | 交易成本/规则: 买卖佣金, 印花税, 滑点率(模拟买卖价差), 最小交易单位, 涨跌停限制 |
+| PaperTradingPage | 模拟盘: 部署列表 + 权益曲线 + 指标 + 交易 + 控制面板 (V2.15) |
 | Dashboard | 主页: K线图 + 单股回测 + 技术指标评估 |
 
 ## Theme
@@ -67,6 +68,15 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **StrategyEnsemble UI**: 新 `EnsembleBuilder.tsx` 组件 — 4 mode radio (等权/手动/收益加权/反向波动率) + 子策略卡片 (参数编辑+同名序号) + 手动权重输入 + 高级设置折叠. PortfolioRunContent 检测 `selected === 'StrategyEnsemble'` 切换渲染. 后端 `_create_strategy` 新增 Ensemble 分支 (列表格式 sub_strategies 避免同名 key 冲突).
 - **LightGBM/XGBoost 白名单**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor` + `XGBRegressor` (仅 regressor, classifier 待定义分类契约), GPU 拦截 (tree_method/device/device_type), `pyproject.toml` 新增 `[ml-extra]` group.
 
+## V2.15 — 模拟盘 (Paper Trading)
+- **PaperTradingPage**: 独立页面 (pages/PaperTradingPage.tsx) — 部署列表+状态徽章+权益曲线 ECharts+指标面板+交易记录表+控制按钮(审批/启动/暂停/恢复/停止)+手动 tick 触发+预警面板
+- **Navbar 新 tab**: `{ id: 'paper-trading', label: '模拟盘' }`, 位于组合回测之后
+- **PortfolioRunContent 部署按钮**: 回测结果底部 "部署到模拟盘" 按钮 → POST /api/live/deploy → 跳转提示
+- **API client**: `web/src/api/live.ts` — 13 个 typed API 函数 (deployToLive/listDeployments/getDeployment/approveDeployment/startDeployment/stopDeployment/pauseDeployment/resumeDeployment/triggerTick/getDashboard/getSnapshots/getTrades + SSE stream)
+- **TypeScript types**: DeploymentSummary/DeploymentDetail/DeploymentHealth/DashboardAlert/SnapshotRecord/TradeEntry
+- **状态标签中文**: pending→待审批, approved→已审批, running→运行中, paused→已暂停, stopped→已停止, error→异常
+- **DocsPage Ch15 模拟盘**: 新增章节 (部署流程/门控/调度/监控/已知限制)
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000
@@ -87,6 +97,8 @@ API proxied to http://localhost:8000
 | components/ResearchPanel.tsx | Research: goal form + SSE progress + report + promote (V2.8) |
 | components/DateRangePicker.tsx | Shared date range picker with preset buttons (V2.10) |
 | components/PortfolioPanel.tsx | 组合回测: 3-tab+中性化+多因子合成+参数搜索 (V2.9+V2.10+V2.11.1) |
-| pages/DocsPage.tsx | 开发文档: 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明 + 数据获取流程) |
+| pages/DocsPage.tsx | 开发文档: 15章 (V2.15: +Ch15 模拟盘) |
+| pages/PaperTradingPage.tsx | 模拟盘: 部署列表+权益曲线+控制面板 (V2.15) |
+| api/live.ts | 模拟盘 API client: 13 typed functions (V2.15) |
 | components/shared/portfolioLabels.ts | 共享 CATEGORY_LABELS + FACTOR_LABELS (V2.13.2, 消除 3 处重复) |
 | components/EnsembleBuilder.tsx | 策略组合构建器: mode/sub-strategies/weights/advanced (V2.14) |
