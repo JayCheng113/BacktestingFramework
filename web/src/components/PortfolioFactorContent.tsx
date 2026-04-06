@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import DateRangePicker from './DateRangePicker'
 import { mlAlphaDiagnostics } from '../api'
@@ -295,16 +295,19 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<DiagnosticsResult | null>(null)
   const [error, setError] = useState('')
+  const diagTokenRef = useRef(0)
 
   // Clear stale diagnostics when inputs change — prevents user from
   // seeing results computed on a different market/symbols/date range.
   useEffect(() => {
+    diagTokenRef.current += 1  // invalidate any in-flight request
     setResult(null)
     setError('')
   }, [symbols, market, startDate, endDate])
 
   // Reset selection when available alphas change (e.g., registry refresh)
   useEffect(() => {
+    diagTokenRef.current += 1  // invalidate any in-flight request
     setSelectedAlpha('')
     setResult(null)
     setError('')
@@ -320,6 +323,7 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
     if (!selectedAlpha) return
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) { setError('请填写股票池'); return }
+    const token = ++diagTokenRef.current
     setLoading(true); setError(''); setResult(null)
     try {
       const resp = await mlAlphaDiagnostics({
@@ -329,10 +333,14 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
         start_date: startDate,
         end_date: endDate,
       })
+      if (diagTokenRef.current !== token) return  // superseded by input change or new request
       setResult(resp.data)
     } catch (e: any) {
+      if (diagTokenRef.current !== token) return
       setError(e.response?.data?.detail || '诊断失败')
-    } finally { setLoading(false) }
+    } finally {
+      if (diagTokenRef.current === token) setLoading(false)
+    }
   }
 
   return (
