@@ -34,6 +34,28 @@ class TradingCalendar:
     def from_dates(cls, trading_days: list[date]) -> TradingCalendar:
         return cls(trading_days)
 
+    _MARKET_TO_EXCHANGE = {"cn_stock": "SSE", "us_stock": "NYSE", "hk_stock": "HKEX"}
+
+    _MARKET_TO_EXCHANGE = {"cn_stock": "SSE", "us_stock": "NYSE", "hk_stock": "HKEX"}
+
+    @classmethod
+    def from_market(cls, market: str) -> TradingCalendar:
+        """V2.15: Factory from market code.
+        Tries Tushare trade_cal first, falls back to weekday calendar."""
+        from datetime import date, timedelta
+        end = date.today()
+        start = end - timedelta(days=365 * 5)
+        exchange = cls._MARKET_TO_EXCHANGE.get(market, "SSE")
+        try:
+            from ez.data.providers.tushare_provider import TushareProvider
+            tp = TushareProvider()
+            days = tp.get_trade_cal(exchange, start, end)
+            if days:
+                return cls.from_dates(days)
+        except Exception:
+            pass
+        return cls.weekday_fallback(start, end)
+
     @classmethod
     def weekday_fallback(cls, start: date, end: date) -> TradingCalendar:
         """Generate Mon-Fri calendar (no holidays). For testing only."""
