@@ -13,12 +13,13 @@ React 19 + TypeScript + Vite 8 + TailwindCSS 4 + ECharts 5 + Monaco Editor
 | FactorPanel | 技术指标评估(单股): 预测能力(IC) + 稳定性(ICIR) + 信号持续性 + 分布 |
 | ExperimentPanel | 3 sub-tabs (单次运行/参数搜索/组合实验→跳转组合历史) + 运行表 + 门控详情 |
 | CandidateSearch | 参数网格/随机搜索 + 排名结果表 (全中文: 夏普/显著性/门控) |
-| CodeEditor | Monaco编辑器 + 4类新建 + registry侧栏(系统内置折叠+用户文件+注册状态) + 刷新/清理研究 + AI对话 |
+| CodeEditor | Monaco编辑器 + 5类新建(策略/因子/组合策略/截面因子/ML Alpha) + registry侧栏(系统内置折叠+用户文件+注册状态) + 刷新/清理研究 + AI对话 |
 | ChatPanel | AI助手 — SSE流式, 中文工具标签, 文件绑定对话, 多会话 |
 | SettingsModal | LLM + Tushare 配置面板 |
 | DocsPage | 开发文档 — 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明) |
 | ResearchPanel | 自主研究: 目标表单 + SSE中文进度 + 任务列表 + 报告 + 注册到全局 |
 | PortfolioPanel | 组合回测: 3-tab (组合回测/选股因子研究/历史记录). 组合回测: 策略参数+多因子合成UI+参数搜索面板+股票池预设+净值曲线+指标+持仓饼图+CSV+多回测对比. 选股因子研究: 因子分类(7大类中文标签)+行业中性化开关+选股能力表+时序图+信号持续性+分档收益+因子相关性+前推验证+数据质量报告 (V2.10+V2.11+V2.11.1) |
+| EnsembleBuilder | 策略组合构建器: mode radio + 子策略卡片 + 权重输入 + 高级设置 (V2.14) |
 | DateRangePicker | 日期范围选择器 (react-datepicker): 开始/结束 + 快捷按钮 |
 | BacktestSettings | 交易成本/规则: 买卖佣金, 印花税, 滑点率(模拟买卖价差), 最小交易单位, 涨跌停限制 |
 | Dashboard | 主页: K线图 + 单股回测 + 技术指标评估 |
@@ -60,6 +61,12 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **Race token 全覆盖**: `evalTokenRef` / `fundaTokenRef` / `compareTokenRef` (PortfolioPanel) + `loadFileTokenRef` (CodeEditor).
 - **ML Alpha 因子分类**: backend 自动 categorize via `issubclass(cls, MLAlpha)`, 前端 factorCategories data-driven.
 
+## V2.14 — 搜索增强 + ML 扩展 + Ensemble UI
+- **CandidateSearch bool/enum 参数**: ParamRangeState 改 discriminated union (NumericParamRange/BoolParamRange/EnumParamRange), bool 参数显示 checkbox, enum/select 显示按钮组, 后端 ParamRangeRequest 放宽 `list[int|float|str|bool]`.
+- **multi_select 组合搜索**: PortfolioPanel "组合搜索" checkbox → 自动 power-set (bitmask 生成所有非空子集), 64 上限硬限 (>6 因子禁用按钮), 原 `|` 分隔模式保留.
+- **StrategyEnsemble UI**: 新 `EnsembleBuilder.tsx` 组件 — 4 mode radio (等权/手动/收益加权/反向波动率) + 子策略卡片 (参数编辑+同名序号) + 手动权重输入 + 高级设置折叠. PortfolioRunContent 检测 `selected === 'StrategyEnsemble'` 切换渲染. 后端 `_create_strategy` 新增 Ensemble 分支 (列表格式 sub_strategies 避免同名 key 冲突).
+- **LightGBM/XGBoost 白名单**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor/LGBMClassifier` + `XGBRegressor/XGBClassifier`, GPU tree_method 拦截, `pyproject.toml` 新增 `[ml-extra]` group.
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000
@@ -82,3 +89,4 @@ API proxied to http://localhost:8000
 | components/PortfolioPanel.tsx | 组合回测: 3-tab+中性化+多因子合成+参数搜索 (V2.9+V2.10+V2.11.1) |
 | pages/DocsPage.tsx | 开发文档: 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明 + 数据获取流程) |
 | components/shared/portfolioLabels.ts | 共享 CATEGORY_LABELS + FACTOR_LABELS (V2.13.2, 消除 3 处重复) |
+| components/EnsembleBuilder.tsx | 策略组合构建器: mode/sub-strategies/weights/advanced (V2.14) |
