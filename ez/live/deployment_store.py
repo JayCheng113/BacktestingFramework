@@ -357,6 +357,21 @@ class DeploymentStore:
             [deployment_id],
         )
 
+    def get_error_count(self, deployment_id: str) -> int:
+        """Return the current consecutive_errors count for a deployment."""
+        row = self._conn.execute(
+            "SELECT consecutive_errors FROM deployment_records WHERE deployment_id = ?",
+            [deployment_id],
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    def update_gate_verdict(self, deployment_id: str, verdict_json: str) -> None:
+        """Persist the serialized gate verdict JSON for a deployment."""
+        self._conn.execute(
+            "UPDATE deployment_records SET gate_verdict = ? WHERE deployment_id = ?",
+            [verdict_json, deployment_id],
+        )
+
     # -- Internal helpers --------------------------------------------------
 
     @staticmethod

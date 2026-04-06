@@ -36,8 +36,6 @@ class TradingCalendar:
 
     _MARKET_TO_EXCHANGE = {"cn_stock": "SSE", "us_stock": "NYSE", "hk_stock": "HKEX"}
 
-    _MARKET_TO_EXCHANGE = {"cn_stock": "SSE", "us_stock": "NYSE", "hk_stock": "HKEX"}
-
     @classmethod
     def from_market(cls, market: str) -> TradingCalendar:
         """V2.15: Factory from market code.

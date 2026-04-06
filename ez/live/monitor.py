@@ -234,11 +234,7 @@ class Monitor:
         days_since_last_trade = _compute_days_since_last_trade(snapshots)
 
         # --- Consecutive errors ---
-        row = self.store._conn.execute(
-            "SELECT consecutive_errors FROM deployment_records WHERE deployment_id = ?",
-            [dep_id],
-        ).fetchone()
-        error_count = int(row[0]) if row and row[0] is not None else 0
+        error_count = self.store.get_error_count(dep_id)
 
         return DeploymentHealth(
             deployment_id=dep_id,

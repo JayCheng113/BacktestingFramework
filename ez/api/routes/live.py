@@ -315,10 +315,7 @@ def approve_deployment(deployment_id: str):
     if verdict.passed:
         store.update_status(deployment_id, "approved")
         # Update gate_verdict with full verdict
-        store._conn.execute(
-            "UPDATE deployment_records SET gate_verdict = ? WHERE deployment_id = ?",
-            [verdict_json, deployment_id],
-        )
+        store.update_gate_verdict(deployment_id, verdict_json)
         return {
             "deployment_id": deployment_id,
             "status": "approved",
@@ -326,10 +323,7 @@ def approve_deployment(deployment_id: str):
         }
     else:
         # Save verdict but keep status as pending
-        store._conn.execute(
-            "UPDATE deployment_records SET gate_verdict = ? WHERE deployment_id = ?",
-            [verdict_json, deployment_id],
-        )
+        store.update_gate_verdict(deployment_id, verdict_json)
         raise HTTPException(400, detail={
             "message": "部署门禁未通过",
             "verdict": json.loads(verdict_json),

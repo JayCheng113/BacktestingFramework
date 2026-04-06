@@ -162,7 +162,7 @@ export default function PaperTradingPage() {
 
   // Holdings pie from latest snapshot
   const latestSnap = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null
-  const positions = (latestSnap?.positions || {}) as Record<string, { shares: number; market_value: number }>
+  const positions = (latestSnap?.holdings || {}) as Record<string, { shares: number; market_value: number }>
   const pieData = Object.entries(positions)
     .filter(([, v]) => v && typeof v === 'object' && (v as { market_value?: number }).market_value)
     .map(([sym, v]) => ({
@@ -301,7 +301,7 @@ export default function PaperTradingPage() {
                   <span style={{ color: (h.cumulative_return || 0) >= 0 ? '#22c55e' : '#ef4444' }}>
                     {fmt(h.cumulative_return, true)}
                   </span>
-                  <span>今日 {fmt(h.today_pnl, true)}</span>
+                  <span>今日 {fmt(h.today_pnl)}</span>
                 </div>
               )}
               {!h && d.created_at && (
@@ -441,7 +441,7 @@ export default function PaperTradingPage() {
                 <MetricCard label="累计收益" value={fmt(health.cumulative_return, true)} positive={health.cumulative_return >= 0} />
                 <MetricCard label="夏普比率" value={fmt(health.sharpe_ratio)} />
                 <MetricCard label="最大回撤" value={fmt(health.max_drawdown, true)} negative />
-                <MetricCard label="今日盈亏" value={fmt(health.today_pnl, true)} positive={health.today_pnl >= 0} />
+                <MetricCard label="今日盈亏" value={fmt(health.today_pnl)} positive={health.today_pnl >= 0} />
                 <MetricCard label="今日交易" value={String(health.today_trades)} />
                 <MetricCard label="风控事件" value={String(health.total_risk_events)} warn={health.total_risk_events > 0} />
                 <MetricCard label="连续亏损" value={`${health.consecutive_loss_days} 天`} warn={health.consecutive_loss_days >= 3} />

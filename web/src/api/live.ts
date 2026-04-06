@@ -68,7 +68,7 @@ export interface SnapshotRecord {
   snapshot_date: string
   equity: number
   cash: number
-  positions: Record<string, unknown>
+  holdings: Record<string, unknown>
   trades: TradeEntry[]
   risk_events: string[]
 }
