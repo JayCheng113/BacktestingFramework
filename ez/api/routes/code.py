@@ -97,7 +97,7 @@ class SaveRequest(BaseModel):
 @router.post("/template")
 def generate_template(req: TemplateRequest):
     """Generate a Python template for a strategy or factor."""
-    valid_kinds = ("strategy", "factor", "portfolio_strategy", "cross_factor")
+    valid_kinds = ("strategy", "factor", "portfolio_strategy", "cross_factor", "ml_alpha")
     if req.kind not in valid_kinds:
         raise HTTPException(status_code=422, detail=f"kind must be one of {valid_kinds}")
     code = get_template(kind=req.kind, class_name=req.class_name, description=req.description)
@@ -123,10 +123,10 @@ def save_code(req: SaveRequest):
 @router.get("/files")
 def list_files(kind: str = Query(default="")):
     """List user code files. kind: empty/strategy/factor=strategies, portfolio_strategy, cross_factor."""
-    if kind in ("portfolio_strategy", "cross_factor", "factor"):
+    if kind in ("portfolio_strategy", "cross_factor", "factor", "ml_alpha"):
         return list_portfolio_files(kind)
     if kind and kind not in ("", "strategy"):
-        raise HTTPException(status_code=422, detail=f"Invalid kind: {kind}. Must be one of: strategy, factor, portfolio_strategy, cross_factor")
+        raise HTTPException(status_code=422, detail=f"Invalid kind: {kind}. Must be one of: strategy, factor, portfolio_strategy, cross_factor, ml_alpha")
     return list_user_strategies()
 
 
@@ -299,14 +299,16 @@ def refresh_registries():
     """
     import sys
     from ez.strategy.loader import load_all_strategies, load_user_factors
-    from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
+    from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors, load_ml_alphas
 
     # Step 1: Clear ALL user entries from registries + sys.modules
     # (so loaders don't skip already-imported modules).
     # V2.12.2 codex reviewer: clean BOTH dicts for dual-dict registries so
     # the full-key dict doesn't leak zombies.
+    # V2.13.1 Phase 5: added ("ml_alpha", "ml_alphas") to the cleanup loop.
     for kind, prefix in [("strategy", "strategies"), ("factor", "factors"),
-                         ("portfolio_strategy", "portfolio_strategies"), ("cross_factor", "cross_factors")]:
+                         ("portfolio_strategy", "portfolio_strategies"), ("cross_factor", "cross_factors"),
+                         ("ml_alpha", "ml_alphas")]:
         mods_to_remove: set[str] = set()
         for registry in _get_all_registries_for_kind(kind):
             user_keys = [k for k, v in registry.items()
@@ -323,6 +325,7 @@ def refresh_registries():
     load_user_factors()
     load_portfolio_strategies()
     load_cross_factors()
+    load_ml_alphas()  # V2.13.1 Phase 5
 
     from ez.strategy.base import Strategy
     from ez.factor.base import Factor

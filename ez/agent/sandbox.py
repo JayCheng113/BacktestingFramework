@@ -1029,7 +1029,7 @@ def list_portfolio_files(kind: str = "portfolio_strategy") -> list[dict]:
     target_dir = _get_dir(kind)
     if not target_dir.exists():
         return []
-    base_classes = {"portfolio_strategy": "PortfolioStrategy", "cross_factor": "CrossSectionalFactor", "factor": "Factor"}
+    base_classes = {"portfolio_strategy": "PortfolioStrategy", "cross_factor": "CrossSectionalFactor", "factor": "Factor", "ml_alpha": "MLAlpha"}
     target_base = base_classes.get(kind, "PortfolioStrategy")
     results = []
     for py_file in sorted(target_dir.glob("*.py")):

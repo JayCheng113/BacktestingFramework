@@ -54,6 +54,7 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 - `POST /api/fundamental/fetch` — Fetch and cache fundamental data for symbols (V2.11)
 - `POST /api/fundamental/quality` — Data quality report for symbols (V2.11)
 - `GET /api/fundamental/factors` — List fundamental factors with categories (V2.11)
+- `POST /api/portfolio/ml-alpha/diagnostics` — Run MLDiagnostics on a user MLAlpha (overfitting assessment: feature importance CV, IS/OOS IC, turnover, verdict) (V2.13.1)
 
 ## Files
 | File | Role |

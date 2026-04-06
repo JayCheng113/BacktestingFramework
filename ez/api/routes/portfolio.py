@@ -1492,3 +1492,103 @@ def factor_correlation(req: FactorCorrelationRequest):
         "factor_names": list(corr_df.index),
         "correlation_matrix": corr_df.values.tolist(),
     }
+
+
+# ─── V2.13.1 Phase 5: ML Alpha Diagnostics ───────────────────────
+
+class MLDiagnosticsRequest(BaseModel):
+    """Request model for POST /ml-alpha/diagnostics."""
+
+    ml_alpha_name: str = Field(
+        ...,
+        description="Class name or module.class key of the MLAlpha subclass. "
+                    "Resolved via CrossSectionalFactor.resolve_class().",
+    )
+    symbols: list[str] = Field(..., min_length=1)
+    market: str = Field(default="cn_stock", pattern=r"^(cn_stock|us_stock|hk_stock)$")
+    start_date: date | None = None
+    end_date: date | None = None
+    eval_freq: str = Field(
+        default="weekly",
+        pattern=r"^(daily|weekly|monthly|quarterly)$",
+    )
+    # DiagnosticsConfig overrides
+    forward_horizon: int = Field(default=5, ge=1, le=60)
+    severe_overfit_threshold: float = Field(default=0.5, gt=0, le=2.0)
+    mild_overfit_threshold: float = Field(default=0.2, gt=0, le=2.0)
+    high_turnover_threshold: float = Field(default=0.6, gt=0, le=1.0)
+    top_n_for_turnover: int = Field(default=10, ge=1, le=100)
+
+
+@router.post("/ml-alpha/diagnostics")
+def ml_alpha_diagnostics(req: MLDiagnosticsRequest):
+    """Run MLDiagnostics on a user-defined MLAlpha and return the
+    overfitting assessment.
+
+    V2.13.1 Phase 5: exposes Phase 2 Python API (MLDiagnostics)
+    as a REST endpoint.
+    """
+    # Lazy imports — sklearn is optional, avoid circular deps
+    try:
+        from ez.portfolio.ml_alpha import MLAlpha
+    except ImportError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"scikit-learn>=1.5 is required for MLAlpha diagnostics. "
+                   f"Install with: pip install -e '.[ml]'. Error: {e}",
+        )
+    from ez.portfolio.ml_diagnostics import MLDiagnostics, DiagnosticsConfig
+
+    # 1. Resolve class
+    try:
+        cls = CrossSectionalFactor.resolve_class(req.ml_alpha_name)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"MLAlpha '{req.ml_alpha_name}' not found: {e}",
+        )
+
+    if not issubclass(cls, MLAlpha):
+        raise HTTPException(
+            status_code=422,
+            detail=f"'{req.ml_alpha_name}' is {cls.__name__} "
+                   f"(CrossSectionalFactor), not an MLAlpha subclass. "
+                   f"Use /evaluate-factors for non-ML factors.",
+        )
+
+    # 2. Instantiate (may raise UnsupportedEstimatorError)
+    try:
+        alpha = cls()
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to instantiate {req.ml_alpha_name}: "
+                   f"{type(e).__name__}: {e}",
+        )
+
+    # 3. Fetch data (warmup-aware lookback)
+    end_dt = req.end_date or date.today()
+    start_dt = req.start_date or (end_dt - timedelta(days=730))
+    try:
+        universe_data, calendar = _fetch_data(
+            req.symbols, req.market, start_dt, end_dt,
+            lookback_days=alpha.warmup_period + 50,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Data fetch failed: {type(e).__name__}: {e}",
+        )
+
+    # 4. Run diagnostics
+    config = DiagnosticsConfig(
+        forward_horizon=req.forward_horizon,
+        severe_overfit_threshold=req.severe_overfit_threshold,
+        mild_overfit_threshold=req.mild_overfit_threshold,
+        high_turnover_threshold=req.high_turnover_threshold,
+        top_n_for_turnover=req.top_n_for_turnover,
+    )
+    diag = MLDiagnostics(alpha, config=config)
+    result = diag.run(universe_data, calendar, start_dt, end_dt, req.eval_freq)
+
+    return result.to_dict()

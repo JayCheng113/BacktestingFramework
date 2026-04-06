@@ -22,9 +22,10 @@ async def lifespan(app: FastAPI):
     load_all_strategies()
     load_user_factors()
     # V2.9: load user portfolio strategies + cross factors
-    from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors
+    from ez.portfolio.loader import load_portfolio_strategies, load_cross_factors, load_ml_alphas
     load_portfolio_strategies()
     load_cross_factors()
+    load_ml_alphas()  # V2.13.1 Phase 5
     # Pre-warm symbol cache in background (don't block startup)
     tushare = get_tushare_provider()
     if tushare:

@@ -36,6 +36,16 @@ def load_cross_factors() -> None:
     _scan_dir(_user_root() / "cross_factors", "cross_factors")
 
 
+def load_ml_alphas() -> None:
+    """Import all ML alpha modules from ml_alphas/.
+
+    V2.13.1 Phase 5: mirrors load_cross_factors(). MLAlpha subclasses
+    auto-register in CrossSectionalFactor._registry via __init_subclass__
+    when their module is imported.
+    """
+    _scan_dir(_user_root() / "ml_alphas", "ml_alphas")
+
+
 def _scan_dir(path: Path, module_base: str) -> None:
     if not path.exists():
         return
