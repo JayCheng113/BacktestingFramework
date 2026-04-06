@@ -59,9 +59,13 @@ class StrategyEnsemble(PortfolioStrategy):
         mode: Combination mode (see module docstring).
         ensemble_weights: Required for ``mode="manual"``. Non-negative,
             sum > 0. Auto-normalized to sum=1.
-        warmup_rebalances: Minimum rebalance count before
-            ``return_weighted`` / ``inverse_vol`` switch from equal
-            fallback. Default 8 (~2 months weekly).
+        warmup_rebalances: Minimum number of **hypothetical return
+            observations** (not rebalance calls) before ``return_weighted``
+            / ``inverse_vol`` switch from equal fallback. Default 8.
+            Since the first rebalance seeds the ledger but produces no
+            return (no prior weights to compare), reaching N observations
+            requires N+1 ``generate_weights`` calls. With weekly
+            rebalance, 8 observations ≈ 9 weeks.
         correlation_threshold: Pairwise |corr| above this triggers a
             warning in ``self.state["correlation_warnings"]``.
     """
@@ -183,7 +187,17 @@ class StrategyEnsemble(PortfolioStrategy):
                 out = s.generate_weights(
                     universe_data, date, prev_weights, prev_returns,
                 )
-                sub_outputs.append(out if out is not None else {})
+                raw = out if out is not None else {}
+                # Codex review: filter non-finite values from sub output.
+                # A buggy sub returning {"A": nan} or {"B": inf} would
+                # silently pollute the combined weights, making it hard
+                # to diagnose why the ensemble "suddenly has no signal".
+                clean = {
+                    sym: w for sym, w in raw.items()
+                    if isinstance(w, (int, float)) and w == w
+                    and w != float("inf") and w != float("-inf")
+                }
+                sub_outputs.append(clean)
                 sub_active.append(True)
             except Exception as e:
                 if not self._sub_exception_warned.get(i, False):

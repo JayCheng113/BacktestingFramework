@@ -70,7 +70,7 @@ Rules:
 | File | Responsibility |
 |------|---------------|
 | `ez/portfolio/ensemble.py` | `StrategyEnsemble(PortfolioStrategy)` + 4 modes + ledger + correlation_warnings (~350 lines) |
-| `tests/test_portfolio/test_ensemble.py` | Unit + integration tests (~400 lines, ~28 tests) |
+| `tests/test_portfolio/test_ensemble.py` | Unit + integration tests (~700 lines, 38 tests) |
 
 ### Modified Files
 

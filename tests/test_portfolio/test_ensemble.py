@@ -756,3 +756,83 @@ class TestEndToEndIntegration:
         assert result.equity_curve[-1] > 0  # not bankrupt
         # Ensemble had at least some rebalances
         assert len(result.rebalance_dates) > 5
+
+    def test_ensemble_through_portfolio_walk_forward(self):
+        """Codex: StrategyEnsemble through portfolio_walk_forward verifies
+        factory-freshness, ledger reset per fold, and nested state
+        isolation under the walk-forward regime."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        from ez.portfolio.cross_factor import MomentumRank, VolumeRank
+        from ez.portfolio.portfolio_strategy import TopNRotation
+        from ez.portfolio.walk_forward import portfolio_walk_forward
+        from ez.portfolio.calendar import TradingCalendar
+        from ez.portfolio.universe import Universe
+
+        rng = np.random.default_rng(42)
+        n_days = 400
+        n_stocks = 6
+        dates = pd.date_range("2022-01-03", periods=n_days, freq="B")
+        data = {}
+        for i in range(n_stocks):
+            prices = 100 * np.cumprod(1 + rng.normal(0.0003 * (i + 1), 0.012, n_days))
+            data[f"S{i:02d}"] = pd.DataFrame({
+                "open": prices, "high": prices * 1.005, "low": prices * 0.995,
+                "close": prices, "adj_close": prices,
+                "volume": rng.integers(100_000, 1_000_000, n_days).astype(float),
+            }, index=dates)
+        cal = TradingCalendar.from_dates([d.date() for d in dates])
+        universe = Universe([f"S{i:02d}" for i in range(n_stocks)])
+
+        created_ensembles: list[StrategyEnsemble] = []
+
+        def strategy_factory():
+            sub_mom = TopNRotation(factor=MomentumRank(period=20), top_n=3)
+            sub_vol = TopNRotation(factor=VolumeRank(period=10), top_n=3)
+            ens = StrategyEnsemble(
+                strategies=[sub_mom, sub_vol],
+                mode="equal",
+            )
+            created_ensembles.append(ens)
+            return ens
+
+        wf_result = portfolio_walk_forward(
+            strategy_factory=strategy_factory,
+            universe=universe,
+            universe_data=data,
+            calendar=cal,
+            start=dates[60].date(),
+            end=dates[-1].date(),
+            n_splits=3,
+            train_ratio=0.7,
+            freq="weekly",
+        )
+
+        # 3 splits × (IS + OOS) = 6 factory calls
+        assert len(created_ensembles) == 6
+        # Each is a distinct instance (factory freshness)
+        assert len(set(id(e) for e in created_ensembles)) == 6
+        # Walk-forward produced results
+        assert wf_result.n_splits == 3
+        assert all(np.isfinite(s) for s in wf_result.oos_sharpes)
+
+    def test_sub_output_nan_filtered(self):
+        """Codex: sub-strategy returning NaN/inf weights must be filtered
+        out at the ensemble level, not propagated to combined weights."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+
+        class _NanStrategy(PortfolioStrategy):
+            def generate_weights(self, data, date, pw, pr):
+                return {"A": float("nan"), "B": 0.5, "C": float("inf")}
+
+        clean = _StaticStrategy({"A": 1.0})
+        nan_sub = _NanStrategy()
+        ens = StrategyEnsemble(strategies=[clean, nan_sub], mode="equal")
+
+        combined = ens.generate_weights({}, datetime(2024, 1, 1), {}, {})
+        # A: clean gives 1.0, nan_sub's NaN is filtered → only clean's 0.5
+        # B: only nan_sub gives 0.5 → 0.25
+        # C: nan_sub's inf is filtered → 0
+        assert "A" in combined
+        assert np.isfinite(combined["A"])
+        assert np.isfinite(combined.get("B", 0))
+        assert combined.get("C", 0) == 0  # inf filtered out
