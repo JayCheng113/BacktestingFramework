@@ -106,8 +106,15 @@ class Scheduler:
             logger.info("Resumed deployment %s", deployment_id)
 
     async def stop_deployment(self, deployment_id: str, reason: str) -> None:
-        """Stop: release engine, update DB status. Locked."""
+        """Stop: release engine, update DB status. Validates record exists and is stoppable."""
         async with self._lock:
+            record = self.store.get_record(deployment_id)
+            if record is None:
+                raise ValueError(f"Deployment {deployment_id!r} not found")
+            if record.status in ("stopped", "pending"):
+                raise ValueError(
+                    f"Cannot stop deployment {deployment_id!r}: "
+                    f"status is {record.status!r}")
             self._engines.pop(deployment_id, None)
             self._paused.discard(deployment_id)
             self.store.update_status(deployment_id, "stopped", stop_reason=reason)

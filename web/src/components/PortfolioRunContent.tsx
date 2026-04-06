@@ -404,10 +404,11 @@ export default function PortfolioRunContent(props: Props) {
             </button>
           )}
           {result && (
-            <button onClick={handleDeploy} disabled={deployLoading} className="px-3 py-1.5 rounded text-sm font-medium text-white"
-              style={{ backgroundColor: deployLoading ? '#30363d' : '#059669' }}
-              title={wfResult ? '包含前推验证结果' : '建议先运行前推验证'}>
-              {deployLoading ? '部署中...' : wfResult ? '部署到模拟盘' : '部署到模拟盘 (无WF)'}
+            <button onClick={handleDeploy} disabled={deployLoading || !wfResult}
+              className="px-3 py-1.5 rounded text-sm font-medium text-white"
+              style={{ backgroundColor: (deployLoading || !wfResult) ? '#30363d' : '#059669' }}
+              title={wfResult ? '包含前推验证结果' : '请先运行前推验证'}>
+              {deployLoading ? '部署中...' : !wfResult ? '需先前推验证' : '部署到模拟盘'}
             </button>
           )}
           <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}

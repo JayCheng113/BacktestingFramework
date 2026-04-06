@@ -56,7 +56,18 @@ class DeployGate:
         portfolio_store,
         wf_metrics: dict,
     ) -> GateVerdict:
-        """4-phase hard check. All params required. No Optional."""
+        """4-phase hard check. All params required. No Optional.
+
+        TRUST BOUNDARY: wf_metrics comes from the caller (API request → frontend).
+        Backtest metrics (sharpe/drawdown/trades/dates/rebalance_weights) are read
+        from portfolio_store (server-side, tamper-resistant). WF metrics (p_value,
+        overfitting_score) are NOT persisted in portfolio_runs — they come from
+        the /walk-forward response which is passed through the deploy → approve flow.
+
+        V2.15 mitigation: Frontend requires WF result before enabling the deploy
+        button (disabled when wfResult is null). Direct API callers can still forge
+        wf_metrics — server-side WF re-computation is V3.0 scope.
+        """
         reasons: list[GateReason] = []
 
         # ---------------------------------------------------------------
