@@ -107,6 +107,10 @@ export default function PortfolioPanel() {
   const runTokenRef = useRef(0)
   const wfTokenRef = useRef(0)
   const searchTokenRef = useRef(0)
+  // V2.13.2 G3.7: race token coverage for uncovered handlers
+  const evalTokenRef = useRef(0)
+  const fundaTokenRef = useRef(0)
+  const compareTokenRef = useRef(0)
   // V2.12.2 codex: track sampled/completed/failed counts + failed combos
   // so the UI can show "N of M combos failed" banner instead of silently
   // dropping failures from the results list.
@@ -238,6 +242,7 @@ export default function PortfolioPanel() {
     const ids = Array.from(selectedRuns)
     if (ids.length < 2) { alert('请至少选择 2 条记录'); return }
     if (ids.length > 10) { alert('最多对比 10 条记录'); return }
+    const myToken = ++compareTokenRef.current
     setComparing(true)
     setCompareData([])
     const results: typeof compareData = []
@@ -265,6 +270,7 @@ export default function PortfolioPanel() {
         errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
       }
     }
+    if (compareTokenRef.current !== myToken) return  // superseded
     if (results.length >= 2) {
       setCompareData(results)
     } else if (errors.length > 0) {
@@ -280,6 +286,7 @@ export default function PortfolioPanel() {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length < 5) { alert('因子评估需要至少 5 个标的'); return }
     if (evalFactors.length === 0) { alert('请选择至少 1 个因子'); return }
+    const myToken = ++evalTokenRef.current
     setEvalLoading(true); setEvalResult(null); setCorrResult(null)
     try {
       const [evalRes, corrRes] = await Promise.all([
@@ -288,15 +295,17 @@ export default function PortfolioPanel() {
           ? factorCorrelation({ symbols: symbolList, market, start_date: startDate, end_date: endDate, factor_names: evalFactors })
           : Promise.resolve(null),
       ])
+      if (evalTokenRef.current !== myToken) return  // superseded
       setEvalResult(evalRes.data)
       if (corrRes) setCorrResult(corrRes.data)
-    } catch (e: any) { alert(e?.response?.data?.detail || e?.message || '评估失败') }
-    finally { setEvalLoading(false) }
+    } catch (e: any) { if (evalTokenRef.current === myToken) alert(e?.response?.data?.detail || e?.message || '评估失败') }
+    finally { if (evalTokenRef.current === myToken) setEvalLoading(false) }
   }
 
   const handleFetchFundamental = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) return
+    const myToken = ++fundaTokenRef.current
     setFetchingFunda(true); setFundaStatus('获取中...')
     try {
       const finaFactorKeys = new Set<string>()
@@ -307,11 +316,13 @@ export default function PortfolioPanel() {
       })
       const hasFina = evalFactors.some(f => finaFactorKeys.has(f))
       const res = await fetchFundamentalData({ symbols: symbolList, market, start_date: startDate, end_date: endDate, include_fina: hasFina })
+      if (fundaTokenRef.current !== myToken) return
       setFundaStatus(res.data.message || '完成')
       const qr = await fundamentalDataQuality({ symbols: symbolList, market, start_date: startDate, end_date: endDate })
+      if (fundaTokenRef.current !== myToken) return
       setQualityReport(qr.data.report || [])
-    } catch (e: any) { setFundaStatus(e.response?.data?.detail || '获取失败') }
-    finally { setFetchingFunda(false) }
+    } catch (e: any) { if (fundaTokenRef.current === myToken) setFundaStatus(e.response?.data?.detail || '获取失败') }
+    finally { if (fundaTokenRef.current === myToken) setFetchingFunda(false) }
   }
 
   const downloadCSV = (filename: string, content: string) => {

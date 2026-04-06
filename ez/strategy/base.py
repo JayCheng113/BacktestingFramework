@@ -30,7 +30,16 @@ class AmbiguousStrategyName(ValueError):
 
 
 class Strategy(ABC):
-    """Base class for all strategies. Subclasses auto-register."""
+    """Base class for all strategies. Subclasses auto-register.
+
+    **deepcopy note**: ``ez/backtest/walk_forward.py`` uses
+    ``copy.deepcopy(strategy)`` per fold to prevent IS/OOS state
+    pollution. Strategy subclasses must NOT hold non-picklable state
+    (DuckDB connections, file handles, httpx clients, etc.) as instance
+    attributes. Use ``self.state`` dict for pure-data state only.
+    If your strategy needs external resources, use the
+    ``strategy_factory`` pattern (see ``ez/portfolio/walk_forward.py``).
+    """
 
     _registry: dict[str, type[Strategy]] = {}
 
