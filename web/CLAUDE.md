@@ -51,6 +51,15 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **ChatPanel AI 创建文件原子绑定**: 流式中 fileKey 绑定用 `targetId` (消息发送时捕获) 而不是 `activeId` 闭包值 (避免用户切会话串线); fetch 失败从 "只切 filename 留旧代码" 改为 "atomic: 要么三元组全更新要么仅刷新侧栏 + 用户警告" (CodeEditor 配套支持 `(undefined, undefined, undefined)` 仅刷新调用); AI 创建 fileKey 采用 `${kind}:${filename}` 格式和 CodeEditor 一致消除重复会话.
 - **CodeEditor deleteFile kind 校验**: 删除文件清编辑器时需要 filename **和** kind 都匹配, 避免同名跨类型 (strategy/factor) 误清.
 
+## V2.13.2 — ML Alpha Frontend (Phase 6)
+- **CodeEditor `+ ML Alpha` 按钮**: `CodeKind` union 加 `'ml_alpha'`, `KIND_LABELS: 'ML Alpha'`, `KIND_COLORS: '#059669'` (emerald). `mlAlphaFiles` state + sidebar 5-group 展示 + 新建/save/delete routing. Navigate to portfolio includes ml_alpha.
+- **PortfolioFactorContent ML 诊断面板**: `MLDiagnosticsPanel` component — ML Alpha 下拉 + "运行诊断" 按钮 + verdict badge (5 色) + IS/OOS IC ECharts 双线图 + feature importance CV table (color-coded) + warnings panel + retrain/turnover metrics. 输入变更 (symbols/market/dates) 自动 reset 结果.
+- **TypeScript 类型**: `DiagnosticsResult` + `MLDiagnosticsRequest` interfaces (typed, not `any`).
+- **API client**: `mlAlphaDiagnostics(data: MLDiagnosticsRequest) → api.post<DiagnosticsResult>(...)`.
+- **共享 labels**: `CATEGORY_LABELS` / `FACTOR_LABELS` 从 3 个重复定义抽到 `shared/portfolioLabels.ts`.
+- **Race token 全覆盖**: `evalTokenRef` / `fundaTokenRef` / `compareTokenRef` (PortfolioPanel) + `loadFileTokenRef` (CodeEditor).
+- **ML Alpha 因子分类**: backend 自动 categorize via `issubclass(cls, MLAlpha)`, 前端 factorCategories data-driven.
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000
@@ -72,3 +81,4 @@ API proxied to http://localhost:8000
 | components/DateRangePicker.tsx | Shared date range picker with preset buttons (V2.10) |
 | components/PortfolioPanel.tsx | 组合回测: 3-tab+中性化+多因子合成+参数搜索 (V2.9+V2.10+V2.11.1) |
 | pages/DocsPage.tsx | 开发文档: 13章 (V2.11: 基本面数据层 + 选股因子研究指南 + 18因子表 + PIT说明 + 数据获取流程) |
+| components/shared/portfolioLabels.ts | 共享 CATEGORY_LABELS + FACTOR_LABELS (V2.13.2, 消除 3 处重复) |
