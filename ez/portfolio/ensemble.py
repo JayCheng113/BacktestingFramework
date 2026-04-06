@@ -351,12 +351,69 @@ class StrategyEnsemble(PortfolioStrategy):
             self.state["sub_hypothetical_returns"][i].append(period_return)
 
     def _check_correlation_warnings(self) -> None:
-        """Pairwise correlation check on hypothetical return series.
+        """Pairwise Pearson correlation on hypothetical return series.
 
-        Placeholder for Task 3.4 — no-op for now.
+        After warmup, if |corr| > ``correlation_threshold`` for any pair
+        of sub-strategies, append a structured warning to
+        ``self.state["correlation_warnings"]``.
+
+        Warning payload: ``{"sub_i": int, "sub_j": int, "correlation": float,
+        "n_samples": int}``.
+
+        Min overlap = ``max(warmup_rebalances, 8)`` — shorter series
+        produce unreliable correlations (high false positive rate).
+
+        **Does NOT auto-drop strategies** — only surfaces information.
         """
-        # TODO: Task 3.4
-        pass
+        if not self._warmup_complete():
+            return
+
+        n = len(self._strategies)
+        if n < 2:
+            return
+
+        returns_lists = self.state["sub_hypothetical_returns"]
+        min_overlap = max(self._warmup, 8)
+
+        # Avoid re-emitting the same pair on subsequent rebalances —
+        # track which pairs have already been warned about.
+        warned_pairs: set[tuple[int, int]] = {
+            (w["sub_i"], w["sub_j"])
+            for w in self.state["correlation_warnings"]
+        }
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if (i, j) in warned_pairs:
+                    continue
+                ri = returns_lists[i]
+                rj = returns_lists[j]
+                # Use the shorter of the two lists, aligned from the tail
+                overlap = min(len(ri), len(rj))
+                if overlap < min_overlap:
+                    continue
+
+                arr_i = np.array(ri[-overlap:], dtype=float)
+                arr_j = np.array(rj[-overlap:], dtype=float)
+
+                # Skip if either is constant (std=0 → corr undefined)
+                if np.std(arr_i) < 1e-10 or np.std(arr_j) < 1e-10:
+                    continue
+
+                corr = float(np.corrcoef(arr_i, arr_j)[0, 1])
+                if abs(corr) > self._corr_threshold:
+                    self.state["correlation_warnings"].append({
+                        "sub_i": i,
+                        "sub_j": j,
+                        "correlation": round(corr, 4),
+                        "n_samples": overlap,
+                    })
+                    _logger.warning(
+                        "StrategyEnsemble: sub-strategies #%d and #%d have "
+                        "high return correlation %.3f (n=%d). Consider "
+                        "removing one to reduce redundancy.",
+                        i, j, corr, overlap,
+                    )
 
 
 # Prevent auto-registration: StrategyEnsemble cannot be zero-arg

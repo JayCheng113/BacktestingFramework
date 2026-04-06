@@ -435,3 +435,74 @@ class TestInverseVolMode:
 
         weights = ens._compute_ensemble_weights([True, True])
         assert abs(weights[0] - 0.5) < 1e-6
+
+
+# ─── Task 3.4: Correlation warnings ──────────────────────────────
+
+class TestCorrelationWarnings:
+    def _build_warmed_ensemble(self, returns_a, returns_b, warmup=8):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0})
+        sub_b = _StaticStrategy({"Y": 1.0})
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="equal",
+            warmup_rebalances=warmup,
+            correlation_threshold=0.9,
+        )
+        for ra, rb in zip(returns_a, returns_b):
+            ens.state["sub_hypothetical_returns"][0].append(ra)
+            ens.state["sub_hypothetical_returns"][1].append(rb)
+            ens.state["sub_target_weights"][0].append({"date": "2022-01-10", "weights": {}})
+            ens.state["sub_target_weights"][1].append({"date": "2022-01-10", "weights": {}})
+        ens.state["first_rebalance_date"] = "2022-01-10"
+        ens.state["last_rebalance_date"] = "2022-06-10"
+        return ens
+
+    def test_identical_strategies_trigger_warning(self):
+        """Two subs with identical return series → corr=1.0 → warning."""
+        returns = [0.01, -0.02, 0.03, -0.01, 0.02, 0.015, -0.005, 0.01, 0.02, -0.01]
+        ens = self._build_warmed_ensemble(returns, returns, warmup=8)
+
+        # Trigger the check
+        ens._check_correlation_warnings()
+
+        warnings = ens.state["correlation_warnings"]
+        assert len(warnings) == 1
+        w = warnings[0]
+        assert w["sub_i"] == 0
+        assert w["sub_j"] == 1
+        assert w["correlation"] > 0.99
+        assert w["n_samples"] == 10
+        assert isinstance(w["correlation"], float)
+
+    def test_uncorrelated_no_warning(self):
+        """Two subs with uncorrelated returns → no warning."""
+        rng = np.random.default_rng(123)
+        returns_a = rng.normal(0, 0.01, 12).tolist()
+        returns_b = rng.normal(0, 0.01, 12).tolist()
+        ens = self._build_warmed_ensemble(returns_a, returns_b, warmup=8)
+
+        ens._check_correlation_warnings()
+
+        # Correlation should be low (random) → no warning
+        warnings = ens.state["correlation_warnings"]
+        assert len(warnings) == 0
+
+    def test_short_series_skipped(self):
+        """Below min_overlap → no correlation computed (avoid false positives)."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0})
+        sub_b = _StaticStrategy({"Y": 1.0})
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="equal",
+            warmup_rebalances=8,
+        )
+        # Only 3 entries — below min_overlap
+        for _ in range(3):
+            ens.state["sub_hypothetical_returns"][0].append(0.01)
+            ens.state["sub_hypothetical_returns"][1].append(0.01)
+
+        ens._check_correlation_warnings()
+        assert len(ens.state["correlation_warnings"]) == 0
