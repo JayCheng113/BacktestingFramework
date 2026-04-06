@@ -26,6 +26,15 @@ async def lifespan(app: FastAPI):
     load_portfolio_strategies()
     load_cross_factors()
     load_ml_alphas()  # V2.13.1 Phase 5
+    # V2.15: Resume running paper-trading deployments from DB
+    try:
+        from ez.api.routes.live import get_scheduler
+        scheduler = get_scheduler()
+        restored = await scheduler.resume_all()
+        if restored:
+            logging.getLogger(__name__).info("Restored %d paper-trading deployments", restored)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Live scheduler resume_all failed: %s", exc)
     # Pre-warm symbol cache in background (don't block startup)
     tushare = get_tushare_provider()
     if tushare:
@@ -109,7 +118,7 @@ async def ez_error_handler(request: Request, exc: EzTradingError):
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-from ez.api.routes import market_data, backtest, factors, experiments, candidates, code, chat, settings, research, portfolio, fundamental  # noqa: E402
+from ez.api.routes import market_data, backtest, factors, experiments, candidates, code, chat, settings, research, portfolio, fundamental, live  # noqa: E402
 app.include_router(market_data.router, prefix="/api/market-data", tags=["market-data"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
 app.include_router(factors.router, prefix="/api/factors", tags=["factors"])
@@ -121,6 +130,7 @@ app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(research.router, prefix="/api/research", tags=["research"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(fundamental.router, prefix="/api/fundamental", tags=["fundamental"])
+app.include_router(live.router, prefix="/api/live", tags=["live"])
 
 
 @app.get("/api/health")

@@ -52,6 +52,14 @@ class RiskManager:
 
         return 1.0, None
 
+    def replay_equity(self, equity_curve: list[float]) -> None:
+        """Rebuild internal state from historical equity curve.
+        Used by Scheduler crash recovery to restore drawdown state machine."""
+        self._peak_equity = 0.0
+        self._is_breached = False
+        for eq in equity_curve:
+            self.check_drawdown(eq)
+
     def check_turnover(self, new_weights: dict[str, float],
                        prev_weights: dict[str, float]
                        ) -> tuple[dict[str, float], str | None]:

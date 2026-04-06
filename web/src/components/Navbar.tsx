@@ -12,6 +12,7 @@ const tabs = [
   { id: 'experiments', label: '实验' },
   { id: 'editor', label: '代码编辑器' },
   { id: 'research', label: '研究助手' },
+  { id: 'paper-trading', label: '模拟盘' },
   { id: 'docs', label: '开发文档' },
 ]
 

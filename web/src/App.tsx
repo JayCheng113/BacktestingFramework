@@ -6,6 +6,7 @@ import CodeEditor from './components/CodeEditor'
 import ResearchPanel from './components/ResearchPanel'
 import PortfolioPanel from './components/PortfolioPanel'
 import DocsPage from './pages/DocsPage'
+import PaperTradingPage from './pages/PaperTradingPage'
 import './styles/global.css'
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
         </div>
       )}
       {activeTab === 'research' && <ResearchPanel />}
+      {activeTab === 'paper-trading' && <PaperTradingPage />}
       {activeTab === 'docs' && <DocsPage />}
     </div>
   )

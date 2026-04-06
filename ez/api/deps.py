@@ -161,3 +161,6 @@ def close_resources() -> None:
     # Close PortfolioStore (V2.9)
     from ez.api.routes.portfolio import reset_portfolio_store
     reset_portfolio_store()
+    # Close Live singletons (V2.15)
+    from ez.api.routes.live import reset_live_singletons
+    reset_live_singletons()

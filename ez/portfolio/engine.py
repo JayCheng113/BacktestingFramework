@@ -18,22 +18,18 @@ import pandas as pd
 from ez.errors import AccountingError
 from ez.portfolio.allocator import Allocator
 from ez.portfolio.calendar import RebalanceFreq, TradingCalendar
+from ez.portfolio.execution import (
+    CostModel,
+    TradeResult,
+    _lot_round,
+    _compute_commission,
+    execute_portfolio_trades,
+    EPS_FUND,
+)
 from ez.portfolio.optimizer import PortfolioOptimizer
 from ez.portfolio.portfolio_strategy import PortfolioStrategy
 from ez.portfolio.risk_manager import RiskManager
 from ez.portfolio.universe import Universe, slice_universe_data
-
-
-EPS_FUND = 0.01  # accounting tolerance (cents)
-
-
-@dataclass
-class CostModel:
-    buy_commission_rate: float = 0.0003
-    sell_commission_rate: float = 0.0003
-    min_commission: float = 5.0
-    stamp_tax_rate: float = 0.0005  # sell-side only (A-share)
-    slippage_rate: float = 0.0
 
 
 @dataclass
@@ -48,15 +44,6 @@ class PortfolioResult:
     rebalance_dates: list[date] = field(default_factory=list)
     rebalance_weights: list[dict[str, float]] = field(default_factory=list)  # V2.12: per-rebalance weights (aligned with rebalance_dates)
     risk_events: list[dict] = field(default_factory=list)  # V2.12: 风控事件日志
-
-
-def _lot_round(shares: float, lot_size: int = 100) -> int:
-    """Round down to lot size."""
-    return int(shares // lot_size) * lot_size
-
-
-def _compute_commission(amount: float, rate: float, minimum: float) -> float:
-    return max(abs(amount) * rate, minimum) if abs(amount) > 0 else 0.0
 
 
 
@@ -297,113 +284,36 @@ def run_portfolio_backtest(
             if total_w > 1.0:
                 weights = {k: v / total_w for k, v in weights.items()}
 
-            # Convert weights → target shares (discrete)
-            target_shares: dict[str, int] = {}
-            for sym, w in weights.items():
-                if sym not in prices or prices[sym] <= 0:
-                    continue
-                target_amount = equity * w
-                raw_shares = target_amount / prices[sym]
-                target_shares[sym] = _lot_round(raw_shares, lot_size)
-
             # V2.12.1 codex follow-up: track pre-trade equity and trade volume
             # so we can surface the ACTUAL post-rounding turnover even when
-            # check_turnover() passed the weight-layer limit. Because
-            # _lot_round() rounds DOWN target shares, sell-side deltas can be
-            # larger than what the weight layer intended, pushing realized
-            # turnover above max_turnover — risk_manager.check_turnover()
-            # alone cannot catch this.
+            # check_turnover() passed the weight-layer limit.
             pre_trade_equity = cash + sum(holdings.get(s, 0) * prices.get(s, 0)
                                            for s in holdings)
-            trade_volume = 0.0  # sum of |traded value| across all legs
 
-            # Execute trades: TWO passes — sells first (free cash), then buys
-            all_syms = sorted(holdings.keys() | target_shares.keys())
-            sell_syms = [s for s in all_syms if target_shares.get(s, 0) < holdings.get(s, 0)]
-            buy_syms = [s for s in all_syms if target_shares.get(s, 0) > holdings.get(s, 0)]
-            sold_today: set[str] = set()  # T+1: track sold symbols (A-share only)
-            for sym in sell_syms + buy_syms:  # sells first, then buys
-                cur = holdings.get(sym, 0)
-                tgt = target_shares.get(sym, 0)
-                delta = tgt - cur
-
-                if delta == 0:
-                    continue
-                if sym not in prices:
-                    continue
-                # C2: require today's bar to trade (no stale-price trading)
-                if sym not in has_bar_today:
-                    continue
-
-                # T+1: cannot buy a symbol that was sold today (V2.12.1 codex:
-                # gated on t_plus_1 flag so US/HK portfolios allow same-day
-                # sell→buy). Prior version hardcoded A-share T+1 for all markets.
-                if t_plus_1 and delta > 0 and sym in sold_today:
-                    continue
-
-                # A-share 涨跌停检查 (C1: use raw close, not adj_close)
-                if limit_pct > 0 and sym in raw_close_today and sym in prev_raw_close:
-                    change = (raw_close_today[sym] - prev_raw_close[sym]) / prev_raw_close[sym] if prev_raw_close[sym] > 0 else 0
-                    if delta > 0 and change >= limit_pct - 1e-6:
-                        continue  # 涨停不可买
-                    if delta < 0 and change <= -limit_pct + 1e-6:
-                        continue  # 跌停不可卖
-
-                base_price = prices[sym]
-                # Directional slippage: buy pushes price UP, sell pushes DOWN
-                if delta > 0:
-                    price = base_price * (1 + cost_model.slippage_rate)
-                else:
-                    price = base_price * (1 - cost_model.slippage_rate)
-                amount = abs(delta) * price
-
-                # Costs (buy/sell use different commission rates)
-                rate = cost_model.buy_commission_rate if delta > 0 else cost_model.sell_commission_rate
-                comm = _compute_commission(amount, rate, cost_model.min_commission)
-                stamp = amount * cost_model.stamp_tax_rate if delta < 0 else 0.0  # sell only
-                total_cost = comm + stamp
-
-                if delta > 0:
-                    # Buy: need cash
-                    total_buy = amount + total_cost
-                    if total_buy > cash:
-                        # Reduce shares to fit budget. price already includes slippage.
-                        min_cost = max(cost_model.min_commission, 0)
-                        affordable = (cash - min_cost) / (price * (1 + cost_model.buy_commission_rate)) if price > 0 else 0
-                        if affordable <= 0:
-                            continue
-                        tgt = cur + _lot_round(affordable, lot_size)
-                        delta = tgt - cur
-                        if delta <= 0:
-                            continue
-                        amount = delta * price  # price already includes slippage
-                        comm = _compute_commission(amount, cost_model.buy_commission_rate, cost_model.min_commission)
-                        total_cost = comm  # no separate slippage — already in price
-                        total_buy = amount + total_cost
-
-                    # Final guard: skip if still over budget (min_commission rounding)
-                    if total_buy > cash + EPS_FUND:
-                        continue
-                    cash -= total_buy
-                    holdings[sym] = tgt
-                else:
-                    # Sell: receive cash minus costs
-                    cash += amount - total_cost
-                    sold_today.add(sym)  # T+1: record sold symbol
-                    if tgt == 0:
-                        holdings.pop(sym, None)
-                    else:
-                        holdings[sym] = tgt
-
+            # V2.15 A1: delegate to shared execute_portfolio_trades()
+            sold_today: set[str] = set()
+            exec_trades, holdings, cash, trade_volume = execute_portfolio_trades(
+                target_weights=weights,
+                holdings=holdings,
+                equity=equity,
+                cash=cash,
+                prices=prices,
+                raw_close_today=raw_close_today,
+                prev_raw_close=prev_raw_close,
+                has_bar_today=has_bar_today,
+                cost_model=cost_model,
+                lot_size=lot_size,
+                limit_pct=limit_pct,
+                t_plus_1=t_plus_1,
+                sold_today=sold_today,
+            )
+            # Convert TradeResult -> dict for result.trades
+            for tr in exec_trades:
                 result.trades.append({
-                    "date": day.isoformat(), "symbol": sym,
-                    "side": "buy" if delta > 0 else "sell",
-                    "shares": abs(delta), "price": price, "cost": total_cost,
+                    "date": day.isoformat(), "symbol": tr.symbol,
+                    "side": tr.side, "shares": tr.shares,
+                    "price": tr.price, "cost": tr.cost,
                 })
-                # Single-sided turnover: accumulate executed trade value. Use
-                # max(buys, sells) at the end so the ratio matches
-                # risk_manager.check_turnover semantics.
-                trade_volume += amount
 
             # Post-execution turnover re-check: discrete lot rounding can push
             # realized turnover above what check_turnover() mixed to. We don't
@@ -413,14 +323,10 @@ def run_portfolio_backtest(
             if risk_manager is not None and pre_trade_equity > 0:
                 # Recompute single-sided turnover from executed trades
                 buy_vol = sum(
-                    abs(t["shares"]) * t["price"]
-                    for t in result.trades
-                    if t.get("date") == day.isoformat() and t.get("side") == "buy"
+                    tr.shares * tr.price for tr in exec_trades if tr.side == "buy"
                 )
                 sell_vol = sum(
-                    abs(t["shares"]) * t["price"]
-                    for t in result.trades
-                    if t.get("date") == day.isoformat() and t.get("side") == "sell"
+                    tr.shares * tr.price for tr in exec_trades if tr.side == "sell"
                 )
                 realized_turnover = max(buy_vol, sell_vol) / pre_trade_equity
                 limit = risk_manager._config.max_turnover
