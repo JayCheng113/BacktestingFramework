@@ -297,13 +297,14 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
   const [error, setError] = useState('')
   const diagTokenRef = useRef(0)
 
-  // Clear stale diagnostics when inputs change — prevents user from
-  // seeing results computed on a different market/symbols/date range.
+  // Clear stale diagnostics when ANY input changes — prevents user from
+  // seeing results computed on a different market/symbols/date range/alpha.
   useEffect(() => {
     diagTokenRef.current += 1  // invalidate any in-flight request
+    setLoading(false)           // unblock button if request was in-flight
     setResult(null)
     setError('')
-  }, [symbols, market, startDate, endDate])
+  }, [symbols, market, startDate, endDate, selectedAlpha])
 
   // Reset selection when available alphas change (e.g., registry refresh)
   useEffect(() => {
@@ -338,9 +339,7 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
     } catch (e: any) {
       if (diagTokenRef.current !== token) return
       setError(e.response?.data?.detail || '诊断失败')
-    } finally {
-      if (diagTokenRef.current === token) setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
