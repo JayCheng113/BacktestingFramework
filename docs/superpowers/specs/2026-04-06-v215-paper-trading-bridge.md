@@ -310,16 +310,23 @@ class DeployGate:
         self,
         spec: DeploymentSpec,
         source_run_id: str,               # 必传 — 来源回测 run ID
-        portfolio_store: PortfolioStore,   # 必传 — 读取回测结果 + 权重历史
+        portfolio_store: PortfolioStore,   # 必传 — 读取回测结果
+        wf_metrics: dict,                 # 必传 — WF 结果 (p_value, overfitting_score, oos_sharpe)
     ) -> GateVerdict:
         """
         四阶段硬检查 (全部必须通过):
-        1. 来源回测存在性
-        2. 研究门禁重算 (sharpe/drawdown/trades/p-value/overfitting)
+        1. 来源回测存在性 + backtest 指标 (从 portfolio_runs DB)
+        2. WF 指标 (从 wf_metrics 参数 — 调用方必须先跑 /walk-forward)
         3. 部署专属检查 (回测时长、标的数、集中度、WFO)
         4. 配置完整性
 
-        所有参数必传, 无 Optional。指标全部从 DB 重算, 不接受外部传入。
+        数据源契约:
+        - backtest 指标 (sharpe/drawdown/trades/dates/rebalance_weights):
+          从 portfolio_store.get_run(source_run_id) 的 metrics/dates/rebalance_weights 读取
+        - WF 指标 (p_value/overfitting_score):
+          从 wf_metrics 参数读取。/walk-forward 端点返回这些值但不持久化到
+          portfolio_runs, 所以必须由 /deploy API 要求前端传入 WF 结果。
+          如果 wf_metrics 为空 dict → 视为未跑 WF → 自动不通过。
         """
         reasons: list[GateReason] = []
 
@@ -334,7 +341,7 @@ class DeployGate:
 
         metrics = json.loads(run.metrics) if run.metrics else {}
 
-        # Phase 1: 研究门禁重算 (从 DB 指标, 不信任外部)
+        # Phase 1: backtest 指标 (从 DB)
         sharpe = metrics.get("sharpe_ratio", 0)
         reasons.append(GateReason(
             rule="min_sharpe", passed=sharpe >= self.config.min_sharpe,
@@ -353,14 +360,15 @@ class DeployGate:
             value=trades, threshold=self.config.min_trades,
             message=f"交易次数 {trades}"))
 
-        # p-value: 从 run 的 config 看是否跑了 WF + significance
-        p_value = metrics.get("p_value", 1.0)
+        # Phase 2: WF 指标 (从 wf_metrics 参数, 非 DB)
+        # 调用方必须先执行 /walk-forward, 把结果传给 /deploy
+        p_value = wf_metrics.get("p_value", 1.0)
         reasons.append(GateReason(
             rule="max_p_value", passed=p_value <= self.config.max_p_value,
             value=p_value, threshold=self.config.max_p_value,
             message=f"显著性 p={p_value:.3f}"))
 
-        overfit = metrics.get("overfitting_score", 1.0)
+        overfit = wf_metrics.get("overfitting_score", 1.0)
         reasons.append(GateReason(
             rule="max_overfitting_score",
             passed=overfit <= self.config.max_overfitting_score,
@@ -381,14 +389,16 @@ class DeployGate:
             value=n_syms, threshold=self.config.min_symbols,
             message=f"标的数 {n_syms}"))
 
-        # 集中度: 全周期最大单股权重 (不用 [-1], 因为终局清仓是 {})
-        weights_hist = json.loads(run.weights_history) if run.weights_history else []
+        # 集中度: 用 rebalance_weights (目标权重), 不用 weights_history (日频漂移)
+        # 存储格式: [{"date": "...", "weights": {"A": 0.3, "B": 0.7}}, ...]
+        reb_weights = json.loads(run.rebalance_weights) if run.rebalance_weights else []
         max_w = 0.0
-        for w_dict in weights_hist:
-            if w_dict:  # 跳过空 dict (清仓/初始)
+        for entry in reb_weights:
+            w_dict = entry.get("weights", {}) if isinstance(entry, dict) else {}
+            if w_dict:  # 跳过空 (终局清仓会有空 entry)
                 period_max = max(w_dict.values())
                 max_w = max(max_w, period_max)
-        if not weights_hist or max_w == 0.0:
+        if not reb_weights or max_w == 0.0:
             max_w = 1.0  # 无有效数据 = 最保守假设
         reasons.append(GateReason(
             rule="max_concentration",
@@ -419,11 +429,12 @@ class DeployGate:
 
 ### 不可绕过性保证
 
-- `source_run_id` 和 `portfolio_store` 都是必传参数 (非 Optional)
-- 门禁从 DB 自己拉 metrics + weights_history 重算, 不接受调用方传入的 verdict
-- 集中度从 `weights_history` 末期实际权重计算 (不是目标权重)
-- p-value / overfitting 用 `1.0` 默认值 = 未跑 WF 自动不通过
-- API 层在 `/deploy` 端点内部构造 DeployGate + 传入 store, 前端无法跳过
+- `source_run_id`, `portfolio_store`, `wf_metrics` 都是必传参数 (非 Optional)
+- backtest 指标从 DB 读 (sharpe/drawdown/trades/dates/rebalance_weights)
+- WF 指标从 `wf_metrics` 参数读 — `/deploy` API 端点要求前端同时传入 WF 结果
+- 如果用户没跑 WF, `wf_metrics={}` → p_value=1.0 + overfit=1.0 → 自动不通过
+- 集中度从 `rebalance_weights` (目标权重) 算全周期最大, 跳过空 dict
+- API 层在 `/deploy` 端点内部构造 DeployGate + 传入 store + wf_metrics, 前端无法跳过
 
 ### 审批流程
 
@@ -543,8 +554,15 @@ class PaperTradingEngine:
         }
 
     def _fetch_latest(self, today: date) -> dict[str, pd.DataFrame]:
-        """获取到 today 为止的历史数据 (含 today 收盘)"""
-        lookback_start = today - timedelta(days=self.strategy.lookback_days + 30)
+        """获取到 today 为止的历史数据 (含 today 收盘)。
+
+        lookback 转换: strategy.lookback_days 是交易日语义。
+        转为自然日: lookback_days * 1.5 + 30 (覆盖周末+节假日+安全余量)。
+        例: 252 交易日 → 252*1.5+30 = 408 自然日 (~1.6 年, 覆盖 1 年交易日)。
+        MLAlpha train_window=500 → 500*1.5+30 = 780 自然日 (~2.1 年)。
+        """
+        natural_days = int(self.strategy.lookback_days * 1.5) + 30
+        lookback_start = today - timedelta(days=natural_days)
         data = {}
         for sym in self.deployment.symbols:
             bars = self.data_chain.get_kline(sym, self.deployment.market, "daily",
