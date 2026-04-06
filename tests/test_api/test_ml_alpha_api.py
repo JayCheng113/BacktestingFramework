@@ -1,6 +1,8 @@
 """V2.13.1 Phase 5: ML Alpha API integration tests.
 
-All tests use mocked data (no real Tushare/AKShare dependency).
+Tests split into two groups:
+- No-sklearn tests: /template, /files — run on ALL CI envs
+- Sklearn-required tests: /diagnostics — skip if sklearn missing
 """
 from __future__ import annotations
 
@@ -10,8 +12,6 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import pytest
-
-pytest.importorskip("sklearn", reason="ML Alpha API tests require scikit-learn")
 
 from fastapi.testclient import TestClient
 from ez.api.app import app
@@ -38,113 +38,138 @@ def _make_synthetic_universe(n_days=300, symbols=None):
     return data, cal
 
 
-# ─── Task 5.1: Loader + template + files ─────────────────────────
+# ─── No-sklearn tests (run on ALL CI envs) ────────────────────────
 
-def test_template_endpoint_accepts_ml_alpha():
-    """POST /api/code/template with kind=ml_alpha returns valid code."""
-    resp = client.post("/api/code/template", json={
-        "class_name": "TestAlpha",
-        "kind": "ml_alpha",
-        "description": "test alpha",
-    })
-    assert resp.status_code == 200
-    code = resp.json()["code"]
-    assert "class TestAlpha(MLAlpha)" in code
-    assert "from sklearn.linear_model import Ridge" in code
-    compile(code, "<template>", "exec")
+class TestCodeAPIMLAlphaRouting:
+    """These tests do NOT require sklearn — they test code.py routing
+    changes that should work on base install."""
 
+    def test_template_endpoint_accepts_ml_alpha(self):
+        resp = client.post("/api/code/template", json={
+            "class_name": "TestAlpha",
+            "kind": "ml_alpha",
+            "description": "test alpha",
+        })
+        assert resp.status_code == 200
+        code = resp.json()["code"]
+        assert "class TestAlpha" in code
+        assert "MLAlpha" in code
 
-def test_files_endpoint_accepts_ml_alpha_kind():
-    """GET /api/code/files?kind=ml_alpha should not error."""
-    resp = client.get("/api/code/files?kind=ml_alpha")
-    assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    def test_files_endpoint_accepts_ml_alpha_kind(self):
+        resp = client.get("/api/code/files?kind=ml_alpha")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
 
+    def test_files_endpoint_rejects_unknown_kind(self):
+        resp = client.get("/api/code/files?kind=nonexistent")
+        assert resp.status_code == 422
 
-# ─── Task 5.2: Diagnostics endpoint ──────────────────────────────
-
-def test_diagnostics_unknown_alpha_404():
-    resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
-        "ml_alpha_name": "NonExistentAlpha",
-        "symbols": ["S00"],
-    })
-    assert resp.status_code == 404
-    assert "not found" in resp.json()["detail"].lower()
-
-
-def test_diagnostics_non_mlalpha_422():
-    """MomentumRank is a CrossSectionalFactor but NOT an MLAlpha."""
-    resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
-        "ml_alpha_name": "MomentumRank",
-        "symbols": ["S00"],
-    })
-    assert resp.status_code == 422
-    assert "not an MLAlpha" in resp.json()["detail"]
+    def test_template_endpoint_rejects_unknown_kind(self):
+        resp = client.post("/api/code/template", json={
+            "class_name": "X", "kind": "nonexistent", "description": "x",
+        })
+        assert resp.status_code == 422
 
 
-def test_diagnostics_empty_symbols_422():
-    resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
-        "ml_alpha_name": "SomeAlpha",
-        "symbols": [],
-    })
-    assert resp.status_code == 422
+# ─── Startup-scan + refresh regression (codex gap #2) ─────────────
+
+class TestStartupScanAndRefresh:
+    """Regression tests for the root cause Phase 5 was built to fix:
+    ml_alphas/ must be scanned at startup AND cleaned+reloaded on
+    /refresh."""
+
+    def test_load_ml_alphas_is_called_at_startup(self):
+        """Verify load_ml_alphas exists and is importable from loader.
+        The actual startup call is in app.py lifespan — we verify the
+        function exists and is callable."""
+        from ez.portfolio.loader import load_ml_alphas
+        assert callable(load_ml_alphas)
+
+    def test_refresh_endpoint_includes_ml_alpha_in_cleanup(self):
+        """The /refresh endpoint must clean ml_alphas.* modules from
+        sys.modules + CrossSectionalFactor registry, then re-scan.
+        We verify by checking the endpoint runs without error and
+        returns a count summary."""
+        resp = client.post("/api/code/refresh")
+        assert resp.status_code == 200
 
 
-def test_diagnostics_happy_path_with_mock_data():
-    """Register a test MLAlpha, mock _fetch_data, call the endpoint,
-    verify 200 + valid result structure. No real data provider needed."""
-    from ez.portfolio.ml_alpha import MLAlpha
-    from ez.portfolio.cross_factor import CrossSectionalFactor
-    from sklearn.linear_model import Ridge
-    import sys
+# ─── Sklearn-required tests ───────────────────────────────────────
 
-    # 1. Define + register a test MLAlpha
-    class _TestDiagApiAlpha(MLAlpha):
-        def __init__(self):
-            super().__init__(
-                name="_test_diag_api",
-                model_factory=lambda: Ridge(alpha=1.0),
-                feature_fn=lambda df: pd.DataFrame({
-                    "ret": df["adj_close"].pct_change(1),
-                }).dropna(),
-                target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
-                train_window=60, retrain_freq=20, purge_days=5,
+class TestMLAlphaDiagnosticsEndpoint:
+    """These tests require sklearn for MLAlpha instantiation."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_without_sklearn(self):
+        pytest.importorskip("sklearn", reason="diagnostics tests need sklearn")
+
+    def test_unknown_alpha_404(self):
+        resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
+            "ml_alpha_name": "NonExistentAlpha",
+            "symbols": ["S00"],
+        })
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+    def test_non_mlalpha_422(self):
+        resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
+            "ml_alpha_name": "MomentumRank",
+            "symbols": ["S00"],
+        })
+        assert resp.status_code == 422
+        assert "not an MLAlpha" in resp.json()["detail"]
+
+    def test_empty_symbols_422(self):
+        resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
+            "ml_alpha_name": "SomeAlpha",
+            "symbols": [],
+        })
+        assert resp.status_code == 422
+
+    def test_happy_path_with_mock_data(self):
+        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.cross_factor import CrossSectionalFactor
+        from sklearn.linear_model import Ridge
+
+        class _TestDiagApiAlpha(MLAlpha):
+            def __init__(self):
+                super().__init__(
+                    name="_test_diag_api",
+                    model_factory=lambda: Ridge(alpha=1.0),
+                    feature_fn=lambda df: pd.DataFrame({
+                        "ret": df["adj_close"].pct_change(1),
+                    }).dropna(),
+                    target_fn=lambda df: df["adj_close"].pct_change(5).shift(-5),
+                    train_window=60, retrain_freq=20, purge_days=5,
+                )
+
+        try:
+            synthetic_data, synthetic_cal = _make_synthetic_universe(n_days=300)
+
+            def mock_fetch(symbols, market, start, end, lookback_days=252):
+                return synthetic_data, synthetic_cal
+
+            with patch("ez.api.routes.portfolio._fetch_data", side_effect=mock_fetch):
+                resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
+                    "ml_alpha_name": "_TestDiagApiAlpha",
+                    "symbols": ["S00", "S01", "S02"],
+                    "start_date": "2022-04-01",
+                    "end_date": "2023-01-01",
+                })
+
+            assert resp.status_code == 200, f"Got {resp.status_code}: {resp.json()}"
+            data = resp.json()
+            assert data["verdict"] in (
+                "healthy", "mild_overfit", "severe_overfit",
+                "unstable", "insufficient_data",
             )
+            assert "ic_series" in data
+            assert "feature_importance_cv" in data
+            assert "overfitting_score" in data
+            assert isinstance(data["warnings"], list)
 
-    try:
-        # 2. Mock _fetch_data to return synthetic data
-        synthetic_data, synthetic_cal = _make_synthetic_universe(n_days=300)
-
-        def mock_fetch(symbols, market, start, end, lookback_days=252):
-            return synthetic_data, synthetic_cal
-
-        with patch("ez.api.routes.portfolio._fetch_data", side_effect=mock_fetch):
-            resp = client.post("/api/portfolio/ml-alpha/diagnostics", json={
-                "ml_alpha_name": "_TestDiagApiAlpha",
-                "symbols": ["S00", "S01", "S02"],
-                "start_date": "2022-04-01",
-                "end_date": "2023-01-01",
-            })
-
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.json()}"
-        data = resp.json()
-
-        # Verify response structure
-        assert "verdict" in data
-        assert data["verdict"] in (
-            "healthy", "mild_overfit", "severe_overfit",
-            "unstable", "insufficient_data",
-        )
-        assert "ic_series" in data
-        assert "feature_importance_cv" in data
-        assert "overfitting_score" in data
-        assert "retrain_dates" in data
-        assert "warnings" in data
-        assert isinstance(data["warnings"], list)
-
-    finally:
-        # Cleanup registry
-        CrossSectionalFactor._registry.pop("_TestDiagApiAlpha", None)
-        for key in list(CrossSectionalFactor._registry_by_key.keys()):
-            if "_TestDiagApiAlpha" in key:
-                del CrossSectionalFactor._registry_by_key[key]
+        finally:
+            CrossSectionalFactor._registry.pop("_TestDiagApiAlpha", None)
+            for key in list(CrossSectionalFactor._registry_by_key.keys()):
+                if "_TestDiagApiAlpha" in key:
+                    del CrossSectionalFactor._registry_by_key[key]

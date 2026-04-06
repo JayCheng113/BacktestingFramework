@@ -1532,11 +1532,15 @@ def ml_alpha_diagnostics(req: MLDiagnosticsRequest):
     try:
         from ez.portfolio.ml_alpha import MLAlpha
     except ImportError as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"scikit-learn>=1.5 is required for MLAlpha diagnostics. "
-                   f"Install with: pip install -e '.[ml]'. Error: {e}",
-        )
+        # Narrow the message: only claim "sklearn required" if the error
+        # actually mentions sklearn. Otherwise surface the real error.
+        msg = str(e).lower()
+        if "sklearn" in msg or "scikit" in msg:
+            detail = (f"scikit-learn>=1.5 is required for MLAlpha diagnostics. "
+                      f"Install with: pip install -e '.[ml]'. Error: {e}")
+        else:
+            detail = f"Failed to import MLAlpha: {type(e).__name__}: {e}"
+        raise HTTPException(status_code=422, detail=detail)
     from ez.portfolio.ml_diagnostics import MLDiagnostics, DiagnosticsConfig
 
     # 1. Resolve class

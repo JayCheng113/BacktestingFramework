@@ -1029,6 +1029,11 @@ def list_portfolio_files(kind: str = "portfolio_strategy") -> list[dict]:
     target_dir = _get_dir(kind)
     if not target_dir.exists():
         return []
+    # AST-level class detection: matches `class Foo(BaseClass)` where
+    # BaseClass is a direct Name or Attribute node. Limitation: aliased
+    # imports (`from ... import MLAlpha as MA`), module-qualified bases
+    # (`ml_alpha.MLAlpha`), or intermediate subclasses won't match.
+    # This is a pre-existing pattern shared with all 4 original kinds.
     base_classes = {"portfolio_strategy": "PortfolioStrategy", "cross_factor": "CrossSectionalFactor", "factor": "Factor", "ml_alpha": "MLAlpha"}
     target_base = base_classes.get(kind, "PortfolioStrategy")
     results = []
