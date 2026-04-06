@@ -140,6 +140,15 @@ class StrategyEnsemble(PortfolioStrategy):
         prev_weights,
         prev_returns,
     ) -> dict[str, float]:
+        """Combine sub-strategy outputs into a single weight vector.
+
+        **prev_weights / prev_returns pass-through**: sub-strategies
+        receive the portfolio-level prev_weights and prev_returns, NOT
+        their own individual previous outputs. This is a V1 design
+        choice (documented limitation). Sub-strategies that need their
+        own history should use their ``self.state`` dict, not rely on
+        these parameters.
+        """
         current: _date = date.date() if hasattr(date, "date") else date
 
         # Step 1: call each sub-strategy. Distinguish exception from

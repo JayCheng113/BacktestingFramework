@@ -439,6 +439,75 @@ class TestInverseVolMode:
 
 # ─── Task 3.4: Correlation warnings ──────────────────────────────
 
+    def test_warmup_requires_both_count_and_days(self):
+        """Plan Task 3.3: warmup gate must check BOTH rebalance count
+        AND elapsed days. Count alone is not enough (weekly vs monthly
+        frequency changes the meaning of '8 rebalances')."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        sub_a = _StaticStrategy({"X": 1.0})
+        sub_b = _StaticStrategy({"Y": 1.0})
+        ens = StrategyEnsemble(
+            strategies=[sub_a, sub_b],
+            mode="return_weighted",
+            warmup_rebalances=8,
+        )
+        # Fill 10 entries (>= 8) BUT only 10 calendar days elapsed
+        # (< min_warmup_days = 8 * 7 = 56)
+        for i in range(10):
+            ens.state["sub_hypothetical_returns"][0].append(0.10)
+            ens.state["sub_hypothetical_returns"][1].append(0.01)
+            ens.state["sub_target_weights"][0].append({"date": "2022-01-10", "weights": {}})
+            ens.state["sub_target_weights"][1].append({"date": "2022-01-10", "weights": {}})
+        ens.state["first_rebalance_date"] = "2022-01-10"
+        ens.state["last_rebalance_date"] = "2022-01-20"  # only 10 days!
+
+        # Despite having 10 entries (>= 8), elapsed = 10 days < 56
+        # → warmup NOT complete → equal weight fallback
+        weights = ens._compute_ensemble_weights([True, True])
+        assert abs(weights[0] - 0.5) < 1e-6, (
+            f"Expected equal weight (warmup not complete due to days), "
+            f"got {weights}"
+        )
+
+
+class TestAllSubsEmpty:
+    """Plan Combination Rule #5: all subs return {} → combined = {} →
+    engine holds 100% cash. NOT an error."""
+
+    def test_all_subs_return_empty_gives_empty_combined(self):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        empty_a = _StaticStrategy({})
+        empty_b = _StaticStrategy({})
+        ens = StrategyEnsemble(strategies=[empty_a, empty_b], mode="equal")
+
+        combined = ens.generate_weights({}, datetime(2024, 1, 1), {}, {})
+        assert combined == {}
+
+    def test_all_subs_return_empty_no_warning(self):
+        """All-empty is a legitimate 'go to cash' signal, not an error."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        import logging
+
+        empty_a = _StaticStrategy({})
+        empty_b = _StaticStrategy({})
+        ens = StrategyEnsemble(strategies=[empty_a, empty_b], mode="equal")
+
+        captured = []
+        handler = logging.Handler()
+        handler.emit = lambda r: captured.append(r.getMessage())
+        logger = logging.getLogger("ez.portfolio.ensemble")
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            ens.generate_weights({}, datetime(2024, 1, 1), {}, {})
+        finally:
+            logger.removeHandler(handler)
+
+        # No sub-strategy warnings (empty is legitimate, not failure)
+        sub_warnings = [m for m in captured if "sub-strategy" in m]
+        assert len(sub_warnings) == 0
+
+
 class TestCorrelationWarnings:
     def _build_warmed_ensemble(self, returns_a, returns_b, warmup=8):
         from ez.portfolio.ensemble import StrategyEnsemble
