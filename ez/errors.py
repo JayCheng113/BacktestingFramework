@@ -28,5 +28,9 @@ class BacktestError(EzTradingError):
     """Backtest engine error."""
 
 
+class AccountingError(EzTradingError):
+    """Accounting invariant violation in portfolio engine."""
+
+
 class ConfigError(EzTradingError):
     """Configuration loading or validation error."""

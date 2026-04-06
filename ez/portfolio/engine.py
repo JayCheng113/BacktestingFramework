@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 
+from ez.errors import AccountingError
 from ez.portfolio.allocator import Allocator
 from ez.portfolio.calendar import RebalanceFreq, TradingCalendar
 from ez.portfolio.optimizer import PortfolioOptimizer
@@ -457,11 +458,13 @@ def run_portfolio_backtest(
         equity = cash + position_value
 
         # Accounting invariant: no negative cash (unless rounding error)
-        assert cash >= -EPS_FUND, \
-            f"Negative cash on {day}: cash={cash:.2f}"
+        if cash < -EPS_FUND:
+            raise AccountingError(f"Negative cash on {day}: cash={cash:.2f}")
         # Accounting invariant: equity must be positive
-        assert equity > 0, \
-            f"Non-positive equity on {day}: equity={equity:.2f}, cash={cash:.2f}, pos={position_value:.2f}"
+        if equity <= 0:
+            raise AccountingError(
+                f"Non-positive equity on {day}: equity={equity:.2f}, "
+                f"cash={cash:.2f}, pos={position_value:.2f}")
 
         # V2.12.2 codex round 5: compute actual daily weights from current
         # holdings × today's prices / equity, reflecting intra-rebalance
@@ -520,7 +523,8 @@ def run_portfolio_backtest(
         # Append the realized-cash equity point so metrics reflect the true
         # end-of-period value (post slippage/commission/stamp).
         if had_liquidation:
-            assert cash >= -EPS_FUND, f"Negative cash after liquidation: {cash:.2f}"
+            if cash < -EPS_FUND:
+                raise AccountingError(f"Negative cash after liquidation: {cash:.2f}")
             result.equity_curve.append(cash)
             result.dates.append(liq_date)
             result.weights_history.append({})  # empty — all liquidated
