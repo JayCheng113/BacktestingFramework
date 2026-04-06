@@ -90,4 +90,9 @@ export const fetchFundamentalData = (data: any) => api.post('/fundamental/fetch'
 export const fundamentalDataQuality = (data: any) => api.post('/fundamental/quality', data)
 export const listFundamentalFactors = () => api.get('/fundamental/factors')
 
+// ML Alpha Diagnostics (V2.13.2)
+import type { MLDiagnosticsRequest, DiagnosticsResult } from '../types'
+export const mlAlphaDiagnostics = (data: MLDiagnosticsRequest) =>
+  api.post<DiagnosticsResult>('/portfolio/ml-alpha/diagnostics', data)
+
 export default api

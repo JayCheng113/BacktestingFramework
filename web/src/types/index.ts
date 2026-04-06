@@ -167,3 +167,35 @@ export interface ParamSchema {
   type: string; default: any; min?: number; max?: number; label?: string
   options?: string[]
 }
+
+// V2.13.2 Phase 6: ML Alpha Diagnostics types
+export interface MLDiagnosticsRequest {
+  ml_alpha_name: string
+  symbols: string[]
+  market?: string
+  start_date?: string
+  end_date?: string
+  eval_freq?: string
+  forward_horizon?: number
+  severe_overfit_threshold?: number
+  mild_overfit_threshold?: number
+  high_turnover_threshold?: number
+  top_n_for_turnover?: number
+}
+
+export interface DiagnosticsResult {
+  feature_importance: Record<string, (number | null)[]>
+  feature_importance_cv: Record<string, number | null>
+  ic_series: Array<{ retrain_date: string; train_ic: number | null; oos_ic: number | null }>
+  mean_train_ic: number | null
+  mean_oos_ic: number | null
+  overfitting_score: number | null
+  turnover_series: Array<{ date: string; retention_rate: number }>
+  avg_turnover: number
+  retrain_dates: string[]
+  retrain_count: number
+  expected_retrain_freq: number
+  actual_avg_gap_days: number
+  verdict: 'healthy' | 'mild_overfit' | 'severe_overfit' | 'unstable' | 'insufficient_data'
+  warnings: string[]
+}

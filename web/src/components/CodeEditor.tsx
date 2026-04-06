@@ -134,7 +134,7 @@ class RSIReversal(Strategy):
   )
 }
 
-type CodeKind = 'strategy' | 'factor' | 'portfolio_strategy' | 'cross_factor'
+type CodeKind = 'strategy' | 'factor' | 'portfolio_strategy' | 'cross_factor' | 'ml_alpha'
 
 interface FileInfo {
   filename: string
@@ -153,6 +153,7 @@ const KIND_LABELS: Record<CodeKind, string> = {
   factor: '因子',
   portfolio_strategy: '组合策略',
   cross_factor: '截面因子',
+  ml_alpha: 'ML Alpha',
 }
 
 const KIND_COLORS: Record<CodeKind, string> = {
@@ -160,6 +161,7 @@ const KIND_COLORS: Record<CodeKind, string> = {
   factor: '#7c3aed',
   portfolio_strategy: '#0891b2',
   cross_factor: '#d97706',
+  ml_alpha: '#059669',
 }
 
 const api = (path: string, opts?: RequestInit) =>
@@ -180,6 +182,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [factorFiles, setFactorFiles] = useState<FileInfo[]>([])
   const [portfolioFiles, setPortfolioFiles] = useState<FileInfo[]>([])
   const [crossFactorFiles, setCrossFactorFiles] = useState<FileInfo[]>([])
+  const [mlAlphaFiles, setMlAlphaFiles] = useState<FileInfo[]>([])
   const [registry, setRegistry] = useState<Record<string, { builtin: any[]; user: any[] }>>({})
   const [status, setStatus] = useState<string>('')
   const [errors, setErrors] = useState<string[]>([])
@@ -213,6 +216,11 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
       const res = await api('/files?kind=cross_factor')
       if (res.ok) setCrossFactorFiles(await res.json())
     } catch {}
+    // Load ML alpha files (V2.13.2)
+    try {
+      const res = await api('/files?kind=ml_alpha')
+      if (res.ok) setMlAlphaFiles(await res.json())
+    } catch {}
     // Load registry (builtin + user registered objects)
     try {
       const res = await api('/registry')
@@ -240,6 +248,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
     const prefixMap: Record<CodeKind, string> = {
       strategy: 'MyStrategy', factor: 'MyFactor',
       portfolio_strategy: 'MyPortfolioStrategy', cross_factor: 'MyCrossFactor',
+      ml_alpha: 'MyMLAlpha',
     }
     const prefix = prefixMap[kind]
     // V2.12.2 codex round 6: only check conflicts within the SAME kind.
@@ -251,6 +260,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
       kind === 'strategy' ? files :
       kind === 'factor' ? factorFiles :
       kind === 'portfolio_strategy' ? portfolioFiles :
+      kind === 'ml_alpha' ? mlAlphaFiles :
       crossFactorFiles
     )
     const existing = kindFiles.map(f => f.filename)
@@ -422,6 +432,10 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
             className="flex-1 text-xs px-1 py-1.5 rounded font-medium" style={{ backgroundColor: KIND_COLORS.cross_factor, color: '#fff', minWidth: '45%' }}>
             + 截面因子
           </button>
+          <button onClick={() => newFile('ml_alpha')}
+            className="flex-1 text-xs px-1 py-1.5 rounded font-medium" style={{ backgroundColor: KIND_COLORS.ml_alpha, color: '#fff', minWidth: '45%' }}>
+            + ML Alpha
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {/* Toolbar: refresh + cleanup */}
@@ -440,14 +454,15 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
               title="清理研究助手生成的 research_* 策略">清理研究</button>
           </div>
 
-          {/* 4 groups: strategy, factor, portfolio_strategy, cross_factor */}
-          {(['strategy', 'factor', 'portfolio_strategy', 'cross_factor'] as CodeKind[]).map(kind => {
+          {/* 5 groups: strategy, factor, portfolio_strategy, cross_factor, ml_alpha */}
+          {(['strategy', 'factor', 'portfolio_strategy', 'cross_factor', 'ml_alpha'] as CodeKind[]).map(kind => {
             const label = KIND_LABELS[kind]
             const color = KIND_COLORS[kind]
             const reg = registry[kind] || { builtin: [], user: [] }
             const userFiles = kind === 'strategy' ? strategyFiles
               : kind === 'factor' ? factorFiles
               : kind === 'portfolio_strategy' ? portfolioFiles
+              : kind === 'ml_alpha' ? mlAlphaFiles
               : crossFactorFiles
             const total = reg.builtin.length + reg.user.length
 
@@ -526,7 +541,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
             style={{ backgroundColor: showHelp ? '#eab308' : 'var(--bg-primary)', color: showHelp ? '#000' : 'var(--text-secondary)', border: '1px solid var(--border)', minWidth: '28px' }}>
             ?
           </button>
-          {onNavigate && (currentKind === 'portfolio_strategy' || currentKind === 'cross_factor') && (
+          {onNavigate && (currentKind === 'portfolio_strategy' || currentKind === 'cross_factor' || currentKind === 'ml_alpha') && (
             <button onClick={() => onNavigate('portfolio')}
               className="text-xs px-3 py-1 rounded"
               style={{ backgroundColor: '#0891b2', color: '#fff' }}>
