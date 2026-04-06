@@ -1,85 +1,64 @@
-# V2.13.2 Comprehensive Release Plan
+# V2.13.2 Comprehensive Release Plan (v2 — codex reviewed)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Close ALL deferred items from V2.13/V2.13.1 review rounds + V2.12.2 legacy. Ship frontend Phase 6. Leave zero known issues in the backlog.
+**Goal:** Close ALL deferred items from V2.13/V2.13.1 reviews + V2.12.2 legacy. Ship frontend Phase 6. Zero backlog.
 
-**Scope:** 5 groups, 30 items total. Ordered by dependency: backend fixes first, then frontend, then tests, then docs.
+**Scope changes from v1 (codex feedback):**
+- G1.2 stamp_tax: use `model_fields_set` not value comparison
+- G2 split: CodeEditor/types/API (no G1 dep) ∥ registry-driven UI (needs G1.1)
+- G2.6 ensemble UI: split out as **optional**, not in main scope/estimate
+- G3: removed 2 false "not done" items (tests already exist), kept 5 genuine items
+- G4.2 power-set: hard cap at 64 combos, not just warning
+- G5: moved to **V2.14 optional**, not in V2.13.2 main scope (env-sensitive)
+- TS client: typed signatures, not `any`
 
 ---
 
-## Group 1: Backend Bug Fixes (blocks frontend)
+## Group 1: Backend Bug Fixes
 
-### 1.1 `/registry` endpoint — ml_alpha classified as builtin (Phase 5 M3)
+### 1.1 `/registry` — ml_alpha as 5th category
 
 **File:** `ez/api/routes/code.py:262-266`
 
-**Bug:** `/registry` response has 4 categories: strategy/factor/portfolio_strategy/cross_factor. ML alpha subclasses from `ml_alphas/` dir are in CrossSectionalFactor registry with `__module__` starting with `"ml_alphas."`, but the `_classify` call for `"cross_factor"` only passes `user_prefixes=("cross_factors.",)`. So ml_alpha user files get classified as `builtin` (not editable).
+**Fix:** Filter CrossSectionalFactor registry into `cross_factor` (module starts with `cross_factors.`) and `ml_alpha` (module starts with `ml_alphas.`).
 
-**Fix:** Add `"ml_alpha"` as a 5th category in the return dict:
+**Test:** `/registry` response has `"ml_alpha"` key with `builtin`/`user` sublists.
 
-```python
-return {
-    "strategy": _classify(Strategy.get_registry(), ("strategies.",)),
-    "factor": _classify(Factor.get_registry(), ("factors.",)),
-    "portfolio_strategy": _classify(PortfolioStrategy.get_registry(), ("portfolio_strategies.",)),
-    "cross_factor": _classify(
-        {k: v for k, v in CrossSectionalFactor.get_registry().items()
-         if not (v.__module__ or "").startswith("ml_alphas.")},
-        ("cross_factors.",),
-    ),
-    "ml_alpha": _classify(
-        {k: v for k, v in CrossSectionalFactor.get_registry().items()
-         if (v.__module__ or "").startswith("ml_alphas.")},
-        ("ml_alphas.",),
-    ),
-}
-```
+### 1.2 `stamp_tax_rate` market gate (Pydantic `model_fields_set`)
 
-**Test:** Verify `/registry` response has `"ml_alpha"` key.
+**File:** `ez/api/routes/portfolio.py` — PortfolioCommonConfig or child classes
 
-### 1.2 `stamp_tax_rate` default not market-gated (V2.12.2 legacy D6)
-
-**File:** `ez/api/routes/portfolio.py:277`
-
-**Bug:** `PortfolioCommonConfig.stamp_tax_rate` defaults to `0.0005` (A-share). Non-UI clients hitting US/HK market without explicitly passing `stamp_tax_rate=0` get Chinese stamp tax applied.
-
-**Fix:** Add a `model_validator` to `PortfolioCommonConfig`:
+**Fix (codex correction):** Use `self.model_fields_set` to detect if `stamp_tax_rate` was explicitly provided:
 
 ```python
 @model_validator(mode="after")
 def _gate_stamp_tax_by_market(self):
-    if self.market != "cn_stock" and self.stamp_tax_rate == 0.0005:
-        # User didn't explicitly set it — zero it for non-CN markets
-        self.stamp_tax_rate = 0.0
+    if hasattr(self, "market") and self.market != "cn_stock":
+        if "stamp_tax_rate" not in self.model_fields_set:
+            self.stamp_tax_rate = 0.0
     return self
 ```
 
-Note: this requires `market` field on PortfolioCommonConfig. Currently `market` is on the child classes (PortfolioRunRequest etc.). May need to lift `market` up or apply the validator on the children. Check during implementation.
+This only zeros the tax when the field was NOT explicitly set AND market is non-CN. If user explicitly passes `stamp_tax_rate=0.0005` for US market, it's respected.
 
-**Test:** POST /run with market="us_stock" without stamp_tax_rate → verify stamp_tax_rate=0 in the result config.
+**Note:** `market` is on child classes, not on `PortfolioCommonConfig`. Apply validator on `PortfolioRunRequest`, `PortfolioWFRequest`, `PortfolioSearchRequest` (all have `market`).
 
-### 1.3 `alpha_combiner` training window fixed 365 days (V2.12.2 legacy D2)
+**Test:** POST /run with market="us_stock" without stamp_tax → verify 0; with explicit stamp_tax=0.001 → verify 0.001 preserved.
+
+### 1.3 `alpha_combiner` training window dynamic
 
 **File:** `ez/api/routes/portfolio.py:215`
 
-**Bug:** `_compute_alpha_weights` uses `start - timedelta(days=365)` as the training window. Long-warmup custom factors get insufficient history.
-
-**Fix:** Make training window dynamic: `max(365, max_factor_warmup * 2)`.
-
-```python
-train_start = start - timedelta(days=max(365, _max_factor_warmup(factors) * 2))
-```
+**Fix:** `train_start = start - timedelta(days=max(365, _max_factor_warmup(factors) * 2))`
 
 **Test:** Factor with warmup=400 → verify training window > 365.
 
-### 1.4 Portfolio lookback warn → raise option (V2.12.2 legacy D4)
+### 1.4 Portfolio lookback `strict_lookback` option
 
 **File:** `ez/portfolio/engine.py:91-126`
 
-**Current:** Lookback check only warns if `strategy.lookback_days < max(factor.warmup_period)`.
-
-**Fix:** Keep warning as default. Add `strict_lookback: bool = False` to `run_portfolio_backtest`. When True, raise ValueError instead of warning. Document in CLAUDE.md.
+**Fix:** Add `strict_lookback: bool = False` param. When True, raise `ValueError` instead of warning.
 
 **Test:** `strict_lookback=True` + insufficient lookback → ValueError.
 
@@ -87,55 +66,57 @@ train_start = start - timedelta(days=max(365, _max_factor_warmup(factors) * 2))
 
 ## Group 2: Phase 6 Frontend
 
-### 2.1 CodeEditor: `+ ML Alpha` button
+**Dependency split (codex):**
+- **G2a** (no G1 dependency): 2.1 CodeEditor + 2.4 TS types + 2.5 API client — can start immediately
+- **G2b** (needs G1.1): 2.2 factor dropdown + 2.3 diagnostics panel — wait for `/registry` fix
+
+### 2.1 CodeEditor: `+ ML Alpha` (G2a — no blocker)
 
 **File:** `web/src/components/CodeEditor.tsx`
 
-- [ ] Add `'ml_alpha'` to `CodeKind` type union (line 137)
-- [ ] Add to `KIND_LABELS`: `ml_alpha: 'ML Alpha'`
-- [ ] Add to `KIND_COLORS`: `ml_alpha: '#059669'` (emerald green, distinct from existing 4)
-- [ ] Add `mlAlphaFiles` state array (mirror `crossFactorFiles`)
-- [ ] Add sidebar group "ML Alpha" with file list
-- [ ] Add "新建" button that calls `/api/code/template` with `kind: "ml_alpha"`
-- [ ] Add save/delete handlers routing to `kind: "ml_alpha"`
+- `CodeKind` union: add `'ml_alpha'`
+- `KIND_LABELS`: `ml_alpha: 'ML Alpha'`
+- `KIND_COLORS`: `ml_alpha: '#059669'`
+- `mlAlphaFiles` state + sidebar group + 新建/save/delete routing
 
-**Test:** Manual — create ml_alpha file via UI, verify it appears in sidebar.
-
-### 2.2 PortfolioPanel: ML Alpha factor category
+### 2.2 PortfolioPanel: ML Alpha factor category (G2b — needs G1.1)
 
 **File:** `web/src/components/PortfolioPanel.tsx`
 
-- [ ] Factor dropdown `<optgroup>` for "ML Alpha" — populated from `/registry` response `ml_alpha` category
-- [ ] When user selects an ML Alpha factor, the factor name is passed to TopNRotation/MultiFactorRotation as before (MLAlpha IS a CrossSectionalFactor)
+- Factor dropdown `<optgroup label="ML Alpha">` populated from `/registry` response `ml_alpha` category
 
-### 2.3 PortfolioFactorContent: ML Diagnostics sub-panel
+### 2.3 PortfolioFactorContent: diagnostics panel (G2b — needs G1.1)
 
 **File:** `web/src/components/PortfolioFactorContent.tsx`
 
-- [ ] New sub-tab "ML 诊断"
-- [ ] Dropdown of registered ML alphas (from `/registry` ml_alpha category)
-- [ ] Button "运行诊断" → calls `POST /api/portfolio/ml-alpha/diagnostics`
-- [ ] Display:
-  - Feature importance stability table (per feature, CV value, color-coded)
-  - IS/OOS IC series line chart (ECharts, dual y-axis)
-  - Overfitting score badge (green/yellow/red based on verdict)
-  - Turnover metric display
-  - Retrain cadence summary
-  - Warnings list
+- Sub-tab "ML 诊断"
+- Dropdown of ML alphas from `/registry`
+- "运行诊断" button → `POST /ml-alpha/diagnostics`
+- Display: feature importance table + IS/OOS IC chart (ECharts) + verdict badge + turnover + warnings
 
-### 2.4 TypeScript types
+### 2.4 TypeScript types (G2a — no blocker)
 
 **File:** `web/src/types/index.ts`
 
 ```typescript
+export interface MLDiagnosticsRequest {
+  ml_alpha_name: string
+  symbols: string[]
+  market?: string
+  start_date?: string
+  end_date?: string
+  eval_freq?: string
+  forward_horizon?: number
+  severe_overfit_threshold?: number
+  mild_overfit_threshold?: number
+  high_turnover_threshold?: number
+  top_n_for_turnover?: number
+}
+
 export interface DiagnosticsResult {
-  feature_importance: Record<string, number[]>
+  feature_importance: Record<string, (number | null)[]>
   feature_importance_cv: Record<string, number | null>
-  ic_series: Array<{
-    retrain_date: string
-    train_ic: number | null
-    oos_ic: number | null
-  }>
+  ic_series: Array<{ retrain_date: string; train_ic: number | null; oos_ic: number | null }>
   mean_train_ic: number | null
   mean_oos_ic: number | null
   overfitting_score: number | null
@@ -150,161 +131,110 @@ export interface DiagnosticsResult {
 }
 ```
 
-### 2.5 API client
+### 2.5 API client — typed (G2a — no blocker, codex: no `any`)
 
 **File:** `web/src/api/index.ts`
 
 ```typescript
-export const mlAlphaDiagnostics = (data: any) =>
-  api.post('/portfolio/ml-alpha/diagnostics', data)
+export const mlAlphaDiagnostics = (data: MLDiagnosticsRequest) =>
+  api.post<DiagnosticsResult>('/portfolio/ml-alpha/diagnostics', data)
 ```
-
-### 2.6 Multi-strategy ensemble page (roadmap item)
-
-**File:** `web/src/components/PortfolioPanel.tsx` or new component
-
-- [ ] Sub-tab or section "多策略组合"
-- [ ] Select sub-strategies from registered portfolio strategies
-- [ ] Select mode: equal / manual / return_weighted / inverse_vol
-- [ ] Manual weights input (when mode=manual)
-- [ ] Run button → constructs StrategyEnsemble via Python API (needs a new API endpoint or leverages existing /run with a special strategy_name="StrategyEnsemble" + strategy_params)
-- [ ] Comparison chart: ensemble equity curve vs individual sub-strategy curves
-
-**Note:** This may require a new API helper to construct StrategyEnsemble from request params. Evaluate during implementation — if too complex for V2.13.2, defer the ensemble UI and just ship the ML Alpha frontend.
 
 ---
 
-## Group 3: Test & Code Polish (from review rounds)
+## Group 2.6 (OPTIONAL — split out per codex)
 
-### 3.1 Stale docstrings (Phase 5 M1, M4)
+### Ensemble UI
 
-**Files:** `ez/api/routes/code.py`
+**Not in V2.13.2 main scope.** Requires new API helper to construct StrategyEnsemble from request params. Evaluate for V2.14.
 
-- [ ] `TemplateRequest.kind` inline comment: add `| "ml_alpha"` (line ~81)
-- [ ] `list_files` docstring: add `ml_alpha` to the kind list (line 125)
+---
 
-### 3.2 Dead code cleanup (Phase 5 M2)
+## Group 3: Test & Code Polish (genuine remaining items only)
 
-**File:** `ez/api/routes/code.py:22-40`
+Items verified as still needed (codex: removed false positives):
 
-- [ ] `_get_registry_for_kind`: either add `"ml_alpha"` case or delete the function if it has zero call sites. Grep first.
+### 3.1 Stale docstrings
 
-### 3.3 MLAlpha `_predict` None branch no warning (Phase 2 M3)
+- `TemplateRequest.kind` comment: add `"ml_alpha"` (code.py ~line 81)
+- `list_files` docstring: add `ml_alpha` (code.py line 125)
+
+### 3.2 Dead code: `_get_registry_for_kind`
+
+Grep for call sites. If zero → delete. If >0 → add `"ml_alpha"` case.
+
+### 3.3 `_predict` sym_features is None — add warning
 
 **File:** `ez/portfolio/ml_alpha.py`
 
-- [ ] In `_predict`, when `sym_features is None`: add a `_predict_none_warned` one-shot flag + warning (parallel to `_predict_feature_type_warned`)
+Add `_predict_none_warned` flag. When `sym_features is None` at predict stage, emit one-shot warning.
 
-### 3.4 `test_compute_skips_retrain_within_freq` boundary (Phase 1 M3)
+### 3.4 `test_compute_skips_retrain_within_freq` — add exact boundary
 
-**File:** `tests/test_portfolio/test_ml_alpha.py`
+Test exists but only checks `< freq` and `> freq`. Add a call at `elapsed == retrain_freq` and assert retrain_count increments.
 
-- [ ] Add a call at `elapsed == retrain_freq` (exact boundary) and assert retrain_count increments. Currently only tests `< freq` and `> freq`.
-
-### 3.5 `test_non_numeric_dtype_logs_warning` assertion tightening (Phase 2 M2)
-
-**File:** `tests/test_portfolio/test_ml_alpha.py`
-
-- [ ] Change substring match from `"category" or "object"` to a more specific pattern like `"dtype"` + `"object"`.
-
-### 3.6 StrategyEnsemble correlation dedup integration test (Phase 3 S1)
+### 3.5 StrategyEnsemble correlation dedup — multi-call integration test
 
 **File:** `tests/test_portfolio/test_ensemble.py`
 
-- [ ] Test that calling `generate_weights` multiple times after warmup produces only 1 correlation warning (not growing).
+Call `generate_weights` 3 times after warmup with identical subs. Assert `len(correlation_warnings) == 1` (not 3).
 
-### 3.7 StrategyEnsemble deepcopy of populated state (Phase 3 S3)
+### 3.6 StrategyEnsemble deepcopy populated state
 
 **File:** `tests/test_portfolio/test_ensemble.py`
 
-- [ ] `copy.deepcopy(ensemble_with_populated_ledger)` → verify independent `_strategies`, `self.state`, `_sub_exception_warned`.
+`copy.deepcopy(ensemble_with_ledger_data)` → verify `_strategies`, `state`, `_sub_exception_warned` are all independent.
 
-### 3.8 Frontend race token coverage (V2.12.2 D7)
+### 3.7 Frontend race token coverage (4 handlers)
 
-**Files:** `web/src/components/PortfolioPanel.tsx`, `web/src/components/CodeEditor.tsx`
+**Files:** `PortfolioPanel.tsx`, `CodeEditor.tsx`
 
-- [ ] `handleEvaluateFactors` (evalResult/corrResult): add runTokenRef pattern
-- [ ] `handleFetchFundamental` (fundaStatus/qualityReport): add runTokenRef pattern
-- [ ] `handleCompare` (compareData): add runTokenRef pattern
-- [ ] `CodeEditor.loadFile` (code/filename): add runTokenRef pattern
+Add `runTokenRef` pattern to: `handleEvaluateFactors`, `handleFetchFundamental`, `handleCompare`, `CodeEditor.loadFile`.
 
 ---
 
-## Group 4: V2.12.2 Legacy Items
+## Group 4: V2.12.2 Legacy
 
-### 4.1 Candidate search bool/enum support (D1)
+### 4.1 bool/enum param search
 
-**Files:** `web/src/components/CandidateSearch.tsx`, `ez/api/routes/candidates.py`
+**Files:** `CandidateSearch.tsx`, `ez/api/routes/candidates.py`
 
-- [ ] `ParamRangeState` add `type: "number" | "bool" | "enum"` field
-- [ ] `generateValues` handle bool → `[0, 1]`, enum → parse from comma-separated string
-- [ ] Backend `ParamRangeRequest` accept `values: list[str]` for enum
-- [ ] Frontend UI: toggle between number range input and enum input based on parameter schema `type` field
+`ParamRangeState` add `type` field. `generateValues` handle bool/enum. Backend accept `values: list[str]`.
 
-### 4.2 multi_select parameter search UX (D3)
+### 4.2 multi_select power-set UX
 
-**File:** `web/src/components/PortfolioPanel.tsx`
+**File:** `PortfolioPanel.tsx`
 
-- [ ] Current: each selected factor runs independently as a single-factor combo
-- [ ] Add checkbox: "组合搜索" — when checked, search all subsets of selected factors (power set)
-- [ ] Warning about combinatorial explosion when power set > 32
+Add "组合搜索" checkbox. **Hard cap at 64 combinations** (codex: not just warning). Above 64 → disable button + show "组合数超过 64,请减少因子数量".
 
-### 4.3 WalkForward deepcopy unpicklable state doc (D5)
+### 4.3 WalkForward unpicklable state doc
 
-**File:** `CLAUDE.md`
-
-- [ ] Already documented. Verify the warning is in Strategy base class docstring too. If not, add it.
+Verify warning in Strategy base class docstring. If missing, add.
 
 ---
 
-## Group 5: Known Limitations Closure
+## Group 5: Whitelist Expansion (DEFERRED to V2.14 — codex)
 
-### 5.1 LightGBM / XGBoost whitelist expansion (E1)
+**NOT in V2.13.2 scope.** Environment-sensitive (LightGBM/XGBoost install quirks). Separate release.
 
-**Files:** `ez/portfolio/ml_alpha.py`, `tests/test_portfolio/test_ml_alpha_sklearn.py`
-
-- [ ] Add `lightgbm` and `xgboost` to `pyproject.toml` `[ml]` optional group
-- [ ] Add `LGBMRegressor` and `XGBRegressor` to `_build_supported_estimator_set()`
-- [ ] Deepcopy regression test for each
-- [ ] Determinism test (fixed random_state)
-- [ ] End-to-end `run_portfolio_backtest` test for each
-- [ ] Sandbox smoke test: `from lightgbm import LGBMRegressor` passes `check_syntax`
-- [ ] Update `ML_ALPHA_TEMPLATE` docstring to mention LightGBM/XGBoost as supported
-- [ ] Update `CLAUDE.md` Known Limitations: remove "V1 不支持 LightGBM/XGBoost"
-
-**Note:** LightGBM booster pickle has known version quirks. Test with the installed version explicitly. XGBoost's `XGBRegressor` uses `n_jobs` (must default to 1). Both need `n_jobs=1` enforcement verification.
-
-### 5.2 Lasso/LR/EN/DT portfolio integration tests (E2)
-
-**File:** `tests/test_portfolio/test_ml_alpha_sklearn.py`
-
-- [ ] `test_lasso_run_portfolio_backtest`
-- [ ] `test_linear_regression_run_portfolio_backtest`
-- [ ] `test_elastic_net_run_portfolio_backtest`
-- [ ] `test_decision_tree_run_portfolio_backtest`
-
-Each: construct MLAlpha with the estimator, run through `run_portfolio_backtest`, assert equity_curve non-empty + retrain_count >= 3.
+- 5.1 LightGBM + XGBoost whitelist + tests
+- 5.2 Lasso/LR/EN/DT portfolio integration tests
 
 ---
 
 ## Execution Order
 
 ```
-Group 1 (backend fixes) → Group 2 (frontend) → Group 3 (polish) → Group 4 (legacy) → Group 5 (whitelist)
+G1.1 (/registry fix)  ──→  G2b (dropdown + diagnostics panel)
+         ↕ parallel                    ↕
+G1.2-1.4 (backend)    ──→  G3 (polish)  ──→  G4 (legacy)
+         ↕ parallel
+G2a (CodeEditor + types + API client)
 ```
 
-**Rationale:**
-- Group 1.1 (`/registry` fix) must land before Group 2 (frontend reads `/registry`)
-- Group 1.2-1.4 are independent backend fixes, can parallel with Group 2
-- Group 3 is all polish, can do anytime
-- Group 4 is V2.12.2 legacy, lowest priority
-- Group 5 (LightGBM/XGBoost) is feature expansion, do last
-
-**Estimated scope:**
-- Group 1: ~60 LOC backend, ~4 tests
-- Group 2: ~500 LOC TypeScript, manual testing
-- Group 3: ~50 LOC, ~6 tests
-- Group 4: ~100 LOC frontend + backend, ~3 tests
-- Group 5: ~40 LOC + ~8 tests (if LightGBM/XGBoost available in env)
-
-**Total: ~750 LOC + ~21 tests**
+**Estimated scope (main, excluding G2.6 + G5):**
+- G1: ~60 LOC, ~4 tests
+- G2a+G2b: ~400 LOC TypeScript
+- G3: ~40 LOC, ~4 tests
+- G4: ~100 LOC, ~3 tests
+- **Total: ~600 LOC + ~11 tests**
