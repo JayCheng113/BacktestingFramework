@@ -313,6 +313,13 @@ class PortfolioCommonConfig(BaseModel):
     index_benchmark: str = Field(default="", pattern=r"^(|000300|000905|000852)$")
     max_tracking_error: float = Field(default=0.05, gt=0, le=0.20)
 
+    # Lookback validation (V2.13.2)
+    strict_lookback: bool = Field(
+        default=False,
+        description="When True, raise ValueError if strategy.lookback_days "
+                    "< max factor warmup_period (instead of just warning).",
+    )
+
 
 class PortfolioRunRequest(PortfolioCommonConfig):
     strategy_name: str = "TopNRotation"
@@ -757,6 +764,7 @@ def run_portfolio(req: PortfolioRunRequest):
         benchmark_symbol=req.benchmark_symbol,
         optimizer=optimizer_instance, risk_manager=risk_mgr,
         t_plus_1=(req.market == "cn_stock"),
+        strict_lookback=req.strict_lookback,
     )
 
     # Sanitize NaN/Inf in metrics
@@ -991,6 +999,7 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             t_plus_1=(req.market == "cn_stock"),
             optimizer_factory=optimizer_factory,
             risk_manager_factory=risk_manager_factory,
+            strict_lookback=req.strict_lookback,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -1167,6 +1176,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 t_plus_1=(req.market == "cn_stock"),
                 optimizer=combo_opt,
                 risk_manager=combo_rm,
+                strict_lookback=req.strict_lookback,
             )
             m = combo_result.metrics
             results.append({

@@ -192,6 +192,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [showChat, setShowChat] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const editorRef = useRef<any>(null)
+  const loadFileTokenRef = useRef(0)  // V2.13.2 A2: race token for loadFile
 
   useEffect(() => { loadAllFiles() }, [])
 
@@ -229,8 +230,10 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   }
 
   const loadFile = async (fname: string, kind: CodeKind = 'strategy') => {
+    const myToken = ++loadFileTokenRef.current
     try {
       const res = await api(`/files/${fname}?kind=${kind}`)
+      if (loadFileTokenRef.current !== myToken) return  // superseded by newer click
       if (res.ok) {
         const data = await res.json()
         setCode(data.code)
@@ -241,7 +244,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setErrors([])
         setTestOutput('')
       }
-    } catch (e: any) { setStatus(`Error: ${e.message}`) }
+    } catch (e: any) { if (loadFileTokenRef.current === myToken) setStatus(`Error: ${e.message}`) }
   }
 
   const newFile = async (kind: CodeKind) => {

@@ -78,6 +78,7 @@ def portfolio_walk_forward(
     t_plus_1: bool = True,  # V2.12.1 codex reviewer round 4: propagate to run_portfolio_backtest
     optimizer_factory=None,  # V2.12.1 codex follow-up: propagate to run_portfolio_backtest
     risk_manager_factory=None,  # V2.12.1 codex follow-up
+    strict_lookback: bool = False,  # V2.13.2: propagate to run_portfolio_backtest
 ) -> PortfolioWFResult:
     """Run walk-forward validation on a portfolio strategy.
 
@@ -147,6 +148,7 @@ def portfolio_walk_forward(
             t_plus_1=t_plus_1,
             optimizer=is_opt,
             risk_manager=is_rm,
+            strict_lookback=strict_lookback,
         )
         # V2.12.1 reviewer round 6 I1+I2: aggregate events from this fold
         if is_opt is not None and is_opt.fallback_events:
@@ -168,6 +170,7 @@ def portfolio_walk_forward(
             t_plus_1=t_plus_1,
             optimizer=oos_opt,
             risk_manager=oos_rm,
+            strict_lookback=strict_lookback,
         )
         if oos_opt is not None and oos_opt.fallback_events:
             for ev in oos_opt.fallback_events:
