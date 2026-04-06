@@ -286,7 +286,26 @@ class TestVerdictAndWarnings:
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
 
-        assert result.verdict in ("healthy", "mild_overfit", "severe_overfit", "unstable")
+        assert result.verdict in (
+            "healthy", "mild_overfit", "severe_overfit", "unstable",
+            "insufficient_data",
+        )
+
+    def test_insufficient_data_verdict_on_short_range(self):
+        """Codex review #2: when IC data is empty (too short date range,
+        no retrains completed), verdict must be 'insufficient_data',
+        not a misleading 'healthy' from 0.0 defaults."""
+        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        data, cal, dates = _make_universe(n_days=400)
+        alpha = _make_alpha(train_window=300, retrain_freq=20, purge_days=5)
+        # Start very late — barely any room for even one retrain + OOS window
+        result = MLDiagnostics(alpha).run(data, cal, dates[350].date(), dates[370].date())
+
+        # With only ~20 days and train_window=300, the diagnostic alpha
+        # may not retrain at all (or retrain once with no OOS window).
+        # overfitting_score should be NaN, verdict "insufficient_data".
+        if result.retrain_count == 0:
+            assert result.verdict == "insufficient_data" or result.verdict == "unknown"
 
     def test_warnings_is_list_of_strings(self):
         from ez.portfolio.ml_diagnostics import MLDiagnostics

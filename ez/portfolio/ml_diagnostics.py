@@ -95,7 +95,10 @@ class DiagnosticsResult:
 
     # ── Summary ──
     verdict: str = "unknown"
-    """One of: 'healthy', 'mild_overfit', 'severe_overfit', 'unstable'."""
+    """One of: 'healthy', 'mild_overfit', 'severe_overfit', 'unstable',
+    'insufficient_data'. The last is set when IC samples are empty
+    (too few retrains, too short date range, or forward_horizon config
+    mismatch) so overfitting_score is NaN."""
     warnings: list[str] = field(default_factory=list)
     """Human-readable diagnostic messages."""
 
@@ -181,31 +184,39 @@ class MLDiagnostics:
         # for all earlier retrains would use the wrong model.
         prev_retrain_count = 0
         retrain_snapshots: list[dict] = []
-        all_scores: list[tuple[_date, pd.Series]] = []
-        # Per-retrain IS IC values (computed immediately at retrain time)
+        # Tag each score with the retrain_count at that moment. This is
+        # critical for OOS IC: if a retrain happens DURING the OOS window,
+        # scores after that retrain come from a DIFFERENT model and must
+        # be excluded. (Codex review #1 — the hardest logic bug in Phase 2.)
+        all_scores: list[tuple[_date, pd.Series, int]] = []
         is_ic_at_retrain: list[float] = []
 
         for eval_date in eval_dates:
             dt = datetime.combine(eval_date, datetime.min.time())
             scores = diag_alpha.compute(universe_data, dt)
-            all_scores.append((eval_date, scores))
 
             snapshot = diag_alpha.diagnostics_snapshot()
             current_retrain_count = snapshot["retrain_count"]
+
+            # Record scores AFTER checking retrain, so the retrain_count
+            # tag reflects whether this eval_date's scores came from the
+            # OLD model (before retrain) or the NEW model (after retrain
+            # that may have been triggered by this compute() call).
+            all_scores.append((eval_date, scores, current_retrain_count))
 
             if current_retrain_count > prev_retrain_count:
                 retrain_date_str = snapshot["last_retrain_date"]
                 result.retrain_dates.append(retrain_date_str)
                 retrain_snapshots.append(snapshot)
-                prev_retrain_count = current_retrain_count
 
-                # Compute IS IC NOW while _current_model is still the
-                # model from THIS retrain (not a future one).
+                # IS IC NOW while _current_model is the correct model
                 retrain_date = _date.fromisoformat(retrain_date_str)
                 is_ic = self._compute_is_ic(
                     diag_alpha, universe_data, retrain_date,
                 )
                 is_ic_at_retrain.append(is_ic)
+
+                prev_retrain_count = current_retrain_count
 
         # ── 4. Retrain cadence metrics ──
         result.retrain_count = len(result.retrain_dates)
@@ -270,7 +281,7 @@ class MLDiagnostics:
         self,
         is_ic_at_retrain: list[float],
         universe_data: dict[str, pd.DataFrame],
-        all_scores: list[tuple[_date, pd.Series]],
+        all_scores: list[tuple[_date, pd.Series, int]],
         eval_dates: list[_date],
         result: DiagnosticsResult,
     ) -> None:
@@ -278,10 +289,11 @@ class MLDiagnostics:
         ``overfitting_score``.
 
         IS IC was pre-computed inside the walk-through loop (at retrain
-        time, when ``_current_model`` was the correct freshly-trained
-        model — see IMPORTANT-1 review fix). OOS IC is computed here
-        from factor scores vs actual forward returns using the
-        configurable ``forward_horizon`` from ``DiagnosticsConfig``.
+        time). OOS IC uses factor scores vs actual forward returns, but
+        ONLY scores produced by the SAME model (same ``retrain_count``
+        tag). If a subsequent retrain occurs within the OOS window, the
+        scores after that retrain are excluded — they came from a
+        different model and would pollute the OOS IC. (Codex review #1.)
         """
         if not result.retrain_dates:
             return
@@ -290,13 +302,33 @@ class MLDiagnostics:
         oos_window = min(max(retrain_freq, 21), 42)
         fwd_horizon = self._config.forward_horizon
 
-        scores_by_date: dict[_date, pd.Series] = {d: s for d, s in all_scores}
+        # Fix #3 (codex review): forward_horizon is a hidden contract —
+        # it must match target_fn's forward horizon. We can't infer it
+        # from target_fn (it's a lambda), but we can sanity-check it.
+        if fwd_horizon > retrain_freq:
+            result.warnings.append(
+                f"forward_horizon ({fwd_horizon}) > retrain_freq "
+                f"({retrain_freq}). OOS IC uses a forward return "
+                f"horizon that exceeds the retrain cycle — check that "
+                f"DiagnosticsConfig.forward_horizon matches your "
+                f"target_fn's shift(-k) horizon."
+            )
+        if fwd_horizon <= 0:
+            result.warnings.append(
+                f"forward_horizon ({fwd_horizon}) must be >= 1. "
+                f"OOS IC will be NaN."
+            )
 
-        # Pre-compute forward returns at each eval date using the
-        # configurable forward_horizon (IMPORTANT-3 review fix: was
-        # hardcoded to 5).
+        # Build date→(scores, retrain_count) lookup
+        scores_and_rc: dict[_date, tuple[pd.Series, int]] = {
+            d: (s, rc) for d, s, rc in all_scores
+        }
+
+        # Pre-compute forward returns at each eval date
         fwd_returns_by_date: dict[_date, dict[str, float]] = {}
-        for eval_date, _ in all_scores:
+        for eval_date, _, _ in all_scores:
+            if eval_date in fwd_returns_by_date:
+                continue
             fwd: dict[str, float] = {}
             for sym, df in universe_data.items():
                 if not isinstance(df.index, pd.DatetimeIndex):
@@ -320,10 +352,13 @@ class MLDiagnostics:
         for i, retrain_date_str in enumerate(result.retrain_dates):
             train_ic = is_ic_at_retrain[i] if i < len(is_ic_at_retrain) else float("nan")
             retrain_date = _date.fromisoformat(retrain_date_str)
+            # The retrain_count at this retrain event = i + 1 (1-indexed:
+            # first retrain → count=1, second → count=2, etc.)
+            retrain_rc = i + 1
 
             oos_ic = self._compute_oos_ic(
-                retrain_date, oos_window, eval_dates,
-                scores_by_date, fwd_returns_by_date,
+                retrain_date, retrain_rc, oos_window, eval_dates,
+                scores_and_rc, fwd_returns_by_date,
             )
 
             result.ic_series.append({
@@ -336,12 +371,18 @@ class MLDiagnostics:
             if np.isfinite(oos_ic):
                 oos_ics.append(oos_ic)
 
-        result.mean_train_ic = float(np.mean(train_ics)) if train_ics else 0.0
-        result.mean_oos_ic = float(np.mean(oos_ics)) if oos_ics else 0.0
-        denom = max(abs(result.mean_train_ic), 1e-6)
-        result.overfitting_score = max(
-            0.0, (result.mean_train_ic - result.mean_oos_ic) / denom,
-        )
+        # Fix #2 (codex review): empty → NaN, not 0.0. A 0.0 default
+        # masquerades as "no overfit" when the real situation is
+        # "insufficient data to assess".
+        result.mean_train_ic = float(np.mean(train_ics)) if train_ics else float("nan")
+        result.mean_oos_ic = float(np.mean(oos_ics)) if oos_ics else float("nan")
+        if np.isfinite(result.mean_train_ic) and np.isfinite(result.mean_oos_ic):
+            denom = max(abs(result.mean_train_ic), 1e-6)
+            result.overfitting_score = max(
+                0.0, (result.mean_train_ic - result.mean_oos_ic) / denom,
+            )
+        else:
+            result.overfitting_score = float("nan")
 
     def _compute_is_ic(
         self,
@@ -387,13 +428,21 @@ class MLDiagnostics:
     def _compute_oos_ic(
         self,
         retrain_date: _date,
+        retrain_rc: int,
         oos_window: int,
         eval_dates: list[_date],
-        scores_by_date: dict[_date, pd.Series],
+        scores_and_rc: dict[_date, tuple[pd.Series, int]],
         fwd_returns_by_date: dict[_date, dict[str, float]],
     ) -> float:
         """Compute OOS IC: average spearman(factor_scores, forward_returns)
-        over the next oos_window calendar days after retrain_date."""
+        over the next ``oos_window`` calendar days after ``retrain_date``.
+
+        **Codex review #1 fix**: only use scores whose ``retrain_count``
+        tag matches ``retrain_rc``. If a subsequent retrain happens
+        within the OOS window, scores after that retrain came from a
+        DIFFERENT model and are excluded. Without this filter, the OOS
+        IC for early retrains would be polluted by later models' predictions.
+        """
         from datetime import timedelta
 
         oos_end = retrain_date + timedelta(days=oos_window)
@@ -402,7 +451,13 @@ class MLDiagnostics:
         for ed in eval_dates:
             if ed <= retrain_date or ed > oos_end:
                 continue
-            scores = scores_by_date.get(ed)
+            entry = scores_and_rc.get(ed)
+            if entry is None:
+                continue
+            scores, rc = entry
+            # Key filter: only scores from the SAME model (same retrain_count)
+            if rc != retrain_rc:
+                continue
             fwd = fwd_returns_by_date.get(ed, {})
             if scores is None or scores.empty or not fwd:
                 continue
@@ -429,23 +484,33 @@ class MLDiagnostics:
 
     def _compute_turnover(
         self,
-        all_scores: list[tuple[_date, pd.Series]],
+        all_scores: list[tuple[_date, pd.Series, int]],
         result: DiagnosticsResult,
     ) -> None:
-        """Compute top-N retention rate across consecutive eval dates."""
+        """Compute top-N retention rate across consecutive eval dates.
+
+        Uses **Jaccard similarity** (|intersection| / |union|) instead of
+        the original asymmetric |intersection| / |prev| — this is
+        symmetric and doesn't over-penalize when the universe shrinks
+        between consecutive dates. (Codex review #4.)
+
+        ``avg_turnover = 1 - mean(jaccard_similarity)``
+        """
         top_n = self._config.top_n_for_turnover
         prev_top: set[str] | None = None
 
-        for eval_date, scores in all_scores:
+        for eval_date, scores, _rc in all_scores:
             if scores.empty:
                 continue
             current_top = set(scores.nlargest(min(top_n, len(scores))).index)
 
             if prev_top is not None and current_top:
-                retention = len(current_top & prev_top) / max(len(prev_top), 1)
+                union = prev_top | current_top
+                intersection = prev_top & current_top
+                jaccard = len(intersection) / max(len(union), 1)
                 result.turnover_series.append({
                     "date": eval_date.isoformat(),
-                    "retention_rate": round(retention, 4),
+                    "retention_rate": round(jaccard, 4),
                 })
 
             prev_top = current_top
@@ -459,6 +524,18 @@ class MLDiagnostics:
     def _compute_verdict(self, result: DiagnosticsResult) -> None:
         """Compute summary verdict and human-readable warnings."""
         cfg = self._config
+
+        # Fix #2 (codex review): if IC data is insufficient, the verdict
+        # must be "insufficient_data", not a false "healthy" from 0.0 defaults.
+        if not np.isfinite(result.overfitting_score):
+            result.verdict = "insufficient_data"
+            result.warnings.append(
+                "Insufficient IC data to compute overfitting score. "
+                "Possible causes: too few retrains, too short date range, "
+                "or forward_horizon exceeding available data. "
+                "Cannot assess overfitting risk."
+            )
+            return
 
         # Overfitting verdict
         if result.overfitting_score > cfg.severe_overfit_threshold:
