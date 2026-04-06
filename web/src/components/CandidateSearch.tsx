@@ -7,17 +7,40 @@ import DateBtn from './shared/DateBtn'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
-interface ParamRangeState {
+// --- Discriminated union for parameter range state ---
+
+interface NumericParamRange {
   name: string
-  type: string       // "int" | "float"
+  type: 'int' | 'float'
   min: number
   max: number
   step: number
   defaultVal: number
 }
 
-/** Generate values using index-based loop to avoid float accumulation drift. */
-function generateValues(pr: ParamRangeState, limit: number = 50): number[] {
+interface BoolParamRange {
+  name: string
+  type: 'bool'
+  selected: boolean[]     // which values are included in search
+  defaultVal: boolean
+}
+
+interface EnumParamRange {
+  name: string
+  type: 'select' | 'str'
+  allOptions: string[]    // all available options from schema
+  selected: string[]      // which options are included in search
+  defaultVal: string
+}
+
+type ParamRangeState = NumericParamRange | BoolParamRange | EnumParamRange
+
+// --- Value generation ---
+
+function generateValues(pr: ParamRangeState, limit: number = 50): (number | string | boolean)[] {
+  if (pr.type === 'bool') return pr.selected
+  if (pr.type === 'select' || pr.type === 'str') return pr.selected
+  // numeric
   if (pr.step <= 0 || pr.min > pr.max) return []
   const count = Math.floor((pr.max - pr.min) / pr.step) + 1
   const n = Math.min(count, limit)
@@ -29,8 +52,9 @@ function generateValues(pr: ParamRangeState, limit: number = 50): number[] {
   return [...new Set(vals)]
 }
 
-/** Count values — same formula as generateValues, O(1). */
 function countValues(pr: ParamRangeState): number {
+  if (pr.type === 'bool') return pr.selected.length
+  if (pr.type === 'select' || pr.type === 'str') return pr.selected.length
   if (pr.step <= 0 || pr.min > pr.max) return 0
   return Math.floor((pr.max - pr.min) / pr.step) + 1
 }
@@ -38,6 +62,12 @@ function countValues(pr: ParamRangeState): number {
 function totalCombinations(ranges: ParamRangeState[]): number {
   if (ranges.length === 0) return 1
   return ranges.reduce((acc, pr) => acc * Math.max(countValues(pr), 1), 1)
+}
+
+function hasError(pr: ParamRangeState): boolean {
+  if (pr.type === 'bool') return pr.selected.length === 0
+  if (pr.type === 'select' || pr.type === 'str') return pr.selected.length === 0
+  return pr.min > pr.max || pr.step <= 0
 }
 
 export default function CandidateSearch() {
@@ -70,24 +100,55 @@ export default function CandidateSearch() {
     setStrategyName(name)
     const s = (strats || strategies).find(s => s.name === name)
     if (s) {
-      setParamRanges(Object.entries(s.parameters).map(([k, v]: [string, any]) => {
-        const def = v.default ?? 0
+      setParamRanges(Object.entries(s.parameters).map(([k, v]: [string, any]): ParamRangeState => {
         const type = v.type || 'float'
+        if (type === 'bool' || typeof v.default === 'boolean') {
+          return { name: k, type: 'bool', selected: [true, false], defaultVal: v.default ?? true }
+        }
+        if (type === 'select' || type === 'str') {
+          const options: string[] = v.options ?? [String(v.default ?? '')]
+          return { name: k, type: type as 'select' | 'str', allOptions: options, selected: [...options], defaultVal: v.default ?? options[0] ?? '' }
+        }
+        // numeric (int/float)
+        const def = v.default ?? 0
         const min = v.min ?? (type === 'int' ? Math.max(1, def - 10) : def * 0.5)
         const max = v.max ?? (type === 'int' ? def + 20 : def * 2)
         const step = type === 'int' ? Math.max(1, Math.round((max - min) / 5)) : (max - min) / 5
-        return { name: k, type, min, max, step, defaultVal: def }
+        return { name: k, type: type as 'int' | 'float', min, max, step, defaultVal: def }
       }))
     }
   }
 
-  const updateRange = (i: number, field: keyof ParamRangeState, val: number) => {
+  const updateNumericRange = (i: number, field: 'min' | 'max' | 'step', val: number) => {
     const next = [...paramRanges]
-    next[i] = { ...next[i], [field]: val }
-    setParamRanges(next)
+    const pr = next[i]
+    if (pr.type === 'int' || pr.type === 'float') {
+      next[i] = { ...pr, [field]: val }
+      setParamRanges(next)
+    }
   }
 
-  const hasRangeErrors = paramRanges.some(pr => pr.min > pr.max || pr.step <= 0)
+  const toggleBoolValue = (i: number, val: boolean) => {
+    const next = [...paramRanges]
+    const pr = next[i]
+    if (pr.type === 'bool') {
+      const cur = pr.selected.includes(val) ? pr.selected.filter(v => v !== val) : [...pr.selected, val]
+      next[i] = { ...pr, selected: cur.length > 0 ? cur : [val] }  // at least one
+      setParamRanges(next)
+    }
+  }
+
+  const toggleEnumValue = (i: number, val: string) => {
+    const next = [...paramRanges]
+    const pr = next[i]
+    if (pr.type === 'select' || pr.type === 'str') {
+      const cur = pr.selected.includes(val) ? pr.selected.filter(v => v !== val) : [...pr.selected, val]
+      next[i] = { ...pr, selected: cur.length > 0 ? cur : [val] }  // at least one
+      setParamRanges(next)
+    }
+  }
+
+  const hasRangeErrors = paramRanges.some(hasError)
   const combos = mode === 'grid' ? totalCombinations(paramRanges) : Math.min(nSamples, totalCombinations(paramRanges))
 
   const handleSearch = async () => {
@@ -194,38 +255,84 @@ export default function CandidateSearch() {
           </label>
         </div>
 
-        {/* Row 3: Parameter Ranges — Min/Max/Step */}
+        {/* Row 3: Parameter Ranges */}
         {paramRanges.length > 0 && (
           <div className="space-y-2">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>参数范围</label>
             <div className="rounded p-3 space-y-2" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-              {/* Header */}
-              <div className="grid grid-cols-[120px_1fr_1fr_1fr_1fr] gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                <span>参数</span><span>最小值</span><span>最大值</span><span>步长</span><span>取值</span>
-              </div>
               {paramRanges.map((pr, i) => {
+                // --- Bool parameter ---
+                if (pr.type === 'bool') {
+                  const err = pr.selected.length === 0
+                  return (
+                    <div key={pr.name} className="flex items-center gap-3">
+                      <span className="text-sm font-medium w-[120px] truncate" style={{ color: 'var(--text-primary)' }} title={pr.name}>{pr.name}</span>
+                      <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        <input type="checkbox" checked={pr.selected.includes(true)} onChange={() => toggleBoolValue(i, true)} /> True
+                      </label>
+                      <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        <input type="checkbox" checked={pr.selected.includes(false)} onChange={() => toggleBoolValue(i, false)} /> False
+                      </label>
+                      <span className="text-xs" style={{ color: err ? '#ef4444' : 'var(--text-secondary)' }}>
+                        [{pr.selected.length}] {pr.selected.map(String).join(', ')}
+                        {err && ' (至少选一个)'}
+                      </span>
+                    </div>
+                  )
+                }
+
+                // --- Enum/select parameter ---
+                if (pr.type === 'select' || pr.type === 'str') {
+                  const err = pr.selected.length === 0
+                  return (
+                    <div key={pr.name}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium w-[120px] truncate" style={{ color: 'var(--text-primary)' }} title={pr.name}>{pr.name}</span>
+                        <span className="text-xs" style={{ color: err ? '#ef4444' : 'var(--text-secondary)' }}>
+                          [{pr.selected.length}/{pr.allOptions.length}]
+                          {err && ' (至少选一个)'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1 ml-[120px]">
+                        {pr.allOptions.map(opt => (
+                          <button key={opt} onClick={() => toggleEnumValue(i, opt)}
+                            className="text-xs px-2 py-0.5 rounded"
+                            style={{
+                              backgroundColor: pr.selected.includes(opt) ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                              color: pr.selected.includes(opt) ? '#fff' : 'var(--text-secondary)',
+                              border: '1px solid var(--border)',
+                            }}>
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+
+                // --- Numeric parameter (original) ---
                 const count = countValues(pr)
-                const preview = generateValues(pr, 6)  // only 6 for display
-                const hasError = pr.min > pr.max || pr.step <= 0
-                const errStyle = hasError ? { ...inputStyle, border: '1px solid #ef4444' } : inputStyle
+                const preview = generateValues(pr, 6) as number[]
+                const numErr = pr.min > pr.max || pr.step <= 0
+                const errStyle = numErr ? { ...inputStyle, border: '1px solid #ef4444' } : inputStyle
                 return (
                   <div key={pr.name} className="grid grid-cols-[120px_1fr_1fr_1fr_1fr] gap-2 items-center">
                     <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}
                       title={pr.name}>{pr.name}</span>
                     <input type="number" value={pr.min} step={pr.type === 'int' ? 1 : 0.1}
-                      onChange={e => updateRange(i, 'min', Number(e.target.value))}
+                      onChange={e => updateNumericRange(i, 'min', Number(e.target.value))}
                       className="px-2 py-1 rounded text-sm w-full" style={pr.min > pr.max ? errStyle : inputStyle} />
                     <input type="number" value={pr.max} step={pr.type === 'int' ? 1 : 0.1}
-                      onChange={e => updateRange(i, 'max', Number(e.target.value))}
+                      onChange={e => updateNumericRange(i, 'max', Number(e.target.value))}
                       className="px-2 py-1 rounded text-sm w-full" style={pr.min > pr.max ? errStyle : inputStyle} />
                     <input type="number" value={pr.step} step={pr.type === 'int' ? 1 : 0.1}
                       min={pr.type === 'int' ? 1 : 0.01}
-                      onChange={e => updateRange(i, 'step', Math.max(pr.type === 'int' ? 1 : 0.01, Number(e.target.value)))}
+                      onChange={e => updateNumericRange(i, 'step', Math.max(pr.type === 'int' ? 1 : 0.01, Number(e.target.value)))}
                       className="px-2 py-1 rounded text-sm w-full" style={pr.step <= 0 ? errStyle : inputStyle} />
                     <span className="text-xs truncate"
-                      style={{ color: hasError ? '#ef4444' : 'var(--text-secondary)' }}
-                      title={hasError ? (pr.min > pr.max ? '最小值 > 最大值' : '步长必须 > 0') : preview.join(', ')}>
-                      {hasError
+                      style={{ color: numErr ? '#ef4444' : 'var(--text-secondary)' }}
+                      title={numErr ? (pr.min > pr.max ? '最小值 > 最大值' : '步长必须 > 0') : preview.join(', ')}>
+                      {numErr
                         ? (pr.min > pr.max ? '最小值 > 最大值' : '步长 > 0')
                         : `[${count}] ${preview.join(', ')}${count > 6 ? '...' : ''}`}
                     </span>
