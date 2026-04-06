@@ -69,7 +69,7 @@ def _get_version() -> str:
         return version("ez-trading")
     except Exception:
         pass
-    return "0.2.13"
+    return "0.2.13.1"
 
 _APP_VERSION = _get_version()
 
