@@ -42,9 +42,11 @@ async def lifespan(app: FastAPI):
     # a no-op because aclose() already sets _async_client = None.
     from ez.llm.factory import get_cached_provider
     provider = get_cached_provider()
-    if provider is not None:
-        await provider.aclose()
-    close_resources()
+    try:
+        if provider is not None:
+            await provider.aclose()
+    finally:
+        close_resources()
 
 
 def _get_version() -> str:
