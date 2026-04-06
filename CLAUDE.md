@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.15 | Tests: 2236 collected with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.15 | Tests: 2226 passed + 10 skipped (2236 collected) with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -174,7 +174,7 @@ No version tag without review pass. No push without critical issues resolved.
   - **RiskManager.replay_equity()**: 从历史权益曲线恢复风控状态 (peak/drawdown), 支持 resume 场景
   - **TradingCalendar.from_market()**: 类方法, 按 market 字符串构造日历实例
   - **DocsPage Ch15 模拟盘**: 部署流程/门控/调度/监控/已知限制
-  - 2054 → 2236 tests (+182)
+  - 2054 → 2226 passed tests (+172), 2236 collected
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
