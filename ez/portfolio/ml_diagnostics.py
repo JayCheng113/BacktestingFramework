@@ -12,9 +12,14 @@ fresh ``MLAlpha`` via ``config_dict()``, drives it through the date
 range, observes retrain events via ``diagnostics_snapshot()``.
 
 **Interface contract**: MLDiagnostics does NOT access any ``_private``
-attributes on MLAlpha except ``_build_training_panel()`` (read-only,
-for IS IC computation, same-package access). All other state
-observation goes through the public ``diagnostics_snapshot()`` method.
+attributes on MLAlpha except:
+1. ``_build_training_panel()`` (read-only, for IS IC computation,
+   same-package access)
+2. ``_current_model`` (read-only, inside the walk-through loop ONLY
+   at the moment of a retrain event, for IS IC prediction — the model
+   reference is valid because it was just trained in this iteration)
+All other state observation goes through the public
+``diagnostics_snapshot()`` method.
 """
 from __future__ import annotations
 
@@ -46,6 +51,11 @@ class DiagnosticsConfig:
     mild_overfit_threshold: float = 0.2
     high_turnover_threshold: float = 0.6
     top_n_for_turnover: int = 10
+    forward_horizon: int = 5
+    """Forward return horizon in trading days for OOS IC computation.
+    Must match the ``target_fn``'s forward horizon (e.g., if target_fn
+    is ``pct_change(10).shift(-10)``, set ``forward_horizon=10``).
+    Default 5 matches the common ``pct_change(5).shift(-5)`` pattern."""
 
 
 @dataclass
@@ -90,14 +100,21 @@ class DiagnosticsResult:
     """Human-readable diagnostic messages."""
 
     def to_dict(self) -> dict:
-        """JSON-serializable dict. No numpy, no pandas, no sklearn."""
+        """JSON-serializable dict. No numpy, no pandas, no sklearn.
+        NaN and inf are converted to None (RFC 8259 compliance)."""
         def _clean(v: Any) -> Any:
             if isinstance(v, (np.integer,)):
                 return int(v)
             if isinstance(v, (np.floating,)):
-                return float(v)
+                v = float(v)
+                # Fall through to float check below
+            if isinstance(v, float):
+                # NaN/inf are not valid JSON per RFC 8259
+                if v != v or v == float("inf") or v == float("-inf"):
+                    return None
+                return v
             if isinstance(v, np.ndarray):
-                return v.tolist()
+                return [_clean(x) for x in v.tolist()]
             if isinstance(v, dict):
                 return {str(k): _clean(vv) for k, vv in v.items()}
             if isinstance(v, (list, tuple)):
@@ -155,33 +172,45 @@ class MLDiagnostics:
             return result
 
         # ── 3. Walk-through loop ──
+        #
+        # IMPORTANT (review round fix): IS IC MUST be computed INSIDE
+        # the loop, immediately after detecting a retrain event, because
+        # `diag_alpha._current_model` holds the freshly-trained model
+        # only at that moment. If we defer IS IC to a post-loop pass,
+        # `_current_model` would be the LAST retrain's model, and IS IC
+        # for all earlier retrains would use the wrong model.
         prev_retrain_count = 0
-        # Collectors for Tasks 2.3-2.5
-        retrain_snapshots: list[dict] = []   # snapshot at each retrain event (Task 2.3)
-        all_scores: list[tuple[_date, pd.Series]] = []  # (eval_date, scores) (Task 2.5)
+        retrain_snapshots: list[dict] = []
+        all_scores: list[tuple[_date, pd.Series]] = []
+        # Per-retrain IS IC values (computed immediately at retrain time)
+        is_ic_at_retrain: list[float] = []
 
         for eval_date in eval_dates:
-            # compute() expects a datetime, not a date
             dt = datetime.combine(eval_date, datetime.min.time())
             scores = diag_alpha.compute(universe_data, dt)
             all_scores.append((eval_date, scores))
 
-            # Poll for retrain event
             snapshot = diag_alpha.diagnostics_snapshot()
             current_retrain_count = snapshot["retrain_count"]
 
             if current_retrain_count > prev_retrain_count:
-                # Retrain happened — record the date
                 retrain_date_str = snapshot["last_retrain_date"]
                 result.retrain_dates.append(retrain_date_str)
                 retrain_snapshots.append(snapshot)
                 prev_retrain_count = current_retrain_count
 
+                # Compute IS IC NOW while _current_model is still the
+                # model from THIS retrain (not a future one).
+                retrain_date = _date.fromisoformat(retrain_date_str)
+                is_ic = self._compute_is_ic(
+                    diag_alpha, universe_data, retrain_date,
+                )
+                is_ic_at_retrain.append(is_ic)
+
         # ── 4. Retrain cadence metrics ──
         result.retrain_count = len(result.retrain_dates)
 
         if result.retrain_count >= 2:
-            # Compute mean calendar-day gap between consecutive retrains
             retrain_date_objs = [
                 _date.fromisoformat(d) for d in result.retrain_dates
             ]
@@ -193,19 +222,18 @@ class MLDiagnostics:
         elif result.retrain_count == 1:
             result.actual_avg_gap_days = 0.0
 
-        # ── 5. Task 2.3 — Feature importance stability ──
+        # ── 5. Feature importance stability ──
         self._compute_feature_importance(retrain_snapshots, result)
 
-        # ── 6. Task 2.4 — IS/OOS IC decay ──
+        # ── 6. IS/OOS IC decay ──
         self._compute_ic_decay(
-            diag_alpha, universe_data, retrain_snapshots,
-            all_scores, eval_dates, result,
+            is_ic_at_retrain, universe_data, all_scores, eval_dates, result,
         )
 
-        # ── 7. Task 2.5 — Turnover analysis ──
+        # ── 7. Turnover analysis ──
         self._compute_turnover(all_scores, result)
 
-        # ── 8. Task 2.6 — Verdict + warnings ──
+        # ── 8. Verdict + warnings ──
         self._compute_verdict(result)
 
         return result
@@ -240,42 +268,48 @@ class MLDiagnostics:
 
     def _compute_ic_decay(
         self,
-        diag_alpha: MLAlpha,
+        is_ic_at_retrain: list[float],
         universe_data: dict[str, pd.DataFrame],
-        retrain_snapshots: list[dict],
         all_scores: list[tuple[_date, pd.Series]],
         eval_dates: list[_date],
         result: DiagnosticsResult,
     ) -> None:
-        """Compute per-retrain IS IC and OOS IC."""
-        if not retrain_snapshots:
+        """Assemble per-retrain IS/OOS IC pairs and compute
+        ``overfitting_score``.
+
+        IS IC was pre-computed inside the walk-through loop (at retrain
+        time, when ``_current_model`` was the correct freshly-trained
+        model — see IMPORTANT-1 review fix). OOS IC is computed here
+        from factor scores vs actual forward returns using the
+        configurable ``forward_horizon`` from ``DiagnosticsConfig``.
+        """
+        if not result.retrain_dates:
             return
 
-        retrain_freq = self._source_alpha.config_dict()["retrain_freq"]
+        retrain_freq = result.expected_retrain_freq
         oos_window = min(max(retrain_freq, 21), 42)
+        fwd_horizon = self._config.forward_horizon
 
-        # Build a date→scores lookup for OOS IC computation
         scores_by_date: dict[_date, pd.Series] = {d: s for d, s in all_scores}
 
-        # Build a date→forward_return lookup. For each symbol, pre-compute
-        # 5-day forward close-to-close return at each eval date.
+        # Pre-compute forward returns at each eval date using the
+        # configurable forward_horizon (IMPORTANT-3 review fix: was
+        # hardcoded to 5).
         fwd_returns_by_date: dict[_date, dict[str, float]] = {}
-        for eval_date, scores in all_scores:
-            fwd = {}
+        for eval_date, _ in all_scores:
+            fwd: dict[str, float] = {}
             for sym, df in universe_data.items():
                 if not isinstance(df.index, pd.DatetimeIndex):
                     continue
-                # Find the close at eval_date and eval_date + ~5 trading days
                 mask_at = df.index.date <= eval_date
                 mask_fwd = df.index.date > eval_date
                 if not mask_at.any() or not mask_fwd.any():
                     continue
                 close_at = float(df.loc[mask_at, "adj_close"].iloc[-1])
-                # Forward: take the 5th trading day after eval_date (or fewer if near end)
                 fwd_bars = df.loc[mask_fwd]
-                if len(fwd_bars) < 5:
+                if len(fwd_bars) < fwd_horizon:
                     continue
-                close_fwd = float(fwd_bars["adj_close"].iloc[4])
+                close_fwd = float(fwd_bars["adj_close"].iloc[fwd_horizon - 1])
                 if close_at > 0:
                     fwd[sym] = close_fwd / close_at - 1.0
             fwd_returns_by_date[eval_date] = fwd
@@ -283,27 +317,20 @@ class MLDiagnostics:
         train_ics: list[float] = []
         oos_ics: list[float] = []
 
-        for snap in retrain_snapshots:
-            retrain_date_str = snap["last_retrain_date"]
-            if retrain_date_str is None:
-                continue
+        for i, retrain_date_str in enumerate(result.retrain_dates):
+            train_ic = is_ic_at_retrain[i] if i < len(is_ic_at_retrain) else float("nan")
             retrain_date = _date.fromisoformat(retrain_date_str)
 
-            # ── IS IC: model predictions vs actual labels on training panel ──
-            train_ic = self._compute_is_ic(diag_alpha, universe_data, retrain_date)
-
-            # ── OOS IC: model predictions vs forward returns on next window ──
             oos_ic = self._compute_oos_ic(
                 retrain_date, oos_window, eval_dates,
                 scores_by_date, fwd_returns_by_date,
             )
 
-            entry = {
+            result.ic_series.append({
                 "retrain_date": retrain_date_str,
                 "train_ic": train_ic,
                 "oos_ic": oos_ic,
-            }
-            result.ic_series.append(entry)
+            })
             if np.isfinite(train_ic):
                 train_ics.append(train_ic)
             if np.isfinite(oos_ic):
