@@ -142,6 +142,7 @@ export default function PortfolioRunContent(props: Props) {
   // point to the old run's data).
   useEffect(() => {
     setFullWeights(null)
+    setWeightsLoading(false)
   }, [result?.run_id])
 
   const handleLoadFullWeights = async () => {
@@ -167,7 +168,7 @@ export default function PortfolioRunContent(props: Props) {
         alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
       }
     } finally {
-      setWeightsLoading(false)
+      if (currentRunIdRef.current === requestedRunId) setWeightsLoading(false)
     }
   }
 

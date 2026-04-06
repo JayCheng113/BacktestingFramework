@@ -140,10 +140,13 @@ export default function PortfolioPanel() {
     runTokenRef.current += 1
     wfTokenRef.current += 1
     searchTokenRef.current += 1
-    setResult(null)
-    setWfResult(null)
-    setSearchResults([])
+    // Clear results AND loading — superseded in-flight requests will see
+    // token mismatch in finally and skip, so we must clear loading here.
+    setResult(null); setLoading(false)
+    setWfResult(null); setWfLoading(false)
+    setSearchResults([]); setSearchLoading(false)
     setSearchMeta(null)
+    setCompareData([]); setComparing(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     symbols, startDate, endDate, freq, selected,
@@ -159,7 +162,7 @@ export default function PortfolioPanel() {
   // so they must not be in the run-invalidation effect above.
   useEffect(() => {
     searchTokenRef.current += 1
-    setSearchResults([])
+    setSearchResults([]); setSearchLoading(false)
     setSearchMeta(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(searchGrid), comboSearch])
@@ -186,18 +189,19 @@ export default function PortfolioPanel() {
       setTrackingError(5)
     }
     // Clear stale evaluation / search / quality results from previous market
-    setEvalResult(null)
+    setEvalResult(null); setEvalLoading(false)
     setCorrResult(null)
-    setSearchResults([])
+    setSearchResults([]); setSearchLoading(false)
+    setSearchMeta(null)
     setQualityReport([])
-    setFundaStatus('')
+    setFundaStatus(''); setFetchingFunda(false)
     // Clear backtest result + WF result + full-weights snapshot — they
     // were computed under the previous market's rules.
-    setResult(null)
-    setWfResult(null)
+    setResult(null); setLoading(false)
+    setWfResult(null); setWfLoading(false)
     // Clear cross-run compare data — comparing runs from different
     // markets would yield meaningless overlays.
-    setCompareData([])
+    setCompareData([]); setComparing(false)
     setSelectedRuns(new Set())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [market])
@@ -262,7 +266,7 @@ export default function PortfolioPanel() {
         alert('对比数据不足（需至少 2 条有效记录）')
       }
     } finally {
-      setComparing(false)
+      if (compareTokenRef.current === myToken) setComparing(false)
     }
   }
 
@@ -283,7 +287,7 @@ export default function PortfolioPanel() {
       setEvalResult(evalRes.data)
       if (corrRes) setCorrResult(corrRes.data)
     } catch (e: any) { if (evalTokenRef.current === myToken) alert(e?.response?.data?.detail || e?.message || '评估失败') }
-    finally { setEvalLoading(false) }
+    finally { if (evalTokenRef.current === myToken) setEvalLoading(false) }
   }
 
   const handleFetchFundamental = async () => {
@@ -306,7 +310,7 @@ export default function PortfolioPanel() {
       if (fundaTokenRef.current !== myToken) return
       setQualityReport(qr.data.report || [])
     } catch (e: any) { if (fundaTokenRef.current === myToken) setFundaStatus(e.response?.data?.detail || '获取失败') }
-    finally { setFetchingFunda(false) }
+    finally { if (fundaTokenRef.current === myToken) setFetchingFunda(false) }
   }
 
   const downloadCSV = (filename: string, content: string) => {
@@ -394,9 +398,7 @@ export default function PortfolioPanel() {
         alert(e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
       }
     } finally {
-      // Always clear loading — even if superseded. Prior version kept
-      // loading=true when token mismatched, causing UI freeze.
-      setLoading(false)
+      if (runTokenRef.current === myToken) setLoading(false)
     }
   }
 
@@ -449,7 +451,7 @@ export default function PortfolioPanel() {
         alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
       }
     } finally {
-      setWfLoading(false)
+      if (wfTokenRef.current === myToken) setWfLoading(false)
     }
   }
 
@@ -553,7 +555,7 @@ export default function PortfolioPanel() {
     } catch (e: any) {
       if (searchTokenRef.current === myToken) alert(e?.response?.data?.detail || '搜索失败')
     } finally {
-      setSearchLoading(false)
+      if (searchTokenRef.current === myToken) setSearchLoading(false)
     }
   }
 
