@@ -250,10 +250,10 @@ def execute_portfolio_trades(
     t_plus_1: bool = True,
     limit_pct: float = 0.1,
     sold_today: set[str] | None = None,
-) -> tuple[list[TradeResult], dict[str, int], float]:
+) -> tuple[list[TradeResult], dict[str, int], float, float]:
     """Execute portfolio trades: weight → shares → two-pass (sell first, buy second).
 
-    Returns: (trades, new_holdings, new_cash)
+    Returns: (trades, new_holdings, new_cash, trade_volume)
     """
     if sold_today is None:
         sold_today = set()

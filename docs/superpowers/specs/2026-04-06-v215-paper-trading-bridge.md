@@ -124,7 +124,7 @@ class DeploymentSpec:
         buy_commission_rate: float = 0.0003,
         sell_commission_rate: float = 0.0003,
         stamp_tax_rate: float = 0.0005,
-        slippage_rate: float = 0.001,
+        slippage_rate: float = 0.0,     # 和 CostModel 默认值对齐 (不是 0.001)
         min_commission: float = 5.0,
         optimizer: str | None = None,
         optimizer_params: tuple = (),
@@ -254,7 +254,7 @@ def from_portfolio_run(run_id: str, name: str) -> tuple[DeploymentSpec, Deployme
         spec_id=spec.spec_id,
         name=name,
         source_run_id=run_id,
-        code_commit=_get_git_sha(),
+        code_commit=_get_git_sha(),  # 从 ez/config.py 导入 (不依赖 ez/agent/)
     )
     return spec, record
 ```
@@ -394,7 +394,11 @@ class DeployGate:
         reb_weights = json.loads(run.rebalance_weights) if run.rebalance_weights else []
         max_w = 0.0
         for entry in reb_weights:
-            w_dict = entry.get("weights", {}) if isinstance(entry, dict) else {}
+            # 防御两种格式: wrapped {"date":"...","weights":{...}} 和 raw {sym: weight}
+            if isinstance(entry, dict):
+                w_dict = entry.get("weights", entry) if "weights" in entry else entry
+            else:
+                w_dict = {}
             if w_dict:  # 跳过空 (终局清仓会有空 entry)
                 period_max = max(w_dict.values())
                 max_w = max(max_w, period_max)
@@ -476,7 +480,7 @@ class PaperTradingEngine:
         optimizer: PortfolioOptimizer | None = None,
         risk_manager: RiskManager | None = None,
     ):
-        self.deployment = deployment
+        self.spec = deployment
         self.strategy = strategy
         self.data_chain = data_chain
         self.optimizer = optimizer
@@ -523,8 +527,10 @@ class PaperTradingEngine:
         day_trades = []
         if self._is_rebalance_day(today):
             sliced = self._slice_history(universe_data, today)
+            # generate_weights 的第二个参数是 datetime, 不是 date
+            dt = datetime.combine(today, datetime.min.time())
             target_weights = self.strategy.generate_weights(
-                sliced, today, self.prev_weights, self.prev_returns)
+                sliced, dt, self.prev_weights, self.prev_returns)
             if self.optimizer:
                 self.optimizer.set_context(today, sliced)
                 target_weights = self.optimizer.optimize(target_weights)
@@ -572,14 +578,6 @@ class PaperTradingEngine:
                 data[sym] = df
         return data
 
-    def _execute_trades(self, target_weights, universe_data, today):
-        """复用回测引擎的 weight→shares→trade 逻辑"""
-        # 和 ez/portfolio/engine.py lines 300-406 相同的:
-        # - weight → amount → shares (lot round)
-        # - sell first, buy second
-        # - T+1, limit price, lot size 检查
-        # - commission + stamp tax + slippage
-        ...
 ```
 
 ### 关键设计决策
@@ -606,7 +604,7 @@ def execute_portfolio_trades(
     t_plus_1: bool = True,
     limit_pct: float = 0.1,
     sold_today: set[str] | None = None,
-) -> tuple[list[TradeResult], dict[str, int], float]:
+) -> tuple[list[TradeResult], dict[str, int], float, float]:
     """
     共享成交逻辑 — 回测引擎和 Paper Trading 引擎都调用。
 
@@ -616,7 +614,8 @@ def execute_portfolio_trades(
     - has_bar_today: 避免 stale price 成交 (停牌/无数据)
     - sold_today: T+1 约束 (当日已卖的不能买回)
 
-    Returns: (trades, new_holdings, new_cash)
+    Returns: (trades, new_holdings, new_cash, trade_volume)
+    trade_volume = sum(|traded amount|), 供调用方做成交后换手率复核。
     """
 ```
 
@@ -738,7 +737,7 @@ class Scheduler:
                 try:
                     result = engine.execute_day(business_date)
                     # 原子: snapshot + last_processed_date 在同一事务
-                    self.store.save_daily_snapshot_atomic(dep_id, business_date, result)
+                    self.store.save_daily_snapshot(dep_id, business_date, result)
                     # 连续失败计数: 成功则归零
                     self.store.reset_error_count(dep_id)
                     results.append({"deployment_id": dep_id, **result})
@@ -757,8 +756,9 @@ class Scheduler:
         """按市场获取交易日历 (缓存)。
         NOTE: TradingCalendar.from_market(market) 是 V2.15 新增工厂方法
         (当前只有 from_dates() 和 weekday_fallback())。
-        实现: 从 Tushare trade_cal API 按交易所获取交易日 → from_dates()。
-        cn_stock → SSE, us_stock → NYSE, hk_stock → HKEX。
+        实现: _MARKET_TO_EXCHANGE = {"cn_stock": "SSE", "us_stock": "NYSE", "hk_stock": "HKEX"}
+        exchange = _MARKET_TO_EXCHANGE[market]
+        调用 TushareProvider.get_trade_cal(exchange, start, end) → from_dates()。
         """
         ...
 
@@ -946,6 +946,7 @@ CREATE TABLE deployment_snapshots (
 | POST | /api/live/deployments/{id}/start | 启动 paper trading |
 | POST | /api/live/deployments/{id}/stop | 停止 |
 | POST | /api/live/deployments/{id}/pause | 暂停 |
+| POST | /api/live/deployments/{id}/resume | 恢复 (paused → running) |
 | POST | /api/live/tick | 触发每日执行 (所有 running 部署) |
 | GET | /api/live/dashboard | 监控仪表板 |
 | GET | /api/live/deployments/{id}/snapshots | 历史快照 (净值曲线数据) |
@@ -1061,3 +1062,9 @@ Phase D: 文档 + 测试
 | OMS 完整状态机 | Paper Trading 不需要订单路由 |
 | 自动调度 (APScheduler) | V2.15 用 API trigger / 外部 cron |
 | 告警推送 (微信/钉钉) | V2.15 只在页面显示 |
+
+## Known Limitations (V2.15)
+
+- **strategy.state 不持久化**: crash recovery 后 StrategyEnsemble 的 hypothetical return ledger 和 MLAlpha 的 trained model 会丢失。Stateless 策略 (TopN/MultiFactor) 不受影响。
+- **数据新鲜度不校验**: _fetch_latest 不验证返回数据是否真的包含 today 的 bar。数据源延迟时可能执行在 stale 数据上。
+- **停止不清仓**: stop_deployment 不做终局 liquidation。用户需手动计算"如果现在平仓" 的 PnL。
