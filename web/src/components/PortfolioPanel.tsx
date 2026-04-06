@@ -50,6 +50,8 @@ export default function PortfolioPanel() {
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
   const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
   const [comparing, setComparing] = useState(false)
+  // V2.15 codex: clear stale compare data when selection changes
+  useEffect(() => { setCompareData([]) }, [selectedRuns])
   // V2.12: Optimizer + Risk Control
   const [optimizer, setOptimizer] = useState('none')
   const [riskAversion, setRiskAversion] = useState(1.0)

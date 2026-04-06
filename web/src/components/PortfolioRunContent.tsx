@@ -124,7 +124,13 @@ export default function PortfolioRunContent(props: Props) {
     if (!name) return
     setDeployLoading(true)
     try {
-      const res = await deployToLive({ source_run_id: result.run_id, name })
+      // Pass wf_metrics from WF result (if available) for DeployGate evaluation
+      const wfMetrics: Record<string, number> = {}
+      if (wfResult) {
+        if (wfResult.significance?.p_value != null) wfMetrics.p_value = wfResult.significance.p_value
+        if (wfResult.overfitting_score != null) wfMetrics.overfitting_score = wfResult.overfitting_score
+      }
+      const res = await deployToLive({ source_run_id: result.run_id, name, wf_metrics: wfMetrics })
       alert(`部署成功！ID: ${res.data.deployment_id}\n请前往 "模拟盘" 页面查看和审批。`)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
@@ -399,8 +405,9 @@ export default function PortfolioRunContent(props: Props) {
           )}
           {result && (
             <button onClick={handleDeploy} disabled={deployLoading} className="px-3 py-1.5 rounded text-sm font-medium text-white"
-              style={{ backgroundColor: deployLoading ? '#30363d' : '#059669' }}>
-              {deployLoading ? '部署中...' : '部署到模拟盘'}
+              style={{ backgroundColor: deployLoading ? '#30363d' : '#059669' }}
+              title={wfResult ? '包含前推验证结果' : '建议先运行前推验证'}>
+              {deployLoading ? '部署中...' : wfResult ? '部署到模拟盘' : '部署到模拟盘 (无WF)'}
             </button>
           )}
           <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
