@@ -27,6 +27,9 @@ class TradeResult:
     side: str          # "buy" | "sell"
     shares: int
     price: float
+    amount: float
+    commission: float
+    stamp_tax: float
     cost: float
 
 
@@ -157,6 +160,9 @@ def execute_portfolio_trades(
             side="buy" if delta > 0 else "sell",
             shares=abs(delta),
             price=price,
+            amount=amount,
+            commission=comm,
+            stamp_tax=stamp,
             cost=total_cost,
         ))
         trade_volume += amount

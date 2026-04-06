@@ -18,7 +18,7 @@ def _default_cost() -> CostModel:
 
 def test_basic_buy():
     """Empty holdings + 100% weight on AAPL -> buy shares."""
-    trades, holdings, cash, _ = execute_portfolio_trades(
+    trades, holdings, cash, trade_volume = execute_portfolio_trades(
         target_weights={"AAPL": 1.0},
         holdings={},
         equity=100_000,
@@ -36,6 +36,7 @@ def test_basic_buy():
     assert trades[0].side == "buy"
     assert holdings["AAPL"] > 0
     assert cash < 100_000
+    assert trade_volume > 0
 
 
 def test_sell_before_buy():
