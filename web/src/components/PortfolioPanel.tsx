@@ -66,6 +66,9 @@ export default function PortfolioPanel() {
   // V2.12.1: Index benchmark
   const [indexBenchmark, setIndexBenchmark] = useState('')
   const [trackingError, setTrackingError] = useState(5)
+  // V2.14 B3: Ensemble config ref (updated by EnsembleBuilder via callback)
+  const ensembleConfigRef = useRef<any>(null)
+
   // Parameter search state -- dynamic from schema
   const [searchMode, setSearchMode] = useState(false)
   const [comboSearch, setComboSearch] = useState(false)
@@ -346,7 +349,9 @@ export default function PortfolioPanel() {
     setLoading(true); setResult(null); setWfResult(null)
     try {
       const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
-      const cleanParams = Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_')))
+      const cleanParams = selected === 'StrategyEnsemble' && ensembleConfigRef.current
+        ? ensembleConfigRef.current
+        : Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_')))
       const res = await runPortfolioBacktest({
         strategy_name: selected, symbols: symbolList,
         market,
@@ -402,7 +407,9 @@ export default function PortfolioPanel() {
         strategy_name: selected, symbols: symbolList,
         market,
         start_date: startDate, end_date: endDate, freq,
-        strategy_params: Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
+        strategy_params: selected === 'StrategyEnsemble' && ensembleConfigRef.current
+          ? ensembleConfigRef.current
+          : Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
         initial_cash: settings.initial_cash,
         n_splits: wfSplits, train_ratio: wfTrainRatio,
         benchmark_symbol: settings.benchmark,
@@ -722,6 +729,7 @@ export default function PortfolioPanel() {
           showAttribution={showAttribution} setShowAttribution={setShowAttribution}
           searchMode={searchMode} setSearchMode={setSearchMode}
           comboSearch={comboSearch} setComboSearch={setComboSearch}
+          ensembleConfigRef={ensembleConfigRef}
           searchGrid={searchGrid} setSearchGrid={setSearchGrid}
           expandedParams={expandedParams} setExpandedParams={setExpandedParams}
           searchLoading={searchLoading} searchResults={searchResults}

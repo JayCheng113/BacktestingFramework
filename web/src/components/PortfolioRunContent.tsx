@@ -5,6 +5,8 @@ import BacktestSettings from './BacktestSettings'
 import DateRangePicker from './DateRangePicker'
 import { useState, useEffect, useRef } from 'react'
 import { getPortfolioRunHoldings } from '../api'
+import EnsembleBuilder from './EnsembleBuilder'
+import type { EnsembleConfig } from './EnsembleBuilder'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -64,6 +66,8 @@ interface Props {
   showOptimizer: boolean; setShowOptimizer: (v: boolean) => void
   showRiskControl: boolean; setShowRiskControl: (v: boolean) => void
   showAttribution: boolean; setShowAttribution: (v: boolean) => void
+  // Ensemble
+  ensembleConfigRef: React.MutableRefObject<any>
   // Search
   searchMode: boolean; setSearchMode: (v: boolean) => void
   comboSearch: boolean; setComboSearch: (v: boolean) => void
@@ -100,11 +104,16 @@ export default function PortfolioRunContent(props: Props) {
     riskControl, setRiskControl, maxDrawdown, setMaxDrawdown, drawdownReduce, setDrawdownReduce,
     drawdownRecovery, setDrawdownRecovery, maxTurnover, setMaxTurnover,
     showOptimizer, setShowOptimizer, showRiskControl, setShowRiskControl, showAttribution, setShowAttribution,
+    ensembleConfigRef,
     searchMode, setSearchMode, comboSearch, setComboSearch, searchGrid, setSearchGrid,
     searchLoading, searchResults, searchMeta,
     handleRun, handleWalkForward, handleSearch, exportEquityCurve, exportTrades,
     renderParamInput,
   } = props
+
+  // V2.14 B3: Ensemble configuration
+  const [ensembleConfig, setEnsembleConfig] = useState<EnsembleConfig | null>(null)
+  const isEnsemble = selected === 'StrategyEnsemble'
 
   // Local state for full weights loading
   const [fullWeights, setFullWeights] = useState<{ date: string; weights: Record<string, number> }[] | null>(null)
@@ -192,8 +201,18 @@ export default function PortfolioRunContent(props: Props) {
               {strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
             </select>
           </div>
-          {/* Dynamic strategy parameters from schema */}
-          {Object.entries(currentSchema).map(([key, schema]) => renderParamInput(key, schema))}
+          {/* Dynamic strategy parameters from schema — or EnsembleBuilder */}
+          {!isEnsemble && Object.entries(currentSchema).map(([key, schema]) => renderParamInput(key, schema))}
+          {/* V2.14 B3: EnsembleBuilder when StrategyEnsemble selected */}
+          {isEnsemble && (
+            <div className="w-full mt-2">
+              <EnsembleBuilder
+                strategies={strategies}
+                factors={factors}
+                onChange={(cfg) => { setEnsembleConfig(cfg); ensembleConfigRef.current = cfg }}
+              />
+            </div>
+          )}
           {/* V2.11.1: AlphaCombiner sub-panel when factor=alpha_combiner */}
           {strategyParams.factor === 'alpha_combiner' && (
             <div className="col-span-full p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
