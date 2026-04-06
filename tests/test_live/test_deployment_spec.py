@@ -161,6 +161,14 @@ class TestDeploymentRecord:
         assert r.started_at is None
         assert r.stopped_at is None
 
+    def test_deployment_record_auto_uuid(self):
+        """DeploymentRecord auto-generates a UUID when deployment_id is omitted."""
+        r1 = DeploymentRecord(spec_id="abc", name="Test1")
+        r2 = DeploymentRecord(spec_id="abc", name="Test2")
+        assert r1.deployment_id != ""
+        assert r2.deployment_id != ""
+        assert r1.deployment_id != r2.deployment_id  # each call gets a unique UUID
+
 
 # ---------------------------------------------------------------------------
 # DeploymentStore
@@ -319,3 +327,22 @@ class TestDeploymentStore:
         assert store.increment_error_count("d1") == 2
         store.reset_error_count("d1")
         assert store.increment_error_count("d1") == 1
+
+    def test_update_status_invalid_raises(self, store, sample_spec):
+        """update_status rejects unknown status strings."""
+        store.save_spec(sample_spec)
+        store.save_record(DeploymentRecord(
+            deployment_id="d1", spec_id=sample_spec.spec_id, name="A",
+        ))
+        with pytest.raises(ValueError, match="Invalid deployment status"):
+            store.update_status("d1", "unknown_status")
+
+    def test_save_error_advances_last_processed_date(self, store, sample_spec):
+        """save_error should update last_processed_date on the record."""
+        store.save_spec(sample_spec)
+        store.save_record(DeploymentRecord(
+            deployment_id="d1", spec_id=sample_spec.spec_id, name="A",
+        ))
+        store.save_error("d1", date(2025, 1, 6), "Network error")
+        last = store.get_last_processed_date("d1")
+        assert last == date(2025, 1, 6)

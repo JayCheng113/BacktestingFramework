@@ -56,6 +56,9 @@ def _parse_ts(val) -> datetime | None:
     return None
 
 
+VALID_STATUSES = frozenset({"pending", "approved", "running", "paused", "stopped", "error"})
+
+
 class DeploymentStore:
     """Persist deployment specs, records, and daily snapshots to DuckDB."""
 
@@ -213,6 +216,8 @@ class DeploymentStore:
 
     def update_status(self, deployment_id: str, status: str, stop_reason: str = "") -> None:
         """Update deployment status. Sets timestamp columns based on new status."""
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Invalid deployment status: {status!r}")
         now = datetime.now(timezone.utc)
         if status == "approved":
             self._conn.execute(
@@ -240,31 +245,37 @@ class DeploymentStore:
     def save_daily_snapshot(self, deployment_id: str, snapshot_date: date, result: dict) -> None:
         """Save one day's execution result. Also updates last_processed_date atomically."""
         sanitized = _sanitize_nans(result)
-        self._conn.execute(
-            """INSERT OR REPLACE INTO deployment_snapshots
-               (deployment_id, snapshot_date, equity, cash, holdings, weights,
-                prev_returns, trades, risk_events, rebalanced, execution_ms, error)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [
-                deployment_id,
-                snapshot_date,
-                sanitized.get("equity", 0.0),
-                sanitized.get("cash", 0.0),
-                json.dumps(sanitized.get("holdings", {}), ensure_ascii=False),
-                json.dumps(sanitized.get("weights", {}), ensure_ascii=False),
-                json.dumps(sanitized.get("prev_returns", {}), ensure_ascii=False),
-                json.dumps(sanitized.get("trades", []), ensure_ascii=False),
-                json.dumps(sanitized.get("risk_events", []), ensure_ascii=False),
-                bool(sanitized.get("rebalanced", False)),
-                sanitized.get("execution_ms"),
-                sanitized.get("error"),
-            ],
-        )
-        # Update last_processed_date in the record
-        self._conn.execute(
-            "UPDATE deployment_records SET last_processed_date = ? WHERE deployment_id = ?",
-            [snapshot_date, deployment_id],
-        )
+        self._conn.begin()
+        try:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO deployment_snapshots
+                   (deployment_id, snapshot_date, equity, cash, holdings, weights,
+                    prev_returns, trades, risk_events, rebalanced, execution_ms, error)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    deployment_id,
+                    snapshot_date,
+                    sanitized.get("equity", 0.0),
+                    sanitized.get("cash", 0.0),
+                    json.dumps(sanitized.get("holdings", {}), ensure_ascii=False),
+                    json.dumps(sanitized.get("weights", {}), ensure_ascii=False),
+                    json.dumps(sanitized.get("prev_returns", {}), ensure_ascii=False),
+                    json.dumps(sanitized.get("trades", []), ensure_ascii=False),
+                    json.dumps(sanitized.get("risk_events", []), ensure_ascii=False),
+                    bool(sanitized.get("rebalanced", False)),
+                    sanitized.get("execution_ms"),
+                    sanitized.get("error"),
+                ],
+            )
+            # Update last_processed_date in the record
+            self._conn.execute(
+                "UPDATE deployment_records SET last_processed_date = ? WHERE deployment_id = ?",
+                [snapshot_date, deployment_id],
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def get_latest_snapshot(self, deployment_id: str) -> dict | None:
         row = self._conn.execute(
@@ -308,13 +319,23 @@ class DeploymentStore:
     # -- Error tracking ----------------------------------------------------
 
     def save_error(self, deployment_id: str, snapshot_date: date, error: str) -> None:
-        """Save an error snapshot (equity/cash = 0, error text populated)."""
-        self._conn.execute(
-            """INSERT OR REPLACE INTO deployment_snapshots
-               (deployment_id, snapshot_date, equity, cash, holdings, weights, error)
-               VALUES (?, ?, 0.0, 0.0, '{}', '{}', ?)""",
-            [deployment_id, snapshot_date, error],
-        )
+        """Save an error snapshot (equity/cash = 0, error text populated). Advances last_processed_date."""
+        self._conn.begin()
+        try:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO deployment_snapshots
+                   (deployment_id, snapshot_date, equity, cash, holdings, weights, error)
+                   VALUES (?, ?, 0.0, 0.0, '{}', '{}', ?)""",
+                [deployment_id, snapshot_date, error],
+            )
+            self._conn.execute(
+                "UPDATE deployment_records SET last_processed_date = ? WHERE deployment_id = ?",
+                [snapshot_date, deployment_id],
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def increment_error_count(self, deployment_id: str) -> int:
         """Increment consecutive_errors and return the new count."""

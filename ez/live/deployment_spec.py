@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -280,9 +281,9 @@ class DeploymentRecord:
 
     State machine: pending -> approved -> running -> stopped | paused | error
     """
-    deployment_id: str
     spec_id: str
     name: str
+    deployment_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: str = "pending"
     stop_reason: str = ""
     source_run_id: str | None = None
