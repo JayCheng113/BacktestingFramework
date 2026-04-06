@@ -87,12 +87,32 @@ class StrategyEnsemble(PortfolioStrategy):
                     f"ensemble_weights length {len(ensemble_weights)} != "
                     f"strategies length {len(strategies)}"
                 )
-            if any(w < 0 for w in ensemble_weights):
-                raise ValueError("ensemble_weights must be non-negative")
+            # Validate individual values: must be finite and non-negative
+            for i, w in enumerate(ensemble_weights):
+                if not isinstance(w, (int, float)):
+                    raise TypeError(
+                        f"ensemble_weights[{i}] must be a number, "
+                        f"got {type(w).__name__}"
+                    )
+                if w != w or w == float("inf") or w == float("-inf"):
+                    raise ValueError(
+                        f"ensemble_weights[{i}] = {w} is not finite. "
+                        f"All weights must be finite numbers."
+                    )
+                if w < 0:
+                    raise ValueError(
+                        f"ensemble_weights[{i}] = {w} is negative. "
+                        f"All weights must be non-negative."
+                    )
             if sum(ensemble_weights) <= 0:
                 raise ValueError("ensemble_weights must sum to > 0")
         if warmup_rebalances < 1:
             raise ValueError("warmup_rebalances must be >= 1")
+        if not (0.0 < correlation_threshold <= 1.0):
+            raise ValueError(
+                f"correlation_threshold must be in (0.0, 1.0], "
+                f"got {correlation_threshold}"
+            )
 
         # Deepcopy each sub-strategy to prevent external state sharing.
         # If a sub holds non-picklable state (DB conn, file handle),
@@ -108,7 +128,10 @@ class StrategyEnsemble(PortfolioStrategy):
             ) from e
 
         self._mode = mode
-        self._manual_weights = ensemble_weights
+        # Defensive copy: prevent external mutation of the weights list
+        # from silently changing ensemble behavior. Same ownership
+        # principle as the sub-strategy deepcopy.
+        self._manual_weights = list(ensemble_weights) if ensemble_weights is not None else None
         self._warmup = warmup_rebalances
         self._corr_threshold = correlation_threshold
         self._min_warmup_days = warmup_rebalances * 7

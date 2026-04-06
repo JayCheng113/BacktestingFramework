@@ -134,6 +134,53 @@ class TestEnsembleSkeleton:
         with pytest.raises(ValueError, match="at least one"):
             StrategyEnsemble(strategies=[], mode="equal")
 
+    def test_nan_in_ensemble_weights_rejected(self):
+        """Codex: NaN in ensemble_weights must be caught at construction."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        with pytest.raises(ValueError, match="not finite"):
+            StrategyEnsemble(
+                strategies=[_StaticStrategy({"A": 1.0}), _StaticStrategy({"B": 1.0})],
+                mode="manual",
+                ensemble_weights=[1.0, float("nan")],
+            )
+
+    def test_inf_in_ensemble_weights_rejected(self):
+        from ez.portfolio.ensemble import StrategyEnsemble
+        with pytest.raises(ValueError, match="not finite"):
+            StrategyEnsemble(
+                strategies=[_StaticStrategy({"A": 1.0}), _StaticStrategy({"B": 1.0})],
+                mode="manual",
+                ensemble_weights=[float("inf"), 1.0],
+            )
+
+    def test_ensemble_weights_defensive_copy(self):
+        """Codex: external mutation of weights list must NOT affect ensemble."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        weights = [3.0, 1.0]
+        ens = StrategyEnsemble(
+            strategies=[_StaticStrategy({"A": 1.0}), _StaticStrategy({"B": 1.0})],
+            mode="manual",
+            ensemble_weights=weights,
+        )
+        # Mutate the original list
+        weights[0] = 0.0
+        weights[1] = 100.0
+
+        # Ensemble should still use the original [3, 1] → [0.75, 0.25]
+        combined = ens.generate_weights({}, datetime(2024, 1, 1), {}, {})
+        assert abs(combined.get("A", 0) - 0.75) < 1e-6
+
+    def test_correlation_threshold_out_of_range_rejected(self):
+        """Codex: correlation_threshold must be in (0, 1]."""
+        from ez.portfolio.ensemble import StrategyEnsemble
+        for bad in [-0.1, 0.0, 1.1, float("nan")]:
+            with pytest.raises(ValueError, match="correlation_threshold"):
+                StrategyEnsemble(
+                    strategies=[_StaticStrategy({"A": 1.0})],
+                    mode="equal",
+                    correlation_threshold=bad,
+                )
+
     def test_deepcopy_isolation(self):
         """Modifying original sub-strategy state after construction
         must not affect the ensemble's internal copy."""
