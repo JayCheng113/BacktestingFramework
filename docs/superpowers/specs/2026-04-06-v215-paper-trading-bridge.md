@@ -49,12 +49,11 @@ V2.15 不是完整实盘系统。它是研究平台 (V1-V2.14) 到未来实盘�
 
 | 文件 | 职责 |
 |------|------|
-| `deployment_spec.py` | DeploymentSpec — 不可变部署规格 |
-| `deploy_gate.py` | DeployGate — 部署审批 (自动检查 + 手动确认) |
+| `deployment_spec.py` | DeploymentSpec (不可变配置) + DeploymentRecord (运行时元数据) |
+| `deploy_gate.py` | DeployGate — 硬门禁 (内部重算, 不可跳过) |
 | `paper_engine.py` | PaperTradingEngine — 模拟执行引擎 |
-| `paper_broker.py` | PaperBroker — 纸面成交撮合 |
-| `scheduler.py` | Scheduler — cron-like 定时触发 |
-| `deployment_store.py` | DeploymentStore — DuckDB 持久化 |
+| `scheduler.py` | Scheduler — 单进程幂等调度 + 业务日期 + 自动恢复 |
+| `deployment_store.py` | DeploymentStore — DuckDB 持久化 (specs + records + snapshots) |
 | `monitor.py` | Monitor — 最小监控集 |
 
 ### 依赖关系
@@ -77,31 +76,29 @@ ez/live/ 不依赖:
 
 ---
 
-## 组件 1: DeploymentSpec — 策略导出/序列化
+## 组件 1: DeploymentSpec + DeploymentRecord — 策略导出/序列化
 
 ### 问题
 
 研究态的策略是 Python 对象 + 散落的参数。要部署运行需要：
 - 固化全部参数 (策略参数 + 成本 + 优化器 + 风控)
-- 记录版本信息 (代码提交、依赖版本)
-- 绑定门禁结果 (通过了哪些 gate)
 - 可复现 (同一个 spec 永远产生同一个策略实例)
+- 审批、启动、停止等**运行时元数据**和策略配置分离
 
-### 设计
+### 设计: 两个对象
+
+**DeploymentSpec** — 纯不可变策略配置 (参与哈希)：
 
 ```python
-@dataclass(frozen=True)
+@dataclass
 class DeploymentSpec:
-    """Immutable deployment specification — the bridge from research to live."""
-
-    # 身份
-    deployment_id: str          # 内容哈希 (SHA-256[:16])
-    name: str                   # 用户可读名称
+    """纯策略配置 — 不含任何运行时/审批元数据。
+    所有字段参与 spec_id 哈希。JSON 序列化后深冻结。"""
 
     # 策略配置 (和 PortfolioRunRequest 对齐)
     strategy_name: str          # "TopNRotation" / "StrategyEnsemble" / ...
     strategy_params: dict       # 含 sub_strategies (Ensemble) 或 factor/top_n
-    symbols: list[str]          # 标的池
+    symbols: tuple[str, ...]    # tuple 不可变 (不用 list)
     market: str                 # "cn_stock" / "us_stock" / "hk_stock"
     freq: str                   # "daily" / "weekly" / "monthly"
 
@@ -116,47 +113,75 @@ class DeploymentSpec:
 
     # 优化器 + 风控
     optimizer: str | None = None
-    optimizer_params: dict = field(default_factory=dict)
+    optimizer_params: tuple = ()      # tuple of (k,v) pairs, 不可变
     risk_control: bool = False
-    risk_params: dict = field(default_factory=dict)
+    risk_params: tuple = ()           # tuple of (k,v) pairs
 
     # 资金
     initial_cash: float = 1_000_000.0
 
-    # 来源追溯
-    source_run_id: str | None = None     # 来自哪个回测 run
-    gate_verdict: dict | None = None     # 门禁结果快照
-    code_commit: str | None = None       # git SHA
-
-    # 时间
-    created_at: datetime = field(default_factory=datetime.now)
-
     @property
-    def deployment_id(self) -> str:
-        """内容哈希 — 相同配置永远生成相同 ID"""
-        # SHA-256 of canonical JSON (exclude created_at, name)
+    def spec_id(self) -> str:
+        """内容哈希 — 所有字段参与, 无例外"""
+        # SHA-256 of canonical JSON → [:16]
+
+    def to_json(self) -> str:
+        """序列化 (symbols/optimizer_params/risk_params → list/dict)"""
+```
+
+**DeploymentRecord** — 可变运行时记录 (不参与哈希)：
+
+```python
+@dataclass
+class DeploymentRecord:
+    """运行时元数据 — 审批/启动/停止/来源"""
+    deployment_id: str              # UUID, 非内容哈希 (每次部署唯一)
+    spec_id: str                    # 指向 DeploymentSpec
+    name: str                       # 用户可读名称
+    status: str = "pending"         # pending → approved → running → stopped/error
+    stop_reason: str = ""
+
+    # 来源追溯
+    source_run_id: str | None = None
+    code_commit: str | None = None
+    gate_verdict: dict | None = None  # Deploy Gate 结果快照
+
+    # 生命周期时间 (UTC aware)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    approved_at: datetime | None = None
+    started_at: datetime | None = None
+    stopped_at: datetime | None = None
 ```
 
 ### 从回测结果创建
 
 ```python
-# 用户在前端点 "部署到模拟盘"
-def from_portfolio_run(run_id: str, name: str) -> DeploymentSpec:
-    """从已完成的组合回测创建部署规格"""
+def from_portfolio_run(run_id: str, name: str) -> tuple[DeploymentSpec, DeploymentRecord]:
+    """从已完成的组合回测创建部署规格 + 记录"""
     run = portfolio_store.get_run(run_id)
     config = json.loads(run.config)
-    return DeploymentSpec(
-        name=name,
+    spec = DeploymentSpec(
         strategy_name=run.strategy_name,
         strategy_params=json.loads(run.strategy_params),
-        symbols=json.loads(run.symbols),
+        symbols=tuple(json.loads(run.symbols)),
         market=config.get("market", "cn_stock"),
         freq=run.freq,
         # ... 从 config 恢复所有参数
+    )
+    record = DeploymentRecord(
+        deployment_id=str(uuid4()),
+        spec_id=spec.spec_id,
+        name=name,
         source_run_id=run_id,
         code_commit=_get_git_sha(),
     )
+    return spec, record
 ```
+
+### 关键区别: spec_id vs deployment_id
+
+- **spec_id** (内容哈希): 同一策略配置永远相同 → 可做去重
+- **deployment_id** (UUID): 每次部署唯一 → 同一配置可以部署多次
 
 ---
 
@@ -176,7 +201,7 @@ def from_portfolio_run(run_id: str, name: str) -> DeploymentSpec:
 @dataclass
 class DeployGateConfig:
     """部署门禁阈值 — 比研究门禁更严格"""
-    # 继承 ResearchGate 检查
+    # 研究门禁阈值 (内部重算, 不依赖外部传入)
     min_sharpe: float = 0.5
     max_drawdown: float = 0.25          # 比研究更严 (0.25 vs 0.30)
     min_trades: int = 20                # 比研究更严 (20 vs 10)
@@ -191,63 +216,93 @@ class DeployGateConfig:
 
 
 class DeployGate:
-    """部署门禁 — ResearchGate 的超集"""
+    """部署门禁 — 硬门禁, 不可跳过。
+
+    内部自行重算研究门禁 (从 source_run_id 拉回测结果),
+    不接受外部传入的 GateVerdict。调用方无法通过不传参绕过。
+    """
 
     def __init__(self, config: DeployGateConfig | None = None):
         self.config = config or DeployGateConfig()
 
-    def evaluate(self, spec: DeploymentSpec,
-                 research_verdict: GateVerdict | None = None,
-                 backtest_metrics: dict | None = None) -> GateVerdict:
+    def evaluate(
+        self,
+        spec: DeploymentSpec,
+        source_run_id: str,               # 必传 — 来源回测 run ID
+        portfolio_store: PortfolioStore,   # 必传 — 读取回测结果
+    ) -> GateVerdict:
         """
-        两阶段检查:
-        1. 如果有 research_verdict, 验证研究门禁已通过
-        2. 额外部署检查 (回测时长、标的数、集中度)
-        返回 GateVerdict (和 ResearchGate 相同结构)
-        """
-        reasons = []
+        三阶段硬检查 (全部必须通过):
+        1. 从 source_run_id 拉回测结果 → 内部重算研究门禁
+        2. 部署专属检查 (回测时长、标的数、集中度)
+        3. 配置完整性检查
 
-        # Phase 1: 研究门禁通过?
-        if research_verdict and not research_verdict.passed:
-            reasons.append(GateReason(
-                rule="research_gate", passed=False,
-                value=0, threshold=1,
-                message="研究门禁未通过，不能部署"
-            ))
+        所有参数都是必传的, 没有 Optional 可以绕过。
+        """
+        reasons: list[GateReason] = []
+
+        # Phase 0: 来源回测必须存在
+        run = portfolio_store.get_run(source_run_id)
+        if not run:
+            return GateVerdict(passed=False, reasons=[
+                GateReason(rule="source_run_exists", passed=False,
+                           value=0, threshold=1,
+                           message=f"来源回测 {source_run_id} 不存在")
+            ])
+
+        metrics = json.loads(run.metrics) if run.metrics else {}
+
+        # Phase 1: 内部重算研究门禁 (不接受外部传入)
+        sharpe = metrics.get("sharpe_ratio", 0)
+        reasons.append(GateReason(
+            rule="min_sharpe", passed=sharpe >= self.config.min_sharpe,
+            value=sharpe, threshold=self.config.min_sharpe,
+            message=f"夏普 {sharpe:.2f}"))
+
+        dd = abs(metrics.get("max_drawdown", 1.0))
+        reasons.append(GateReason(
+            rule="max_drawdown", passed=dd <= self.config.max_drawdown,
+            value=dd, threshold=self.config.max_drawdown,
+            message=f"最大回撤 {dd:.1%}"))
+
+        trades = metrics.get("trade_count", 0)
+        reasons.append(GateReason(
+            rule="min_trades", passed=trades >= self.config.min_trades,
+            value=trades, threshold=self.config.min_trades,
+            message=f"交易次数 {trades}"))
 
         # Phase 2: 部署专属检查
-        if backtest_metrics:
-            # 回测时长
-            bt_days = backtest_metrics.get("n_trading_days", 0)
-            reasons.append(GateReason(
-                rule="min_backtest_days",
-                passed=bt_days >= self.config.min_backtest_days,
-                value=bt_days, threshold=self.config.min_backtest_days,
-                message=f"回测天数 {bt_days} {'>=':if passed else '<'} {self.config.min_backtest_days}"
-            ))
-
-            # 更严格的 sharpe/drawdown
-            sharpe = backtest_metrics.get("sharpe_ratio", 0)
-            reasons.append(GateReason(
-                rule="min_sharpe", passed=sharpe >= self.config.min_sharpe,
-                value=sharpe, threshold=self.config.min_sharpe,
-                message=f"夏普 {sharpe:.2f}"
-            ))
-            # ... 其余规则
-
-        # 标的池检查
+        n_days = len(json.loads(run.dates)) if run.dates else 0
         reasons.append(GateReason(
-            rule="min_symbols",
-            passed=len(spec.symbols) >= self.config.min_symbols,
-            value=len(spec.symbols), threshold=self.config.min_symbols,
-            message=f"标的数 {len(spec.symbols)}"
-        ))
+            rule="min_backtest_days",
+            passed=n_days >= self.config.min_backtest_days,
+            value=n_days, threshold=self.config.min_backtest_days,
+            message=f"回测天数 {n_days}"))
+
+        n_syms = len(spec.symbols)
+        reasons.append(GateReason(
+            rule="min_symbols", passed=n_syms >= self.config.min_symbols,
+            value=n_syms, threshold=self.config.min_symbols,
+            message=f"标的数 {n_syms}"))
+
+        # Phase 3: 配置完整性
+        reasons.append(GateReason(
+            rule="freq_valid",
+            passed=spec.freq in ("daily", "weekly", "monthly"),
+            value=0, threshold=0,
+            message=f"调仓频率 {spec.freq}"))
 
         return GateVerdict(
             passed=all(r.passed for r in reasons),
-            reasons=reasons
+            reasons=reasons,
         )
 ```
+
+### 不可绕过性保证
+
+- `source_run_id` 和 `portfolio_store` 都是必传参数 (非 Optional)
+- 门禁从 DB 自己拉指标重算, 不接受调用方声称的 "研究已通过"
+- API 层在 `/deploy` 端点内部构造 DeployGate + 传入 store, 前端无法跳过
 
 ### 审批流程
 
@@ -384,106 +439,164 @@ class PaperTradingEngine:
 
 ### 关键设计决策
 
-1. **`execute_day()` 是无状态函数** — 所有状态在 `self` 上，Scheduler 只需要每天调一次
-2. **数据获取复用 DataProviderChain** — 同一个数据源，只是 end_date = today
+1. **`execute_day()` 是幂等函数** — 同一 business_date 重复调用不产生新交易 (见 Scheduler 幂等键)
+2. **数据获取复用 DataProviderChain** — 同一个数据源，只是 end_date = business_date
 3. **成交逻辑从 portfolio engine 提取** — 不是复制粘贴，而是提取共享函数：
 
 ```python
-# ez/portfolio/engine.py (新增导出)
+# ez/portfolio/execution.py (新文件)
 def execute_portfolio_trades(
     target_weights: dict[str, float],
     current_holdings: dict[str, int],
-    prices: dict[str, float],
+    equity: float,
     cash: float,
+    # 行情上下文 — 完整, 不遗漏
+    prices: dict[str, float],           # 今日收盘价 (adj_close)
+    raw_closes: dict[str, float],       # 今日 raw close (涨跌停判断用)
+    prev_raw_closes: dict[str, float],  # 昨日 raw close (涨跌停基准)
+    has_bar_today: set[str],            # 今日有实际 bar 的标的 (无 bar 不交易)
+    # 成交参数
     cost_model: CostModel,
-    market_rules: MarketRulesMatcher | None = None,
+    lot_size: int = 100,
+    t_plus_1: bool = True,
+    limit_pct: float = 0.1,
     sold_today: set[str] | None = None,
-) -> tuple[list[dict], dict[str, int], float]:
+) -> tuple[list[TradeResult], dict[str, int], float]:
     """
-    共享成交函数 — 回测引擎和 Paper Trading 引擎都调用
+    共享成交逻辑 — 回测引擎和 Paper Trading 引擎都调用。
+
+    输入契约:
+    - prices: 成交价基准 (adj_close + 滑点)
+    - raw_closes + prev_raw_closes: 涨跌停判断 (raw, 非复权)
+    - has_bar_today: 避免 stale price 成交 (停牌/无数据)
+    - sold_today: T+1 约束 (当日已卖的不能买回)
+
     Returns: (trades, new_holdings, new_cash)
     """
 ```
 
-这是 V2.15 最关键的重构：把回测引擎的交易执行逻辑提取为独立函数。
+回测引擎的内循环 (lines 320-406) 改为调用这个函数。Paper Trading 引擎也调用它。
+**删除 `paper_broker.py`** — 成交逻辑全部在 `execution.py`, 没有独立 broker 模块。
 
 ---
 
 ## 组件 4: Scheduler — 定时触发
 
+### 约束声明
+
+- **单进程**: V2.15 Scheduler 是进程内单例。不支持多 worker。文档和启动日志明确声明。
+- **业务日期**: tick 接收 `business_date: date` 而非 `date.today()`。调用方负责确定当日是否交易日。
+- **幂等**: 每个 deployment 持久化 `last_processed_date`。同日重复 tick 跳过 (返回缓存结果)。
+- **交易日历**: Scheduler 依赖 `TradingCalendar`。非交易日 tick 是 no-op (不跳过, 记录为 "非交易日")。
+
 ### 设计
 
 ```python
 class Scheduler:
-    """最小调度器 — 管理 paper trading job 的生命周期"""
+    """单进程调度器 — 管理 paper trading job 的生命周期。
 
-    def __init__(self, store: DeploymentStore):
+    ⚠️ 单进程约束: 不支持多 worker / 多实例部署。
+    进程重启时通过 resume_all() 从 DB 恢复所有 running 部署。
+    """
+
+    def __init__(self, store: DeploymentStore, data_chain: DataProviderChain):
         self.store = store
-        self._jobs: dict[str, PaperTradingEngine] = {}  # deployment_id → engine
+        self.data_chain = data_chain
+        self._engines: dict[str, PaperTradingEngine] = {}
         self._lock = asyncio.Lock()
 
+    async def resume_all(self) -> int:
+        """进程启动时自动恢复所有 status='running' 的部署。
+        由 app lifespan 调用。返回恢复数量。"""
+        running = self.store.list_deployments(status="running")
+        count = 0
+        for record in running:
+            try:
+                await self._start_engine(record.deployment_id)
+                count += 1
+            except Exception as e:
+                self.store.save_error(record.deployment_id, date.today(), f"恢复失败: {e}")
+        return count
+
     async def start_deployment(self, deployment_id: str) -> None:
-        """启动一个部署的 paper trading"""
         async with self._lock:
-            if deployment_id in self._jobs:
+            if deployment_id in self._engines:
                 raise ValueError("已在运行")
-            spec = self.store.get_deployment(deployment_id)
-            strategy, optimizer, risk = self._instantiate(spec)
-            engine = PaperTradingEngine(spec, strategy, ...)
-
-            # 恢复历史状态 (如果有)
-            self._restore_state(engine, deployment_id)
-
-            self._jobs[deployment_id] = engine
+            await self._start_engine(deployment_id)
             self.store.update_status(deployment_id, "running")
 
     async def stop_deployment(self, deployment_id: str, reason: str = "user_stop") -> None:
-        """停止一个部署"""
         async with self._lock:
-            if deployment_id in self._jobs:
-                del self._jobs[deployment_id]
+            self._engines.pop(deployment_id, None)
             self.store.update_status(deployment_id, "stopped", stop_reason=reason)
 
-    async def tick(self, today: date) -> list[dict]:
+    async def tick(self, business_date: date, calendar: TradingCalendar) -> list[dict]:
         """
-        每日触发 — 由外部 cron 或 API 调用
-        对所有 running 的 deployment 执行当日逻辑
+        每日触发。
+
+        幂等: 同一 deployment × 同一 business_date 只执行一次。
+        非交易日: 跳过执行, 记录 "非交易日" 状态。
         """
+        if not calendar.is_trading_day(business_date):
+            return [{"date": str(business_date), "skipped": "非交易日"}]
+
         results = []
-        for dep_id, engine in list(self._jobs.items()):
+        for dep_id, engine in list(self._engines.items()):
+            # 幂等检查
+            last = self.store.get_last_processed_date(dep_id)
+            if last and last >= business_date:
+                results.append({"deployment_id": dep_id, "skipped": "已执行"})
+                continue
+
             try:
-                result = engine.execute_day(today)
-                self.store.save_daily_snapshot(dep_id, result)
+                result = engine.execute_day(business_date)
+                self.store.save_daily_snapshot(dep_id, business_date, result)
                 results.append({"deployment_id": dep_id, **result})
             except Exception as e:
-                self.store.save_error(dep_id, today, str(e))
+                self.store.save_error(dep_id, business_date, str(e))
                 results.append({"deployment_id": dep_id, "error": str(e)})
         return results
 
-    def _restore_state(self, engine: PaperTradingEngine, deployment_id: str):
-        """从 DB 恢复最后的持仓/现金状态 (crash recovery)"""
-        latest = self.store.get_latest_snapshot(deployment_id)
-        if latest:
-            engine.cash = latest["cash"]
-            engine.holdings = latest["holdings"]
-            engine.equity_curve = latest["equity_curve"]
-            engine.dates = latest["dates"]
-            engine.prev_weights = latest["prev_weights"]
+    async def _start_engine(self, deployment_id: str) -> None:
+        """内部: 实例化 engine + 完整状态恢复"""
+        record = self.store.get_record(deployment_id)
+        spec = self.store.get_spec(record.spec_id)
+        strategy, optimizer, risk = self._instantiate(spec)
+        engine = PaperTradingEngine(spec, strategy, self.data_chain, optimizer, risk)
+        self._restore_full_state(engine, deployment_id)
+        self._engines[deployment_id] = engine
+
+    def _restore_full_state(self, engine: PaperTradingEngine, deployment_id: str):
+        """完整状态恢复 — 所有影响策略行为的字段"""
+        snapshots = self.store.get_all_snapshots(deployment_id)
+        if not snapshots:
+            return
+        latest = snapshots[-1]
+        engine.cash = latest["cash"]
+        engine.holdings = latest["holdings"]
+        engine.prev_weights = latest["weights"]
+        engine.prev_returns = latest.get("prev_returns", {})
+        # 恢复完整历史 (策略可能需要)
+        engine.equity_curve = [s["equity"] for s in snapshots]
+        engine.dates = [date.fromisoformat(s["snapshot_date"]) for s in snapshots]
+        engine.trades = []
+        engine.risk_events = []
+        for s in snapshots:
+            engine.trades.extend(json.loads(s.get("trades", "[]")))
+            engine.risk_events.extend(json.loads(s.get("risk_events", "[]")))
 ```
 
 ### 触发方式
 
-V2.15 用最简方案：**API 触发** (不做真 cron)
-
 ```python
 # POST /api/live/tick
-# 由用户手动调用 (开发/测试)
-# 或由外部 cron job 每日收盘后调用 (生产)
+# 接收业务日期 (非 date.today()), 由调用方确定
 @router.post("/tick")
-async def trigger_daily_tick():
-    today = date.today()
-    results = await scheduler.tick(today)
-    return {"date": str(today), "results": results}
+async def trigger_daily_tick(business_date: date | None = None):
+    cal = TradingCalendar.from_market(scheduler.default_market)
+    bd = business_date or cal.previous_trading_day(date.today())
+    results = await scheduler.tick(bd, cal)
+    return {"business_date": str(bd), "results": results}
 ```
 
 V3.0 时替换为内置 APScheduler 或 Celery。
@@ -560,31 +673,41 @@ class Monitor:
 ## 持久化: DeploymentStore
 
 ```sql
--- 部署规格 (不可变)
-CREATE TABLE deployments (
-    deployment_id VARCHAR PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    spec TEXT NOT NULL,              -- JSON: 完整 DeploymentSpec
-    status VARCHAR DEFAULT 'pending', -- pending/approved/running/stopped/error
-    stop_reason VARCHAR DEFAULT '',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    approved_at TIMESTAMP,           -- Deploy Gate 通过时间
-    started_at TIMESTAMP,            -- 开始运行时间
-    stopped_at TIMESTAMP,
-    source_run_id VARCHAR,           -- 来源回测 ID
-    gate_verdict TEXT                -- JSON: Deploy Gate 结果
+-- 策略配置 (不可变, spec_id 是内容哈希)
+CREATE TABLE deployment_specs (
+    spec_id VARCHAR PRIMARY KEY,
+    spec_json TEXT NOT NULL,            -- JSON: 完整 DeploymentSpec
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 每日快照 (追加写入)
+-- 部署记录 (可变, deployment_id 是 UUID)
+CREATE TABLE deployment_records (
+    deployment_id VARCHAR PRIMARY KEY,
+    spec_id VARCHAR NOT NULL REFERENCES deployment_specs(spec_id),
+    name VARCHAR NOT NULL,
+    status VARCHAR DEFAULT 'pending',   -- pending/approved/running/stopped/error
+    stop_reason VARCHAR DEFAULT '',
+    source_run_id VARCHAR,              -- 来源回测 ID
+    code_commit VARCHAR,
+    gate_verdict TEXT,                  -- JSON: Deploy Gate 结果
+    last_processed_date DATE,           -- 幂等键: 最后执行的业务日期
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    approved_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    stopped_at TIMESTAMPTZ
+);
+
+-- 每日快照 (追加写入, 幂等: deployment_id + snapshot_date 唯一)
 CREATE TABLE deployment_snapshots (
     deployment_id VARCHAR NOT NULL,
     snapshot_date DATE NOT NULL,
     equity DOUBLE NOT NULL,
     cash DOUBLE NOT NULL,
-    holdings TEXT NOT NULL,           -- JSON: {symbol: shares}
-    weights TEXT NOT NULL,            -- JSON: {symbol: weight}
-    trades TEXT DEFAULT '[]',         -- JSON: 当日交易
-    risk_events TEXT DEFAULT '[]',    -- JSON: 当日风控事件
+    holdings TEXT NOT NULL,             -- JSON: {symbol: shares}
+    weights TEXT NOT NULL,              -- JSON: {symbol: weight}
+    prev_returns TEXT DEFAULT '{}',     -- JSON: {symbol: float} 策略依赖
+    trades TEXT DEFAULT '[]',           -- JSON: 当日交易
+    risk_events TEXT DEFAULT '[]',      -- JSON: 当日风控事件
     rebalanced BOOLEAN DEFAULT FALSE,
     execution_ms DOUBLE,
     error TEXT,
@@ -660,56 +783,13 @@ Deploy Gate 自动检查
 
 ## 核心重构: 提取共享成交函数
 
-这是 V2.15 的前置条件。从 `ez/portfolio/engine.py` 提取：
+V2.15 前置条件。从 `ez/portfolio/engine.py` lines 300-406 提取到 `ez/portfolio/execution.py`。
 
-```python
-# ez/portfolio/execution.py (新文件)
-
-@dataclass
-class TradeOrder:
-    symbol: str
-    side: Literal["buy", "sell"]
-    target_shares: int
-    target_weight: float
-
-@dataclass
-class TradeResult:
-    symbol: str
-    side: str
-    shares: int
-    price: float
-    amount: float
-    commission: float
-    stamp_tax: float
-    slippage: float
-
-def execute_portfolio_trades(
-    target_weights: dict[str, float],
-    current_holdings: dict[str, int],
-    prices: dict[str, float],
-    prev_closes: dict[str, float],
-    cash: float,
-    equity: float,
-    cost_model: CostModel,
-    lot_size: int = 100,
-    t_plus_1: bool = True,
-    limit_pct: float = 0.1,
-    sold_today: set[str] | None = None,
-) -> tuple[list[TradeResult], dict[str, int], float]:
-    """
-    共享成交逻辑:
-    1. 计算 target shares (weight → amount → shares → lot round)
-    2. Sell first, buy second
-    3. Apply market rules (T+1, limit price, lot size)
-    4. Deduct costs (commission + stamp tax + slippage)
-
-    Returns: (trades, new_holdings, new_cash)
-
-    回测引擎和 Paper Trading 引擎都调用这个函数。
-    """
-```
-
-回测引擎的 `run_portfolio_backtest` 改为调用这个函数。Paper Trading 引擎也调用它。**Same code, two contexts.**
+完整函数签名见组件 3 的 `execute_portfolio_trades()`。关键点：
+- **输入完整性**: prices + raw_closes + prev_raw_closes + has_bar_today，覆盖现有回测的所有市场规则上下文
+- **回测引擎重构**: `run_portfolio_backtest` 内循环改为调用 `execute_portfolio_trades()`，不改变外部行为
+- **Paper Trading 复用**: `PaperTradingEngine.execute_day()` 调用同一函数
+- **paper_broker.py 不存在**: 成交逻辑全部在 `execution.py`，没有独立 broker 模块
 
 ---
 
