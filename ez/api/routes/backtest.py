@@ -48,7 +48,7 @@ class _SellSideTaxMatcher(Matcher):
 
 
 class BacktestRequest(BaseModel):
-    symbol: str
+    symbol: str = Field(min_length=1)
     market: str = "cn_stock"
     period: str = "daily"
     strategy_name: str
