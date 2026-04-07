@@ -214,7 +214,7 @@ export default function ResearchPanel() {
   const loadResearchFiles = async (task?: ResearchTask | null) => {
     try {
       const res = await fetch('/api/code/files')
-      if (!res.ok) return
+      if (!res.ok) { setResearchFiles([]); return }
       const all: {filename: string; class_name: string}[] = await res.json()
       const researchAll = all.filter((f) => f.filename.startsWith('research_'))
 
