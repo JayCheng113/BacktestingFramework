@@ -16,6 +16,9 @@ from ez.types import Bar
 
 logger = logging.getLogger(__name__)
 
+# Expected trading bars per calendar year, keyed by period.
+_BARS_PER_YEAR = {"daily": 245, "weekly": 52, "monthly": 12}
+
 # Lazy import to avoid circular dependency (validator imports Bar from types)
 _DataValidator = None
 
@@ -99,6 +102,7 @@ class DataProviderChain:
         end_date: date,
         *,
         skip_density: bool = False,
+        period: str = "daily",
     ) -> tuple[bool, str]:
         """Check if cached bars cover the requested range WITHOUT gaps.
 
@@ -128,9 +132,10 @@ class DataProviderChain:
             return True, "boundary ok (short range, skip density check)"
         if skip_density:
             return True, "boundary ok (known-sparse symbol, skip density check)"
-        # A-share: ~245 trading days/year. 0.75 tolerance covers long holidays
-        # (Spring Festival week + October week + minor breaks ≈ 15 days).
-        expected_bars = max(1, int(req_days * 245 / 365))
+        # Period-aware density: daily ~245, weekly ~52, monthly ~12 bars/year.
+        # 0.75 tolerance covers long holidays.
+        bars_per_year = _BARS_PER_YEAR.get(period, 245)
+        expected_bars = max(1, int(req_days * bars_per_year / 365))
         actual_bars = len(cached)
         if actual_bars < expected_bars * 0.75:
             return False, f"middle gap: {actual_bars} bars, expected ~{expected_bars} (<75%)"
@@ -152,7 +157,7 @@ class DataProviderChain:
         cached = self._store.query_kline(symbol, market, period, start_date, end_date)
         if cached:
             complete, reason = self._is_cache_complete(
-                cached, start_date, end_date, skip_density=skip_density,
+                cached, start_date, end_date, skip_density=skip_density, period=period,
             )
             if complete:
                 logger.info("Cache hit for %s/%s/%s (%s)", symbol, market, period, reason)
@@ -180,11 +185,13 @@ class DataProviderChain:
                     if result.valid_bars:
                         self._store.save_kline(result.valid_bars, period)
                         # Check coverage by BAR COUNT (not just date span).
-                        # ~245 trading days/year. If provider returns <50% of expected bars
-                        # AND there are more providers, try next for better coverage.
+                        # Period-aware: daily ~245, weekly ~52, monthly ~12 bars/year.
+                        # If provider returns <50% of expected bars AND there are more
+                        # providers, try next for better coverage.
                         vb = result.valid_bars
                         req_days = (end_date - start_date).days
-                        expected_bars = max(1, int(req_days * 245 / 365))
+                        bars_per_year = _BARS_PER_YEAR.get(period, 245)
+                        expected_bars = max(1, int(req_days * bars_per_year / 365))
                         actual_bars = len(vb)
                         is_last = (provider is self._providers[-1])
                         if req_days > 30 and actual_bars < expected_bars * 0.5 and not is_last:
@@ -234,7 +241,7 @@ class DataProviderChain:
                 _batch_ts = None
             skip_density = _batch_ts is not None
             complete, reason = self._is_cache_complete(
-                bars, start_date, end_date, skip_density=skip_density,
+                bars, start_date, end_date, skip_density=skip_density, period=period,
             ) if bars else (False, "empty")
             if complete:
                 result[sym] = bars
