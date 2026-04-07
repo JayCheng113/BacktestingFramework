@@ -83,6 +83,9 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **CandidateSearch**: `isNumeric()` type guard 修复 `tsc -b` 严格构建错误
 - **ensembleConfig**: 移除未使用的 state (只用 ref)
 
+## V2.16 — Platform Polish
+- **DocsPage API 参考**: Ch8 新增 13 个模拟盘 API 端点 (deploy/list/detail/approve/start/stop/pause/resume/tick/dashboard/snapshots/trades/stream), 含停止清仓参数说明
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000

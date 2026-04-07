@@ -85,23 +85,28 @@ class AKShareDataProvider(DataProvider):
             logger.warning("AKShare qfq fetch failed for %s: %s", symbol, e)
             return []
 
-        # Fetch raw (unadjusted) — best-effort, degrade gracefully
+        # Fetch raw (unadjusted) — best-effort with 1 retry, degrade gracefully
         df_raw = None
-        try:
-            self._throttle()
-            if is_etf:
-                df_raw = ak.fund_etf_hist_em(
-                    symbol=code, period=ak_period,
-                    start_date=ts_start, end_date=ts_end, adjust="",
-                )
-            else:
-                df_raw = ak.stock_zh_a_hist(
-                    symbol=code, period=ak_period,
-                    start_date=ts_start, end_date=ts_end, adjust="",
-                )
-        except Exception as e:
-            logger.warning("AKShare raw fetch failed for %s, using qfq for all fields: %s", symbol, e)
-            # df_raw stays None → raw_map empty → fallback to adj values in bar construction
+        for _attempt in range(2):
+            try:
+                self._throttle()
+                if is_etf:
+                    df_raw = ak.fund_etf_hist_em(
+                        symbol=code, period=ak_period,
+                        start_date=ts_start, end_date=ts_end, adjust="",
+                    )
+                else:
+                    df_raw = ak.stock_zh_a_hist(
+                        symbol=code, period=ak_period,
+                        start_date=ts_start, end_date=ts_end, adjust="",
+                    )
+                break  # success — skip retry
+            except Exception as e:
+                if _attempt == 0:
+                    logger.info("AKShare raw fetch failed for %s (attempt 1), retrying: %s", symbol, e)
+                    continue
+                logger.warning("AKShare raw fetch failed for %s after retry, using qfq for all fields: %s", symbol, e)
+                # df_raw stays None → raw_map empty → fallback to adj values in bar construction
 
         if df_adj is None or df_adj.empty:
             return []

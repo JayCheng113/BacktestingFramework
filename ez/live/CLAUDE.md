@@ -38,8 +38,8 @@ Bridge between offline backtest research and forward-looking paper execution.
 - **Error escalation**: 3 consecutive errors -> automatic status="error" + engine removal (no infinite retry)
 
 ## Status
-V2.15.1 -- beta (promoted from experimental after stabilization). Known limitations:
+V2.16 -- beta. Known limitations:
 - strategy.state not persisted across process restarts
 - Data freshness depends on provider update timing
-- Stop does not trigger liquidation
+- ~~Stop does not trigger liquidation~~ -- V2.16: `liquidate=True` option added to stop_deployment
 - Single-process scheduler (no multi-worker)
