@@ -70,6 +70,8 @@ export interface ExperimentRun {
   gate_summary: string
   gate_reasons: string | GateReason[]
   error: string | null
+  start_date?: string
+  end_date?: string
 }
 
 export interface GateReason {
@@ -164,8 +166,8 @@ export interface HistoryRun {
 }
 
 export interface ParamSchema {
-  type: string; default: any; min?: number; max?: number; label?: string
-  options?: string[]
+  type: string; default: number | string | boolean; min?: number; max?: number; label?: string
+  step?: number; options?: string[]
 }
 
 // V2.13.2 Phase 6: ML Alpha Diagnostics types

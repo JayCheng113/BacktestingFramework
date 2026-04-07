@@ -33,7 +33,10 @@ export default function Dashboard() {
     try {
       const res = await fetchKline({ symbol, market, period, start_date: start, end_date: end })
       setKlineData(res.data)
-    } catch (e: any) { showToast('error', e?.response?.data?.detail || 'Failed to fetch data') }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '获取行情数据失败')
+    }
     finally { setLoading(false) }
   }
 

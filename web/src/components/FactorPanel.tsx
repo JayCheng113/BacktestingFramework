@@ -31,7 +31,10 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
       }))
       setFactors(list)
       if (list.length > 0 && !factor) setFactor(list[0].value)
-    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载因子列表失败') })
+    }).catch((e: unknown) => {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载因子列表失败')
+    })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // V2.12.2 codex: clear stale factor result when any evaluation input
@@ -47,7 +50,10 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     try {
       const res = await evaluateFactor({ symbol, market, factor_name: factor, start_date: startDate, end_date: endDate })
       setResult(res.data)
-    } catch (e: any) { showToast('error', e?.response?.data?.detail || 'Evaluation failed') }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '因子评估失败')
+    }
     finally { setLoading(false) }
   }
 

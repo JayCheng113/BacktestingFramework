@@ -10,8 +10,8 @@ interface Props {
   history: HistoryRun[]
   selectedRuns: Set<string>
   toggleRunSelection: (runId: string) => void
-  compareData: { id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]
-  setCompareData: (v: { id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]) => void
+  compareData: { id: string; name: string; equity: number[]; dates: string[]; metrics: Record<string, number> }[]
+  setCompareData: (v: { id: string; name: string; equity: number[]; dates: string[]; metrics: Record<string, number> }[]) => void
   comparing: boolean
   handleCompare: () => void
   handleDeleteRun: (runId: string) => void

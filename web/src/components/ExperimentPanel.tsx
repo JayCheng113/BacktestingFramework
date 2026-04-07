@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments } from '../api'
-import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
+import type { ExperimentRun, StrategyInfo, GateReason, ParamSchema } from '../types'
 import CandidateSearch from './CandidateSearch'
 import DateBtn from './shared/DateBtn'
 import { useToast } from './shared/Toast'
@@ -38,11 +38,14 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
       if (userStrategies.length > 0) {
         // V2.12.1 post-review fix (codex): select by full key to avoid name-collision picks
         setStrategyName(userStrategies[0].key)
-        const defaults: Record<string, number> = {}
-        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as any).default
+        const defaults: Record<string, number | string | boolean> = {}
+        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as ParamSchema).default
         setParams(defaults)
       }
-    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败') })
+    }).catch((e: unknown) => {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败')
+    })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadRuns = () => {
@@ -55,15 +58,18 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
         return !name.includes('research_') && !name.startsWith('Research')
       })
       setRuns(userRuns)
-    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载实验记录失败') }).finally(() => setLoading(false))
+    }).catch((e: unknown) => {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载实验记录失败')
+    }).finally(() => setLoading(false))
   }
 
   const handleStrategyChange = (key: string) => {
     setStrategyName(key)
     const s = strategies.find(s => s.key === key)
     if (s) {
-      const defaults: Record<string, number> = {}
-      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as any).default
+      const defaults: Record<string, number | string | boolean> = {}
+      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as ParamSchema).default
       setParams(defaults)
     }
   }
@@ -86,8 +92,9 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
         showToast('warning', `重复: 该实验已有完成的运行记录 (${res.data.existing_run_id || res.data.spec_id})`)
       }
       loadRuns()
-    } catch (e: any) {
-      showToast('error', e?.response?.data?.detail || 'Experiment failed')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '实验运行失败')
     } finally {
       setSubmitting(false)
     }
@@ -285,7 +292,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
                   <td className="px-3 py-2">{r.strategy_name}</td>
                   <td className="px-3 py-2">{r.symbol}</td>
                   <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    {(r as any).start_date?.slice(0, 10) || '?'} ~ {(r as any).end_date?.slice(0, 10) || '?'}
+                    {r.start_date?.slice(0, 10) || '?'} ~ {r.end_date?.slice(0, 10) || '?'}
                   </td>
                   <td className="px-3 py-2 text-right">{r.sharpe_ratio?.toFixed(2) ?? '-'}</td>
                   <td className="px-3 py-2 text-right" style={{ color: (r.total_return ?? 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>

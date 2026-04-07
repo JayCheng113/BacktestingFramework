@@ -45,8 +45,14 @@ export default function SettingsModal({ open, onClose }: Props) {
       setModel(d.model === '(默认)' ? '' : d.model)
       setBaseUrl(d.base_url === '(默认)' ? '' : d.base_url)
       setTemperature(d.temperature)
-    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.message || '加载 LLM 配置失败') })
-    fetch('/api/settings/tushare').then(r => r.json()).then(setTushare).catch((e: unknown) => { const err = e as any; showToast('error', err?.message || '加载 Tushare 配置失败') })
+    }).catch((e: unknown) => {
+      const err = e as { message?: string }
+      showToast('error', err?.message || '加载 LLM 配置失败')
+    })
+    fetch('/api/settings/tushare').then(r => r.json()).then(setTushare).catch((e: unknown) => {
+      const err = e as { message?: string }
+      showToast('error', err?.message || '加载 Tushare 配置失败')
+    })
   }, [open])
 
   const saveLLM = async () => {

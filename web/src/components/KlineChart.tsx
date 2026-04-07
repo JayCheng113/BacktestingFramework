@@ -1,6 +1,16 @@
 import ReactECharts from 'echarts-for-react'
 import type { KlineBar, TradeRecord } from '../types'
 
+interface ChartMarker {
+  coord: [string, number]
+  itemStyle: { color: string }
+}
+
+// ECharts series config — union of candlestick/bar/line/scatter.
+// echarts-for-react does not export a precise series type, so we use
+// Record<string, unknown> to avoid `any` while staying practical.
+type EChartsSeries = Record<string, unknown>
+
 interface Props {
   data: KlineBar[]
   symbol: string
@@ -45,8 +55,8 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   const colors = data.map(d => d.close >= d.open ? '#ef4444' : '#22c55e')
 
   // Build buy/sell markers from trades
-  const buyMarkers: any[] = []
-  const sellMarkers: any[] = []
+  const buyMarkers: ChartMarker[] = []
+  const sellMarkers: ChartMarker[] = []
   // Store trade reference with each marker for correct tooltip mapping
   const buyTrades: TradeRecord[] = []
   const sellTrades: TradeRecord[] = []
@@ -74,7 +84,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
 
   const boll = computeBOLL(data)
 
-  const series: any[] = [
+  const series: EChartsSeries[] = [
     {
       type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
       itemStyle: { color: '#ef4444', color0: '#22c55e', borderColor: '#ef4444', borderColor0: '#22c55e' },
@@ -125,7 +135,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
         label: { show: true, position: 'bottom', formatter: 'B', color: '#ef4444', fontSize: 10, fontWeight: 'bold' },
       })),
       tooltip: {
-        formatter: (p: any) => {
+        formatter: (p: { dataIndex: number }) => {
           const t = buyTrades[p.dataIndex]
           return t ? `<b>Buy</b><br/>Price: ${t.entry_price.toFixed(2)}` : ''
         }
@@ -143,7 +153,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
         label: { show: true, position: 'top', formatter: 'S', color: '#22c55e', fontSize: 10, fontWeight: 'bold' },
       })),
       tooltip: {
-        formatter: (p: any) => {
+        formatter: (p: { dataIndex: number }) => {
           const t = sellTrades[p.dataIndex]
           return t ? `<b>Sell</b><br/>Price: ${t.exit_price.toFixed(2)}<br/>PnL: ${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}` : ''
         }

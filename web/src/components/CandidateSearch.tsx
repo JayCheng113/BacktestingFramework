@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { searchCandidates, listStrategies } from '../api'
-import type { StrategyInfo, CandidateResult, SearchResult } from '../types'
+import type { StrategyInfo, CandidateResult, SearchResult, ParamSchema } from '../types'
 import DateBtn from './shared/DateBtn'
 import { useToast } from './shared/Toast'
 
@@ -101,26 +101,30 @@ export default function CandidateSearch() {
       const userStrategies = r.data.filter((s: StrategyInfo) => !s.key?.includes('research_'))
       setStrategies(userStrategies)
       if (userStrategies.length > 0) handleStrategyChange(userStrategies[0].name, userStrategies)
-    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败') })
+    }).catch((e: unknown) => {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败')
+    })
   }, [])
 
   const handleStrategyChange = (name: string, strats?: StrategyInfo[]) => {
     setStrategyName(name)
     const s = (strats || strategies).find(s => s.name === name)
     if (s) {
-      setParamRanges(Object.entries(s.parameters).map(([k, v]: [string, any]): ParamRangeState => {
-        const type = v.type || 'float'
-        if (type === 'bool' || typeof v.default === 'boolean') {
-          return { name: k, type: 'bool', selected: [true, false], defaultVal: v.default ?? true }
+      setParamRanges(Object.entries(s.parameters).map(([k, v]): ParamRangeState => {
+        const ps = v as ParamSchema
+        const type = ps.type || 'float'
+        if (type === 'bool' || typeof ps.default === 'boolean') {
+          return { name: k, type: 'bool', selected: [true, false], defaultVal: (ps.default as boolean) ?? true }
         }
         if (type === 'select' || type === 'str') {
-          const options: string[] = v.options ?? [String(v.default ?? '')]
-          return { name: k, type: type as 'select' | 'str', allOptions: options, selected: [...options], defaultVal: v.default ?? options[0] ?? '' }
+          const options: string[] = ps.options ?? [String(ps.default ?? '')]
+          return { name: k, type: type as 'select' | 'str', allOptions: options, selected: [...options], defaultVal: (ps.default as string) ?? options[0] ?? '' }
         }
         // numeric (int/float)
-        const def = v.default ?? 0
-        const min = v.min ?? (type === 'int' ? Math.max(1, def - 10) : def * 0.5)
-        const max = v.max ?? (type === 'int' ? def + 20 : def * 2)
+        const def = (ps.default as number) ?? 0
+        const min = ps.min ?? (type === 'int' ? Math.max(1, def - 10) : def * 0.5)
+        const max = ps.max ?? (type === 'int' ? def + 20 : def * 2)
         const step = type === 'int' ? Math.max(1, Math.round((max - min) / 5)) : (max - min) / 5
         return { name: k, type: type as 'int' | 'float', min, max, step, defaultVal: def }
       }))
@@ -181,8 +185,9 @@ export default function CandidateSearch() {
         skip_prefilter: skipPrefilter,
       })
       setResult(res.data)
-    } catch (e: any) {
-      showToast('error', e?.response?.data?.detail || '搜索失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '搜索失败')
     } finally {
       setSearching(false)
     }

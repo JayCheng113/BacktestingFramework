@@ -80,7 +80,7 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
     setWeights(prev => prev.filter((_, i) => i !== idx))
   }
 
-  const updateSubParam = (idx: number, key: string, value: any) => {
+  const updateSubParam = (idx: number, key: string, value: number | string | boolean) => {
     setSubs(prev => prev.map((s, i) =>
       i === idx ? { ...s, params: { ...s.params, [key]: value } } : s
     ))

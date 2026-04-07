@@ -79,8 +79,11 @@ export default function ResearchPanel() {
     try {
       const res = await fetch('/api/research/tasks')
       if (res.ok) setTasks(await res.json())
-    } catch {}
-  }, [])
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载研究任务失败')
+    }
+  }, [showToast])
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
@@ -124,7 +127,13 @@ export default function ResearchPanel() {
     setSelectedTask(null)
     try {
       const res = await fetch(`/api/research/tasks/${taskId}/stream`, { signal: controller.signal })
-      if (!res.ok || !res.body) { setStreaming(false); return }
+      if (!res.ok || !res.body) {
+        setStreaming(false)
+        setStreamingTaskId('')
+        loadTasks()
+        showToast('error', '研究任务连接失败')
+        return
+      }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = '', eventType = ''
@@ -146,7 +155,15 @@ export default function ResearchPanel() {
           }
         }
       }
-    } catch {}
+    } catch (e: unknown) {
+      // AbortError is expected when user cancels — don't toast for that
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        // intentionally silent — user-initiated cancel
+      } else {
+        const err = e as { response?: { data?: { detail?: string } }; message?: string }
+        showToast('error', err?.response?.data?.detail || err?.message || '研究任务流中断')
+      }
+    }
     setStreaming(false)
     setStreamingTaskId('')
     loadTasks()
@@ -161,7 +178,10 @@ export default function ResearchPanel() {
       setStreaming(false)
       setStreamingTaskId('')
       await loadTasks()
-    } catch {}
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '取消任务失败')
+    }
   }
 
   const selectTask = async (taskId: string) => {
@@ -173,7 +193,10 @@ export default function ResearchPanel() {
         setSelectedTask(task)
         loadResearchFiles(task)
       }
-    } catch {}
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载任务详情失败')
+    }
   }
 
   useEffect(() => {
@@ -203,7 +226,10 @@ export default function ResearchPanel() {
       } else {
         setResearchFiles([]) // no iterations = no files to promote
       }
-    } catch {}
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '加载研究文件失败')
+    }
   }
 
   const promoteStrategy = async (filename: string) => {
