@@ -38,7 +38,7 @@ export default function DocsPage() {
   return (
     <div className="flex" style={{ height: 'calc(100vh - 48px)' }}>
       {/* Sidebar nav */}
-      <div className="w-48 border-r overflow-y-auto py-4 px-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+      <div className="w-40 md:w-48 shrink-0 border-r overflow-y-auto py-4 px-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
         <div className="text-xs font-bold mb-3" style={{ color: 'var(--text-secondary)' }}>ez-trading 开发文档</div>
         {sections.map(s => (
           <button key={s.id} onClick={() => setActive(s.id)}

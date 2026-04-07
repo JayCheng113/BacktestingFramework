@@ -491,7 +491,7 @@ export default function PaperTradingPage() {
                       </thead>
                       <tbody>
                         {todayTrades.map((t, i) => (
-                          <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                             <td className="py-1">{t.symbol}</td>
                             <td className="py-1" style={{ color: t.side === 'buy' ? '#ef4444' : '#22c55e' }}>
                               {t.side === 'buy' ? '买入' : '卖出'}
@@ -545,7 +545,7 @@ export default function PaperTradingPage() {
                     </thead>
                     <tbody>
                       {trades.slice().reverse().map((t, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                           <td className="py-1">{t.snapshot_date}</td>
                           <td className="py-1">{t.symbol}</td>
                           <td className="py-1" style={{ color: t.side === 'buy' ? '#ef4444' : '#22c55e' }}>
@@ -570,13 +570,13 @@ export default function PaperTradingPage() {
                   type="date"
                   value={tickDate}
                   onChange={e => setTickDate(e.target.value)}
-                  className="px-2 py-1 rounded text-xs"
+                  className="px-3 py-1.5 rounded text-xs"
                   style={inputStyle}
                 />
                 <button
                   onClick={handleTick}
                   disabled={tickLoading || !tickDate}
-                  className="px-3 py-1 rounded text-xs font-medium text-white"
+                  className="px-3 py-1.5 rounded text-xs font-medium text-white"
                   style={{ backgroundColor: tickLoading ? '#30363d' : 'var(--color-accent)' }}
                 >
                   {tickLoading ? '执行中...' : '执行 Tick'}

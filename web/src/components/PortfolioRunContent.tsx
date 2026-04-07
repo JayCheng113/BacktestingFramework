@@ -617,7 +617,7 @@ export default function PortfolioRunContent(props: Props) {
                   ))}
                 </tr></thead>
                 <tbody>{searchResults.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i === 0 ? 'rgba(34,197,94,0.08)' : undefined }}>
+                  <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i === 0 ? 'rgba(34,197,94,0.08)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                     <td className="px-3 py-1.5 font-medium">{r.rank}</td>
                     <td className="px-3 py-1.5">{Object.entries(r.params || {}).map(([k, v]) => {
                       const label = currentSchema[k]?.label || k
@@ -749,8 +749,8 @@ export default function PortfolioRunContent(props: Props) {
                   </tr></thead>
                   <tbody>{Object.entries(result.active_weights)
                     .sort((a, b) => Math.abs((b[1] as ActiveWeight).active) - Math.abs((a[1] as ActiveWeight).active))
-                    .map(([sym, aw]) => (
-                    <tr key={sym} style={{ borderBottom: '1px solid var(--border)' }}>
+                    .map(([sym, aw], i) => (
+                    <tr key={sym} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                       <td className="px-3 py-1 font-mono">{sym}</td>
                       <td className="px-3 py-1">{((aw as ActiveWeight).portfolio * 100).toFixed(1)}%</td>
                       <td className="px-3 py-1">{((aw as ActiveWeight).benchmark * 100).toFixed(1)}%</td>
@@ -822,7 +822,7 @@ export default function PortfolioRunContent(props: Props) {
                     ))}
                   </tr></thead>
                   <tbody>{result.trades.map((t, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                       <td className="px-3 py-1">{t.date}</td>
                       <td className="px-3 py-1">{t.symbol}</td>
                       <td className="px-3 py-1" style={{ color: t.side === 'buy' ? 'var(--color-up)' : 'var(--color-down)' }}>{t.side === 'buy' ? '买入' : '卖出'}</td>

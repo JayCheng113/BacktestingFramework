@@ -15,17 +15,21 @@ interface ResearchIteration {
 interface SSEEvent { event: string; data: Record<string, unknown> }
 
 // Format SSE events as readable Chinese text
-function formatEvent(e: SSEEvent): { icon: string; text: string; color: string } {
+function formatEvent(e: SSEEvent): { icon: string; text: string; color: string; fullText?: string } {
   const d = e.data
   switch (e.event) {
     case 'iteration_start':
       return { icon: '🔄', text: `第 ${(d.iteration as number) + 1}/${d.max_iterations} 轮开始`, color: '#3b82f6' }
-    case 'hypothesis':
-      return { icon: '💡', text: `假设 ${(d.index as number) + 1}/${d.total}: ${(d.text as string || '').substring(0, 80)}`, color: '#f59e0b' }
+    case 'hypothesis': {
+      const hypoText = (d.text as string || '')
+      return { icon: '💡', text: `假设 ${(d.index as number) + 1}/${d.total}: ${hypoText.substring(0, 80)}`, color: '#f59e0b', fullText: hypoText.length > 80 ? hypoText : undefined }
+    }
     case 'code_success':
       return { icon: '✓', text: `策略创建成功: ${d.class_name}`, color: '#22c55e' }
-    case 'code_failed':
-      return { icon: '✗', text: `策略创建失败: ${(d.error as string || '').substring(0, 60)}`, color: '#ef4444' }
+    case 'code_failed': {
+      const errText = (d.error as string || '')
+      return { icon: '✗', text: `策略创建失败: ${errText.substring(0, 60)}`, color: '#ef4444', fullText: errText.length > 60 ? errText : undefined }
+    }
     case 'batch_start':
       return { icon: '⚙', text: `开始回测 ${d.total_specs} 个策略...`, color: '#8b949e' }
     case 'batch_complete':
@@ -341,7 +345,7 @@ export default function ResearchPanel() {
               return (
                 <div key={i} className="flex items-start gap-2 text-sm border-l-2 border-blue-500 pl-3">
                   <span style={{ flexShrink: 0 }}>{f.icon}</span>
-                  <span style={{ color: f.color }}>{f.text}</span>
+                  <span style={{ color: f.color }} title={f.fullText}>{f.text}</span>
                 </div>
               )
             })}
@@ -486,7 +490,7 @@ export default function ResearchPanel() {
                           {hypotheses.map((h, hi) => (
                             <div key={hi} className="text-xs flex items-start gap-1 mb-0.5" style={{ color: 'var(--text-secondary)' }}>
                               <span style={{ color: '#f59e0b', flexShrink: 0 }}>💡</span>
-                              <span>{h.length > 80 ? h.substring(0, 80) + '...' : h}</span>
+                              <span title={h.length > 80 ? h : undefined}>{h.length > 80 ? h.substring(0, 80) + '...' : h}</span>
                             </div>
                           ))}
                         </div>
