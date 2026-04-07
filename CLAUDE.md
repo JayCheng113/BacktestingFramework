@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.16 | Tests: 2234 passed + 10 skipped (2244 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.16.1 | Tests: 2234 passed + 10 skipped (2244 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -189,6 +189,17 @@ No version tag without review pass. No push without critical issues resolved.
   - **DocsPage API 参考**: 新增 13 个模拟盘 API 端点到 Ch8 API 参考
   - **集成测试 5 个**: test_factor_contract_all_builtins (所有注册因子计算契约), test_backtest_with_market_rules (T+1/整手/印花税), test_walk_forward_determinism (WF 确定性), test_portfolio_backtest_with_optimizer (MeanVariance 优化器), test_full_pipeline_research_gate (回测→WF→门控→裁定)
   - 2229 → 2234 tests (+5 integration)
+
+- **V2.16.1**: Stability — 前端深度打磨:
+  - **Toast 通知系统**: 新建 `ToastProvider` + `useToast` hook, 34 处 `alert()` 替换为非阻塞 toast (success/error/warning/info), 4s/8s 自动消失, fadeIn 动画
+  - **TypeScript `any` 清零**: components/ + pages/ 全部 `.tsx` 文件 0 处 `any` (从 65+ 降至 0). 新增 20+ 接口定义 (EvalFactorResult, CorrResponse, WalkForwardResult, SearchResultRow, FactorCategory, RegistryEntry, ChartMarker 等)
+  - **silent catch 清零**: 所有 `.catch(() => {})` 替换为 toast 错误反馈, 包括策略列表/历史记录/因子列表/设置加载等初始化路径
+  - **表单验证**: 日期范围 (start < end) 校验, WF nSplits (2-20) 校验, ResearchPanel 表单 streaming 时 disable, ExperimentPanel 清理天数输入校验
+  - **状态一致性**: ResearchPanel 文件加载失败清空旧任务数据, SettingsModal 保存/刷新分离 (刷新失败不覆盖保存成功)
+  - **UI 视觉**: 表格斑马纹, 视觉层次 (标题 text-base semibold), 图表高度统一, 响应式侧边栏, SettingsModal boxSizing, 研究事件左侧蓝色边线
+  - **Navbar 版本号动态化**: 从 /api/health 读取版本 (不再硬编码)
+  - **Windows 兼容**: 所有 `read_text()` 加 `encoding="utf-8"`, LightGBM/XGBoost 测试 skip 用 `except Exception` (捕获 OSError)
+  - **CI 修复**: macOS `brew install libomp` for LightGBM
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
