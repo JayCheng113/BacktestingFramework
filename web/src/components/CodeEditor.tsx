@@ -164,6 +164,15 @@ const KIND_COLORS: Record<CodeKind, string> = {
   ml_alpha: '#059669',
 }
 
+interface RegistryEntry {
+  name: string
+  description?: string
+}
+
+interface EditorHandle {
+  getValue: () => string
+}
+
 const api = (path: string, opts?: RequestInit) =>
   fetch(`/api/code${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
 
@@ -183,7 +192,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [portfolioFiles, setPortfolioFiles] = useState<FileInfo[]>([])
   const [crossFactorFiles, setCrossFactorFiles] = useState<FileInfo[]>([])
   const [mlAlphaFiles, setMlAlphaFiles] = useState<FileInfo[]>([])
-  const [registry, setRegistry] = useState<Record<string, { builtin: any[]; user: any[] }>>({})
+  const [registry, setRegistry] = useState<Record<string, { builtin: RegistryEntry[]; user: RegistryEntry[] }>>({})
   const [status, setStatus] = useState<string>('')
   const [errors, setErrors] = useState<string[]>([])
   const [testOutput, setTestOutput] = useState('')
@@ -191,7 +200,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [validating, setValidating] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
-  const editorRef = useRef<any>(null)
+  const editorRef = useRef<EditorHandle | null>(null)
   const loadFileTokenRef = useRef(0)  // V2.13.2 A2: race token for loadFile
 
   useEffect(() => { loadAllFiles() }, [])
@@ -244,7 +253,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setErrors([])
         setTestOutput('')
       }
-    } catch (e: any) { if (loadFileTokenRef.current === myToken) setStatus(`Error: ${e.message}`) }
+    } catch (e: unknown) { if (loadFileTokenRef.current === myToken) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
   }
 
   const newFile = async (kind: CodeKind) => {

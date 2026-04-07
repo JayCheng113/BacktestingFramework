@@ -235,16 +235,16 @@ export default function ResearchPanel() {
       <div className="rounded-lg p-4 mb-6" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
         <h3 className="text-lg font-semibold mb-3">自主研究任务</h3>
         <div className="flex flex-col gap-3">
-          <textarea value={goal} onChange={e => setGoal(e.target.value)}
+          <textarea value={goal} onChange={e => setGoal(e.target.value)} disabled={streaming}
             placeholder="描述研究目标，例如：探索A股动量策略，目标夏普比率 > 1，最大回撤 < 20%"
             className="w-full p-3 rounded text-sm resize-none"
-            style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', minHeight: '80px' }} />
+            style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', minHeight: '80px', opacity: streaming ? 0.5 : 1 }} />
           <div className="flex gap-3 items-end flex-wrap">
             <div>
               <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>股票代码</label>
-              <input value={symbol} onChange={e => setSymbol(e.target.value)}
+              <input value={symbol} onChange={e => setSymbol(e.target.value)} disabled={streaming}
                 className="px-3 py-1.5 rounded text-sm w-32"
-                style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', opacity: streaming ? 0.5 : 1 }} />
             </div>
             <div>
               <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>日期范围</label>
@@ -273,9 +273,9 @@ export default function ResearchPanel() {
                 <div key={f.label}>
                   <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>{f.label}</label>
                   <input type="number" value={f.value} onChange={e => f.set(Number(e.target.value))}
-                    min={f.min} max={f.max} step={(f as { step?: number }).step || 1}
+                    min={f.min} max={f.max} step={(f as { step?: number }).step || 1} disabled={streaming}
                     className="px-2 py-1 rounded text-sm w-full"
-                    style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                    style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', opacity: streaming ? 0.5 : 1 }} />
                 </div>
               ))}
             </div>

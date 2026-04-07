@@ -31,7 +31,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
       }))
       setFactors(list)
       if (list.length > 0 && !factor) setFactor(list[0].value)
-    }).catch(() => {})
+    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载因子列表失败') })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // V2.12.2 codex: clear stale factor result when any evaluation input
@@ -108,19 +108,23 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
       <h3 className="text-sm font-medium mb-3">技术指标评估 (单股)</h3>
-      <div className="flex gap-3 items-end mb-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>
-          <select value={factor} onChange={e => setFactor(e.target.value)}
-            className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
-            {factors.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-          </select>
+      {factors.length === 0 ? (
+        <div className="py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>暂无可用因子</div>
+      ) : (
+        <div className="flex gap-3 items-end mb-4">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>因子</label>
+            <select value={factor} onChange={e => setFactor(e.target.value)}
+              className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+              {factors.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+          <button onClick={handleEval} disabled={loading || !factor}
+            className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
+            {loading ? '评估中...' : '评估'}
+          </button>
         </div>
-        <button onClick={handleEval} disabled={loading || !factor}
-          className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
-          {loading ? '评估中...' : '评估'}
-        </button>
-      </div>
+      )}
       {result && (
         <div>
           {/* Metric cards */}

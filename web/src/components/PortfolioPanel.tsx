@@ -25,7 +25,10 @@ export default function PortfolioPanel() {
   // A-share T+1 / stamp tax / limit-pct rules to US/HK backtests.
   const [market, setMarket] = useState('cn_stock')
   const [startDate, setStartDate] = useState('2020-01-01')
-  const [endDate, setEndDate] = useState('2024-12-31')
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
   const [freq, setFreq] = useState('monthly')
   const [strategyParams, setStrategyParams] = useState<Record<string, any>>({})
   const [settings, setSettings] = useState<BacktestSettingsValue>(DEFAULT_SETTINGS)
@@ -217,12 +220,12 @@ export default function PortfolioPanel() {
       setFactors(data.available_factors || [])
       setFactorCategories(data.factor_categories || [])
       if (data.strategies?.length > 0 && !selected) setSelected(data.strategies[0].name)
-    }).catch(() => {})
+    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载组合策略失败') })
     loadHistory()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadHistory = () => {
-    listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch(() => {})
+    listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载历史记录失败') })
   }
 
   const toggleRunSelection = (runId: string) => {
@@ -358,6 +361,10 @@ export default function PortfolioPanel() {
   }
 
   const handleRun = async () => {
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
     // V2.12.2 codex round 8: capture per-request token. Check on resume
     // to reject stale responses after input change or new run.
     const myToken = ++runTokenRef.current
@@ -407,6 +414,10 @@ export default function PortfolioPanel() {
   }
 
   const handleWalkForward = async () => {
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
     // V2.12.2 codex round 8: stale-response token.
     const myToken = ++wfTokenRef.current
     setWfLoading(true); setWfResult(null)
@@ -462,6 +473,10 @@ export default function PortfolioPanel() {
   }
 
   const handleSearch = async () => {
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) { showToast('warning', '请填写股票池'); return }
 

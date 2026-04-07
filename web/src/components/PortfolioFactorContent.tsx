@@ -8,6 +8,60 @@ const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid va
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
+// ── Factor evaluation types ──────────────────────────────────────
+
+interface FactorInfo {
+  key?: string
+  class_name?: string
+  description?: string
+  needs_fina?: boolean
+}
+
+interface FactorCategory {
+  key: string
+  label: string
+  factors: (string | FactorInfo)[]
+}
+
+interface EvalFactorResult {
+  factor_name: string
+  mean_ic: number | null
+  mean_rank_ic: number | null
+  icir: number | null
+  rank_icir: number | null
+  n_eval_dates: number
+  avg_stocks_per_date?: number
+  ic_series?: number[]
+  rank_ic_series?: number[]
+  eval_dates?: string[]
+  ic_decay?: Record<string, number>
+  quintile_returns?: Record<string, number>
+}
+
+interface EvalResponse {
+  results: EvalFactorResult[]
+  warnings?: string[]
+}
+
+interface CorrResponse {
+  correlation_matrix: number[][]
+  factor_names: string[]
+}
+
+interface QualityRow {
+  symbol: string
+  industry?: string
+  daily_count: number
+  daily_expected: number
+  daily_coverage_pct: number
+  has_fina: boolean
+  fina_reports?: number
+}
+
+interface EChartsTooltipParam {
+  data: [number, number, number]
+}
+
 const fmt = (v: number | null | undefined, pct = false) => {
   if (v == null) return '-'
   return pct ? `${(v * 100).toFixed(2)}%` : v.toFixed(4)
@@ -20,16 +74,16 @@ interface Props {
   startDate: string; setStartDate: (v: string) => void
   endDate: string; setEndDate: (v: string) => void
   factors: string[]
-  factorCategories: { key: string; label: string; factors: any[] }[]
+  factorCategories: FactorCategory[]
   // Factor research state
   evalFactors: string[]; setEvalFactors: (v: string[] | ((prev: string[]) => string[])) => void
   neutralize: boolean; setNeutralize: (v: boolean) => void
-  evalResult: any
-  corrResult: any
+  evalResult: EvalResponse | null
+  corrResult: CorrResponse | null
   evalLoading: boolean
   fetchingFunda: boolean
   fundaStatus: string
-  qualityReport: any[]
+  qualityReport: QualityRow[]
   // Handlers
   handleEvaluateFactors: () => void
   handleFetchFundamental: () => void
@@ -59,7 +113,7 @@ export default function PortfolioFactorContent(props: Props) {
           <div key={cat.key} className="mb-2">
             <span className="text-xs font-medium mr-2" style={{ color: 'var(--text-secondary)' }}>{CATEGORY_LABELS[cat.key] || cat.label}:</span>
             <div className="flex flex-wrap gap-1 mt-0.5">
-              {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
+              {(Array.isArray(cat.factors) ? cat.factors : []).map((f: string | FactorInfo) => {
                 const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
                 const fLabel = FACTOR_LABELS[fKey] || fKey
                 const fDesc = typeof f === 'object' ? f.description : ''
@@ -171,7 +225,7 @@ export default function PortfolioFactorContent(props: Props) {
                   <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                 ))}
               </tr></thead>
-              <tbody>{evalResult.results.map((r: any) => (
+              <tbody>{evalResult.results.map((r: EvalFactorResult) => (
                 <tr key={r.factor_name} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td className="px-3 py-1.5">{FACTOR_LABELS[r.factor_name] || r.factor_name}</td>
                   <td className="px-3 py-1.5" style={{ color: (r.mean_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_ic)}</td>
@@ -191,12 +245,12 @@ export default function PortfolioFactorContent(props: Props) {
               backgroundColor: '#0d1117',
               title: { text: '选股能力随时间变化 (Rank IC)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
               tooltip: { trigger: 'axis' as const },
-              legend: { data: evalResult.results.map((r: any) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+              legend: { data: evalResult.results.map((r: EvalFactorResult) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
               grid: { left: 60, right: 20, top: 50, bottom: 30 },
               xAxis: { type: 'time' as const, axisLabel: { color: '#8b949e', fontSize: 9 } },
               yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
               color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
-              series: evalResult.results.map((r: any) => ({
+              series: evalResult.results.map((r: EvalFactorResult) => ({
                 name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
                 data: (r.eval_dates || []).map((d: string, i: number) => [d, r.rank_ic_series?.[i] ?? 0]),
                 showSymbol: false,
@@ -212,12 +266,12 @@ export default function PortfolioFactorContent(props: Props) {
                 backgroundColor: '#0d1117',
                 title: { text: '信号持续性 (IC随天数衰减)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
                 tooltip: { trigger: 'axis' as const },
-                legend: { data: evalResult.results.map((r: any) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+                legend: { data: evalResult.results.map((r: EvalFactorResult) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
                 grid: { left: 60, right: 20, top: 50, bottom: 30 },
                 xAxis: { type: 'category' as const, data: ['1天', '5天', '10天', '20天'], axisLabel: { color: '#8b949e' } },
                 yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
                 color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
-                series: evalResult.results.map((r: any) => ({
+                series: evalResult.results.map((r: EvalFactorResult) => ({
                   name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
                   data: [r.ic_decay['1'], r.ic_decay['5'], r.ic_decay['10'], r.ic_decay['20']],
                 })),
@@ -233,7 +287,7 @@ export default function PortfolioFactorContent(props: Props) {
                 xAxis: { type: 'category' as const, data: ['Q1(低)', 'Q2', 'Q3', 'Q4', 'Q5(高)'], axisLabel: { color: '#8b949e' } },
                 yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e', formatter: (v: number) => (v * 100).toFixed(2) + '%' } },
                 color: ['#2563eb', '#ef4444', '#22c55e'],
-                series: evalResult.results.map((r: any) => ({
+                series: evalResult.results.map((r: EvalFactorResult) => ({
                   name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'bar' as const,
                   data: [1, 2, 3, 4, 5].map(q => r.quintile_returns[String(q)] ?? 0),
                 })),
@@ -249,7 +303,7 @@ export default function PortfolioFactorContent(props: Props) {
               <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子相关性 (高相关说明因子重复)</h4>
               <ReactECharts option={{
                 backgroundColor: '#0d1117',
-                tooltip: { formatter: (p: any) => `${corrLabels[p.data[1]]} × ${corrLabels[p.data[0]]}: ${p.data[2].toFixed(3)}` },
+                tooltip: { formatter: (p: EChartsTooltipParam) => `${corrLabels[p.data[1]]} × ${corrLabels[p.data[0]]}: ${p.data[2].toFixed(3)}` },
                 grid: { left: 120, right: 40, top: 10, bottom: 40 },
                 xAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: '#8b949e', fontSize: 9, rotate: 30 } },
                 yAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: '#8b949e', fontSize: 9 } },
@@ -257,7 +311,7 @@ export default function PortfolioFactorContent(props: Props) {
                 series: [{
                   type: 'heatmap', data: corrResult.correlation_matrix.flatMap((row: number[], i: number) =>
                     row.map((v: number, j: number) => [j, i, Math.round(v * 1000) / 1000])),
-                  label: { show: true, color: '#e6edf3', fontSize: 10, formatter: (p: any) => p.data[2].toFixed(2) },
+                  label: { show: true, color: '#e6edf3', fontSize: 10, formatter: (p: EChartsTooltipParam) => p.data[2].toFixed(2) },
                 }],
               }} style={{ height: Math.max(200, corrResult.factor_names.length * 40 + 60) }} />
             </div>
@@ -289,7 +343,7 @@ const VERDICT_LABELS: Record<string, string> = {
 
 function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategories }: {
   symbols: string; market: string; startDate: string; endDate: string
-  factorCategories: { key: string; label: string; factors: any[] }[]
+  factorCategories: FactorCategory[]
 }) {
   const [selectedAlpha, setSelectedAlpha] = useState('')
   const [loading, setLoading] = useState(false)
@@ -317,7 +371,7 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
   // Get ML alpha names from factorCategories
   const mlCat = factorCategories.find(c => c.key === 'ml_alpha')
   const mlAlphas: string[] = mlCat
-    ? (mlCat.factors as any[]).map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
+    ? (mlCat.factors as (string | FactorInfo)[]).map((f: string | FactorInfo) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
     : []
 
   const runDiagnostics = async () => {
@@ -336,9 +390,10 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
       })
       if (diagTokenRef.current !== token) return  // superseded by input change or new request
       setResult(resp.data)
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (diagTokenRef.current !== token) return
-      setError(e.response?.data?.detail || '诊断失败')
+      const err = e as { response?: { data?: { detail?: string } } }
+      setError(err?.response?.data?.detail || '诊断失败')
     } finally { if (diagTokenRef.current === token) setLoading(false) }
   }
 
