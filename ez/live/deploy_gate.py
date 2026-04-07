@@ -9,7 +9,7 @@
 All params are required. No Optional bypass. Reuses GateReason/GateVerdict
 from ez/agent/gates.py for consistent verdict format.
 
-V2.16 S1: WF metrics now read from DB (portfolio_runs.wf_metrics column),
+V2.15.1 S1: WF metrics now read from DB (portfolio_runs.wf_metrics column),
 eliminating the client trust boundary. The /walk-forward endpoint writes
 WF metrics to the source run when source_run_id is provided.
 """
@@ -61,7 +61,7 @@ class DeployGate:
     ) -> GateVerdict:
         """4-phase hard check. All params required. No Optional.
 
-        V2.16 S1: WF metrics (p_value, overfitting_score) are now read from
+        V2.15.1 S1: WF metrics (p_value, overfitting_score) are now read from
         portfolio_runs.wf_metrics (server-side, written by /walk-forward endpoint).
         This eliminates the V2.15 trust boundary where clients could forge WF metrics.
         """

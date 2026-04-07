@@ -1,4 +1,4 @@
-"""V2.16 S2: Restart recovery regression tests.
+"""V2.15.1 S2: Restart recovery regression tests.
 
 Tests that error -> restart -> _restore_full_state produces correct state,
 including _last_prices and risk_manager replay.

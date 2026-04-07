@@ -38,7 +38,7 @@ def _make_run(
 ) -> dict:
     """Build a fake portfolio_runs row (already JSON-parsed, like PortfolioStore.get_run()).
 
-    V2.16 S1: wf_metrics is now a column in portfolio_runs, read by DeployGate
+    V2.15.1 S1: wf_metrics is now a column in portfolio_runs, read by DeployGate
     from the run dict (not passed as a separate parameter).
     """
     if metrics is _SENTINEL:

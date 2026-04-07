@@ -992,7 +992,7 @@ class PortfolioWFRequest(PortfolioCommonConfig):
     initial_cash: float = Field(default=1_000_000, ge=10_000)
     n_splits: int = Field(default=5, ge=2, le=20)
     train_ratio: float = Field(default=0.7, gt=0.0, lt=1.0)
-    # V2.16 S1: optional source_run_id — if provided, WF metrics are persisted
+    # V2.15.1 S1: optional source_run_id — if provided, WF metrics are persisted
     # to portfolio_runs.wf_metrics for that run. This closes the trust boundary
     # in DeployGate (WF metrics read from DB, not client input).
     source_run_id: str | None = None
@@ -1060,7 +1060,7 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
     # Significance on OOS equity curve
     sig = portfolio_significance(wf_result.oos_equity_curve, seed=42) if wf_result.oos_equity_curve else None
 
-    # V2.16 S1: persist WF metrics to portfolio_runs.wf_metrics for the source run.
+    # V2.15.1 S1: persist WF metrics to portfolio_runs.wf_metrics for the source run.
     # This closes the trust boundary — DeployGate reads WF metrics from DB.
     if req.source_run_id:
         pf_store = _get_store()

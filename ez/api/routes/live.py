@@ -295,7 +295,7 @@ def approve_deployment(deployment_id: str):
     if not spec:
         raise HTTPException(500, f"部署配置 {record.spec_id} 未找到")
 
-    # Run gate — V2.16 S1: WF metrics read from DB, not from client
+    # Run gate — V2.15.1 S1: WF metrics read from DB, not from client
     gate = DeployGate()
     pf_store = _get_portfolio_store()
     verdict = gate.evaluate(

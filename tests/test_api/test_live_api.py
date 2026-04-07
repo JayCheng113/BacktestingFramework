@@ -85,7 +85,7 @@ _WF_METRICS_BAD = {
 
 
 def _make_mock_run_with_wf(run_id: str = "test-run-001", wf_metrics: dict | None = None) -> dict:
-    """Build mock run with wf_metrics in the run dict (V2.16 S1: server-side WF)."""
+    """Build mock run with wf_metrics in the run dict (V2.15.1 S1: server-side WF)."""
     run = _make_mock_run(run_id)
     run["wf_metrics"] = wf_metrics
     return run
@@ -137,7 +137,7 @@ class TestApproveEndpoint:
 
     def test_approve_runs_gate(self):
         """Deploy then approve — should pass with good metrics.
-        V2.16 S1: wf_metrics are now in the run dict (server-side), not deploy request.
+        V2.15.1 S1: wf_metrics are now in the run dict (server-side), not deploy request.
         """
         mock_run = _make_mock_run_with_wf(wf_metrics=_WF_METRICS_GOOD)
         with patch("ez.api.routes.live._get_portfolio_store") as mock_pf:
@@ -162,7 +162,7 @@ class TestApproveEndpoint:
 
     def test_approve_rejects_bad_metrics(self):
         """Deploy then approve with bad WF + run metrics — should fail.
-        V2.16 S1: wf_metrics are now in the run dict (server-side).
+        V2.15.1 S1: wf_metrics are now in the run dict (server-side).
         """
         mock_run = _make_mock_run_with_wf(wf_metrics=_WF_METRICS_BAD)
         # Make run metrics bad too
