@@ -1,4 +1,5 @@
 import ReactECharts from 'echarts-for-react'
+import { CHART } from './shared/chartTheme'
 import type { PortfolioRunResult, ParamSchema, ActiveWeight } from '../types'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import BacktestSettings from './BacktestSettings'
@@ -248,16 +249,16 @@ export default function PortfolioRunContent(props: Props) {
   }
 
   const equityOption = result ? {
-    backgroundColor: '#0d1117',
-    title: { text: '组合净值曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '组合净值曲线', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' as const },
-    legend: { data: ['组合', settings.benchmark ? `基准(${settings.benchmark})` : '基准(现金)'], textStyle: { color: '#8b949e' }, top: 25 },
+    legend: { data: ['组合', settings.benchmark ? `基准(${settings.benchmark})` : '基准(现金)'], textStyle: { color: CHART.textSecondary }, top: 25 },
     grid: { left: 70, right: 20, top: 55, bottom: 30 },
-    xAxis: { type: 'category' as const, data: result.dates.map(d => d.slice(0, 10)), axisLabel: { color: '#8b949e', rotate: 30, fontSize: 9 } },
-    yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+    xAxis: { type: 'category' as const, data: result.dates.map(d => d.slice(0, 10)), axisLabel: { color: CHART.textSecondary, rotate: 30, fontSize: 9 } },
+    yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
-      { name: '组合', type: 'line' as const, data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
-      { name: settings.benchmark ? `基准(${settings.benchmark})` : '基准(现金)', type: 'line' as const, data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' as const }, showSymbol: false },
+      { name: '组合', type: 'line' as const, data: result.equity_curve, lineStyle: { color: CHART.accent }, showSymbol: false },
+      { name: settings.benchmark ? `基准(${settings.benchmark})` : '基准(现金)', type: 'line' as const, data: result.benchmark_curve, lineStyle: { color: CHART.textSecondary, type: 'dashed' as const }, showSymbol: false },
     ],
   } : null
 
@@ -441,10 +442,10 @@ export default function PortfolioRunContent(props: Props) {
           )}
         </div>
         <div className="flex gap-2 flex-wrap mt-2">
-          <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? '#30363d' : 'var(--color-accent)' }}>
+          <button onClick={handleRun} disabled={loading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: loading ? CHART.border : 'var(--color-accent)' }}>
             {loading ? '运行中...' : '运行组合回测'}
           </button>
-          <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? '#30363d' : '#7c3aed' }}>
+          <button onClick={handleWalkForward} disabled={wfLoading} className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: wfLoading ? CHART.border : '#7c3aed' }}>
             {wfLoading ? '验证中...' : '前推验证'}
           </button>
           {!isEnsemble && (
@@ -456,7 +457,7 @@ export default function PortfolioRunContent(props: Props) {
           {result && (
             <button onClick={handleDeploy} disabled={deployLoading || !wfResult}
               className="px-3 py-1.5 rounded text-sm font-medium text-white"
-              style={{ backgroundColor: (deployLoading || !wfResult) ? '#30363d' : '#059669' }}
+              style={{ backgroundColor: (deployLoading || !wfResult) ? CHART.border : '#059669' }}
               title={wfResult ? '包含前推验证结果' : '请先运行前推验证'}>
               {deployLoading ? '部署中...' : !wfResult ? '需先前推验证' : '部署到模拟盘'}
             </button>
@@ -490,7 +491,7 @@ export default function PortfolioRunContent(props: Props) {
                 const psSize = selCount > 0 ? (1 << selCount) - 1 : 0
                 const over = psSize > 64
                 return (
-                  <span className="text-xs" style={{ color: over ? '#ef4444' : 'var(--text-secondary)' }}>
+                  <span className="text-xs" style={{ color: over ? CHART.up : 'var(--text-secondary)' }}>
                     {selCount > 0 ? `${selCount} 因子 → ${psSize} 种组合` : '请先选择因子'}
                     {over && ' (超过 64 上限，请减少因子)'}
                   </span>
@@ -573,7 +574,7 @@ export default function PortfolioRunContent(props: Props) {
             const psOver = msKey ? ((1 << (searchGrid[msKey] || '').split(',').filter(Boolean).length) - 1) > 64 : false
             return (
               <button onClick={handleSearch} disabled={searchLoading || psOver}
-                className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: (searchLoading || psOver) ? '#30363d' : '#1e6b3a' }}>
+                className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: (searchLoading || psOver) ? CHART.border : '#1e6b3a' }}>
                 {searchLoading ? '搜索中...' : psOver ? '因子过多' : '开始搜索'}
               </button>
             )
@@ -583,10 +584,10 @@ export default function PortfolioRunContent(props: Props) {
           {searchMeta && (searchMeta.sampled > 0 || searchMeta.failed > 0) && (
             <div className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
               共 {searchMeta.total_combinations} 种组合, 采样 {searchMeta.sampled},
-              成功 <span style={{ color: '#22c55e' }}>{searchMeta.completed}</span>
+              成功 <span style={{ color: CHART.down }}>{searchMeta.completed}</span>
               {searchMeta.failed > 0 && (
                 <>
-                  , 失败 <span style={{ color: '#ef4444', fontWeight: 600 }}>{searchMeta.failed}</span>
+                  , 失败 <span style={{ color: CHART.up, fontWeight: 600 }}>{searchMeta.failed}</span>
                 </>
               )}
             </div>
@@ -624,7 +625,7 @@ export default function PortfolioRunContent(props: Props) {
                       const val = typeof v === 'string' ? (FACTOR_LABELS[v] || v) : String(v)
                       return `${label}=${val}`
                     }).join(', ')}</td>
-                    <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? '#22c55e' : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
+                    <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? CHART.down : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
                     <td className="px-3 py-1.5">{r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}</td>
                     <td className="px-3 py-1.5">{r.annualized_return != null ? (r.annualized_return * 100).toFixed(1) + '%' : '-'}</td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{r.max_drawdown != null ? (r.max_drawdown * 100).toFixed(1) + '%' : '-'}</td>
@@ -683,17 +684,17 @@ export default function PortfolioRunContent(props: Props) {
           {result.latest_weights && Object.keys(result.latest_weights).length > 0 && (
             <div className="mt-3">
               <ReactECharts option={{
-                backgroundColor: '#0d1117',
+                backgroundColor: CHART.bg,
                 title: {
                   text: result.terminal_liquidated
                     ? '期末前最后持仓 (次日已全部清仓)'
                     : '最新持仓分布',
-                  textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center',
+                  textStyle: { color: CHART.text, fontSize: 12 }, left: 'center',
                 },
                 tooltip: { trigger: 'item' as const, formatter: '{b}: {d}%' },
                 series: [{
                   type: 'pie', radius: ['30%', '55%'], center: ['50%', '55%'],
-                  label: { color: '#8b949e', fontSize: 10 },
+                  label: { color: CHART.textSecondary, fontSize: 10 },
                   data: [
                     ...Object.entries(result.latest_weights)
                       .filter(([, w]) => w > 0.001)

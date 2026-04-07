@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
+import { CHART } from './shared/chartTheme'
 import DateRangePicker from './DateRangePicker'
 import { mlAlphaDiagnostics } from '../api'
 import type { DiagnosticsResult } from '../types'
@@ -169,11 +170,11 @@ export default function PortfolioFactorContent(props: Props) {
       </div>
       <div className="flex items-center gap-2 mb-3">
         <button onClick={handleFetchFundamental} disabled={fetchingFunda}
-          className="px-3 py-1.5 rounded text-sm font-medium" style={{ backgroundColor: fetchingFunda ? '#30363d' : '#1e6b3a', color: '#fff' }}>
+          className="px-3 py-1.5 rounded text-sm font-medium" style={{ backgroundColor: fetchingFunda ? CHART.border : '#1e6b3a', color: '#fff' }}>
           {fetchingFunda ? '获取中...' : '获取基本面数据'}
         </button>
         <button onClick={handleEvaluateFactors} disabled={evalLoading}
-          className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: evalLoading ? '#30363d' : '#0891b2' }}>
+          className="px-4 py-1.5 rounded text-sm font-medium text-white" style={{ backgroundColor: evalLoading ? CHART.border : '#0891b2' }}>
           {evalLoading ? '评估中...' : '评估因子'}
         </button>
         {fundaStatus && <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{fundaStatus}</span>}
@@ -245,14 +246,14 @@ export default function PortfolioFactorContent(props: Props) {
           {/* IC time series chart */}
           {(evalResult.results[0]?.ic_series?.length ?? 0) > 0 && (
             <ReactECharts option={{
-              backgroundColor: '#0d1117',
-              title: { text: '选股能力随时间变化 (Rank IC)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+              backgroundColor: CHART.bg,
+              title: { text: '选股能力随时间变化 (Rank IC)', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
               tooltip: { trigger: 'axis' as const },
-              legend: { data: evalResult.results.map((r: EvalFactorResult) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+              legend: { data: evalResult.results.map((r: EvalFactorResult) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: CHART.textSecondary, fontSize: 10 }, top: 25 },
               grid: { left: 60, right: 20, top: 50, bottom: 30 },
-              xAxis: { type: 'time' as const, axisLabel: { color: '#8b949e', fontSize: 9 } },
-              yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-              color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
+              xAxis: { type: 'time' as const, axisLabel: { color: CHART.textSecondary, fontSize: 9 } },
+              yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
+              color: [CHART.accent, CHART.up, CHART.down, '#eab308', '#8b5cf6'],
               series: evalResult.results.map((r: EvalFactorResult) => ({
                 name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
                 data: (r.eval_dates || []).map((d: string, i: number) => [d, r.rank_ic_series?.[i] ?? 0]),
@@ -266,14 +267,14 @@ export default function PortfolioFactorContent(props: Props) {
             {/* IC Decay */}
             {evalResult.results[0]?.ic_decay && (
               <ReactECharts option={{
-                backgroundColor: '#0d1117',
-                title: { text: '信号持续性 (IC随天数衰减)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                backgroundColor: CHART.bg,
+                title: { text: '信号持续性 (IC随天数衰减)', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
                 tooltip: { trigger: 'axis' as const },
-                legend: { data: evalResult.results.map((r: EvalFactorResult) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 25 },
+                legend: { data: evalResult.results.map((r: EvalFactorResult) => FACTOR_LABELS[r.factor_name] || r.factor_name), textStyle: { color: CHART.textSecondary, fontSize: 10 }, top: 25 },
                 grid: { left: 60, right: 20, top: 50, bottom: 30 },
-                xAxis: { type: 'category' as const, data: ['1天', '5天', '10天', '20天'], axisLabel: { color: '#8b949e' } },
-                yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-                color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
+                xAxis: { type: 'category' as const, data: ['1天', '5天', '10天', '20天'], axisLabel: { color: CHART.textSecondary } },
+                yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
+                color: [CHART.accent, CHART.up, CHART.down, '#eab308', '#8b5cf6'],
                 series: evalResult.results.map((r: EvalFactorResult) => ({
                   name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
                   data: [r.ic_decay?.['1'], r.ic_decay?.['5'], r.ic_decay?.['10'], r.ic_decay?.['20']],
@@ -283,13 +284,13 @@ export default function PortfolioFactorContent(props: Props) {
             {/* Quintile returns */}
             {evalResult.results[0]?.quintile_returns && (
               <ReactECharts option={{
-                backgroundColor: '#0d1117',
-                title: { text: '按因子排名分5档的未来5天收益', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+                backgroundColor: CHART.bg,
+                title: { text: '按因子排名分5档的未来5天收益', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
                 tooltip: { trigger: 'axis' as const },
                 grid: { left: 60, right: 20, top: 50, bottom: 30 },
-                xAxis: { type: 'category' as const, data: ['Q1(低)', 'Q2', 'Q3', 'Q4', 'Q5(高)'], axisLabel: { color: '#8b949e' } },
-                yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e', formatter: (v: number) => (v * 100).toFixed(2) + '%' } },
-                color: ['#2563eb', '#ef4444', '#22c55e'],
+                xAxis: { type: 'category' as const, data: ['Q1(低)', 'Q2', 'Q3', 'Q4', 'Q5(高)'], axisLabel: { color: CHART.textSecondary } },
+                yAxis: { type: 'value' as const, splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary, formatter: (v: number) => (v * 100).toFixed(2) + '%' } },
+                color: [CHART.accent, CHART.up, CHART.down],
                 series: evalResult.results.map((r: EvalFactorResult) => ({
                   name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'bar' as const,
                   data: [1, 2, 3, 4, 5].map(q => r.quintile_returns?.[String(q)] ?? 0),
@@ -305,16 +306,16 @@ export default function PortfolioFactorContent(props: Props) {
             <div className="mt-3">
               <h4 className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>因子相关性 (高相关说明因子重复)</h4>
               <ReactECharts option={{
-                backgroundColor: '#0d1117',
+                backgroundColor: CHART.bg,
                 tooltip: { formatter: (p: EChartsTooltipParam) => `${corrLabels[p.data[1]]} × ${corrLabels[p.data[0]]}: ${p.data[2].toFixed(3)}` },
                 grid: { left: 120, right: 40, top: 10, bottom: 40 },
-                xAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: '#8b949e', fontSize: 9, rotate: 30 } },
-                yAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: '#8b949e', fontSize: 9 } },
-                visualMap: { min: -1, max: 1, calculable: true, orient: 'vertical' as const, right: 0, top: 'center', inRange: { color: ['#2563eb', '#0d1117', '#ef4444'] }, textStyle: { color: '#8b949e' } },
+                xAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: CHART.textSecondary, fontSize: 9, rotate: 30 } },
+                yAxis: { type: 'category' as const, data: corrLabels, axisLabel: { color: CHART.textSecondary, fontSize: 9 } },
+                visualMap: { min: -1, max: 1, calculable: true, orient: 'vertical' as const, right: 0, top: 'center', inRange: { color: [CHART.accent, CHART.bg, CHART.up] }, textStyle: { color: CHART.textSecondary } },
                 series: [{
                   type: 'heatmap', data: corrResult.correlation_matrix.flatMap((row: number[], i: number) =>
                     row.map((v: number, j: number) => [j, i, Math.round(v * 1000) / 1000])),
-                  label: { show: true, color: '#e6edf3', fontSize: 10, formatter: (p: EChartsTooltipParam) => p.data[2].toFixed(2) },
+                  label: { show: true, color: CHART.text, fontSize: 10, formatter: (p: EChartsTooltipParam) => p.data[2].toFixed(2) },
                 }],
               }} style={{ height: Math.max(200, corrResult.factor_names.length * 40 + 60) }} />
             </div>
@@ -336,7 +337,7 @@ export default function PortfolioFactorContent(props: Props) {
 // ─── ML Diagnostics Panel ────────────────────────────────────────
 
 const VERDICT_COLORS: Record<string, string> = {
-  healthy: '#22c55e', mild_overfit: '#eab308', severe_overfit: '#ef4444',
+  healthy: CHART.down, mild_overfit: '#eab308', severe_overfit: CHART.up,
   unstable: '#f97316', insufficient_data: '#6b7280', unknown: '#6b7280',
 }
 const VERDICT_LABELS: Record<string, string> = {
@@ -462,7 +463,7 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
                     {Object.entries(result.feature_importance_cv).map(([feat, cv]) => (
                       <div key={feat} className="flex justify-between px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-secondary)' }}>
                         <span>{feat}</span>
-                        <span style={{ color: cv != null && cv > 2 ? '#ef4444' : cv != null && cv > 1 ? '#eab308' : '#22c55e' }}>
+                        <span style={{ color: cv != null && cv > 2 ? CHART.up : cv != null && cv > 1 ? '#eab308' : CHART.down }}>
                           {cv != null ? cv.toFixed(3) : '-'}
                         </span>
                       </div>
@@ -482,9 +483,9 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
                     backgroundColor: 'transparent',
                     grid: { top: 30, right: 20, bottom: 30, left: 50 },
                     tooltip: { trigger: 'axis' },
-                    legend: { data: ['IS IC', 'OOS IC'], textStyle: { color: '#8b949e', fontSize: 10 } },
-                    xAxis: { type: 'category', data: result.ic_series.map(e => e.retrain_date), axisLabel: { color: '#8b949e', fontSize: 9 } },
-                    yAxis: { type: 'value', axisLabel: { color: '#8b949e', fontSize: 9 } },
+                    legend: { data: ['IS IC', 'OOS IC'], textStyle: { color: CHART.textSecondary, fontSize: 10 } },
+                    xAxis: { type: 'category', data: result.ic_series.map(e => e.retrain_date), axisLabel: { color: CHART.textSecondary, fontSize: 9 } },
+                    yAxis: { type: 'value', axisLabel: { color: CHART.textSecondary, fontSize: 9 } },
                     series: [
                       { name: 'IS IC', type: 'line', data: result.ic_series.map(e => e.train_ic), lineStyle: { color: '#3b82f6' }, itemStyle: { color: '#3b82f6' } },
                       { name: 'OOS IC', type: 'line', data: result.ic_series.map(e => e.oos_ic), lineStyle: { color: '#f97316' }, itemStyle: { color: '#f97316' } },
