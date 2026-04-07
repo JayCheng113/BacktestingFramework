@@ -1,5 +1,6 @@
 import ReactECharts from 'echarts-for-react'
 import type { HistoryRun } from '../types'
+import { CHART } from './shared/chartTheme'
 
 const fmt = (v: number | null | undefined, pct = false) => {
   if (v == null) return '-'
@@ -56,7 +57,7 @@ export default function PortfolioHistoryContent(props: Props) {
               if (cs.index_benchmark) configPieces.push(`指数:${cs.index_benchmark}`)
               const configLabel = configPieces.length > 0 ? configPieces.join(' ') : '默认'
               return (
-              <tr key={r.run_id} style={{ borderBottom: '1px solid var(--border)', backgroundColor: selectedRuns.has(r.run_id) ? '#1e3a5f20' : 'transparent' }}>
+              <tr key={r.run_id} style={{ borderBottom: '1px solid var(--border)', backgroundColor: selectedRuns.has(r.run_id) ? 'rgba(37,99,235,0.15)' : 'transparent', borderLeft: selectedRuns.has(r.run_id) ? '3px solid var(--color-accent)' : '3px solid transparent' }}>
                 <td className="px-3 py-1.5">
                   <input type="checkbox" checked={selectedRuns.has(r.run_id)} onChange={() => toggleRunSelection(r.run_id)} />
                 </td>
@@ -108,13 +109,13 @@ export default function PortfolioHistoryContent(props: Props) {
             )}
           </h4>
           <ReactECharts option={{
-            backgroundColor: '#0d1117',
+            backgroundColor: CHART.bg,
             tooltip: { trigger: 'axis' as const },
-            legend: { data: compareData.map(d => d.name), textStyle: { color: '#8b949e', fontSize: 10 }, top: 5, type: 'scroll' as const },
+            legend: { data: compareData.map(d => d.name), textStyle: { color: CHART.textSecondary, fontSize: 10 }, top: 5, type: 'scroll' as const },
             grid: { left: 70, right: 20, top: 40, bottom: 30 },
-            xAxis: { type: axisType as 'time' | 'value', name: xName, axisLabel: { color: '#8b949e' } },
-            yAxis: { type: 'value' as const, name: '归一化净值', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-            color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#f97316'],
+            xAxis: { type: axisType as 'time' | 'value', name: xName, axisLabel: { color: CHART.textSecondary } },
+            yAxis: { type: 'value' as const, name: '归一化净值', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
+            color: [CHART.accent, CHART.up, CHART.down, '#eab308', '#8b5cf6', '#f97316'],
             series: compareData.map(d => ({
               name: d.name, type: 'line' as const,
               data: allHaveDates

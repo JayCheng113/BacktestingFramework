@@ -24,7 +24,7 @@ const code: React.CSSProperties = {
   lineHeight: '1.6', fontFamily: 'monospace', margin: '8px 0',
 }
 const h2s: React.CSSProperties = { color: 'var(--color-accent)', fontSize: '16px', fontWeight: 700, margin: '24px 0 12px', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }
-const h3s: React.CSSProperties = { color: '#93c5fd', fontSize: '13px', fontWeight: 600, margin: '16px 0 8px' }
+const h3s: React.CSSProperties = { color: 'var(--color-accent)', fontSize: '13px', fontWeight: 600, margin: '16px 0 8px' }
 const ps: React.CSSProperties = { margin: '6px 0', lineHeight: '1.7' }
 const tds: React.CSSProperties = { padding: '6px 10px', borderBottom: '1px solid var(--border)' }
 const ths: React.CSSProperties = { ...tds, fontWeight: 600, textAlign: 'left', backgroundColor: 'var(--bg-secondary)' }

@@ -95,11 +95,17 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
       {/* Mode selection */}
       <div>
         <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>组合模式</label>
-        <div className="flex gap-3 mt-1 flex-wrap">
+        <div className="flex gap-2 mt-1 flex-wrap">
           {Object.entries(MODE_LABELS).map(([k, label]) => (
-            <label key={k} className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <input type="radio" checked={mode === k} onChange={() => setMode(k as EnsembleMode)} /> {label}
-            </label>
+            <button key={k} onClick={() => setMode(k as EnsembleMode)}
+              className="text-xs px-3 py-1 rounded"
+              style={{
+                backgroundColor: mode === k ? 'var(--color-accent)' : 'var(--bg-primary)',
+                color: mode === k ? '#fff' : 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}>
+              {label}
+            </button>
           ))}
         </div>
       </div>
@@ -127,7 +133,8 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
         return (
           <div key={sub._id} className="p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+              <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)', maxWidth: '200px' }}
+                title={sub.name + (dupeCount > 1 ? ` #${dupeIdx}` : '')}>
                 {sub.name}{dupeCount > 1 ? ` #${dupeIdx}` : ''}
               </span>
               <div className="flex items-center gap-2">

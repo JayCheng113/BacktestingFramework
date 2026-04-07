@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useToast } from '../components/shared/Toast'
 import ReactECharts from 'echarts-for-react'
+import { CHART } from '../components/shared/chartTheme'
 import {
   listDeployments, getDeployment, getDashboard, getSnapshots, getTrades,
   approveDeployment, startDeployment, stopDeployment, pauseDeployment,
@@ -197,8 +198,8 @@ export default function PaperTradingPage() {
 
   // ----- ECharts options -----
   const equityOption = equityDates.length > 0 ? {
-    backgroundColor: '#0d1117',
-    title: { text: '净值曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '净值曲线', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: {
       trigger: 'axis' as const,
       formatter: (params: Array<{ axisValue: string; value: number }>) => {
@@ -211,25 +212,25 @@ export default function PaperTradingPage() {
     xAxis: {
       type: 'category' as const,
       data: equityDates,
-      axisLabel: { color: '#8b949e', rotate: 30, fontSize: 9 },
+      axisLabel: { color: CHART.textSecondary, rotate: 30, fontSize: 9 },
     },
     yAxis: {
       type: 'value' as const,
-      splitLine: { lineStyle: { color: '#21262d' } },
-      axisLabel: { color: '#8b949e' },
+      splitLine: { lineStyle: { color: CHART.grid } },
+      axisLabel: { color: CHART.textSecondary },
     },
     series: [{
       type: 'line' as const,
       data: equityCurve,
-      lineStyle: { color: '#2563eb' },
+      lineStyle: { color: CHART.accent },
       areaStyle: { color: 'rgba(37, 99, 235, 0.1)' },
       showSymbol: false,
     }],
   } : null
 
   const pieOption = pieData.length > 0 ? {
-    backgroundColor: '#0d1117',
-    title: { text: '持仓分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '持仓分布', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: {
       trigger: 'item' as const,
       formatter: '{b}: {c} ({d}%)',
@@ -238,8 +239,8 @@ export default function PaperTradingPage() {
       type: 'pie' as const,
       radius: ['35%', '60%'],
       data: pieData,
-      label: { color: '#8b949e', fontSize: 10 },
-      itemStyle: { borderColor: '#0d1117', borderWidth: 2 },
+      label: { color: CHART.textSecondary, fontSize: 10 },
+      itemStyle: { borderColor: CHART.bg, borderWidth: 2 },
     }],
   } : null
 
@@ -300,7 +301,7 @@ export default function PaperTradingPage() {
               </div>
               {h && (
                 <div className="flex gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  <span style={{ color: (h.cumulative_return || 0) >= 0 ? '#22c55e' : '#ef4444' }}>
+                  <span style={{ color: (h.cumulative_return || 0) >= 0 ? CHART.down : CHART.up }}>
                     {fmt(h.cumulative_return, true)}
                   </span>
                   <span>今日 {fmt(h.today_pnl)}</span>
@@ -417,7 +418,7 @@ export default function PaperTradingPage() {
                 {gateVerdict.reasons && gateVerdict.reasons.length > 0 && (
                   <div className="grid grid-cols-2 gap-1 mt-2">
                     {gateVerdict.reasons.map((r, i) => (
-                      <span key={i} className="text-xs" style={{ color: r.passed ? '#8b949e' : '#ef4444' }}>
+                      <span key={i} className="text-xs" style={{ color: r.passed ? CHART.textSecondary : CHART.up }}>
                         {r.passed ? '  ' : '  '} {r.message}
                       </span>
                     ))}
@@ -493,7 +494,7 @@ export default function PaperTradingPage() {
                         {todayTrades.map((t, i) => (
                           <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
                             <td className="py-1">{t.symbol}</td>
-                            <td className="py-1" style={{ color: t.side === 'buy' ? '#ef4444' : '#22c55e' }}>
+                            <td className="py-1" style={{ color: t.side === 'buy' ? CHART.up : CHART.down }}>
                               {t.side === 'buy' ? '买入' : '卖出'}
                             </td>
                             <td className="text-right py-1">{t.shares}</td>
@@ -548,7 +549,7 @@ export default function PaperTradingPage() {
                         <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
                           <td className="py-1">{t.snapshot_date}</td>
                           <td className="py-1">{t.symbol}</td>
-                          <td className="py-1" style={{ color: t.side === 'buy' ? '#ef4444' : '#22c55e' }}>
+                          <td className="py-1" style={{ color: t.side === 'buy' ? CHART.up : CHART.down }}>
                             {t.side === 'buy' ? '买入' : '卖出'}
                           </td>
                           <td className="text-right py-1">{t.shares}</td>
@@ -609,10 +610,10 @@ function MetricCard({ label, value, positive, negative, warn }: {
   warn?: boolean
 }) {
   let valueColor = 'var(--text-primary)'
-  if (positive === true) valueColor = '#22c55e'
-  else if (positive === false) valueColor = '#ef4444'
-  if (negative) valueColor = '#ef4444'
-  if (warn) valueColor = '#f59e0b'
+  if (positive === true) valueColor = CHART.down
+  else if (positive === false) valueColor = CHART.up
+  if (negative) valueColor = CHART.up
+  if (warn) valueColor = CHART.warn
 
   return (
     <div className="p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>

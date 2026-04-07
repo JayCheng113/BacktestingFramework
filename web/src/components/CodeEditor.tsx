@@ -9,7 +9,7 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
   const li = { marginBottom: '4px' }
 
   return (
-    <div className="overflow-y-auto" style={{ backgroundColor: '#0f172a', padding: '16px 20px', borderRadius: '8px' }}>
+    <div className="overflow-y-auto" style={{ backgroundColor: 'var(--bg-secondary)', padding: '16px 20px', borderRadius: '8px' }}>
       <div className="flex justify-between items-center mb-3">
         <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '14px' }}>策略开发指南</span>
         <button onClick={onClose} className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>

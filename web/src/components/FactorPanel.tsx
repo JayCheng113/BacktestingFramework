@@ -3,6 +3,7 @@ import ReactECharts from 'echarts-for-react'
 import { listFactors, evaluateFactor } from '../api'
 import type { FactorResult } from '../types'
 import { useToast } from './shared/Toast'
+import { CHART } from './shared/chartTheme'
 
 interface Props {
   symbol: string; market: string; startDate: string; endDate: string
@@ -62,30 +63,30 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   const icMean = result && icN > 0 ? result.ic_series.reduce((a: number, b: number) => a + b, 0) / icN : 0
   const icStd = result && icN > 1 ? Math.sqrt(result.ic_series.reduce((s: number, v: number) => s + (v - icMean) ** 2, 0) / (icN - 1)) : 0
   const icTimeSeriesOption = result ? {
-    backgroundColor: '#0d1117',
-    title: { text: '预测能力随时间变化', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '预测能力随时间变化', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
-    xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+    xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: CHART.textSecondary } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
-      { type: 'bar', data: result.ic_series.map((v: number) => ({ value: v, itemStyle: { color: v >= 0 ? '#2563eb80' : '#ef444480' } })), barMaxWidth: 4 },
-      { type: 'line', data: result.ic_series.map(() => icMean), lineStyle: { color: '#f59e0b', type: 'dashed', width: 1 }, showSymbol: false, name: 'Mean' },
-      { type: 'line', data: result.ic_series.map(() => icMean + icStd), lineStyle: { color: '#f59e0b40', type: 'dotted', width: 1 }, showSymbol: false, name: '+1σ' },
-      { type: 'line', data: result.ic_series.map(() => icMean - icStd), lineStyle: { color: '#f59e0b40', type: 'dotted', width: 1 }, showSymbol: false, name: '-1σ' },
+      { type: 'bar', data: result.ic_series.map((v: number) => ({ value: v, itemStyle: { color: v >= 0 ? CHART.accent + '80' : CHART.up + '80' } })), barMaxWidth: 4 },
+      { type: 'line', data: result.ic_series.map(() => icMean), lineStyle: { color: CHART.warn, type: 'dashed', width: 1 }, showSymbol: false, name: 'Mean' },
+      { type: 'line', data: result.ic_series.map(() => icMean + icStd), lineStyle: { color: CHART.warn + '40', type: 'dotted', width: 1 }, showSymbol: false, name: '+1σ' },
+      { type: 'line', data: result.ic_series.map(() => icMean - icStd), lineStyle: { color: CHART.warn + '40', type: 'dotted', width: 1 }, showSymbol: false, name: '-1σ' },
     ],
   } : null
 
   // IC Decay curve
   const icDecayOption = result && result.ic_decay ? {
-    backgroundColor: '#0d1117',
-    title: { text: '信号持续性 (天数越长衰减越多)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '信号持续性 (天数越长衰减越多)', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
-    xAxis: { type: 'category', data: Object.keys(result.ic_decay).map(k => `${k}d`), axisLabel: { color: '#8b949e' } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+    xAxis: { type: 'category', data: Object.keys(result.ic_decay).map(k => `${k}d`), axisLabel: { color: CHART.textSecondary } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
-      { type: 'line', data: Object.values(result.ic_decay), lineStyle: { color: '#2563eb', width: 2 }, symbolSize: 8, itemStyle: { color: '#2563eb' } },
+      { type: 'line', data: Object.values(result.ic_decay), lineStyle: { color: CHART.accent, width: 2 }, symbolSize: 8, itemStyle: { color: CHART.accent } },
     ],
   } : null
 
@@ -101,13 +102,13 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     vals.forEach((v: number) => { const idx = Math.min(Math.floor((v - min) / step), bins - 1); counts[idx]++ })
     const labels = Array.from({ length: bins }, (_, i) => (min + step * (i + 0.5)).toFixed(3))
     return {
-      backgroundColor: '#0d1117',
-      title: { text: '预测能力分布', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+      backgroundColor: CHART.bg,
+      title: { text: '预测能力分布', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
       tooltip: { trigger: 'axis' },
       grid: { left: 60, right: 20, top: 40, bottom: 30 },
-      xAxis: { type: 'category', data: labels, axisLabel: { color: '#8b949e', rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-      series: [{ type: 'bar', data: counts, itemStyle: { color: '#2563eb80' } }],
+      xAxis: { type: 'category', data: labels, axisLabel: { color: CHART.textSecondary, rotate: 45, fontSize: 10 } },
+      yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
+      series: [{ type: 'bar', data: counts, itemStyle: { color: CHART.accent + '80' } }],
     }
   })() : null
 
@@ -141,7 +142,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
             ].map(([label, val]) => (
               <div key={label as string} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
                 <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{label as string}</div>
-                <div className="text-sm font-medium" style={{ color: Math.abs(val as number) > 0.03 ? '#2563eb' : 'var(--text-primary)' }}>
+                <div className="text-sm font-medium" style={{ color: Math.abs(val as number) > 0.03 ? CHART.accent : 'var(--text-primary)' }}>
                   {(val as number).toFixed(4)}
                 </div>
               </div>

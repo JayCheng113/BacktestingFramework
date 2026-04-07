@@ -466,7 +466,7 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
               <div className="rounded-lg px-3 py-2 text-xs" style={{
                 backgroundColor: m.role === 'user' ? 'var(--color-accent)' : 'var(--bg-secondary)',
                 color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
-                maxWidth: '90%', overflow: 'hidden',
+                maxWidth: '90%', overflow: 'hidden', wordBreak: 'break-word',
               }}>
                 <pre className="whitespace-pre-wrap font-sans" style={{ overflowWrap: 'break-word', wordBreak: 'break-word', maxWidth: '100%' }}>
                   {m.content}

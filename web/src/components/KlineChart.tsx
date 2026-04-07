@@ -1,5 +1,6 @@
 import ReactECharts from 'echarts-for-react'
 import type { KlineBar, TradeRecord } from '../types'
+import { CHART } from './shared/chartTheme'
 
 interface ChartMarker {
   coord: [string, number]
@@ -52,7 +53,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   const dates = data.map(d => d.date)
   const ohlc = data.map(d => [d.open, d.close, d.low, d.high])
   const volumes = data.map(d => d.volume)
-  const colors = data.map(d => d.close >= d.open ? '#ef4444' : '#22c55e')
+  const colors = data.map(d => d.close >= d.open ? CHART.up : CHART.down)
 
   // Build buy/sell markers from trades
   const buyMarkers: ChartMarker[] = []
@@ -68,14 +69,14 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       if (dateSet.has(entryDate)) {
         buyMarkers.push({
           coord: [entryDate, t.entry_price],
-          itemStyle: { color: '#ef4444' },
+          itemStyle: { color: CHART.up },
         })
         buyTrades.push(t)
       }
       if (dateSet.has(exitDate)) {
         sellMarkers.push({
           coord: [exitDate, t.exit_price],
-          itemStyle: { color: t.pnl >= 0 ? '#ef4444' : '#22c55e' },  // Chinese: red=profit, green=loss
+          itemStyle: { color: t.pnl >= 0 ? CHART.up : CHART.down },  // Chinese: red=profit, green=loss
         })
         sellTrades.push(t)
       }
@@ -87,7 +88,7 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   const series: EChartsSeries[] = [
     {
       type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
-      itemStyle: { color: '#ef4444', color0: '#22c55e', borderColor: '#ef4444', borderColor0: '#22c55e' },
+      itemStyle: { color: CHART.up, color0: CHART.down, borderColor: CHART.up, borderColor0: CHART.down },
       markPoint: (buyMarkers.length > 0 || sellMarkers.length > 0) ? {
         symbol: 'triangle',
         symbolSize: 10,
@@ -114,14 +115,14 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       xAxisIndex: 1, yAxisIndex: 1,
     },
     // Moving Averages
-    { name: 'MA5', type: 'line', data: computeMA(data, 5), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#f59e0b', width: 1 }, showSymbol: false, z: 5 },
-    { name: 'MA10', type: 'line', data: computeMA(data, 10), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#3b82f6', width: 1 }, showSymbol: false, z: 5 },
-    { name: 'MA20', type: 'line', data: computeMA(data, 20), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#a855f7', width: 1 }, showSymbol: false, z: 5 },
-    { name: 'MA60', type: 'line', data: computeMA(data, 60), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#22c55e', width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA5', type: 'line', data: computeMA(data, 5), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.ma5, width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA10', type: 'line', data: computeMA(data, 10), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.ma10, width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA20', type: 'line', data: computeMA(data, 20), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.ma20, width: 1 }, showSymbol: false, z: 5 },
+    { name: 'MA60', type: 'line', data: computeMA(data, 60), xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.ma60, width: 1 }, showSymbol: false, z: 5 },
     // Bollinger Bands
-    { name: 'BOLL Upper', type: 'line', data: boll.upper, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#64748b', width: 1, type: 'dashed' }, showSymbol: false, z: 4 },
-    { name: 'BOLL Mid', type: 'line', data: boll.mid, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#64748b', width: 1 }, showSymbol: false, z: 4 },
-    { name: 'BOLL Lower', type: 'line', data: boll.lower, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: '#64748b', width: 1, type: 'dashed' }, showSymbol: false, z: 4 },
+    { name: 'BOLL Upper', type: 'line', data: boll.upper, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.boll, width: 1, type: 'dashed' }, showSymbol: false, z: 4 },
+    { name: 'BOLL Mid', type: 'line', data: boll.mid, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.boll, width: 1 }, showSymbol: false, z: 4 },
+    { name: 'BOLL Lower', type: 'line', data: boll.lower, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { color: CHART.boll, width: 1, type: 'dashed' }, showSymbol: false, z: 4 },
   ]
 
   // Add buy/sell scatter for clear visibility + tooltip
@@ -129,10 +130,10 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
     series.push({
       type: 'scatter', xAxisIndex: 0, yAxisIndex: 0,
       symbolSize: 14, symbol: 'arrow', symbolRotate: 0,
-      itemStyle: { color: '#ef4444', borderColor: '#fff', borderWidth: 1 },
+      itemStyle: { color: CHART.up, borderColor: '#fff', borderWidth: 1 },
       data: buyMarkers.map(m => ({
         value: [m.coord[0], m.coord[1] * 0.98],  // slightly below price
-        label: { show: true, position: 'bottom', formatter: 'B', color: '#ef4444', fontSize: 10, fontWeight: 'bold' },
+        label: { show: true, position: 'bottom', formatter: 'B', color: CHART.up, fontSize: 10, fontWeight: 'bold' },
       })),
       tooltip: {
         formatter: (p: { dataIndex: number }) => {
@@ -147,10 +148,10 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
     series.push({
       type: 'scatter', xAxisIndex: 0, yAxisIndex: 0,
       symbolSize: 14, symbol: 'arrow', symbolRotate: 180,
-      itemStyle: { color: '#22c55e', borderColor: '#fff', borderWidth: 1 },
+      itemStyle: { color: CHART.down, borderColor: '#fff', borderWidth: 1 },
       data: sellMarkers.map(m => ({
         value: [m.coord[0], m.coord[1] * 1.02],  // slightly above price
-        label: { show: true, position: 'top', formatter: 'S', color: '#22c55e', fontSize: 10, fontWeight: 'bold' },
+        label: { show: true, position: 'top', formatter: 'S', color: CHART.down, fontSize: 10, fontWeight: 'bold' },
       })),
       tooltip: {
         formatter: (p: { dataIndex: number }) => {
@@ -163,12 +164,12 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
   }
 
   const option = {
-    backgroundColor: '#0d1117',
-    title: { text: symbol, left: 'center', top: 8, textStyle: { color: '#e6edf3', fontSize: 14 } },
+    backgroundColor: CHART.bg,
+    title: { text: symbol, left: 'center', top: 8, textStyle: { color: CHART.text, fontSize: 14 } },
     legend: {
       data: ['MA5', 'MA10', 'MA20', 'MA60', 'BOLL Upper', 'BOLL Mid', 'BOLL Lower'],
       selected: { 'MA5': true, 'MA10': true, 'MA20': true, 'MA60': false, 'BOLL Upper': false, 'BOLL Mid': false, 'BOLL Lower': false },
-      textStyle: { color: '#8b949e', fontSize: 11 }, top: 8, right: 10, itemWidth: 14, itemHeight: 8, itemGap: 8,
+      textStyle: { color: CHART.textSecondary, fontSize: 11 }, top: 8, right: 10, itemWidth: 14, itemHeight: 8, itemGap: 8,
     },
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     grid: [
@@ -176,16 +177,16 @@ export default function KlineChart({ data, symbol, trades = [] }: Props) {
       { left: 60, right: 20, top: '72%', height: '18%' },
     ],
     xAxis: [
-      { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#30363d' } }, axisLabel: { color: '#8b949e' } },
-      { type: 'category', data: dates, gridIndex: 1, axisLine: { lineStyle: { color: '#30363d' } }, axisLabel: { color: '#8b949e' } },
+      { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: CHART.border } }, axisLabel: { color: CHART.textSecondary } },
+      { type: 'category', data: dates, gridIndex: 1, axisLine: { lineStyle: { color: CHART.border } }, axisLabel: { color: CHART.textSecondary } },
     ],
     yAxis: [
-      { scale: true, gridIndex: 0, splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-      { scale: true, gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#8b949e' } },
+      { scale: true, gridIndex: 0, splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
+      { scale: true, gridIndex: 1, splitLine: { show: false }, axisLabel: { color: CHART.textSecondary } },
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], bottom: 5, height: 20, borderColor: '#30363d', fillerColor: 'rgba(37,99,235,0.2)' },
+      { type: 'slider', xAxisIndex: [0, 1], bottom: 5, height: 20, borderColor: CHART.border, fillerColor: 'rgba(37,99,235,0.2)' },
     ],
     series,
   }

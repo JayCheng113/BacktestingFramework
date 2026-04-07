@@ -5,6 +5,7 @@ import type { StrategyInfo, BacktestResult, WalkForwardResult, ParamSchema } fro
 import BacktestSettings, { getDefaultSettings } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import { useToast } from './shared/Toast'
+import { CHART } from './shared/chartTheme'
 
 interface Props {
   symbol: string; market: string; period?: string; startDate: string; endDate: string
@@ -170,27 +171,27 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
   }
 
   const equityOption = result ? {
-    backgroundColor: '#0d1117',
-    title: { text: '权益曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '权益曲线', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
-    legend: { data: ['策略', '基准(买入持有)'], textStyle: { color: '#8b949e' }, top: 25 },
+    legend: { data: ['策略', '基准(买入持有)'], textStyle: { color: CHART.textSecondary }, top: 25 },
     grid: { left: 60, right: 20, top: 60, bottom: 30 },
-    xAxis: { type: 'category', data: result.equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
+    xAxis: { type: 'category', data: result.equity_curve.map((_: number, i: number) => i), axisLabel: { color: CHART.textSecondary } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
-      { name: '策略', type: 'line', data: result.equity_curve, lineStyle: { color: '#2563eb' }, showSymbol: false },
-      { name: '基准(买入持有)', type: 'line', data: result.benchmark_curve, lineStyle: { color: '#8b949e', type: 'dashed' }, showSymbol: false },
+      { name: '策略', type: 'line', data: result.equity_curve, lineStyle: { color: CHART.accent }, showSymbol: false },
+      { name: '基准(买入持有)', type: 'line', data: result.benchmark_curve, lineStyle: { color: CHART.textSecondary, type: 'dashed' }, showSymbol: false },
     ],
   } : null
 
   const wfEquityOption = wfResult ? {
-    backgroundColor: '#0d1117',
-    title: { text: '样本外权益曲线', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
+    backgroundColor: CHART.bg,
+    title: { text: '样本外权益曲线', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
     tooltip: { trigger: 'axis' },
     grid: { left: 60, right: 20, top: 40, bottom: 30 },
-    xAxis: { type: 'category', data: wfResult.oos_equity_curve.map((_: number, i: number) => i), axisLabel: { color: '#8b949e' } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#21262d' } }, axisLabel: { color: '#8b949e' } },
-    series: [{ type: 'line', data: wfResult.oos_equity_curve, lineStyle: { color: '#22c55e' }, showSymbol: false }],
+    xAxis: { type: 'category', data: wfResult.oos_equity_curve.map((_: number, i: number) => i), axisLabel: { color: CHART.textSecondary } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
+    series: [{ type: 'line', data: wfResult.oos_equity_curve, lineStyle: { color: CHART.down }, showSymbol: false }],
   } : null
 
   const exportCSV = (result: BacktestResult) => {
@@ -348,7 +349,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             ))}
           </div>
           <div className="flex items-center gap-2 mb-3">
-            <span className={`text-xs px-2 py-0.5 rounded ${result.significance.is_significant ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>
+            <span className="text-xs px-2 py-0.5 rounded"
+              style={{
+                backgroundColor: result.significance.is_significant ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                color: result.significance.is_significant ? CHART.down : CHART.up,
+              }}>
               {result.significance.is_significant ? '显著' : '不显著'}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -418,7 +423,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             </div>
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
               <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>过拟合评分</div>
-              <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.5 ? '#ef4444' : '#22c55e' }}>
+              <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.5 ? CHART.up : CHART.down }}>
                 {wfResult.overfitting_score.toFixed(4)}
               </div>
             </div>
@@ -432,7 +437,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             </div>
           </div>
           <div className="flex items-center gap-2 mb-3">
-            <span className={`text-xs px-2 py-0.5 rounded ${wfResult.overfitting_score <= 0.3 ? 'bg-green-900 text-green-300' : wfResult.overfitting_score <= 0.6 ? 'bg-yellow-900 text-yellow-300' : 'bg-red-900 text-red-300'}`}>
+            <span className="text-xs px-2 py-0.5 rounded"
+              style={{
+                backgroundColor: wfResult.overfitting_score <= 0.3 ? 'rgba(34,197,94,0.15)' : wfResult.overfitting_score <= 0.6 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                color: wfResult.overfitting_score <= 0.3 ? CHART.down : wfResult.overfitting_score <= 0.6 ? CHART.warn : CHART.up,
+              }}>
               {wfResult.overfitting_score <= 0.3 ? '稳健' : wfResult.overfitting_score <= 0.6 ? '轻微过拟合' : '过拟合'}
             </span>
           </div>
