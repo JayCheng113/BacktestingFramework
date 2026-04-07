@@ -37,10 +37,14 @@ type ParamRangeState = NumericParamRange | BoolParamRange | EnumParamRange
 
 // --- Value generation ---
 
+function isNumeric(pr: ParamRangeState): pr is NumericParamRange {
+  return pr.type === 'int' || pr.type === 'float'
+}
+
 function generateValues(pr: ParamRangeState, limit: number = 50): (number | string | boolean)[] {
   if (pr.type === 'bool') return pr.selected
   if (pr.type === 'select' || pr.type === 'str') return pr.selected
-  // numeric
+  if (!isNumeric(pr)) return []
   if (pr.step <= 0 || pr.min > pr.max) return []
   const count = Math.floor((pr.max - pr.min) / pr.step) + 1
   const n = Math.min(count, limit)
@@ -55,6 +59,7 @@ function generateValues(pr: ParamRangeState, limit: number = 50): (number | stri
 function countValues(pr: ParamRangeState): number {
   if (pr.type === 'bool') return pr.selected.length
   if (pr.type === 'select' || pr.type === 'str') return pr.selected.length
+  if (!isNumeric(pr)) return 0
   if (pr.step <= 0 || pr.min > pr.max) return 0
   return Math.floor((pr.max - pr.min) / pr.step) + 1
 }
@@ -67,6 +72,7 @@ function totalCombinations(ranges: ParamRangeState[]): number {
 function hasError(pr: ParamRangeState): boolean {
   if (pr.type === 'bool') return pr.selected.length === 0
   if (pr.type === 'select' || pr.type === 'str') return pr.selected.length === 0
+  if (!isNumeric(pr)) return false
   return pr.min > pr.max || pr.step <= 0
 }
 
@@ -311,6 +317,7 @@ export default function CandidateSearch() {
                 }
 
                 // --- Numeric parameter (original) ---
+                if (!isNumeric(pr)) return null
                 const count = countValues(pr)
                 const preview = generateValues(pr, 6) as number[]
                 const numErr = pr.min > pr.max || pr.step <= 0

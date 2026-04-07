@@ -113,7 +113,6 @@ export default function PortfolioRunContent(props: Props) {
   } = props
 
   // V2.14 B3: Ensemble configuration
-  const [ensembleConfig, setEnsembleConfig] = useState<EnsembleConfig | null>(null)
   const isEnsemble = selected === 'StrategyEnsemble'
 
   // V2.15 C3: Deploy to paper trading
@@ -231,7 +230,7 @@ export default function PortfolioRunContent(props: Props) {
               <EnsembleBuilder
                 strategies={strategies}
                 factors={factors}
-                onChange={(cfg) => { setEnsembleConfig(cfg); ensembleConfigRef.current = cfg }}
+                onChange={(cfg) => { ensembleConfigRef.current = cfg }}
               />
             </div>
           )}
