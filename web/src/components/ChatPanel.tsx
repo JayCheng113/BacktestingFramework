@@ -374,8 +374,9 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
           }
         }
       }
-    } catch (e: any) {
-      updateMsgs(prev => [...prev, { role: 'assistant', content: `网络错误: ${e.message}` }])
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      updateMsgs(prev => [...prev, { role: 'assistant', content: `网络错误: ${msg}` }])
     } finally {
       setStreaming(false)
     }

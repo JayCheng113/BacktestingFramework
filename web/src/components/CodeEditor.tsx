@@ -315,7 +315,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           setErrors(data.errors)
         }
       }
-    } catch (e: any) { setStatus(`Error: ${e.message}`) }
+    } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
     finally { setValidating(false) }
   }
 
@@ -353,7 +353,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setErrors(errs)
         if (detail.test_output) setTestOutput(detail.test_output)
       }
-    } catch (e: any) { setStatus(`Error: ${e.message}`) }
+    } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
     finally { setSaving(false) }
   }
 
@@ -386,8 +386,8 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         const err = await res.json().catch(() => ({ detail: '未知错误' }))
         setStatus(`删除失败: ${err.detail || res.statusText}`)
       }
-    } catch (e: any) {
-      setStatus(`删除失败: ${e?.message || '网络错误'}`)
+    } catch (e: unknown) {
+      setStatus(`删除失败: ${e instanceof Error ? e.message : '网络错误'}`)
     }
   }
 

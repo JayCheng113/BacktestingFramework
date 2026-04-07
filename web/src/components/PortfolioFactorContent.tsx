@@ -208,7 +208,10 @@ export default function PortfolioFactorContent(props: Props) {
       )}
 
       {/* Evaluation results */}
-      {evalResult && evalResult.results && (
+      {evalResult && (!evalResult.results || evalResult.results.length === 0) && !evalLoading && (
+        <div className="mt-4 py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>暂无评估结果</div>
+      )}
+      {evalResult && evalResult.results && evalResult.results.length > 0 && (
         <div className="mt-4">
           {/* Warnings (e.g., neutralization skipped) */}
           {evalResult.warnings && evalResult.warnings.length > 0 && (
