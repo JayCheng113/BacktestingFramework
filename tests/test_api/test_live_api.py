@@ -92,12 +92,27 @@ def _make_mock_run_with_wf(run_id: str = "test-run-001", wf_metrics: dict | None
 
 
 @pytest.fixture(autouse=True)
-def _reset_live_singletons():
-    """Reset live singletons before and after each test."""
-    from ez.api.routes.live import reset_live_singletons
-    reset_live_singletons()
+def _use_memory_db_for_live(monkeypatch):
+    """Use in-memory DuckDB for live tests — never touch data/ez_trading.db."""
+    import duckdb
+    from ez.api.routes import live as live_module
+    from ez.live.deployment_store import DeploymentStore
+
+    # Reset singletons
+    live_module.reset_live_singletons()
+
+    # Patch _get_deployment_store to use in-memory DB
+    _mem_store = DeploymentStore(duckdb.connect(":memory:"))
+    monkeypatch.setattr(live_module, "_deployment_store", _mem_store)
+
     yield
-    reset_live_singletons()
+
+    # Cleanup
+    try:
+        _mem_store._conn.close()
+    except Exception:
+        pass
+    live_module.reset_live_singletons()
 
 
 # ---------------------------------------------------------------------------
