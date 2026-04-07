@@ -72,8 +72,14 @@ def _get_monitor() -> Monitor:
 
 
 def reset_live_singletons() -> None:
-    """Reset singletons (called by deps.close_resources or tests)."""
+    """Reset singletons (called by deps.close_resources or tests).
+    Closes the independent DeploymentStore connection if it exists."""
     global _deployment_store, _scheduler, _monitor
+    if _deployment_store is not None:
+        try:
+            _deployment_store._conn.close()
+        except Exception:
+            pass
     _deployment_store = None
     _scheduler = None
     _monitor = None
