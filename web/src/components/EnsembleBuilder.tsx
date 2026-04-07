@@ -14,7 +14,7 @@ export type EnsembleMode = 'equal' | 'manual' | 'return_weighted' | 'inverse_vol
 
 export interface SubStrategyDef {
   name: string
-  params: Record<string, any>
+  params: Record<string, number | string | boolean>
 }
 
 export interface EnsembleConfig {
@@ -65,7 +65,7 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
   const addStrategy = (name: string) => {
     if (subs.length >= 5 || !name) return
     const s = availableStrategies.find(s => s.name === name)
-    const defaults: Record<string, any> = {}
+    const defaults: Record<string, number | string | boolean> = {}
     if (s) {
       for (const [k, v] of Object.entries(s.parameters)) {
         defaults[k] = v.default
@@ -155,7 +155,7 @@ export default function EnsembleBuilder({ strategies, factors, onChange }: Props
                 return (
                   <div key={key} className="flex items-center gap-2 mt-1">
                     <label className="text-xs w-20 shrink-0" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-                    <select value={val ?? ''} onChange={e => updateSubParam(idx, key, e.target.value)}
+                    <select value={String(val ?? '')} onChange={e => updateSubParam(idx, key, e.target.value)}
                       className="flex-1 px-2 py-1 rounded text-xs" style={inputStyle}>
                       {options.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>

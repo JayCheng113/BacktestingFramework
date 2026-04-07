@@ -313,12 +313,12 @@ export default function PortfolioPanel() {
       setFactors(data.available_factors || [])
       setFactorCategories(data.factor_categories || [])
       if (data.strategies?.length > 0 && !selected) setSelected(data.strategies[0].name)
-    }).catch(() => {})
+    }).catch((e: unknown) => { const err = e as { response?: { data?: { detail?: string } }; message?: string }; showToast('error', err?.response?.data?.detail || err?.message || '策略列表加载失败') })
     loadHistory()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadHistory = () => {
-    listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch(() => {})
+    listPortfolioRuns(20).then(r => setHistory(r.data || [])).catch((e: unknown) => { const err = e as { response?: { data?: { detail?: string } }; message?: string }; showToast('error', err?.response?.data?.detail || err?.message || '历史记录加载失败') })
   }
 
   const toggleRunSelection = (runId: string) => {

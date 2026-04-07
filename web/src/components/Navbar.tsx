@@ -25,7 +25,7 @@ export default function Navbar({ activeTab, onTabChange }: Props) {
     const check = () => {
       fetch('/api/health').then(r => {
         setBackendOk(r.ok)
-        if (r.ok) r.json().then(d => { if (d.version) setVersion(d.version) }).catch(() => {})
+        if (r.ok) r.json().then(d => { if (d.version) setVersion(d.version) }).catch(() => { /* JSON parse best-effort for version badge */ })
       }).catch(() => setBackendOk(false))
     }
     check()
