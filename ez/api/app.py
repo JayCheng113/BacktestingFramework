@@ -71,7 +71,7 @@ def _get_version() -> str:
         from pathlib import Path
         pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
         if pyproject.exists():
-            data = tomllib.loads(pyproject.read_text())
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
             return data["project"]["version"]
     except Exception:
         pass
@@ -80,7 +80,7 @@ def _get_version() -> str:
         return version("ez-trading")
     except Exception:
         pass
-    return "0.2.15.1"
+    return "0.2.16"
 
 _APP_VERSION = _get_version()
 

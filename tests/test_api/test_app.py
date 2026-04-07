@@ -16,7 +16,7 @@ def test_health_endpoint():
     # Version should match pyproject.toml (single source of truth)
     import tomllib
     from pathlib import Path
-    expected = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+    expected = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     assert data["version"] == expected
     assert "strategies_registered" in data
 

@@ -1972,7 +1972,7 @@ llm:
           <table style={tbl}><thead><tr><th style={ths}>限制</th><th style={ths}>说明</th><th style={ths}>影响</th></tr></thead><tbody>
             <tr><td style={tds}>strategy.state 不持久化</td><td style={tds}>进程重启后策略内部状态丢失</td><td style={tds}>有状态策略（如 MLAlpha 模型）重启后首个 rebalance 从零训练</td></tr>
             <tr><td style={tds}>数据时效性</td><td style={tds}>依赖数据源更新速度</td><td style={tds}>tick 时数据可能尚未更新，需在收盘后足够时间执行</td></tr>
-            <tr><td style={tds}>停止不清仓</td><td style={tds}>停止部署不会执行清仓操作</td><td style={tds}>不影响模拟盘（无真实持仓），但期末持仓指标会高估</td></tr>
+            <tr><td style={tds}>停止可选清仓</td><td style={tds}>停止时可选择清仓 (?liquidate=true)</td><td style={tds}>默认不清仓；选择清仓后系统卖出所有持仓并记录清仓快照</td></tr>
             <tr><td style={tds}>单进程</td><td style={tds}>Scheduler 无多 worker 支持</td><td style={tds}>大量部署时 tick 串行处理较慢</td></tr>
             <tr><td style={tds}>无 crash recovery</td><td style={tds}>tick 执行中途崩溃可能丢失当天快照</td><td style={tds}>下次 tick 会补执行（幂等保护）</td></tr>
           </tbody></table>

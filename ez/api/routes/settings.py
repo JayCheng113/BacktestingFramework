@@ -28,7 +28,7 @@ def _read_env() -> dict[str, str]:
     result: dict[str, str] = {}
     if not _ENV_FILE.exists():
         return result
-    for line in _ENV_FILE.read_text().splitlines():
+    for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -55,7 +55,7 @@ def _write_env(updates: dict[str, str]) -> None:
     with _env_lock:
         lines: list[str] = []
         if _ENV_FILE.exists():
-            lines = _ENV_FILE.read_text().splitlines()
+            lines = _ENV_FILE.read_text(encoding="utf-8").splitlines()
 
         updated_keys: set[str] = set()
         new_lines: list[str] = []

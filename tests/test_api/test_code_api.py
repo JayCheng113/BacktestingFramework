@@ -72,7 +72,7 @@ class TestHealthVersion:
         assert resp.status_code == 200
         import tomllib
         from pathlib import Path
-        expected = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+        expected = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
         assert resp.json()["version"] == expected
 
 

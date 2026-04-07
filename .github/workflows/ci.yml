@@ -44,7 +44,7 @@ jobs:
         shell: python
         run: |
           import tomllib, pathlib
-          ver_toml = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          ver_toml = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
           from fastapi.testclient import TestClient
           from ez.api.app import app
           ver_runtime = TestClient(app).get("/api/health").json()["version"]
