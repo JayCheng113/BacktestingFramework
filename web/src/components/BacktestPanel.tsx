@@ -47,7 +47,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as ParamSchema).default
         setParams(defaults)
       }
-    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败') })
+    }).catch(() => {})
   }, [])
 
   // Reset cost settings when market changes (A-share rules only for cn_stock).

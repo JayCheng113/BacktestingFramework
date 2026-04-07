@@ -39,15 +39,25 @@ interface PortfolioWalkForwardResult {
   fold_results?: Record<string, unknown>[]
   oos_equity_curve?: number[]
   oos_dates?: string[]
+  oos_metrics?: Record<string, number>
+  significance?: {
+    is_significant: boolean
+    p_value: number
+  }
+  is_sharpes?: number[]
+  oos_sharpes?: number[]
   warnings?: string[]
 }
 
 interface SearchResultRow {
+  rank: number
   params: Record<string, unknown>
-  metrics: Record<string, number | null>
-  sharpe_ratio?: number | null
+  metrics?: Record<string, number | null>
+  sharpe?: number | null
   total_return?: number | null
   max_drawdown?: number | null
+  annualized_return?: number | null
+  trade_count?: number | null
   warnings?: string[]
 }
 
@@ -56,6 +66,9 @@ interface SearchMeta {
   total_combinations: number;
   failed_combos: Array<{ combo_index: number; params: Record<string, unknown>; error: string }>;
 }
+
+// Strategy params are dynamic (int/float/bool/str/multi_select).
+type ParamValue = number | string | boolean | string[]
 
 const metricLabels: Record<string, string> = {
   total_return: '总收益率', annualized_return: '年化收益率', sharpe_ratio: '夏普比率',
@@ -83,7 +96,7 @@ interface Props {
   factors: string[]
   factorCategories: FactorCategory[]
   selected: string; setSelected: (v: string) => void
-  strategyParams: Record<string, number | string | boolean | string[]>; updateParam: (key: string, value: number | string | boolean | string[]) => void
+  strategyParams: Record<string, ParamValue>; updateParam: (key: string, value: ParamValue) => void
   currentSchema: Record<string, ParamSchema>
   currentDesc: string
   // Run state
@@ -283,20 +296,20 @@ export default function PortfolioRunContent(props: Props) {
               <div className="flex flex-wrap gap-1 mb-2">
                 {factors.filter(f => f !== 'alpha_combiner').map(f => (
                   <button key={f} onClick={() => {
-                    const cur = strategyParams.alpha_factors || []
+                    const cur = Array.isArray(strategyParams.alpha_factors) ? strategyParams.alpha_factors : []
                     if (cur.includes(f)) updateParam('alpha_factors', cur.filter((x: string) => x !== f))
                     else updateParam('alpha_factors', [...cur, f])
                   }}
                     className="text-xs px-2 py-0.5 rounded"
-                    style={{ backgroundColor: (strategyParams.alpha_factors || []).includes(f) ? 'var(--color-accent)' : 'var(--bg-secondary)',
-                             color: (strategyParams.alpha_factors || []).includes(f) ? '#fff' : 'var(--text-secondary)',
+                    style={{ backgroundColor: (Array.isArray(strategyParams.alpha_factors) ? strategyParams.alpha_factors : []).includes(f) ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                             color: (Array.isArray(strategyParams.alpha_factors) ? strategyParams.alpha_factors : []).includes(f) ? '#fff' : 'var(--text-secondary)',
                              border: '1px solid var(--border)' }}>
                     {FACTOR_LABELS[f] || f}
                   </button>
                 ))}
               </div>
               <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>合成方法</label>
-              <select value={strategyParams.alpha_method || 'equal'} onChange={e => updateParam('alpha_method', e.target.value)}
+              <select value={String(strategyParams.alpha_method || 'equal')} onChange={e => updateParam('alpha_method', e.target.value)}
                 className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
                 <option value="equal">等权</option>
                 <option value="ic">IC加权 (选股能力越强权重越大)</option>

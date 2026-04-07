@@ -243,7 +243,7 @@ export default function PortfolioFactorContent(props: Props) {
           </div>
 
           {/* IC time series chart */}
-          {evalResult.results[0]?.ic_series?.length > 0 && (
+          {(evalResult.results[0]?.ic_series?.length ?? 0) > 0 && (
             <ReactECharts option={{
               backgroundColor: '#0d1117',
               title: { text: '选股能力随时间变化 (Rank IC)', textStyle: { color: '#e6edf3', fontSize: 12 }, left: 'center' },
@@ -276,7 +276,7 @@ export default function PortfolioFactorContent(props: Props) {
                 color: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6'],
                 series: evalResult.results.map((r: EvalFactorResult) => ({
                   name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'line' as const,
-                  data: [r.ic_decay['1'], r.ic_decay['5'], r.ic_decay['10'], r.ic_decay['20']],
+                  data: [r.ic_decay?.['1'], r.ic_decay?.['5'], r.ic_decay?.['10'], r.ic_decay?.['20']],
                 })),
               }} style={{ height: 220 }} />
             )}
@@ -292,7 +292,7 @@ export default function PortfolioFactorContent(props: Props) {
                 color: ['#2563eb', '#ef4444', '#22c55e'],
                 series: evalResult.results.map((r: EvalFactorResult) => ({
                   name: FACTOR_LABELS[r.factor_name] || r.factor_name, type: 'bar' as const,
-                  data: [1, 2, 3, 4, 5].map(q => r.quintile_returns[String(q)] ?? 0),
+                  data: [1, 2, 3, 4, 5].map(q => r.quintile_returns?.[String(q)] ?? 0),
                 })),
               }} style={{ height: 220 }} />
             )}
