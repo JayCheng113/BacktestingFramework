@@ -795,7 +795,7 @@ export default function PortfolioRunContent(props: Props) {
                     <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>持仓</th>
                   </tr></thead>
                   <tbody>{weightsToShow.map((wh, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                       <td className="px-3 py-1">{wh.date}</td>
                       <td className="px-3 py-1">
                         {Object.entries(wh.weights).filter(([, w]) => w > 0.001).sort((a, b) => b[1] - a[1])

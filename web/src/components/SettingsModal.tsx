@@ -99,7 +99,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} onClick={onClose} />
-      <div style={{ position: 'relative', zIndex: 51, width: '500px', maxHeight: '80vh', overflow: 'auto', borderRadius: '8px', backgroundColor: '#0f172a', padding: '20px' }}>
+      <div style={{ position: 'relative', zIndex: 51, maxWidth: '500px', width: 'calc(100% - 32px)', maxHeight: '80vh', overflow: 'auto', borderRadius: '8px', backgroundColor: '#0f172a', padding: '20px' }}>
         <div className="flex justify-between items-center mb-4">
           <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '16px' }}>系统设置</span>
           <button onClick={onClose} className="text-xs px-2 py-0.5 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>
