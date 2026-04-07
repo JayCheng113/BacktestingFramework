@@ -45,20 +45,22 @@ class Scheduler:
     async def resume_all(self) -> int:
         """Startup: restore all status='running' deployments from DB.
         On engine init failure, rolls back status to 'error' (not phantom running).
-        Returns the number of engines successfully restored."""
-        records = self.store.list_deployments(status="running")
-        restored = 0
-        for record in records:
-            dep_id = record.deployment_id
-            try:
-                await self._start_engine(dep_id)
-                restored += 1
-                logger.info("Restored deployment %s", dep_id)
-            except Exception:
-                logger.error("Failed to restore deployment %s", dep_id, exc_info=True)
-                # Roll back to error — don't leave phantom "running" in DB
-                self.store.update_status(dep_id, "error", stop_reason="恢复引擎失败")
-        return restored
+        Returns the number of engines successfully restored.
+        Locked with same _lock as tick() to prevent concurrent mutation."""
+        async with self._lock:
+            records = self.store.list_deployments(status="running")
+            restored = 0
+            for record in records:
+                dep_id = record.deployment_id
+                try:
+                    await self._start_engine(dep_id)
+                    restored += 1
+                    logger.info("Restored deployment %s", dep_id)
+                except Exception:
+                    logger.error("Failed to restore deployment %s", dep_id, exc_info=True)
+                    # Roll back to error — don't leave phantom "running" in DB
+                    self.store.update_status(dep_id, "error", stop_reason="恢复引擎失败")
+            return restored
 
     async def start_deployment(self, deployment_id: str) -> None:
         """Start approved deployment. Checks status=='approved' — hard gate.

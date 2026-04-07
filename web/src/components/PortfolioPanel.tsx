@@ -444,6 +444,8 @@ export default function PortfolioPanel() {
         max_turnover: maxTurnover / 100,
         index_benchmark: indexBenchmark,
         max_tracking_error: trackingError / 100,
+        // V2.16 S1: persist WF metrics to portfolio_runs for DeployGate
+        source_run_id: result?.run_id || undefined,
       })
       if (wfTokenRef.current !== myToken) return  // superseded
       setWfResult(res.data)

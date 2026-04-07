@@ -55,6 +55,7 @@ class PaperTradingEngine:
         self.prev_returns: dict[str, float] = {}
         self.risk_events: list[dict] = []
         self._last_prices: dict[str, float] = {}  # cache for mark-to-market on data gaps
+        self._rebalance_dates_cache: set[date] | None = None
 
     # ------------------------------------------------------------------
     # Main entry point — called by Scheduler once per trading day
@@ -296,14 +297,17 @@ class PaperTradingEngine:
         return has
 
     def _is_rebalance_day(self, today: date) -> bool:
-        """Check if *today* is a rebalance day per TradingCalendar + spec.freq."""
-        if self._calendar is None:
-            from ez.portfolio.calendar import TradingCalendar
-            self._calendar = TradingCalendar.from_market(self.spec.market)
-        rebal = self._calendar.rebalance_dates(
-            self._calendar.start, self._calendar.end, self.spec.freq,
-        )
-        return today in set(rebal)
+        """Check if *today* is a rebalance day per TradingCalendar + spec.freq.
+        Caches the rebalance date set after first computation."""
+        if self._rebalance_dates_cache is None:
+            if self._calendar is None:
+                from ez.portfolio.calendar import TradingCalendar
+                self._calendar = TradingCalendar.from_market(self.spec.market)
+            reb_dates = self._calendar.rebalance_dates(
+                self._calendar.start, self._calendar.end, self.spec.freq,
+            )
+            self._rebalance_dates_cache = set(reb_dates)
+        return today in self._rebalance_dates_cache
 
     def _slice_history(
         self, data: dict[str, pd.DataFrame], today: date,

@@ -72,6 +72,7 @@ class PortfolioStore:
             ("warnings", "TEXT"),
             ("dates", "TEXT"),
             ("weights_history", "TEXT"),
+            ("wf_metrics", "TEXT"),
         ]:
             try:
                 self._conn.execute(f"ALTER TABLE portfolio_runs ADD COLUMN {col} {typ}")
@@ -149,7 +150,8 @@ class PortfolioStore:
             """SELECT run_id, strategy_name, strategy_params, symbols,
                       start_date, end_date, freq, initial_cash,
                       metrics, equity_curve, trade_count, rebalance_count, created_at,
-                      rebalance_weights, trades, config, warnings, dates, weights_history
+                      rebalance_weights, trades, config, warnings, dates, weights_history,
+                      wf_metrics
                FROM portfolio_runs WHERE run_id = ?""", [run_id],
         ).fetchone()
         if not row:
@@ -157,16 +159,24 @@ class PortfolioStore:
         cols = ["run_id", "strategy_name", "strategy_params", "symbols",
                 "start_date", "end_date", "freq", "initial_cash",
                 "metrics", "equity_curve", "trade_count", "rebalance_count", "created_at",
-                "rebalance_weights", "trades", "config", "warnings", "dates", "weights_history"]
+                "rebalance_weights", "trades", "config", "warnings", "dates", "weights_history",
+                "wf_metrics"]
         d = dict(zip(cols, row))
         for key in ("strategy_params", "symbols", "metrics", "equity_curve",
                      "rebalance_weights", "trades", "config", "warnings", "dates",
-                     "weights_history"):
+                     "weights_history", "wf_metrics"):
             if d.get(key) and isinstance(d[key], str):
                 d[key] = _sanitize_nans(json.loads(d[key]))
         if d["created_at"]:
             d["created_at"] = str(d["created_at"])
         return d
+
+    def update_wf_metrics(self, run_id: str, wf_metrics: dict) -> None:
+        """Store walk-forward metrics for a run. Called by /walk-forward endpoint."""
+        self._conn.execute(
+            "UPDATE portfolio_runs SET wf_metrics = ? WHERE run_id = ?",
+            [json.dumps(_sanitize_nans(wf_metrics)), run_id],
+        )
 
     def delete_run(self, run_id: str) -> bool:
         before = self._conn.execute("SELECT COUNT(*) FROM portfolio_runs WHERE run_id = ?", [run_id]).fetchone()[0]

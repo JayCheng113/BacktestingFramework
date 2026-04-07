@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.15 | Tests: 2226 passed + 10 skipped (2236 collected) with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.15.1 | Tests: 2229 passed + 10 skipped (2239 collected) with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -175,6 +175,14 @@ No version tag without review pass. No push without critical issues resolved.
   - **TradingCalendar.from_market()**: 类方法, 按 market 字符串构造日历实例
   - **DocsPage Ch15 模拟盘**: 部署流程/门控/调度/监控/已知限制
   - 2054 → 2226 passed tests (+172), 2236 collected
+
+- **V2.15.1**: Stability — 模拟盘从 experimental 推向 beta:
+  - **S1 server-side WF metrics**: `portfolio_runs` 新增 `wf_metrics` 列. `/walk-forward` 端点接收 `source_run_id` → 自动将 WF 指标 (p_value/overfitting_score/oos_sharpe) 写回 source run. DeployGate 从 DB 读 WF 指标, 不再信任客户端传入. 消除 V2.15 的 wf_metrics 信任边界.
+  - **S2 恢复回归测试**: 3 个 restart recovery 测试 — error 快照不污染恢复, _last_prices 从 weights+equity+holdings 重建, risk_manager.replay_equity 恢复回撤状态机.
+  - **S3 DeploymentStore 独立连接**: 不再共享 `get_store()._conn`, 自建 DuckDB 连接到同一 DB 文件.
+  - **S4 resume_all 加锁**: `asyncio.Lock` 覆盖 resume_all + start/pause/resume/stop/tick 全部 6 个入口.
+  - **S5 _is_rebalance_day 缓存**: 首次计算后缓存 rebalance date set, 后续 O(1) 查找.
+  - 2226 → 2229 tests (+3 recovery regression)
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)

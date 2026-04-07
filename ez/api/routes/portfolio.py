@@ -992,6 +992,10 @@ class PortfolioWFRequest(PortfolioCommonConfig):
     initial_cash: float = Field(default=1_000_000, ge=10_000)
     n_splits: int = Field(default=5, ge=2, le=20)
     train_ratio: float = Field(default=0.7, gt=0.0, lt=1.0)
+    # V2.16 S1: optional source_run_id — if provided, WF metrics are persisted
+    # to portfolio_runs.wf_metrics for that run. This closes the trust boundary
+    # in DeployGate (WF metrics read from DB, not client input).
+    source_run_id: str | None = None
 
 
 @router.post("/walk-forward")
@@ -1055,6 +1059,16 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
 
     # Significance on OOS equity curve
     sig = portfolio_significance(wf_result.oos_equity_curve, seed=42) if wf_result.oos_equity_curve else None
+
+    # V2.16 S1: persist WF metrics to portfolio_runs.wf_metrics for the source run.
+    # This closes the trust boundary — DeployGate reads WF metrics from DB.
+    if req.source_run_id:
+        pf_store = _get_store()
+        pf_store.update_wf_metrics(req.source_run_id, {
+            "p_value": sig.monte_carlo_p_value if sig else 1.0,
+            "overfitting_score": wf_result.overfitting_score,
+            "oos_sharpe": wf_result.oos_metrics.get("sharpe_ratio") if wf_result.oos_metrics else None,
+        })
 
     # V2.12.1 reviewer round 6 I1+I2: surface optimizer fallback and risk events
     # aggregated across all folds so WF users see the same warnings /run users do.
