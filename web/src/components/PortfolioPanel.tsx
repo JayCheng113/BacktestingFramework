@@ -7,12 +7,14 @@ import type { EnsembleConfig } from './EnsembleBuilder'
 import PortfolioRunContent from './PortfolioRunContent'
 import PortfolioFactorContent from './PortfolioFactorContent'
 import PortfolioHistoryContent from './PortfolioHistoryContent'
+import { useToast } from './shared/Toast'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
 export default function PortfolioPanel() {
+  const { showToast } = useToast()
   const [strategies, setStrategies] = useState<{ name: string; description: string; parameters: Record<string, ParamSchema> }[]>([])
   const [factors, setFactors] = useState<string[]>([])
   const [factorCategories, setFactorCategories] = useState<{ key: string; label: string; factors: any[] }[]>([])
@@ -234,8 +236,8 @@ export default function PortfolioPanel() {
 
   const handleCompare = async () => {
     const ids = Array.from(selectedRuns)
-    if (ids.length < 2) { alert('请至少选择 2 条记录'); return }
-    if (ids.length > 10) { alert('最多对比 10 条记录'); return }
+    if (ids.length < 2) { showToast('warning', '请至少选择 2 条记录'); return }
+    if (ids.length > 10) { showToast('warning', '最多对比 10 条记录'); return }
     const myToken = ++compareTokenRef.current
     setComparing(true)
     setCompareData([])
@@ -262,10 +264,10 @@ export default function PortfolioPanel() {
       if (results.length >= 2) {
         setCompareData(results)
       } else if (errors.length > 0) {
-        alert('对比加载失败:\n' + errors.join('\n'))
+        showToast('error', '对比加载失败:\n' + errors.join('\n'))
         loadHistory()
       } else {
-        alert('对比数据不足（需至少 2 条有效记录）')
+        showToast('warning', '对比数据不足（需至少 2 条有效记录）')
       }
     } finally {
       if (compareTokenRef.current === myToken) setComparing(false)
@@ -274,8 +276,8 @@ export default function PortfolioPanel() {
 
   const handleEvaluateFactors = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
-    if (symbolList.length < 5) { alert('因子评估需要至少 5 个标的'); return }
-    if (evalFactors.length === 0) { alert('请选择至少 1 个因子'); return }
+    if (symbolList.length < 5) { showToast('warning', '因子评估需要至少 5 个标的'); return }
+    if (evalFactors.length === 0) { showToast('warning', '请选择至少 1 个因子'); return }
     const myToken = ++evalTokenRef.current
     setEvalLoading(true); setEvalResult(null); setCorrResult(null)
     try {
@@ -288,7 +290,7 @@ export default function PortfolioPanel() {
       if (evalTokenRef.current !== myToken) return  // superseded
       setEvalResult(evalRes.data)
       if (corrRes) setCorrResult(corrRes.data)
-    } catch (e: any) { if (evalTokenRef.current === myToken) alert(e?.response?.data?.detail || e?.message || '评估失败') }
+    } catch (e: any) { if (evalTokenRef.current === myToken) showToast('error', e?.response?.data?.detail || e?.message || '评估失败') }
     finally { if (evalTokenRef.current === myToken) setEvalLoading(false) }
   }
 
@@ -347,7 +349,7 @@ export default function PortfolioPanel() {
       await deletePortfolioRun(runId)
       loadHistory()
     } catch (e: any) {
-      alert('删除失败: ' + (e?.response?.data?.detail || e?.message || '未知错误'))
+      showToast('error', '删除失败: ' + (e?.response?.data?.detail || e?.message || '未知错误'))
     }
   }
 
@@ -397,7 +399,7 @@ export default function PortfolioPanel() {
       loadHistory()
     } catch (e: any) {
       if (runTokenRef.current === myToken) {
-        alert(e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
+        showToast('error', e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
       }
     } finally {
       if (runTokenRef.current === myToken) setLoading(false)
@@ -449,10 +451,10 @@ export default function PortfolioPanel() {
       })
       if (wfTokenRef.current !== myToken) return  // superseded
       setWfResult(res.data)
-      if (res.data.warnings?.length) alert('前推验证提示: ' + res.data.warnings.join('\n'))
+      if (res.data.warnings?.length) showToast('warning', '前推验证提示: ' + res.data.warnings.join('\n'))
     } catch (e: any) {
       if (wfTokenRef.current === myToken) {
-        alert('前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
+        showToast('error', '前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
       }
     } finally {
       if (wfTokenRef.current === myToken) setWfLoading(false)
@@ -461,7 +463,7 @@ export default function PortfolioPanel() {
 
   const handleSearch = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
-    if (symbolList.length === 0) { alert('请填写股票池'); return }
+    if (symbolList.length === 0) { showToast('warning', '请填写股票池'); return }
 
     const paramGrid: Record<string, any[]> = {}
     let totalCombos = 1
@@ -485,7 +487,7 @@ export default function PortfolioPanel() {
               subsets.push(subset)
             }
             if (subsets.length > 64) {
-              alert(`因子组合数 ${subsets.length} 超过 64 上限，请减少选中因子数`)
+              showToast('warning', `因子组合数 ${subsets.length} 超过 64 上限，请减少选中因子数`)
               return
             }
             paramGrid[key] = subsets
@@ -511,7 +513,7 @@ export default function PortfolioPanel() {
         if (vals.length > 0) { paramGrid[key] = vals; totalCombos *= vals.length }
       }
     }
-    if (Object.keys(paramGrid).length === 0) { alert('请至少为一个参数设置多个候选值'); return }
+    if (Object.keys(paramGrid).length === 0) { showToast('warning', '请至少为一个参数设置多个候选值'); return }
 
     // V2.12.2 codex round 8: stale-response token for search.
     const myToken = ++searchTokenRef.current
@@ -555,9 +557,9 @@ export default function PortfolioPanel() {
       const tc = res.data.total_combinations || 0
       let searchMsg = res.data.warnings?.length ? res.data.warnings.join('\n') + '\n' : ''
       if (tc > 50) searchMsg += `共 ${tc} 种组合，随机采样 50 个展示（可能不完整）`
-      if (searchMsg) alert(searchMsg.trim())
+      if (searchMsg) showToast('info', searchMsg.trim())
     } catch (e: any) {
-      if (searchTokenRef.current === myToken) alert(e?.response?.data?.detail || '搜索失败')
+      if (searchTokenRef.current === myToken) showToast('error', e?.response?.data?.detail || '搜索失败')
     } finally {
       if (searchTokenRef.current === myToken) setSearchLoading(false)
     }

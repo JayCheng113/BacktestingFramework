@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listFactors, evaluateFactor } from '../api'
 import type { FactorResult } from '../types'
+import { useToast } from './shared/Toast'
 
 interface Props {
   symbol: string; market: string; startDate: string; endDate: string
@@ -16,6 +17,7 @@ const _LABELS: Record<string, string> = {
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function FactorPanel({ symbol, market, startDate, endDate }: Props) {
+  const { showToast } = useToast()
   const [factors, setFactors] = useState<{ value: string; label: string }[]>([])
   const [factor, setFactor] = useState('')
   const [result, setResult] = useState<FactorResult | null>(null)
@@ -45,7 +47,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     try {
       const res = await evaluateFactor({ symbol, market, factor_name: factor, start_date: startDate, end_date: endDate })
       setResult(res.data)
-    } catch (e: any) { alert(e?.response?.data?.detail || 'Evaluation failed') }
+    } catch (e: any) { showToast('error', e?.response?.data?.detail || 'Evaluation failed') }
     finally { setLoading(false) }
   }
 
