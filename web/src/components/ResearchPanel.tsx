@@ -234,6 +234,7 @@ export default function ResearchPanel() {
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
       showToast('error', err?.response?.data?.detail || err?.message || '加载研究文件失败')
+      setResearchFiles([])  // clear stale files from previous task
     }
   }
 

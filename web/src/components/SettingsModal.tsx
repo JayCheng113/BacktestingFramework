@@ -64,21 +64,21 @@ export default function SettingsModal({ open, onClose }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, api_key: apiKey, model, base_url: baseUrl, temperature }),
       })
-      if (res.ok) {
-        setStatus('LLM 配置已保存')
-        setApiKey('')
-        // Refresh status
-        const d = await fetch('/api/settings/llm').then(r => r.json())
-        setLlm(d)
-      } else {
-        setStatus('保存失败')
-      }
-    } catch { setStatus('保存失败') }
+      if (!res.ok) { setStatus('保存失败'); setSaving(false); return }
+      setStatus('LLM 配置已保存')
+      setApiKey('')
+    } catch { setStatus('保存失败'); setSaving(false); return }
+    // Refresh status separately — failure doesn't override success
+    try {
+      const d = await fetch('/api/settings/llm').then(r => r.json())
+      setLlm(d)
+    } catch { /* refresh failed but save succeeded — keep success status */ }
     finally { setSaving(false) }
   }
 
   const saveTushare = async () => {
     setSaving(true)
+    setStatus('')
     try {
       const res = await fetch('/api/settings/tushare', {
         method: 'POST',
@@ -88,9 +88,12 @@ export default function SettingsModal({ open, onClose }: Props) {
       if (!res.ok) { setStatus('Tushare Token 保存失败'); setSaving(false); return }
       setStatus('Tushare Token 已保存')
       setTushareToken('')
+    } catch { setStatus('保存失败'); setSaving(false); return }
+    // Refresh separately
+    try {
       const d = await fetch('/api/settings/tushare').then(r => r.json())
       setTushare(d)
-    } catch { setStatus('保存失败') }
+    } catch { /* refresh failed but save succeeded */ }
     finally { setSaving(false) }
   }
 
