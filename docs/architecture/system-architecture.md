@@ -583,16 +583,16 @@ Agent 调整: "尝试均值回归型策略"
 
 ```
 Layer 0: 数据平台          ██████████ 100%  3数据源 + DuckDB + 校验
-Layer 1: 特征工程          ████░░░░░░  40%  6技术因子 + IC评估 + C++加速
-Layer 2: 候选生成          ███░░░░░░░  30%  策略注册 + contract test
-Layer 3: Research Gate     ██████░░░░  60%  回测+WFO+显著性, 缺Gate框架
-Layer 4: Deploy Gate       ░░░░░░░░░░   0%
-Layer 5: Runtime Gate      ░░░░░░░░░░   0%
-Layer 6: 执行层            ░░░░░░░░░░   0%
-Layer 7: 调度+监控         ░░░░░░░░░░   0%
+Layer 1: 特征工程          ████████░░  80%  9技术+18基本面+ML Alpha(9 estimator)+Ensemble
+Layer 2: 候选生成          ████████░░  80%  策略注册+contract test+参数搜索+bool/enum+power-set
+Layer 3: Research Gate     ████████░░  80%  回测+WFO+显著性+Gate框架(5规则)+FDR
+Layer 4: Deploy Gate       ████████░░  80%  10检查硬门禁+server-side WF指标 (V2.15+V2.15.1)
+Layer 5: Runtime Gate      ██░░░░░░░░  20%  RiskManager回撤熔断+换手限制 (完整Pre-Trade待V3.0)
+Layer 6: 执行层            ████░░░░░░  40%  PaperTradingEngine+共享成交函数 (真实Broker待V3.0)
+Layer 7: 调度+监控         ████░░░░░░  40%  Scheduler(幂等/锁/恢复)+Monitor(仪表板/预警) (ops待V3.0)
 
-Research 面: ████████░░ ~50% (数据→特征→回测链路可用)
-Live 面:     ░░░░░░░░░░  0%  (无 OMS/Broker/风控)
+Research 面: ██████████ ~95% (完整研究链路)
+Live 面:     ████░░░░░░ ~40% (Paper Trading可用, 真实Broker/OMS待V3.0)
 ```
 
 ---

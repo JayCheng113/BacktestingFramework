@@ -77,6 +77,12 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **状态标签中文**: pending→待审批, approved→已审批, running→运行中, paused→已暂停, stopped→已停止, error→异常
 - **DocsPage Ch15 模拟盘**: 新增章节 (部署流程/门控/调度/监控/已知限制)
 
+## V2.15.1 — 稳定化
+- **部署按钮**: 必须先跑 WF 才能部署 (`disabled={!wfResult}`), 传 `source_run_id` 到 `/walk-forward`
+- **wf_metrics 不再从前端传**: `/deploy` 不再接收 `wf_metrics`, WF 指标由服务端持久化
+- **CandidateSearch**: `isNumeric()` type guard 修复 `tsc -b` 严格构建错误
+- **ensembleConfig**: 移除未使用的 state (只用 ref)
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000

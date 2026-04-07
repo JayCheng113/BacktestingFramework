@@ -139,17 +139,19 @@ def _build_supported_estimator_set() -> frozenset[type]:
 
     # V2.14: LightGBM (optional — regressor only, classifier deferred
     # until a classification contract is defined)
+    # NOTE: except Exception (not just ImportError) because lightgbm can raise
+    # OSError when libomp.dylib is missing on macOS even if the package is installed.
     try:
         from lightgbm import LGBMRegressor
         estimators.add(LGBMRegressor)
-    except ImportError:
+    except Exception:
         pass
 
     # V2.14: XGBoost (optional — regressor only, classifier deferred)
     try:
         from xgboost import XGBRegressor
         estimators.add(XGBRegressor)
-    except ImportError:
+    except Exception:
         pass
 
     return frozenset(estimators)

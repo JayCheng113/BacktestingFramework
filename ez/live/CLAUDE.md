@@ -38,7 +38,7 @@ Bridge between offline backtest research and forward-looking paper execution.
 - **Error escalation**: 3 consecutive errors -> automatic status="error" + engine removal (no infinite retry)
 
 ## Status
-V2.15 -- experimental. Known limitations:
+V2.15.1 -- beta (promoted from experimental after stabilization). Known limitations:
 - strategy.state not persisted across process restarts
 - Data freshness depends on provider update timing
 - Stop does not trigger liquidation
