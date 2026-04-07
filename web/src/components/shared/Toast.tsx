@@ -36,7 +36,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     success: { bg: 'rgba(34,197,94,0.15)', border: '#22c55e', text: '#22c55e' },
     error: { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', text: '#ef4444' },
     warning: { bg: 'rgba(245,158,11,0.15)', border: '#f59e0b', text: '#f59e0b' },
-    info: { bg: 'rgba(59,130,246,0.15)', border: '#3b8cf6', text: '#3b8cf6' },
+    info: { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', text: '#3b82f6' },
   }
 
   return (

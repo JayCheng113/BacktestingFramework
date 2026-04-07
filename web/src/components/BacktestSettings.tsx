@@ -35,7 +35,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
     onChange({ ...value, [key]: v })
 
   return (
-    <div className="p-3 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+    <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
       <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置</div>
       <div className="flex flex-wrap gap-3 items-end mb-2">
         {showInitialCash && (
@@ -43,7 +43,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>初始资金</label>
             <input type="number" value={value.initial_cash} step={100000} min={10000}
               onChange={e => set('initial_cash', Number(e.target.value))}
-              className="px-2 py-1 rounded text-xs w-28" style={inputStyle} />
+              className="px-3 py-1.5 rounded text-xs w-28" style={inputStyle} />
           </div>
         )}
         {showBenchmark && (
@@ -51,28 +51,28 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>基准 (留空=现金)</label>
             <input type="text" value={value.benchmark} placeholder="510300.SH"
               onChange={e => set('benchmark', e.target.value)}
-              className="px-2 py-1 rounded text-xs w-24" style={inputStyle} />
+              className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
           </div>
         )}
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>买入佣金</label>
           <input type="number" value={value.buy_commission_rate} step={0.0001} min={0}
             onChange={e => set('buy_commission_rate', Number(e.target.value))}
-            className="px-2 py-1 rounded text-xs w-24" style={inputStyle} />
+            className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
         </div>
         {showSellCommission && (
           <div className="flex flex-col gap-1">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>卖出佣金</label>
             <input type="number" value={value.sell_commission_rate} step={0.0001} min={0}
               onChange={e => set('sell_commission_rate', Number(e.target.value))}
-              className="px-2 py-1 rounded text-xs w-24" style={inputStyle} />
+              className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
           </div>
         )}
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>最低佣金</label>
           <input type="number" value={value.min_commission} step={1} min={0}
             onChange={e => set('min_commission', Number(e.target.value))}
-            className="px-2 py-1 rounded text-xs w-16" style={inputStyle} />
+            className="px-3 py-1.5 rounded text-xs w-16" style={inputStyle} />
         </div>
       </div>
       <div className="flex flex-wrap gap-3 items-end">
@@ -81,21 +81,21 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>印花税(卖)</label>
             <input type="number" value={value.stamp_tax_rate} step={0.0001} min={0}
               onChange={e => set('stamp_tax_rate', Number(e.target.value))}
-              className="px-2 py-1 rounded text-xs w-24" style={inputStyle} />
+              className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
           </div>
         )}
         <div className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>滑点率 (模拟买卖价差)</label>
           <input type="number" value={value.slippage_rate} step={0.001} min={0} max={0.1}
             onChange={e => set('slippage_rate', Number(e.target.value))}
-            className="px-2 py-1 rounded text-xs w-20" style={inputStyle} />
+            className="px-3 py-1.5 rounded text-xs w-20" style={inputStyle} />
         </div>
         {showLotSize && (
           <div className="flex flex-col gap-1">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>最小交易单位(股)</label>
             <input type="number" value={value.lot_size} step={100} min={1}
               onChange={e => set('lot_size', Number(e.target.value))}
-              className="px-2 py-1 rounded text-xs w-16" style={inputStyle} />
+              className="px-3 py-1.5 rounded text-xs w-16" style={inputStyle} />
           </div>
         )}
         {showLimitPct && (
@@ -103,7 +103,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>涨跌停限制%</label>
             <input type="number" value={Math.round(value.limit_pct * 100)} step={1} min={0} max={30}
               onChange={e => set('limit_pct', Number(e.target.value) / 100)}
-              className="px-2 py-1 rounded text-xs w-16" style={inputStyle} />
+              className="px-3 py-1.5 rounded text-xs w-16" style={inputStyle} />
           </div>
         )}
       </div>

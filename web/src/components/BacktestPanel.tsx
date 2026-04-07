@@ -385,7 +385,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
                   </thead>
                   <tbody>
                     {result.trades.map((t, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
                         <td className="px-3 py-2" style={{ color: 'var(--text-secondary)' }}>{i + 1}</td>
                         <td className="px-3 py-2">{t.entry_time.slice(0, 10)}</td>
                         <td className="px-3 py-2">{t.exit_time.slice(0, 10)}</td>

@@ -107,3 +107,41 @@ body {
   color: var(--text-primary) !important;
   border: 1px solid var(--border) !important;
 }
+
+/* Dark theme scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Focus ring for keyboard navigation */
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Text selection */
+::selection {
+  background-color: var(--color-accent);
+  color: white;
+}
+
+/* Disabled button cursor */
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Button hover feedback */
+button:not(:disabled):hover {
+  filter: brightness(1.15);
+}

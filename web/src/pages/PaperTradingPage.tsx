@@ -491,7 +491,7 @@ export default function PaperTradingPage() {
                       </thead>
                       <tbody>
                         {todayTrades.map((t, i) => (
-                          <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                          <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
                             <td className="py-1">{t.symbol}</td>
                             <td className="py-1" style={{ color: t.side === 'buy' ? '#ef4444' : '#22c55e' }}>
                               {t.side === 'buy' ? '买入' : '卖出'}
@@ -545,7 +545,7 @@ export default function PaperTradingPage() {
                     </thead>
                     <tbody>
                       {trades.slice().reverse().map((t, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
                           <td className="py-1">{t.snapshot_date}</td>
                           <td className="py-1">{t.symbol}</td>
                           <td className="py-1" style={{ color: t.side === 'buy' ? '#ef4444' : '#22c55e' }}>
