@@ -124,13 +124,9 @@ export default function PortfolioRunContent(props: Props) {
     if (!name) return
     setDeployLoading(true)
     try {
-      // Pass wf_metrics from WF result (if available) for DeployGate evaluation
-      const wfMetrics: Record<string, number> = {}
-      if (wfResult) {
-        if (wfResult.significance?.p_value != null) wfMetrics.p_value = wfResult.significance.p_value
-        if (wfResult.overfitting_score != null) wfMetrics.overfitting_score = wfResult.overfitting_score
-      }
-      const res = await deployToLive({ source_run_id: result.run_id, name, wf_metrics: wfMetrics })
+      // V2.16 S1: wf_metrics are now persisted server-side by /walk-forward.
+      // DeployGate reads them from DB — no need to pass from frontend.
+      const res = await deployToLive({ source_run_id: result.run_id, name })
       alert(`部署成功！ID: ${res.data.deployment_id}\n请前往 "模拟盘" 页面查看和审批。`)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }

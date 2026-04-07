@@ -50,7 +50,10 @@ _monitor: Monitor | None = None
 def _get_deployment_store() -> DeploymentStore:
     global _deployment_store
     if _deployment_store is None:
-        _deployment_store = DeploymentStore(get_store()._conn)
+        import duckdb
+        from ez.config import load_config
+        db_path = load_config().database.path
+        _deployment_store = DeploymentStore(duckdb.connect(db_path))
     return _deployment_store
 
 
@@ -88,7 +91,6 @@ def get_scheduler() -> Scheduler:
 class DeployRequest(BaseModel):
     source_run_id: str
     name: str
-    wf_metrics: dict = Field(default_factory=dict)
 
 
 class DeployResponse(BaseModel):
@@ -222,10 +224,6 @@ def create_deployment(req: DeployRequest):
         source_run_id=req.source_run_id,
         code_commit=_get_git_sha(),
     )
-    # Stash wf_metrics in gate_verdict temporarily as JSON for approve to read
-    if req.wf_metrics:
-        record.gate_verdict = json.dumps({"wf_metrics": req.wf_metrics}, ensure_ascii=False)
-
     # 4. Save both
     store.save_spec(spec)
     store.save_record(record)
@@ -291,26 +289,16 @@ def approve_deployment(deployment_id: str):
     if not spec:
         raise HTTPException(500, f"部署配置 {record.spec_id} 未找到")
 
-    # Extract wf_metrics stashed in gate_verdict during deploy
-    wf_metrics: dict = {}
-    if record.gate_verdict:
-        try:
-            gv = json.loads(record.gate_verdict)
-            wf_metrics = gv.get("wf_metrics", {})
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    # Run gate
+    # Run gate — V2.16 S1: WF metrics read from DB, not from client
     gate = DeployGate()
     pf_store = _get_portfolio_store()
     verdict = gate.evaluate(
         spec=spec,
         source_run_id=record.source_run_id or "",
         portfolio_store=pf_store,
-        wf_metrics=wf_metrics,
     )
 
-    # Serialize verdict — preserve wf_metrics so retry is possible
+    # Serialize verdict
     verdict_data = {
         "passed": verdict.passed,
         "summary": verdict.summary,
@@ -324,7 +312,6 @@ def approve_deployment(deployment_id: str):
             }
             for r in verdict.reasons
         ],
-        "wf_metrics": wf_metrics,  # preserve for retry
     }
     verdict_json = json.dumps(verdict_data, ensure_ascii=False)
 
@@ -337,7 +324,7 @@ def approve_deployment(deployment_id: str):
             "verdict": verdict_data,
         }
     else:
-        # Save verdict (with wf_metrics) but keep status as pending — retryable
+        # Save verdict but keep status as pending — retryable
         store.update_gate_verdict(deployment_id, verdict_json)
         raise HTTPException(400, detail={
             "message": "部署门禁未通过",

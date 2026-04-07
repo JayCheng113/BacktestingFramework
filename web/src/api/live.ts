@@ -96,7 +96,7 @@ export interface TickResult {
 // API functions
 // ---------------------------------------------------------------------------
 
-export const deployToLive = (data: { source_run_id: string; name: string; wf_metrics?: Record<string, unknown> }) =>
+export const deployToLive = (data: { source_run_id: string; name: string }) =>
   api.post<DeployResponse>('/deploy', data)
 
 export const listDeployments = (status?: string) =>

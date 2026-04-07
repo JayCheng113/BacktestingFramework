@@ -84,6 +84,13 @@ _WF_METRICS_BAD = {
 }
 
 
+def _make_mock_run_with_wf(run_id: str = "test-run-001", wf_metrics: dict | None = None) -> dict:
+    """Build mock run with wf_metrics in the run dict (V2.16 S1: server-side WF)."""
+    run = _make_mock_run(run_id)
+    run["wf_metrics"] = wf_metrics
+    return run
+
+
 @pytest.fixture(autouse=True)
 def _reset_live_singletons():
     """Reset live singletons before and after each test."""
@@ -107,7 +114,6 @@ class TestDeployEndpoint:
             resp = client.post("/api/live/deploy", json={
                 "source_run_id": "test-run-001",
                 "name": "Test Deployment",
-                "wf_metrics": _WF_METRICS_GOOD,
             })
         assert resp.status_code == 200, f"Got {resp.status_code}: {resp.json()}"
         data = resp.json()
@@ -130,22 +136,23 @@ class TestApproveEndpoint:
     """POST /api/live/deployments/{id}/approve"""
 
     def test_approve_runs_gate(self):
-        """Deploy then approve — should pass with good metrics."""
-        mock_run = _make_mock_run()
+        """Deploy then approve — should pass with good metrics.
+        V2.16 S1: wf_metrics are now in the run dict (server-side), not deploy request.
+        """
+        mock_run = _make_mock_run_with_wf(wf_metrics=_WF_METRICS_GOOD)
         with patch("ez.api.routes.live._get_portfolio_store") as mock_pf:
             pf_store = mock_pf.return_value
             pf_store.get_run.return_value = mock_run
 
-            # 1. Deploy
+            # 1. Deploy (no wf_metrics in request)
             deploy_resp = client.post("/api/live/deploy", json={
                 "source_run_id": "test-run-001",
                 "name": "Test Gate",
-                "wf_metrics": _WF_METRICS_GOOD,
             })
             assert deploy_resp.status_code == 200
             dep_id = deploy_resp.json()["deployment_id"]
 
-            # 2. Approve
+            # 2. Approve — gate reads wf_metrics from DB
             approve_resp = client.post(f"/api/live/deployments/{dep_id}/approve")
 
         assert approve_resp.status_code == 200, f"Got {approve_resp.status_code}: {approve_resp.json()}"
@@ -154,8 +161,10 @@ class TestApproveEndpoint:
         assert data["verdict"]["passed"] is True
 
     def test_approve_rejects_bad_metrics(self):
-        """Deploy then approve with bad WF metrics — should fail."""
-        mock_run = _make_mock_run()
+        """Deploy then approve with bad WF + run metrics — should fail.
+        V2.16 S1: wf_metrics are now in the run dict (server-side).
+        """
+        mock_run = _make_mock_run_with_wf(wf_metrics=_WF_METRICS_BAD)
         # Make run metrics bad too
         mock_run["metrics"]["sharpe_ratio"] = 0.1  # below 0.5 threshold
         mock_run["metrics"]["max_drawdown"] = -0.40  # exceeds 0.25
@@ -164,15 +173,14 @@ class TestApproveEndpoint:
             pf_store = mock_pf.return_value
             pf_store.get_run.return_value = mock_run
 
-            # Deploy
+            # Deploy (no wf_metrics in request)
             deploy_resp = client.post("/api/live/deploy", json={
                 "source_run_id": "test-run-001",
                 "name": "Bad Deploy",
-                "wf_metrics": _WF_METRICS_BAD,
             })
             dep_id = deploy_resp.json()["deployment_id"]
 
-            # Approve — should fail
+            # Approve — should fail (gate reads bad wf_metrics from DB)
             approve_resp = client.post(f"/api/live/deployments/{dep_id}/approve")
 
         assert approve_resp.status_code == 400
@@ -184,16 +192,15 @@ class TestLifecycleFlow:
     """Full lifecycle: deploy -> approve -> start -> tick -> stop"""
 
     def test_lifecycle_flow(self):
-        mock_run = _make_mock_run()
+        mock_run = _make_mock_run_with_wf(wf_metrics=_WF_METRICS_GOOD)
         with patch("ez.api.routes.live._get_portfolio_store") as mock_pf:
             pf_store = mock_pf.return_value
             pf_store.get_run.return_value = mock_run
 
-            # 1. Deploy
+            # 1. Deploy (no wf_metrics in request)
             deploy_resp = client.post("/api/live/deploy", json={
                 "source_run_id": "test-run-001",
                 "name": "Lifecycle Test",
-                "wf_metrics": _WF_METRICS_GOOD,
             })
             assert deploy_resp.status_code == 200
             dep_id = deploy_resp.json()["deployment_id"]

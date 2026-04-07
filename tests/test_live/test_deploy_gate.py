@@ -34,8 +34,13 @@ def _make_run(
     metrics: dict | None | object = _SENTINEL,
     dates: list | None | object = _SENTINEL,
     rebalance_weights: list | None | object = _SENTINEL,
+    wf_metrics: dict | None | object = _SENTINEL,
 ) -> dict:
-    """Build a fake portfolio_runs row (already JSON-parsed, like PortfolioStore.get_run())."""
+    """Build a fake portfolio_runs row (already JSON-parsed, like PortfolioStore.get_run()).
+
+    V2.16 S1: wf_metrics is now a column in portfolio_runs, read by DeployGate
+    from the run dict (not passed as a separate parameter).
+    """
     if metrics is _SENTINEL:
         metrics = {
             "sharpe_ratio": 1.2,
@@ -51,6 +56,8 @@ def _make_run(
             {"date": "2022-02-01", "weights": {"A": 0.2, "B": 0.2, "C": 0.2, "D": 0.2, "E": 0.1, "F": 0.1}},
             {"date": "2022-03-01", "weights": {"A": 0.15, "B": 0.25, "C": 0.2, "D": 0.2, "E": 0.1, "F": 0.1}},
         ]
+    if wf_metrics is _SENTINEL:
+        wf_metrics = _good_wf_metrics()
     return {
         "run_id": "run_001",
         "strategy_name": "TopN",
@@ -71,10 +78,12 @@ def _make_run(
         "warnings": [],
         "dates": dates,
         "weights_history": [],
+        "wf_metrics": wf_metrics,
     }
 
 
 def _good_wf_metrics() -> dict:
+    """Return WF metrics that pass all gate thresholds."""
     return {"p_value": 0.01, "overfitting_score": 0.1}
 
 
@@ -116,7 +125,7 @@ class TestSourceRunExists:
         gate = DeployGate()
         spec = _make_spec()
         store = _MockPortfolioStore()  # empty store
-        verdict = gate.evaluate(spec, "nonexistent", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "nonexistent", store)
         assert not verdict.passed
         assert len(verdict.reasons) == 1
         assert verdict.reasons[0].rule == "source_run_exists"
@@ -126,7 +135,7 @@ class TestSourceRunExists:
         gate = DeployGate()
         spec = _make_spec()
         store = _MockPortfolioStore({"run_001": None})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         assert not verdict.passed
         assert verdict.reasons[0].rule == "source_run_exists"
 
@@ -137,7 +146,7 @@ class TestMinSharpe:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 0.3, "max_drawdown": -0.1, "trade_count": 50})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sharpe_reason = next(r for r in verdict.reasons if r.rule == "min_sharpe")
         assert not sharpe_reason.passed
         assert sharpe_reason.value == 0.3
@@ -148,7 +157,7 @@ class TestMinSharpe:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 0.8, "max_drawdown": -0.1, "trade_count": 50})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sharpe_reason = next(r for r in verdict.reasons if r.rule == "min_sharpe")
         assert sharpe_reason.passed
 
@@ -157,7 +166,7 @@ class TestMinSharpe:
         spec = _make_spec()
         run = _make_run(metrics={"max_drawdown": -0.1, "trade_count": 50})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sharpe_reason = next(r for r in verdict.reasons if r.rule == "min_sharpe")
         assert not sharpe_reason.passed
         assert sharpe_reason.value == 0
@@ -169,7 +178,7 @@ class TestMaxDrawdown:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.35, "trade_count": 50})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         dd_reason = next(r for r in verdict.reasons if r.rule == "max_drawdown")
         assert not dd_reason.passed
         assert dd_reason.value == pytest.approx(0.35)
@@ -180,7 +189,7 @@ class TestMaxDrawdown:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": 0.35, "trade_count": 50})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         dd_reason = next(r for r in verdict.reasons if r.rule == "max_drawdown")
         assert not dd_reason.passed
         assert dd_reason.value == pytest.approx(0.35)
@@ -190,7 +199,7 @@ class TestMaxDrawdown:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.2, "trade_count": 50})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         dd_reason = next(r for r in verdict.reasons if r.rule == "max_drawdown")
         assert dd_reason.passed
 
@@ -201,7 +210,7 @@ class TestMinTrades:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.1, "trade_count": 5})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         trades_reason = next(r for r in verdict.reasons if r.rule == "min_trades")
         assert not trades_reason.passed
         assert trades_reason.value == 5
@@ -211,7 +220,7 @@ class TestMinTrades:
         spec = _make_spec()
         run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.1, "trade_count": 25})
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         trades_reason = next(r for r in verdict.reasons if r.rule == "min_trades")
         assert trades_reason.passed
 
@@ -220,10 +229,9 @@ class TestMaxPValue:
     def test_above_threshold_fails(self):
         gate = DeployGate()
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"p_value": 0.2, "overfitting_score": 0.1})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"p_value": 0.2, "overfitting_score": 0.1}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         p_reason = next(r for r in verdict.reasons if r.rule == "max_p_value")
         assert not p_reason.passed
         assert p_reason.value == 0.2
@@ -231,10 +239,9 @@ class TestMaxPValue:
     def test_below_threshold_passes(self):
         gate = DeployGate()
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"p_value": 0.03, "overfitting_score": 0.1})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"p_value": 0.03, "overfitting_score": 0.1}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         p_reason = next(r for r in verdict.reasons if r.rule == "max_p_value")
         assert p_reason.passed
 
@@ -242,10 +249,9 @@ class TestMaxPValue:
         """Missing p_value in wf_metrics defaults to 1.0 -> fail."""
         gate = DeployGate()
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"overfitting_score": 0.1})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"overfitting_score": 0.1}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         p_reason = next(r for r in verdict.reasons if r.rule == "max_p_value")
         assert not p_reason.passed
         assert p_reason.value == 1.0
@@ -255,10 +261,9 @@ class TestMaxOverfittingScore:
     def test_above_threshold_fails(self):
         gate = DeployGate()
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"p_value": 0.01, "overfitting_score": 0.6})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"p_value": 0.01, "overfitting_score": 0.6}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         of_reason = next(r for r in verdict.reasons if r.rule == "max_overfitting_score")
         assert not of_reason.passed
         assert of_reason.value == 0.6
@@ -266,10 +271,9 @@ class TestMaxOverfittingScore:
     def test_below_threshold_passes(self):
         gate = DeployGate()
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"p_value": 0.01, "overfitting_score": 0.2})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"p_value": 0.01, "overfitting_score": 0.2}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         of_reason = next(r for r in verdict.reasons if r.rule == "max_overfitting_score")
         assert of_reason.passed
 
@@ -280,7 +284,7 @@ class TestMinBacktestDays:
         spec = _make_spec()
         run = _make_run(dates=["2022-01-04", "2022-01-05", "2022-01-06"])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         days_reason = next(r for r in verdict.reasons if r.rule == "min_backtest_days")
         assert not days_reason.passed
         assert days_reason.value == 3
@@ -290,7 +294,7 @@ class TestMinBacktestDays:
         spec = _make_spec()
         run = _make_run(dates=[f"d{i}" for i in range(510)])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         days_reason = next(r for r in verdict.reasons if r.rule == "min_backtest_days")
         assert days_reason.passed
         assert days_reason.value == 510
@@ -300,7 +304,7 @@ class TestMinBacktestDays:
         spec = _make_spec()
         run = _make_run(dates=[])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         days_reason = next(r for r in verdict.reasons if r.rule == "min_backtest_days")
         assert not days_reason.passed
         assert days_reason.value == 0
@@ -313,7 +317,7 @@ class TestMinBacktestDays:
         # Simulate raw JSON string (pre-parse did not happen)
         run["dates"] = json.dumps(run["dates"])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         days_reason = next(r for r in verdict.reasons if r.rule == "min_backtest_days")
         assert days_reason.passed
 
@@ -324,7 +328,7 @@ class TestMinSymbols:
         spec = _make_spec(symbols=("A", "B"))
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sym_reason = next(r for r in verdict.reasons if r.rule == "min_symbols")
         assert not sym_reason.passed
         assert sym_reason.value == 2
@@ -334,7 +338,7 @@ class TestMinSymbols:
         spec = _make_spec(symbols=("A", "B", "C", "D", "E"))
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sym_reason = next(r for r in verdict.reasons if r.rule == "min_symbols")
         assert sym_reason.passed
 
@@ -347,7 +351,7 @@ class TestMaxConcentration:
             {"date": "2022-02-01", "weights": {"A": 0.6, "B": 0.4}},
         ])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         conc_reason = next(r for r in verdict.reasons if r.rule == "max_concentration")
         assert not conc_reason.passed
         assert conc_reason.value == pytest.approx(0.6)
@@ -360,7 +364,7 @@ class TestMaxConcentration:
             {"date": "2022-03-01", "weights": {"A": 0.25, "B": 0.35, "C": 0.4}},
         ])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         conc_reason = next(r for r in verdict.reasons if r.rule == "max_concentration")
         assert conc_reason.passed
 
@@ -370,7 +374,7 @@ class TestMaxConcentration:
         spec = _make_spec()
         run = _make_run(rebalance_weights=[])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         conc_reason = next(r for r in verdict.reasons if r.rule == "max_concentration")
         assert not conc_reason.passed
         assert conc_reason.value == 1.0
@@ -383,7 +387,7 @@ class TestMaxConcentration:
             {"A": 0.3, "B": 0.3, "C": 0.4},
         ])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         conc_reason = next(r for r in verdict.reasons if r.rule == "max_concentration")
         assert conc_reason.passed
         assert conc_reason.value == pytest.approx(0.4)
@@ -397,7 +401,7 @@ class TestMaxConcentration:
         ])
         run["rebalance_weights"] = json.dumps(run["rebalance_weights"])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         conc_reason = next(r for r in verdict.reasons if r.rule == "max_concentration")
         assert not conc_reason.passed
         assert conc_reason.value == pytest.approx(0.6)
@@ -411,7 +415,7 @@ class TestMaxConcentration:
             {"date": "2022-03-01", "weights": {"A": 0.55, "B": 0.25, "C": 0.2}},
         ])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         conc_reason = next(r for r in verdict.reasons if r.rule == "max_concentration")
         assert not conc_reason.passed
         assert conc_reason.value == pytest.approx(0.55)
@@ -422,10 +426,9 @@ class TestRequireWfo:
         """Default wf_metrics (p=1, overfit=1) means WFO not done -> fail."""
         gate = DeployGate()
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"p_value": 1.0, "overfitting_score": 1.0})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"p_value": 1.0, "overfitting_score": 1.0}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         wfo_reason = next(r for r in verdict.reasons if r.rule == "require_wfo")
         assert not wfo_reason.passed
 
@@ -434,7 +437,7 @@ class TestRequireWfo:
         spec = _make_spec()
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         wfo_reason = next(r for r in verdict.reasons if r.rule == "require_wfo")
         assert wfo_reason.passed
 
@@ -442,10 +445,9 @@ class TestRequireWfo:
         """When require_wfo=False, no require_wfo reason should appear."""
         gate = DeployGate(DeployGateConfig(require_wfo=False))
         spec = _make_spec()
-        run = _make_run()
+        run = _make_run(wf_metrics={"p_value": 1.0, "overfitting_score": 1.0})
         store = _MockPortfolioStore({"run_001": run})
-        wf = {"p_value": 1.0, "overfitting_score": 1.0}
-        verdict = gate.evaluate(spec, "run_001", store, wf)
+        verdict = gate.evaluate(spec, "run_001", store)
         wfo_reasons = [r for r in verdict.reasons if r.rule == "require_wfo"]
         assert len(wfo_reasons) == 0
 
@@ -456,7 +458,7 @@ class TestFreqValid:
         spec = _make_spec(freq="tick")
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         freq_reason = next(r for r in verdict.reasons if r.rule == "freq_valid")
         assert not freq_reason.passed
 
@@ -465,7 +467,7 @@ class TestFreqValid:
         spec = _make_spec(freq="daily")
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         freq_reason = next(r for r in verdict.reasons if r.rule == "freq_valid")
         assert freq_reason.passed
 
@@ -474,7 +476,7 @@ class TestFreqValid:
         spec = _make_spec(freq="weekly")
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         freq_reason = next(r for r in verdict.reasons if r.rule == "freq_valid")
         assert freq_reason.passed
 
@@ -483,7 +485,7 @@ class TestFreqValid:
         spec = _make_spec(freq="monthly")
         run = _make_run()
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         freq_reason = next(r for r in verdict.reasons if r.rule == "freq_valid")
         assert freq_reason.passed
 
@@ -500,7 +502,7 @@ class TestAllPass:
             ],
         )
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         assert verdict.passed, f"Failed reasons: {[r.rule for r in verdict.failed_reasons]}"
         assert len(verdict.reasons) >= 10  # at least 10 checks
 
@@ -515,7 +517,7 @@ class TestAllPass:
             ],
         )
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         assert "PASS" in verdict.summary
         n = len(verdict.reasons)
         assert f"{n}/{n}" in verdict.summary
@@ -528,7 +530,7 @@ class TestAllPass:
             dates=[f"d{i}" for i in range(10)],
         )
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         assert not verdict.passed
         assert len(verdict.failed_reasons) > 0
         for fr in verdict.failed_reasons:
@@ -543,7 +545,7 @@ class TestEdgeCases:
         run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.1, "trade_count": 50})
         run["metrics"] = json.dumps(run["metrics"])
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sharpe_reason = next(r for r in verdict.reasons if r.rule == "min_sharpe")
         assert sharpe_reason.passed
 
@@ -554,7 +556,7 @@ class TestEdgeCases:
         run = _make_run()
         run["metrics"] = None
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         sharpe_reason = next(r for r in verdict.reasons if r.rule == "min_sharpe")
         assert not sharpe_reason.passed
 
@@ -567,7 +569,7 @@ class TestEdgeCases:
             dates=[f"d{i}" for i in range(510)],
         )
         store = _MockPortfolioStore({"run_001": run})
-        verdict = gate.evaluate(spec, "run_001", store, _good_wf_metrics())
+        verdict = gate.evaluate(spec, "run_001", store)
         assert not verdict.passed
         # All three custom thresholds should fail
         sharpe_reason = next(r for r in verdict.reasons if r.rule == "min_sharpe")

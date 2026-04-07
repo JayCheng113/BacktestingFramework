@@ -3,11 +3,15 @@
 4-phase evaluation:
   Phase 0: Source run existence
   Phase 1: Research metrics (from portfolio_runs DB row)
-  Phase 2: Walk-forward metrics (from wf_metrics param, NOT from DB)
+  Phase 2: Walk-forward metrics (from portfolio_runs.wf_metrics, server-side)
   Phase 3: Deploy-specific (backtest days, symbols, concentration, WFO, freq)
 
 All params are required. No Optional bypass. Reuses GateReason/GateVerdict
 from ez/agent/gates.py for consistent verdict format.
+
+V2.16 S1: WF metrics now read from DB (portfolio_runs.wf_metrics column),
+eliminating the client trust boundary. The /walk-forward endpoint writes
+WF metrics to the source run when source_run_id is provided.
 """
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ class DeployGate:
     Usage::
 
         gate = DeployGate()
-        verdict = gate.evaluate(spec, source_run_id, portfolio_store, wf_metrics)
+        verdict = gate.evaluate(spec, source_run_id, portfolio_store)
         if not verdict.passed:
             for r in verdict.failed_reasons:
                 print(r.rule, r.message)
@@ -54,19 +58,12 @@ class DeployGate:
         spec,
         source_run_id: str,
         portfolio_store,
-        wf_metrics: dict,
     ) -> GateVerdict:
         """4-phase hard check. All params required. No Optional.
 
-        TRUST BOUNDARY: wf_metrics comes from the caller (API request → frontend).
-        Backtest metrics (sharpe/drawdown/trades/dates/rebalance_weights) are read
-        from portfolio_store (server-side, tamper-resistant). WF metrics (p_value,
-        overfitting_score) are NOT persisted in portfolio_runs — they come from
-        the /walk-forward response which is passed through the deploy → approve flow.
-
-        V2.15 mitigation: Frontend requires WF result before enabling the deploy
-        button (disabled when wfResult is null). Direct API callers can still forge
-        wf_metrics — server-side WF re-computation is V3.0 scope.
+        V2.16 S1: WF metrics (p_value, overfitting_score) are now read from
+        portfolio_runs.wf_metrics (server-side, written by /walk-forward endpoint).
+        This eliminates the V2.15 trust boundary where clients could forge WF metrics.
         """
         reasons: list[GateReason] = []
 
@@ -130,8 +127,9 @@ class DeployGate:
         )
 
         # ---------------------------------------------------------------
-        # Phase 2: WF metrics (from wf_metrics param, NOT from DB)
+        # Phase 2: WF metrics (from portfolio_runs.wf_metrics, server-side)
         # ---------------------------------------------------------------
+        wf_metrics = self._parse_json_field(run, "wf_metrics", {})
         p_value = wf_metrics.get("p_value", 1.0)
         reasons.append(
             GateReason(
