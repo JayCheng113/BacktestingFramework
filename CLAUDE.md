@@ -200,6 +200,9 @@ No version tag without review pass. No push without critical issues resolved.
   - **Navbar 版本号动态化**: 从 /api/health 读取版本 (不再硬编码)
   - **Windows 兼容**: 所有 `read_text()` 加 `encoding="utf-8"`, LightGBM/XGBoost 测试 skip 用 `except Exception` (捕获 OSError)
   - **CI 修复**: macOS `brew install libomp` for LightGBM
+  - **chartTheme 统一**: 新建 `shared/chartTheme.ts`, 所有 ECharts 组件 (KlineChart/BacktestPanel/FactorPanel/PaperTradingPage/PortfolioRunContent/PortfolioFactorContent/PortfolioHistoryContent) 的 ~100 处硬编码颜色迁移到 `CHART.*` 常量. MA60 从绿色改为青色 (避免与跌色混淆)
+  - **全局样式增强**: global.css 新增暗色滚动条 + focus-visible 蓝色焦点环 + ::selection 蓝底白字 + disabled cursor + button hover brightness
+  - **组件视觉**: EnsembleBuilder radio→styled buttons, PortfolioHistoryContent 选中行 accent 左边框, 模态框背景→var(--bg-secondary), 斑马纹 opacity 0.02→0.04, BacktestSettings padding 对齐, DocsPage h3 颜色变量化
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
