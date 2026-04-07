@@ -19,10 +19,14 @@ const tabs = [
 export default function Navbar({ activeTab, onTabChange }: Props) {
   const [showSettings, setShowSettings] = useState(false)
   const [backendOk, setBackendOk] = useState(false)
+  const [version, setVersion] = useState('')
 
   useEffect(() => {
     const check = () => {
-      fetch('/api/health').then(r => setBackendOk(r.ok)).catch(() => setBackendOk(false))
+      fetch('/api/health').then(r => {
+        setBackendOk(r.ok)
+        if (r.ok) r.json().then(d => { if (d.version) setVersion(d.version) }).catch(() => {})
+      }).catch(() => setBackendOk(false))
     }
     check()
     const timer = setInterval(check, 10000) // check every 10s
@@ -41,7 +45,7 @@ export default function Navbar({ activeTab, onTabChange }: Props) {
               boxShadow: backendOk ? '0 0 6px #22c55e80' : '0 0 6px #ef444480',
               animation: 'pulse 2s ease-in-out infinite',
             }} title={backendOk ? '后端运行中' : '后端未连接'} />
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>v0.2.11.1</span>
+            {version && <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>v{version}</span>}
           </div>
           <div className="flex gap-1">
             {tabs.map(t => (

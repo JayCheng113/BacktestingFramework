@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listStrategies, runBacktest, runWalkForward } from '../api'
-import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
+import type { StrategyInfo, BacktestResult, WalkForwardResult, ParamSchema } from '../types'
 import BacktestSettings, { getDefaultSettings } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import { useToast } from './shared/Toast'
@@ -44,7 +44,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         // non-deterministic class.
         setSelected(userStrategies[0].key)
         const defaults: Record<string, number | string | boolean> = {}
-        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as any).default
+        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as ParamSchema).default
         setParams(defaults)
       }
     }).catch(() => {})
@@ -88,6 +88,14 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
 
   const handleRun = async () => {
     if (!selected || !symbol) return
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
+    if (mode === 'walk-forward' && (nSplits < 2 || nSplits > 20)) {
+      showToast('warning', '前推验证分割数须在 2-20 之间')
+      return
+    }
     // V2.12.2 codex round 8: capture a per-request token. The response
     // handler only applies setState if this token is still the latest —
     // otherwise the request was superseded by an input change or a new
@@ -132,8 +140,9 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         if (runTokenRef.current !== myToken) return  // superseded
         setWfResult(res.data)
       }
-    } catch (e: any) {
-      if (runTokenRef.current === myToken) showToast('error', e?.response?.data?.detail || 'Failed')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      if (runTokenRef.current === myToken) showToast('error', err?.response?.data?.detail || 'Failed')
     } finally {
       // Only reset loading if we're still the latest request — otherwise
       // a newer in-flight request would be marked as "done" prematurely.
@@ -146,7 +155,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     const s = strategies.find(s => s.key === key)
     if (s) {
       const defaults: Record<string, number | string | boolean> = {}
-      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as any).default
+      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as ParamSchema).default
       setParams(defaults)
     }
     // V2.12.2 codex: clear previous-strategy results + trades so the user
@@ -249,7 +258,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             // bloat, not a visible bug but inconsistent with the rest
             // of round 8's race guards).
             runTokenRef.current += 1
-            setMode(e.target.value as any); setResult(null); setWfResult(null); onTradesUpdate?.([])
+            setMode(e.target.value as 'backtest' | 'walk-forward'); setResult(null); setWfResult(null); onTradesUpdate?.([])
           }}
             className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             <option value="backtest">单次回测</option>

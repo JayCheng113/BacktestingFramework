@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useToast } from './shared/Toast'
 
 interface Props {
   open: boolean
@@ -33,6 +34,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [tushareToken, setTushareToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
+  const { showToast } = useToast()
 
   useEffect(() => {
     if (!open) return
@@ -43,8 +45,8 @@ export default function SettingsModal({ open, onClose }: Props) {
       setModel(d.model === '(默认)' ? '' : d.model)
       setBaseUrl(d.base_url === '(默认)' ? '' : d.base_url)
       setTemperature(d.temperature)
-    }).catch(() => {})
-    fetch('/api/settings/tushare').then(r => r.json()).then(setTushare).catch(() => {})
+    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.message || '加载 LLM 配置失败') })
+    fetch('/api/settings/tushare').then(r => r.json()).then(setTushare).catch((e: unknown) => { const err = e as any; showToast('error', err?.message || '加载 Tushare 配置失败') })
   }, [open])
 
   const saveLLM = async () => {

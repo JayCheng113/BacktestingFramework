@@ -13,11 +13,108 @@ const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid va
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
+// ── Shared types ─────────────────────────────────────────────────
+
+interface FactorInfo {
+  key?: string
+  class_name?: string
+  description?: string
+  needs_fina?: boolean
+}
+
+interface FactorCategory {
+  key: string
+  label: string
+  factors: (string | FactorInfo)[]
+}
+
+interface EvalFactorResult {
+  factor_name: string
+  mean_ic: number | null
+  mean_rank_ic: number | null
+  icir: number | null
+  rank_icir: number | null
+  n_eval_dates: number
+  avg_stocks_per_date?: number
+  ic_series?: number[]
+  rank_ic_series?: number[]
+  eval_dates?: string[]
+  ic_decay?: Record<string, number>
+  quintile_returns?: Record<string, number>
+}
+
+interface EvalResponse {
+  results: EvalFactorResult[]
+  warnings?: string[]
+}
+
+interface CorrResponse {
+  correlation_matrix: number[][]
+  factor_names: string[]
+}
+
+interface QualityRow {
+  symbol: string
+  industry?: string
+  daily_count: number
+  daily_expected: number
+  daily_coverage_pct: number
+  has_fina: boolean
+  fina_reports?: number
+}
+
+interface PortfolioWalkForwardResult {
+  oos_sharpe: number | null
+  oos_total_return: number | null
+  oos_max_drawdown: number | null
+  overfitting_score: number
+  is_vs_oos_degradation: number
+  n_splits: number
+  fold_results?: Record<string, unknown>[]
+  oos_equity_curve?: number[]
+  oos_dates?: string[]
+  oos_metrics?: Record<string, number>
+  significance?: {
+    is_significant: boolean
+    p_value: number
+  }
+  is_sharpes?: number[]
+  oos_sharpes?: number[]
+  warnings?: string[]
+}
+
+interface SearchResultRow {
+  rank: number
+  params: Record<string, unknown>
+  metrics?: Record<string, number | null>
+  sharpe?: number | null
+  total_return?: number | null
+  max_drawdown?: number | null
+  annualized_return?: number | null
+  trade_count?: number | null
+  warnings?: string[]
+}
+
+interface SearchMeta {
+  sampled: number; completed: number; failed: number;
+  total_combinations: number;
+  failed_combos: Array<{ combo_index: number; params: Record<string, unknown>; error: string }>;
+}
+
+interface CompareEntry {
+  id: string; name: string; equity: number[]; dates: string[]; metrics: Record<string, number>
+}
+
+// Strategy params are dynamic (int/float/bool/str/multi_select). The exact
+// runtime shape depends on the strategy schema. Using a dedicated alias so
+// the union is explicit but not duplicated across the file.
+type ParamValue = number | string | boolean | string[]
+
 export default function PortfolioPanel() {
   const { showToast } = useToast()
   const [strategies, setStrategies] = useState<{ name: string; description: string; parameters: Record<string, ParamSchema> }[]>([])
   const [factors, setFactors] = useState<string[]>([])
-  const [factorCategories, setFactorCategories] = useState<{ key: string; label: string; factors: any[] }[]>([])
+  const [factorCategories, setFactorCategories] = useState<FactorCategory[]>([])
   const [selected, setSelected] = useState('')
   const [symbols, setSymbols] = useState('510300.SH,510500.SH,159915.SZ,518880.SH,513100.SH')
   // V2.12.2 codex: previously PortfolioPanel had no market state at all and
@@ -25,13 +122,16 @@ export default function PortfolioPanel() {
   // A-share T+1 / stamp tax / limit-pct rules to US/HK backtests.
   const [market, setMarket] = useState('cn_stock')
   const [startDate, setStartDate] = useState('2020-01-01')
-  const [endDate, setEndDate] = useState('2024-12-31')
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
   const [freq, setFreq] = useState('monthly')
-  const [strategyParams, setStrategyParams] = useState<Record<string, any>>({})
+  const [strategyParams, setStrategyParams] = useState<Record<string, ParamValue>>({})
   const [settings, setSettings] = useState<BacktestSettingsValue>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(false)
   const [wfLoading, setWfLoading] = useState(false)
-  const [wfResult, setWfResult] = useState<any>(null)
+  const [wfResult, setWfResult] = useState<PortfolioWalkForwardResult | null>(null)
   const [wfSplits, setWfSplits] = useState(5)
   const [wfTrainRatio, setWfTrainRatio] = useState(0.7)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
@@ -40,17 +140,17 @@ export default function PortfolioPanel() {
   // Factor research state
   const [evalFactors, setEvalFactors] = useState<string[]>(['momentum_rank_20'])
   const [neutralize, setNeutralize] = useState(false)
-  const [evalResult, setEvalResult] = useState<any>(null)
-  const [corrResult, setCorrResult] = useState<any>(null)
+  const [evalResult, setEvalResult] = useState<EvalResponse | null>(null)
+  const [corrResult, setCorrResult] = useState<CorrResponse | null>(null)
   const [evalLoading, setEvalLoading] = useState(false)
   const [fetchingFunda, setFetchingFunda] = useState(false)
   const [fundaStatus, setFundaStatus] = useState<string>('')
-  const [qualityReport, setQualityReport] = useState<any[]>([])
+  const [qualityReport, setQualityReport] = useState<QualityRow[]>([])
   // Clear stale quality report when inputs change
   useEffect(() => { setQualityReport([]); setFundaStatus('') }, [symbols, startDate, endDate])
 
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set())
-  const [compareData, setCompareData] = useState<{ id: string; name: string; equity: number[]; dates: string[]; metrics: any }[]>([])
+  const [compareData, setCompareData] = useState<CompareEntry[]>([])
   const [comparing, setComparing] = useState(false)
   // V2.15 codex: clear stale compare data when selection changes
   useEffect(() => { setCompareData([]) }, [selectedRuns])
@@ -80,7 +180,7 @@ export default function PortfolioPanel() {
   const [searchGrid, setSearchGrid] = useState<Record<string, string>>({})
   const [expandedParams, setExpandedParams] = useState<Record<string, boolean>>({})
   const [searchLoading, setSearchLoading] = useState(false)
-  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [searchResults, setSearchResults] = useState<SearchResultRow[]>([])
   // V2.12.2 codex round 8: monotonic tokens for stale-response
   // invalidation. Each handler (run/wf/search) bumps its own token
   // before awaiting and checks on resume whether the token is still
@@ -96,11 +196,7 @@ export default function PortfolioPanel() {
   // V2.12.2 codex: track sampled/completed/failed counts + failed combos
   // so the UI can show "N of M combos failed" banner instead of silently
   // dropping failures from the results list.
-  const [searchMeta, setSearchMeta] = useState<{
-    sampled: number; completed: number; failed: number;
-    total_combinations: number;
-    failed_combos: Array<{ combo_index: number; params: any; error: string }>;
-  } | null>(null)
+  const [searchMeta, setSearchMeta] = useState<SearchMeta | null>(null)
 
   // Current strategy's parameter schema
   const currentSchema = useMemo(() => {
@@ -115,7 +211,7 @@ export default function PortfolioPanel() {
   // strategies share a parameter name like 'top_n' which would silently reuse
   // the old range but apply it to a different strategy's behavior.
   useEffect(() => {
-    const defaults: Record<string, any> = {}
+    const defaults: Record<string, ParamValue> = {}
     for (const [key, schema] of Object.entries(currentSchema)) {
       defaults[key] = schema.default
     }
@@ -256,8 +352,9 @@ export default function PortfolioPanel() {
             dates,
             metrics: d.metrics || {},
           })
-        } catch (e: any) {
-          errors.push(`${id}: ${e?.response?.data?.detail || e?.message || '失败'}`)
+        } catch (e: unknown) {
+          const err = e as { response?: { data?: { detail?: string } }; message?: string }
+          errors.push(`${id}: ${err?.response?.data?.detail || err?.message || '失败'}`)
         }
       }
       if (compareTokenRef.current !== myToken) return  // superseded
@@ -290,7 +387,7 @@ export default function PortfolioPanel() {
       if (evalTokenRef.current !== myToken) return  // superseded
       setEvalResult(evalRes.data)
       if (corrRes) setCorrResult(corrRes.data)
-    } catch (e: any) { if (evalTokenRef.current === myToken) showToast('error', e?.response?.data?.detail || e?.message || '评估失败') }
+    } catch (e: unknown) { const err = e as { response?: { data?: { detail?: string } }; message?: string }; if (evalTokenRef.current === myToken) showToast('error', err?.response?.data?.detail || err?.message || '评估失败') }
     finally { if (evalTokenRef.current === myToken) setEvalLoading(false) }
   }
 
@@ -302,7 +399,7 @@ export default function PortfolioPanel() {
     try {
       const finaFactorKeys = new Set<string>()
       factorCategories.forEach(cat => {
-        if (Array.isArray(cat.factors)) cat.factors.forEach((f: any) => {
+        if (Array.isArray(cat.factors)) cat.factors.forEach((f: string | FactorInfo) => {
           if (typeof f === 'object' && f.needs_fina) finaFactorKeys.add(f.key || f.class_name || '')
         })
       })
@@ -313,7 +410,7 @@ export default function PortfolioPanel() {
       const qr = await fundamentalDataQuality({ symbols: symbolList, market, start_date: startDate, end_date: endDate })
       if (fundaTokenRef.current !== myToken) return
       setQualityReport(qr.data.report || [])
-    } catch (e: any) { if (fundaTokenRef.current === myToken) setFundaStatus(e.response?.data?.detail || '获取失败') }
+    } catch (e: unknown) { const err = e as { response?: { data?: { detail?: string } } }; if (fundaTokenRef.current === myToken) setFundaStatus(err?.response?.data?.detail || '获取失败') }
     finally { if (fundaTokenRef.current === myToken) setFetchingFunda(false) }
   }
 
@@ -348,16 +445,21 @@ export default function PortfolioPanel() {
     try {
       await deletePortfolioRun(runId)
       loadHistory()
-    } catch (e: any) {
-      showToast('error', '删除失败: ' + (e?.response?.data?.detail || e?.message || '未知错误'))
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', '删除失败: ' + (err?.response?.data?.detail || err?.message || '未知错误'))
     }
   }
 
-  const updateParam = (key: string, value: any) => {
+  const updateParam = (key: string, value: ParamValue) => {
     setStrategyParams(prev => ({ ...prev, [key]: value }))
   }
 
   const handleRun = async () => {
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
     // V2.12.2 codex round 8: capture per-request token. Check on resume
     // to reject stale responses after input change or new run.
     const myToken = ++runTokenRef.current
@@ -397,9 +499,10 @@ export default function PortfolioPanel() {
       if (runTokenRef.current !== myToken) return  // superseded
       setResult(res.data)
       loadHistory()
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
       if (runTokenRef.current === myToken) {
-        showToast('error', e?.response?.data?.detail || JSON.stringify(e?.response?.data) || 'Failed')
+        showToast('error', err?.response?.data?.detail || err?.message || 'Failed')
       }
     } finally {
       if (runTokenRef.current === myToken) setLoading(false)
@@ -407,6 +510,10 @@ export default function PortfolioPanel() {
   }
 
   const handleWalkForward = async () => {
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
     // V2.12.2 codex round 8: stale-response token.
     const myToken = ++wfTokenRef.current
     setWfLoading(true); setWfResult(null)
@@ -452,9 +559,10 @@ export default function PortfolioPanel() {
       if (wfTokenRef.current !== myToken) return  // superseded
       setWfResult(res.data)
       if (res.data.warnings?.length) showToast('warning', '前推验证提示: ' + res.data.warnings.join('\n'))
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
       if (wfTokenRef.current === myToken) {
-        showToast('error', '前推验证 失败: ' + (e?.response?.data?.detail || e?.message || ''))
+        showToast('error', '前推验证 失败: ' + (err?.response?.data?.detail || err?.message || ''))
       }
     } finally {
       if (wfTokenRef.current === myToken) setWfLoading(false)
@@ -462,10 +570,14 @@ export default function PortfolioPanel() {
   }
 
   const handleSearch = async () => {
+    if (new Date(startDate) >= new Date(endDate)) {
+      showToast('warning', '开始日期必须早于结束日期')
+      return
+    }
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) { showToast('warning', '请填写股票池'); return }
 
-    const paramGrid: Record<string, any[]> = {}
+    const paramGrid: Record<string, (string | number | string[])[]> = {}
     let totalCombos = 1
     for (const [key, schema] of Object.entries(currentSchema)) {
       const raw = searchGrid[key] || ''
@@ -558,8 +670,9 @@ export default function PortfolioPanel() {
       let searchMsg = res.data.warnings?.length ? res.data.warnings.join('\n') + '\n' : ''
       if (tc > 50) searchMsg += `共 ${tc} 种组合，随机采样 50 个展示（可能不完整）`
       if (searchMsg) showToast('info', searchMsg.trim())
-    } catch (e: any) {
-      if (searchTokenRef.current === myToken) showToast('error', e?.response?.data?.detail || '搜索失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      if (searchTokenRef.current === myToken) showToast('error', err?.response?.data?.detail || '搜索失败')
     } finally {
       if (searchTokenRef.current === myToken) setSearchLoading(false)
     }
@@ -568,7 +681,7 @@ export default function PortfolioPanel() {
   // Render a single param input based on schema type
   const renderParamInput = (key: string, schema: ParamSchema) => {
     const label = schema.label || key
-    const value = strategyParams[key] ?? schema.default
+    const value: ParamValue = strategyParams[key] ?? schema.default
 
     if (schema.type === 'select') {
       const options: string[] = schema.options ?? (factors.length > 0 ? factors : [String(schema.default)])
@@ -576,13 +689,13 @@ export default function PortfolioPanel() {
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-          <select value={value} onChange={e => updateParam(key, e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+          <select value={String(value)} onChange={e => updateParam(key, e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
             {useCategories ? (<>
               {factorCategories.map(cat => {
                 const catLabel = CATEGORY_LABELS
                 return (
                 <optgroup key={cat.key} label={catLabel[cat.key] || cat.label}>
-                  {(Array.isArray(cat.factors) ? cat.factors : []).map((f: any) => {
+                  {(Array.isArray(cat.factors) ? cat.factors : []).map((f: string | FactorInfo) => {
                     const fKey = typeof f === 'string' ? f : (f.key || f.class_name || '')
                     const needsFina = typeof f === 'object' && f.needs_fina
                     return <option key={fKey} value={fKey}>{FACTOR_LABELS[fKey] || fKey}{needsFina ? ' *' : ''}</option>
@@ -629,7 +742,7 @@ export default function PortfolioPanel() {
             <div className="p-2 rounded mt-1" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto' }}>
               {useCategories ? factorCategories.map(cat => {
                 const catFactors = (Array.isArray(cat.factors) ? cat.factors : [])
-                  .map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
+                  .map((f: string | FactorInfo) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
                   .filter((f: string) => f && f !== 'alpha_combiner')
                 if (catFactors.length === 0) return null
                 return (
@@ -675,7 +788,7 @@ export default function PortfolioPanel() {
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-          <input type="number" value={value} min={schema.min} max={schema.max}
+          <input type="number" value={Number(value)} min={schema.min} max={schema.max}
             onChange={e => { const v = parseInt(e.target.value); updateParam(key, isNaN(v) ? schema.default : v) }}
             className="px-3 py-1.5 rounded text-sm w-20" style={inputStyle} />
         </div>
@@ -686,7 +799,7 @@ export default function PortfolioPanel() {
       return (
         <div key={key} className="flex flex-col gap-1">
           <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-          <input type="number" value={value} min={schema.min} max={schema.max} step={0.01}
+          <input type="number" value={Number(value)} min={schema.min} max={schema.max} step={0.01}
             onChange={e => { const v = parseFloat(e.target.value); updateParam(key, isNaN(v) ? schema.default : v) }}
             className="px-3 py-1.5 rounded text-sm w-24" style={inputStyle} />
         </div>
@@ -697,7 +810,7 @@ export default function PortfolioPanel() {
     return (
       <div key={key} className="flex flex-col gap-1">
         <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-        <input type="text" value={value} onChange={e => updateParam(key, e.target.value)}
+        <input type="text" value={String(value)} onChange={e => updateParam(key, e.target.value)}
           className="px-3 py-1.5 rounded text-sm w-32" style={inputStyle} />
       </div>
     )

@@ -25,7 +25,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
   const [market] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
   const [startDate, setStartDate] = useState<Date>(new Date(2020, 0, 1))
-  const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
+  const [endDate, setEndDate] = useState<Date>(new Date())
   const [runWfo, setRunWfo] = useState(true)
   const [wfoSplits, setWfoSplits] = useState(3)
   const [useMarketRules, setUseMarketRules] = useState(true)
@@ -42,7 +42,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
         for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as any).default
         setParams(defaults)
       }
-    }).catch(() => {})
+    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败') })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadRuns = () => {
@@ -55,7 +55,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
         return !name.includes('research_') && !name.startsWith('Research')
       })
       setRuns(userRuns)
-    }).catch(() => {}).finally(() => setLoading(false))
+    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载实验记录失败') }).finally(() => setLoading(false))
   }
 
   const handleStrategyChange = (key: string) => {
@@ -107,7 +107,10 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
     const keepStr = prompt('保留最近 N 条记录(删除更旧的):', '200')
     if (!keepStr) return
     const keep = parseInt(keepStr, 10)
-    if (isNaN(keep) || keep < 1) return
+    if (isNaN(keep) || keep < 1) {
+      showToast('warning', '请输入有效的正整数')
+      return
+    }
     try {
       const res = await cleanupExperiments(keep)
       showToast('success', `已清理 ${res.data.deleted} 条旧记录`)

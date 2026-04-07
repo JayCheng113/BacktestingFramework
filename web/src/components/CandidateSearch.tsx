@@ -88,7 +88,7 @@ export default function CandidateSearch() {
   const [market, setMarket] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
   const [startDate, setStartDate] = useState<Date>(new Date(2020, 0, 1))
-  const [endDate, setEndDate] = useState<Date>(new Date(2024, 11, 31))
+  const [endDate, setEndDate] = useState<Date>(new Date())
   const [mode, setMode] = useState<'grid' | 'random'>('grid')
   const [nSamples, setNSamples] = useState(20)
   const [skipPrefilter, setSkipPrefilter] = useState(false)
@@ -101,7 +101,7 @@ export default function CandidateSearch() {
       const userStrategies = r.data.filter((s: StrategyInfo) => !s.key?.includes('research_'))
       setStrategies(userStrategies)
       if (userStrategies.length > 0) handleStrategyChange(userStrategies[0].name, userStrategies)
-    }).catch(() => {})
+    }).catch((e: unknown) => { const err = e as any; showToast('error', err?.response?.data?.detail || err?.message || '加载策略失败') })
   }, [])
 
   const handleStrategyChange = (name: string, strats?: StrategyInfo[]) => {

@@ -164,6 +164,15 @@ const KIND_COLORS: Record<CodeKind, string> = {
   ml_alpha: '#059669',
 }
 
+interface RegistryEntry {
+  name: string
+  description?: string
+}
+
+interface EditorHandle {
+  getValue: () => string
+}
+
 const api = (path: string, opts?: RequestInit) =>
   fetch(`/api/code${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
 
@@ -183,7 +192,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [portfolioFiles, setPortfolioFiles] = useState<FileInfo[]>([])
   const [crossFactorFiles, setCrossFactorFiles] = useState<FileInfo[]>([])
   const [mlAlphaFiles, setMlAlphaFiles] = useState<FileInfo[]>([])
-  const [registry, setRegistry] = useState<Record<string, { builtin: any[]; user: any[] }>>({})
+  const [registry, setRegistry] = useState<Record<string, { builtin: RegistryEntry[]; user: RegistryEntry[] }>>({})
   const [status, setStatus] = useState<string>('')
   const [errors, setErrors] = useState<string[]>([])
   const [testOutput, setTestOutput] = useState('')
@@ -191,7 +200,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [validating, setValidating] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
-  const editorRef = useRef<any>(null)
+  const editorRef = useRef<EditorHandle | null>(null)
   const loadFileTokenRef = useRef(0)  // V2.13.2 A2: race token for loadFile
 
   useEffect(() => { loadAllFiles() }, [])
@@ -244,7 +253,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setErrors([])
         setTestOutput('')
       }
-    } catch (e: any) { if (loadFileTokenRef.current === myToken) setStatus(`Error: ${e.message}`) }
+    } catch (e: unknown) { if (loadFileTokenRef.current === myToken) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
   }
 
   const newFile = async (kind: CodeKind) => {
@@ -306,7 +315,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           setErrors(data.errors)
         }
       }
-    } catch (e: any) { setStatus(`Error: ${e.message}`) }
+    } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
     finally { setValidating(false) }
   }
 
@@ -344,7 +353,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setErrors(errs)
         if (detail.test_output) setTestOutput(detail.test_output)
       }
-    } catch (e: any) { setStatus(`Error: ${e.message}`) }
+    } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
     finally { setSaving(false) }
   }
 
@@ -377,8 +386,8 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         const err = await res.json().catch(() => ({ detail: '未知错误' }))
         setStatus(`删除失败: ${err.detail || res.statusText}`)
       }
-    } catch (e: any) {
-      setStatus(`删除失败: ${e?.message || '网络错误'}`)
+    } catch (e: unknown) {
+      setStatus(`删除失败: ${e instanceof Error ? e.message : '网络错误'}`)
     }
   }
 

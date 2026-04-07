@@ -14,6 +14,62 @@ const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid va
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
+// ── Types for PortfolioRunContent ────────────────────────────────
+
+interface FactorInfo {
+  key?: string
+  class_name?: string
+  description?: string
+  needs_fina?: boolean
+}
+
+interface FactorCategory {
+  key: string
+  label: string
+  factors: (string | FactorInfo)[]
+}
+
+interface PortfolioWalkForwardResult {
+  oos_sharpe: number | null
+  oos_total_return: number | null
+  oos_max_drawdown: number | null
+  overfitting_score: number
+  is_vs_oos_degradation: number
+  n_splits: number
+  fold_results?: Record<string, unknown>[]
+  oos_equity_curve?: number[]
+  oos_dates?: string[]
+  oos_metrics?: Record<string, number>
+  significance?: {
+    is_significant: boolean
+    p_value: number
+  }
+  is_sharpes?: number[]
+  oos_sharpes?: number[]
+  warnings?: string[]
+}
+
+interface SearchResultRow {
+  rank: number
+  params: Record<string, unknown>
+  metrics?: Record<string, number | null>
+  sharpe?: number | null
+  total_return?: number | null
+  max_drawdown?: number | null
+  annualized_return?: number | null
+  trade_count?: number | null
+  warnings?: string[]
+}
+
+interface SearchMeta {
+  sampled: number; completed: number; failed: number;
+  total_combinations: number;
+  failed_combos: Array<{ combo_index: number; params: Record<string, unknown>; error: string }>;
+}
+
+// Strategy params are dynamic (int/float/bool/str/multi_select).
+type ParamValue = number | string | boolean | string[]
+
 const metricLabels: Record<string, string> = {
   total_return: '总收益率', annualized_return: '年化收益率', sharpe_ratio: '夏普比率',
   sortino_ratio: '索提诺比率', max_drawdown: '最大回撤', max_drawdown_duration: '回撤持续(天)',
@@ -38,15 +94,15 @@ interface Props {
   settings: BacktestSettingsValue; setSettings: (v: BacktestSettingsValue) => void
   strategies: { name: string; description: string; parameters: Record<string, ParamSchema> }[]
   factors: string[]
-  factorCategories: { key: string; label: string; factors: any[] }[]
+  factorCategories: FactorCategory[]
   selected: string; setSelected: (v: string) => void
-  strategyParams: Record<string, any>; updateParam: (key: string, value: any) => void
+  strategyParams: Record<string, ParamValue>; updateParam: (key: string, value: ParamValue) => void
   currentSchema: Record<string, ParamSchema>
   currentDesc: string
   // Run state
   result: PortfolioRunResult | null
   loading: boolean
-  wfResult: any; setWfResult: (v: any) => void
+  wfResult: PortfolioWalkForwardResult | null; setWfResult: (v: PortfolioWalkForwardResult | null) => void
   wfLoading: boolean
   wfSplits: number; setWfSplits: (v: number) => void
   wfTrainRatio: number; setWfTrainRatio: (v: number) => void
@@ -75,14 +131,10 @@ interface Props {
   comboSearch: boolean; setComboSearch: (v: boolean) => void
   searchGrid: Record<string, string>; setSearchGrid: (v: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void
   expandedParams: Record<string, boolean>; setExpandedParams: (v: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void
-  searchLoading: boolean; searchResults: any[]
+  searchLoading: boolean; searchResults: SearchResultRow[]
   // V2.12.2 codex: search counts + failed combos so UI surfaces failures
   // that prior version silently dropped from results.
-  searchMeta?: {
-    sampled: number; completed: number; failed: number;
-    total_combinations: number;
-    failed_combos: Array<{ combo_index: number; params: any; error: string }>;
-  } | null
+  searchMeta?: SearchMeta | null
   // Handlers
   handleRun: () => void
   handleWalkForward: () => void
@@ -185,9 +237,10 @@ export default function PortfolioRunContent(props: Props) {
       // run's holdings table to appear under the new run's pie chart.
       if (currentRunIdRef.current !== requestedRunId) return  // superseded
       setFullWeights(res.data.weights_history || [])
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (currentRunIdRef.current === requestedRunId) {
-        showToast('error', '加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
+        const err = e as { response?: { data?: { detail?: string } }; message?: string }
+        showToast('error', '加载完整历史失败: ' + (err?.response?.data?.detail || err?.message || ''))
       }
     } finally {
       if (currentRunIdRef.current === requestedRunId) setWeightsLoading(false)
@@ -243,20 +296,20 @@ export default function PortfolioRunContent(props: Props) {
               <div className="flex flex-wrap gap-1 mb-2">
                 {factors.filter(f => f !== 'alpha_combiner').map(f => (
                   <button key={f} onClick={() => {
-                    const cur = strategyParams.alpha_factors || []
+                    const cur = Array.isArray(strategyParams.alpha_factors) ? strategyParams.alpha_factors : []
                     if (cur.includes(f)) updateParam('alpha_factors', cur.filter((x: string) => x !== f))
                     else updateParam('alpha_factors', [...cur, f])
                   }}
                     className="text-xs px-2 py-0.5 rounded"
-                    style={{ backgroundColor: (strategyParams.alpha_factors || []).includes(f) ? 'var(--color-accent)' : 'var(--bg-secondary)',
-                             color: (strategyParams.alpha_factors || []).includes(f) ? '#fff' : 'var(--text-secondary)',
+                    style={{ backgroundColor: (Array.isArray(strategyParams.alpha_factors) ? strategyParams.alpha_factors : []).includes(f) ? 'var(--color-accent)' : 'var(--bg-secondary)',
+                             color: (Array.isArray(strategyParams.alpha_factors) ? strategyParams.alpha_factors : []).includes(f) ? '#fff' : 'var(--text-secondary)',
                              border: '1px solid var(--border)' }}>
                     {FACTOR_LABELS[f] || f}
                   </button>
                 ))}
               </div>
               <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>合成方法</label>
-              <select value={strategyParams.alpha_method || 'equal'} onChange={e => updateParam('alpha_method', e.target.value)}
+              <select value={String(strategyParams.alpha_method || 'equal')} onChange={e => updateParam('alpha_method', e.target.value)}
                 className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
                 <option value="equal">等权</option>
                 <option value="ic">IC加权 (选股能力越强权重越大)</option>
@@ -472,7 +525,7 @@ export default function PortfolioRunContent(props: Props) {
                     </label>
                     {useCategories ? factorCategories.map(cat => {
                       const catFactors = (Array.isArray(cat.factors) ? cat.factors : [])
-                        .map((f: any) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
+                        .map((f: string | FactorInfo) => typeof f === 'string' ? f : (f.key || f.class_name || ''))
                         .filter((f: string) => f && f !== 'alpha_combiner')
                       if (catFactors.length === 0) return null
                       return (
@@ -555,7 +608,7 @@ export default function PortfolioRunContent(props: Props) {
               </div>
             </details>
           )}
-          {searchResults.length > 0 && (
+          {searchResults.length > 0 ? (
             <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
               <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                 <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -580,6 +633,8 @@ export default function PortfolioRunContent(props: Props) {
                 ))}</tbody>
               </table>
             </div>
+          ) : searchMeta && !searchLoading && (
+            <div className="mt-3 py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>搜索结果为空</div>
           )}
         </div>
       )}
