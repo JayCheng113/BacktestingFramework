@@ -112,8 +112,9 @@ export default function ResearchPanel() {
       } else if (res.status === 409) {
         showToast('warning', '已有研究任务运行中，请等待完成或取消后重试')
       }
-    } catch (e) {
-      console.error('Start research failed:', e)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', err?.response?.data?.detail || err?.message || '启动研究失败')
     } finally {
       setLoading(false)
     }
