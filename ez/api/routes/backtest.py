@@ -55,7 +55,7 @@ class BacktestRequest(BaseModel):
     strategy_params: dict = {}
     start_date: date
     end_date: date
-    initial_capital: float = 100000.0
+    initial_capital: float = 1000000.0
     # V2.12.2 codex: prior version had only `commission_rate` (single value),
     # silently dropping the frontend's "sell commission" UI input.
     # New fields `buy_commission_rate` and `sell_commission_rate` allow
