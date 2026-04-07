@@ -905,7 +905,10 @@ class TestMLAlphaLightGBM:
 
     @pytest.fixture(autouse=True)
     def _skip(self):
-        pytest.importorskip("lightgbm", reason="LightGBM tests need lightgbm>=4.0")
+        try:
+            import lightgbm  # noqa: F401
+        except Exception:
+            pytest.skip("LightGBM not available (missing package or libomp)")
 
     def test_lgbm_deepcopy(self):
         from lightgbm import LGBMRegressor
@@ -954,7 +957,10 @@ class TestMLAlphaXGBoost:
 
     @pytest.fixture(autouse=True)
     def _skip(self):
-        pytest.importorskip("xgboost", reason="XGBoost tests need xgboost>=2.0")
+        try:
+            import xgboost  # noqa: F401
+        except Exception:
+            pytest.skip("XGBoost not available (missing package or native lib)")
 
     def test_xgb_deepcopy(self):
         from xgboost import XGBRegressor
@@ -1033,7 +1039,10 @@ class TestMLAlphaLightGBMGPU:
 
     @pytest.fixture(autouse=True)
     def _skip(self):
-        pytest.importorskip("lightgbm", reason="LightGBM GPU rejection test needs lightgbm")
+        try:
+            import lightgbm  # noqa: F401
+        except Exception:
+            pytest.skip("LightGBM not available (missing package or libomp)")
 
     def test_lgbm_device_type_gpu_rejected(self):
         from lightgbm import LGBMRegressor
