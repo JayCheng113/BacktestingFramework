@@ -247,8 +247,8 @@ export default function PaperTradingPage() {
   return (
     <div className="flex h-[calc(100vh-48px)]">
       {/* Left sidebar: deployment list */}
-      <div className="w-72 flex-shrink-0 overflow-y-auto border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-        <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
+      <div className="w-64 md:w-72 shrink-0 overflow-y-auto border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+        <div className="p-3 mb-3 border-b" style={{ borderColor: 'var(--border)' }}>
           <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>模拟盘部署</h2>
           <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
             {deployments.length} 个部署
@@ -275,7 +275,7 @@ export default function PaperTradingPage() {
               }}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)', maxWidth: '160px' }}>
+                <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)', maxWidth: '160px' }} title={d.name}>
                   {d.name}
                 </span>
                 <div className="flex items-center gap-1.5">
@@ -462,7 +462,7 @@ export default function PaperTradingPage() {
               {/* Pie */}
               <div className="rounded" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
                 {pieOption ? (
-                  <ReactECharts option={pieOption} style={{ height: 260 }} />
+                  <ReactECharts option={pieOption} style={{ height: 300 }} />
                 ) : (
                   <div className="flex items-center justify-center h-64 text-xs" style={{ color: 'var(--text-secondary)' }}>
                     暂无持仓数据

@@ -335,11 +335,11 @@ export default function ResearchPanel() {
               )}
             </div>
           </div>
-          <div className="space-y-1.5 max-h-80 overflow-y-auto" style={{ color: 'var(--text-secondary)' }}>
+          <div className="space-y-2 max-h-80 overflow-y-auto" style={{ color: 'var(--text-secondary)' }}>
             {events.map((e, i) => {
               const f = formatEvent(e)
               return (
-                <div key={i} className="flex items-start gap-2 text-sm">
+                <div key={i} className="flex items-start gap-2 text-sm border-l-2 border-blue-500 pl-3">
                   <span style={{ flexShrink: 0 }}>{f.icon}</span>
                   <span style={{ color: f.color }}>{f.text}</span>
                 </div>

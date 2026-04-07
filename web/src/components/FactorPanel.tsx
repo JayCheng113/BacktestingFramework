@@ -113,7 +113,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-medium mb-3">技术指标评估 (单股)</h3>
+      <h3 className="text-base font-semibold mb-3">技术指标评估 (单股)</h3>
       {factors.length === 0 ? (
         <div className="py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>暂无可用因子</div>
       ) : (
@@ -148,11 +148,11 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
             ))}
           </div>
           {/* Charts: IC series + IC decay + IC distribution */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {icTimeSeriesOption && <ReactECharts option={icTimeSeriesOption} style={{ height: 220 }} />}
-            {icDecayOption && <ReactECharts option={icDecayOption} style={{ height: 220 }} />}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            {icTimeSeriesOption && <ReactECharts option={icTimeSeriesOption} style={{ height: 250 }} />}
+            {icDecayOption && <ReactECharts option={icDecayOption} style={{ height: 250 }} />}
           </div>
-          {icHistOption && <div className="mt-4"><ReactECharts option={icHistOption} style={{ height: 200 }} /></div>}
+          {icHistOption && <div className="mt-4"><ReactECharts option={icHistOption} style={{ height: 250 }} /></div>}
         </div>
       )}
     </div>

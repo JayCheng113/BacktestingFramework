@@ -244,7 +244,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
 
   return (
     <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-medium mb-3">回测</h3>
+      <h3 className="text-base font-semibold mb-3">回测</h3>
       <div className="flex flex-wrap gap-3 items-end mb-4">
         {/* Mode toggle */}
         <div className="flex flex-col gap-1">
@@ -316,11 +316,11 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           )
         })}
       </div>
-      <div className="mb-3">
+      <div className="mt-4 mb-3">
         <BacktestSettings value={costSettings} onChange={setCostSettings}
           showBenchmark={false} showInitialCash={false} showSellCommission={false} />
       </div>
-      <div className="flex flex-wrap gap-3 items-end mb-4">
+      <div className="flex flex-wrap gap-3 items-end mt-3 mb-4">
         {mode === 'walk-forward' && (
           <div className="flex flex-col gap-1">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>分割数</label>
@@ -369,12 +369,12 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
           {/* Trade Records Table */}
           {result.trades.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-6">
               <div className="flex justify-between items-center mb-2">
                 <h4 className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>交易记录 ({result.trades.length})</h4>
                 <button onClick={() => exportCSV(result)} className="text-xs px-2 py-1 rounded" style={{ ...inputStyle, cursor: 'pointer' }}>导出CSV</button>
               </div>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+              <div className="overflow-x-auto max-h-80 overflow-y-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                 <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: 'var(--bg-primary)', position: 'sticky', top: 0 }}>
@@ -385,19 +385,19 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
                   </thead>
                   <tbody>
                     {result.trades.map((t, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{i + 1}</td>
-                        <td className="px-3 py-1.5">{t.entry_time.slice(0, 10)}</td>
-                        <td className="px-3 py-1.5">{t.exit_time.slice(0, 10)}</td>
-                        <td className="px-3 py-1.5">{t.entry_price.toFixed(2)}</td>
-                        <td className="px-3 py-1.5">{t.exit_price.toFixed(2)}</td>
-                        <td className="px-3 py-1.5" style={{ color: t.pnl >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                        <td className="px-3 py-2" style={{ color: 'var(--text-secondary)' }}>{i + 1}</td>
+                        <td className="px-3 py-2">{t.entry_time.slice(0, 10)}</td>
+                        <td className="px-3 py-2">{t.exit_time.slice(0, 10)}</td>
+                        <td className="px-3 py-2">{t.entry_price.toFixed(2)}</td>
+                        <td className="px-3 py-2">{t.exit_price.toFixed(2)}</td>
+                        <td className="px-3 py-2" style={{ color: t.pnl >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
                           {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                         </td>
-                        <td className="px-3 py-1.5" style={{ color: t.pnl_pct >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
+                        <td className="px-3 py-2" style={{ color: t.pnl_pct >= 0 ? 'var(--color-up)' : 'var(--color-down)' }}>
                           {(t.pnl_pct * 100).toFixed(2)}%
                         </td>
-                        <td className="px-3 py-1.5" style={{ color: 'var(--text-secondary)' }}>{t.commission.toFixed(2)}</td>
+                        <td className="px-3 py-2" style={{ color: 'var(--text-secondary)' }}>{t.commission.toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
