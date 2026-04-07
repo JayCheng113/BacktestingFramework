@@ -71,8 +71,12 @@ def test_factor_contract_all_builtins(sample_df):
     - No all-NaN factor columns (after warmup)
     """
     from ez.factor.base import Factor
-    # Force import of builtins to populate registry
+    # Force import of ALL builtins to populate registry
     import ez.factor.builtin.technical  # noqa: F401
+    try:
+        import ez.factor.builtin.fundamental  # noqa: F401
+    except Exception:
+        pass  # fundamental factors may need extra deps
 
     registry = Factor.get_registry()
     assert len(registry) > 0, "Factor registry is empty"

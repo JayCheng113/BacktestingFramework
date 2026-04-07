@@ -111,8 +111,8 @@ export const approveDeployment = (id: string) =>
 export const startDeployment = (id: string) =>
   api.post(`/deployments/${id}/start`)
 
-export const stopDeployment = (id: string, reason?: string) =>
-  api.post(`/deployments/${id}/stop`, { reason: reason || '手动停止' })
+export const stopDeployment = (id: string, reason?: string, liquidate?: boolean) =>
+  api.post(`/deployments/${id}/stop`, { reason: reason || '手动停止' }, { params: liquidate ? { liquidate: 'true' } : {} })
 
 export const pauseDeployment = (id: string) =>
   api.post(`/deployments/${id}/pause`)

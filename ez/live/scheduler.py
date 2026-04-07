@@ -138,7 +138,7 @@ class Scheduler:
                         prices = dict(engine._last_prices)
                         raw_closes = dict(prices)
                         prev_raw = dict(prices)
-                        has_bar = {s: True for s in engine.holdings}
+                        has_bar = set(engine.holdings.keys())
                         cost_model = CostModel(
                             buy_commission_rate=engine.spec.buy_commission_rate,
                             sell_commission_rate=engine.spec.sell_commission_rate,
@@ -168,10 +168,13 @@ class Scheduler:
                         ]
                         engine.holdings = new_holdings
                         engine.cash = new_cash
-                        # Save liquidation snapshot
+                        # Save liquidation snapshot — use ACTUAL new_holdings (may be
+                        # non-empty if some positions couldn't be sold due to missing prices)
+                        post_equity = new_cash + sum(
+                            new_holdings.get(s, 0) * prices.get(s, 0) for s in new_holdings)
                         self.store.save_daily_snapshot(deployment_id, today, {
-                            "date": str(today), "equity": new_cash,
-                            "cash": new_cash, "holdings": {},
+                            "date": str(today), "equity": post_equity,
+                            "cash": new_cash, "holdings": dict(new_holdings),
                             "weights": {}, "trades": liquidation_trades,
                             "risk_events": [], "rebalanced": False,
                             "liquidation": True,

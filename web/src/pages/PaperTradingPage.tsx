@@ -387,9 +387,8 @@ export default function PaperTradingPage() {
                 {(detail.status === 'running' || detail.status === 'paused') && (
                   <button
                     onClick={() => {
-                      if (confirm('确定停止该部署？停止后无法恢复。')) {
-                        handleAction(() => stopDeployment(detail.deployment_id, '手动停止'))
-                      }
+                      const liq = confirm('停止前是否清仓所有持仓？\n\n确定 = 清仓后停止\n取消 = 直接停止（保留持仓记录）')
+                      handleAction(() => stopDeployment(detail.deployment_id, '手动停止', liq))
                     }}
                     disabled={actionLoading}
                     className="px-3 py-1.5 rounded text-xs font-medium text-white"
