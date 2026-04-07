@@ -39,7 +39,10 @@ export default function SettingsModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return
     setStatus('')
-    fetch('/api/settings/llm').then(r => r.json()).then(d => {
+    fetch('/api/settings/llm').then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      return r.json()
+    }).then(d => {
       setLlm(d)
       setProvider(d.provider)
       setModel(d.model === '(默认)' ? '' : d.model)
@@ -49,7 +52,10 @@ export default function SettingsModal({ open, onClose }: Props) {
       const err = e as { message?: string }
       showToast('error', err?.message || '加载 LLM 配置失败')
     })
-    fetch('/api/settings/tushare').then(r => r.json()).then(setTushare).catch((e: unknown) => {
+    fetch('/api/settings/tushare').then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      return r.json()
+    }).then(setTushare).catch((e: unknown) => {
       const err = e as { message?: string }
       showToast('error', err?.message || '加载 Tushare 配置失败')
     })

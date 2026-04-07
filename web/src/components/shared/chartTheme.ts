@@ -18,4 +18,7 @@ export const CHART = {
   ma20: '#a855f7',
   ma60: '#06b6d4',         // cyan — avoid conflict with down color
   boll: '#64748b',
+  isIc: '#3b82f6',    // blue — in-sample IC line
+  oosIc: '#f97316',   // orange — out-of-sample IC line
+  palette: ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#f97316', '#06b6d4', '#ec4899'],
 } as const

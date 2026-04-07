@@ -115,7 +115,7 @@ export default function PortfolioHistoryContent(props: Props) {
             grid: { left: 70, right: 20, top: 40, bottom: 30 },
             xAxis: { type: axisType as 'time' | 'value', name: xName, axisLabel: { color: CHART.textSecondary } },
             yAxis: { type: 'value' as const, name: '归一化净值', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
-            color: [CHART.accent, CHART.up, CHART.down, '#eab308', '#8b5cf6', '#f97316'],
+            color: CHART.palette,
             series: compareData.map(d => ({
               name: d.name, type: 'line' as const,
               data: allHaveDates

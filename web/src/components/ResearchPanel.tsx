@@ -82,7 +82,11 @@ export default function ResearchPanel() {
   const loadTasks = useCallback(async () => {
     try {
       const res = await fetch('/api/research/tasks')
-      if (res.ok) setTasks(await res.json())
+      if (!res.ok) {
+        showToast('error', '任务列表加载失败')
+        return
+      }
+      setTasks(await res.json())
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
       showToast('error', err?.response?.data?.detail || err?.message || '加载研究任务失败')

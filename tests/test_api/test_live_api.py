@@ -101,9 +101,21 @@ def _use_memory_db_for_live(monkeypatch):
     # Reset singletons
     live_module.reset_live_singletons()
 
-    # Patch _get_deployment_store to use in-memory DB
+    # Patch _deployment_store to use in-memory DB
     _mem_store = DeploymentStore(duckdb.connect(":memory:"))
     monkeypatch.setattr(live_module, "_deployment_store", _mem_store)
+
+    # Also patch scheduler to avoid _get_scheduler() calling get_chain()
+    # which opens the real data/ez_trading.db
+    from ez.live.scheduler import Scheduler
+    _mock_scheduler = MagicMock(spec=Scheduler)
+    _mock_scheduler.store = _mem_store
+    _mock_scheduler.start_deployment = AsyncMock()
+    _mock_scheduler.stop_deployment = AsyncMock()
+    _mock_scheduler.pause_deployment = AsyncMock()
+    _mock_scheduler.resume_deployment = AsyncMock()
+    _mock_scheduler.tick = AsyncMock(return_value=[])
+    monkeypatch.setattr(live_module, "_scheduler", _mock_scheduler)
 
     yield
 

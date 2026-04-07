@@ -487,8 +487,8 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
                     xAxis: { type: 'category', data: result.ic_series.map(e => e.retrain_date), axisLabel: { color: CHART.textSecondary, fontSize: 9 } },
                     yAxis: { type: 'value', axisLabel: { color: CHART.textSecondary, fontSize: 9 } },
                     series: [
-                      { name: 'IS IC', type: 'line', data: result.ic_series.map(e => e.train_ic), lineStyle: { color: '#3b82f6' }, itemStyle: { color: '#3b82f6' } },
-                      { name: 'OOS IC', type: 'line', data: result.ic_series.map(e => e.oos_ic), lineStyle: { color: '#f97316' }, itemStyle: { color: '#f97316' } },
+                      { name: 'IS IC', type: 'line', data: result.ic_series.map(e => e.train_ic), lineStyle: { color: CHART.isIc }, itemStyle: { color: CHART.isIc } },
+                      { name: 'OOS IC', type: 'line', data: result.ic_series.map(e => e.oos_ic), lineStyle: { color: CHART.oosIc }, itemStyle: { color: CHART.oosIc } },
                     ],
                   }} style={{ height: 200 }} />
                 </div>
