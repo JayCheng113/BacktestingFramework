@@ -1632,6 +1632,36 @@ FMP_API_KEY=your_key_here`}</pre>
             </div>
           ))}
 
+          {/* Live / Paper Trading */}
+          <div style={h2s}>模拟盘 API (V2.15)</div>
+          {[
+            { method: 'POST', path: '/api/live/deploy', desc: '从组合回测创建部署', body: '{ source_run_id: string, name: string }', resp: '{ deployment_id, spec_id }' },
+            { method: 'GET', path: '/api/live/deployments', desc: '部署列表 (可按状态筛选)', body: '?status=running', resp: '[{ deployment_id, name, status, ... }]' },
+            { method: 'GET', path: '/api/live/deployments/{id}', desc: '部署详情 + 最新快照', body: '(无)', resp: '{ deployment_id, status, spec, latest_snapshot }' },
+            { method: 'POST', path: '/api/live/deployments/{id}/approve', desc: '运行部署门控审批', body: '(无)', resp: '{ deployment_id, status, verdict }' },
+            { method: 'POST', path: '/api/live/deployments/{id}/start', desc: '启动模拟交易', body: '(无)', resp: '{ deployment_id, status: "running" }' },
+            { method: 'POST', path: '/api/live/deployments/{id}/stop', desc: '停止部署 (可选清仓)', body: '{ reason: string } ?liquidate=true', resp: '{ deployment_id, status: "stopped", liquidated }' },
+            { method: 'POST', path: '/api/live/deployments/{id}/pause', desc: '暂停部署', body: '(无)', resp: '{ deployment_id, status: "paused" }' },
+            { method: 'POST', path: '/api/live/deployments/{id}/resume', desc: '恢复暂停的部署', body: '(无)', resp: '{ deployment_id, status: "running" }' },
+            { method: 'POST', path: '/api/live/tick', desc: '触发每日执行', body: '{ business_date: "YYYY-MM-DD" }', resp: '{ business_date, results: [...] }' },
+            { method: 'GET', path: '/api/live/dashboard', desc: '监控仪表盘', body: '(无)', resp: '{ deployments: [DeploymentHealth], alerts: [...] }' },
+            { method: 'GET', path: '/api/live/deployments/{id}/snapshots', desc: '历史每日快照', body: '(无)', resp: '[{ snapshot_date, equity, cash, holdings, weights, trades }]' },
+            { method: 'GET', path: '/api/live/deployments/{id}/trades', desc: '部署交易记录', body: '(无)', resp: '[{ symbol, side, shares, price, cost, snapshot_date }]' },
+            { method: 'GET', path: '/api/live/deployments/{id}/stream', desc: '实时 SSE 事件流', body: '(无)', resp: 'SSE: event:snapshot|done + keepalive' },
+          ].map(a => (
+            <div key={a.path + a.method} style={{ marginBottom: '10px', padding: '8px 12px', borderRadius: '6px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '1px 6px', borderRadius: '3px', backgroundColor: a.method === 'GET' ? '#166534' : a.method === 'DELETE' ? '#7f1d1d' : '#1e40af', color: '#fff' }}>{a.method}</span>
+                <code style={{ fontSize: '12px', color: 'var(--color-accent)' }}>{a.path}</code>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>— {a.desc}</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                <div><b>请求:</b> <code>{a.body}</code></div>
+                <div><b>响应:</b> <code>{a.resp}</code></div>
+              </div>
+            </div>
+          ))}
+
           <div style={h2s}>错误码</div>
           <table style={tbl}>
             <thead><tr><th style={ths}>HTTP 状态码</th><th style={ths}>含义</th><th style={ths}>常见原因</th></tr></thead>

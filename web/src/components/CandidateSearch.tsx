@@ -4,6 +4,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import { searchCandidates, listStrategies } from '../api'
 import type { StrategyInfo, CandidateResult, SearchResult } from '../types'
 import DateBtn from './shared/DateBtn'
+import { useToast } from './shared/Toast'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -77,6 +78,7 @@ function hasError(pr: ParamRangeState): boolean {
 }
 
 export default function CandidateSearch() {
+  const { showToast } = useToast()
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [searching, setSearching] = useState(false)
   const [result, setResult] = useState<SearchResult | null>(null)
@@ -180,7 +182,7 @@ export default function CandidateSearch() {
       })
       setResult(res.data)
     } catch (e: any) {
-      alert(e?.response?.data?.detail || '搜索失败')
+      showToast('error', e?.response?.data?.detail || '搜索失败')
     } finally {
       setSearching(false)
     }

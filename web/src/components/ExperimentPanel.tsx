@@ -5,10 +5,12 @@ import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cl
 import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
 import CandidateSearch from './CandidateSearch'
 import DateBtn from './shared/DateBtn'
+import { useToast } from './shared/Toast'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  const { showToast } = useToast()
   const [subTab, setSubTab] = useState<'single' | 'search' | 'portfolio'>('single')
   const [runs, setRuns] = useState<ExperimentRun[]>([])
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
@@ -81,11 +83,11 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
         use_market_rules: useMarketRules,
       })
       if (res.data?.status === 'duplicate') {
-        alert(`重复: 该实验已有完成的运行记录 (${res.data.existing_run_id || res.data.spec_id})`)
+        showToast('warning', `重复: 该实验已有完成的运行记录 (${res.data.existing_run_id || res.data.spec_id})`)
       }
       loadRuns()
     } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Experiment failed')
+      showToast('error', e?.response?.data?.detail || 'Experiment failed')
     } finally {
       setSubmitting(false)
     }
@@ -98,7 +100,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
       await deleteExperiment(runId)
       if (detail?.run_id === runId) setDetail(null)
       loadRuns()
-    } catch { alert('删除失败') }
+    } catch { showToast('error', '删除失败') }
   }
 
   const handleCleanup = async () => {
@@ -108,9 +110,9 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
     if (isNaN(keep) || keep < 1) return
     try {
       const res = await cleanupExperiments(keep)
-      alert(`已清理 ${res.data.deleted} 条旧记录`)
+      showToast('success', `已清理 ${res.data.deleted} 条旧记录`)
       loadRuns()
-    } catch { alert('清理失败') }
+    } catch { showToast('error', '清理失败') }
   }
 
   const parseGateReasons = (r: ExperimentRun): GateReason[] => {

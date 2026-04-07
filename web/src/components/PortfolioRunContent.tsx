@@ -8,6 +8,7 @@ import { getPortfolioRunHoldings } from '../api'
 import { deployToLive } from '../api/live'
 import EnsembleBuilder from './EnsembleBuilder'
 import type { EnsembleConfig } from './EnsembleBuilder'
+import { useToast } from './shared/Toast'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -93,6 +94,7 @@ interface Props {
 }
 
 export default function PortfolioRunContent(props: Props) {
+  const { showToast } = useToast()
   const {
     symbols, setSymbols, market, setMarket,
     startDate, setStartDate, endDate, setEndDate, freq, setFreq,
@@ -126,10 +128,10 @@ export default function PortfolioRunContent(props: Props) {
       // V2.16 S1: wf_metrics are now persisted server-side by /walk-forward.
       // DeployGate reads them from DB — no need to pass from frontend.
       const res = await deployToLive({ source_run_id: result.run_id, name })
-      alert(`部署成功！ID: ${res.data.deployment_id}\n请前往 "模拟盘" 页面查看和审批。`)
+      showToast('success', `部署成功！ID: ${res.data.deployment_id}\n请前往 "模拟盘" 页面查看和审批。`)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      alert('部署失败: ' + (err?.response?.data?.detail || err?.message || ''))
+      showToast('error', '部署失败: ' + (err?.response?.data?.detail || err?.message || ''))
     } finally {
       setDeployLoading(false)
     }
@@ -185,7 +187,7 @@ export default function PortfolioRunContent(props: Props) {
       setFullWeights(res.data.weights_history || [])
     } catch (e: any) {
       if (currentRunIdRef.current === requestedRunId) {
-        alert('加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
+        showToast('error', '加载完整历史失败: ' + (e?.response?.data?.detail || e?.message || ''))
       }
     } finally {
       if (currentRunIdRef.current === requestedRunId) setWeightsLoading(false)

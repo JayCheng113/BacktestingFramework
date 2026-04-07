@@ -5,8 +5,10 @@ import BacktestPanel from '../components/BacktestPanel'
 import FactorPanel from '../components/FactorPanel'
 import { fetchKline } from '../api'
 import type { KlineBar, TradeRecord } from '../types'
+import { useToast } from '../components/shared/Toast'
 
 export default function Dashboard() {
+  const { showToast } = useToast()
   const [klineData, setKlineData] = useState<KlineBar[]>([])
   const [currentSymbol, setCurrentSymbol] = useState('')
   const [currentMarket, setCurrentMarket] = useState('cn_stock')
@@ -31,7 +33,7 @@ export default function Dashboard() {
     try {
       const res = await fetchKline({ symbol, market, period, start_date: start, end_date: end })
       setKlineData(res.data)
-    } catch (e: any) { alert(e?.response?.data?.detail || 'Failed to fetch data') }
+    } catch (e: any) { showToast('error', e?.response?.data?.detail || 'Failed to fetch data') }
     finally { setLoading(false) }
   }
 

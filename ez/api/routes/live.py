@@ -354,15 +354,19 @@ async def start_deployment(deployment_id: str):
 
 
 @router.post("/deployments/{deployment_id}/stop")
-async def stop_deployment(deployment_id: str, req: StopRequest | None = None):
-    """Stop a running deployment."""
+async def stop_deployment(
+    deployment_id: str,
+    req: StopRequest | None = None,
+    liquidate: bool = Query(False, description="Liquidate all positions before stopping"),
+):
+    """Stop a running deployment. If liquidate=true, sells all positions first."""
     reason = req.reason if req else "手动停止"
     scheduler = _get_scheduler()
     try:
-        await scheduler.stop_deployment(deployment_id, reason=reason)
+        await scheduler.stop_deployment(deployment_id, reason=reason, liquidate=liquidate)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"deployment_id": deployment_id, "status": "stopped"}
+    return {"deployment_id": deployment_id, "status": "stopped", "liquidated": liquidate}
 
 
 @router.post("/deployments/{deployment_id}/pause")

@@ -3,6 +3,7 @@
  * metrics, trades, and control panel.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useToast } from '../components/shared/Toast'
 import ReactECharts from 'echarts-for-react'
 import {
   listDeployments, getDeployment, getDashboard, getSnapshots, getTrades,
@@ -38,6 +39,7 @@ const fmt = (v: number | null | undefined, pct = false, digits = 2) => {
 }
 
 export default function PaperTradingPage() {
+  const { showToast } = useToast()
   // ----- State -----
   const [deployments, setDeployments] = useState<DeploymentSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -129,7 +131,7 @@ export default function PaperTradingPage() {
       if (selectedId) await refreshDetail(selectedId)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      alert(err?.response?.data?.detail || err?.message || '操作失败')
+      showToast('error', err?.response?.data?.detail || err?.message || '操作失败')
     } finally {
       setActionLoading(false)
     }
@@ -137,7 +139,7 @@ export default function PaperTradingPage() {
 
   const handleTick = async () => {
     if (!tickDate) {
-      alert('请选择交易日期')
+      showToast('warning', '请选择交易日期')
       return
     }
     setTickLoading(true)
@@ -147,7 +149,7 @@ export default function PaperTradingPage() {
       if (selectedId) await refreshDetail(selectedId)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      alert('Tick 失败: ' + (err?.response?.data?.detail || err?.message || ''))
+      showToast('error', 'Tick 失败: ' + (err?.response?.data?.detail || err?.message || ''))
     } finally {
       setTickLoading(false)
     }

@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.15.1 | Tests: 2229 passed + 10 skipped (2239 collected) with sklearn+lgbm+xgb / ~1813 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.16 | Tests: 2234 passed + 10 skipped (2244 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -183,6 +183,12 @@ No version tag without review pass. No push without critical issues resolved.
   - **S4 resume_all 加锁**: `asyncio.Lock` 覆盖 resume_all + start/pause/resume/stop/tick 全部 6 个入口.
   - **S5 _is_rebalance_day 缓存**: 首次计算后缓存 rebalance date set, 后续 O(1) 查找.
   - 2226 → 2229 tests (+3 recovery regression)
+- **V2.16**: Platform Polish — 可靠性 + 集成测试 + 文档:
+  - **AKShare raw fetch 重试**: 原始价格 fetch 失败后自动重试 1 次再降级到 adj_close fallback (减少因瞬时网络错误导致的数据质量降级)
+  - **stop_deployment liquidate 选项**: Scheduler.stop_deployment 新增 `liquidate: bool = False` 参数, True 时先用空权重触发 execute_portfolio_trades 平仓所有持仓, 保存清仓快照后再停止; API 层 `/stop` 端点接受 `?liquidate=true` query param
+  - **DocsPage API 参考**: 新增 13 个模拟盘 API 端点到 Ch8 API 参考
+  - **集成测试 5 个**: test_factor_contract_all_builtins (所有注册因子计算契约), test_backtest_with_market_rules (T+1/整手/印花税), test_walk_forward_determinism (WF 确定性), test_portfolio_backtest_with_optimizer (MeanVariance 优化器), test_full_pipeline_research_gate (回测→WF→门控→裁定)
+  - 2229 → 2234 tests (+5 integration)
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
@@ -198,7 +204,7 @@ No version tag without review pass. No push without critical issues resolved.
 - LLM 调用计数近似 (chat_sync 内部多轮不精确计入，已文档化为估计值)
 - Tencent provider close=adj_close (qfq当raw, 涨跌停判断不精确; Tushare/AKShare优先所以影响低)
 - multi_select 参数搜索只搜单因子组合 (设计限制, 不是多因子组合空间)
-- AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log)
+- AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log; V2.16 加 1 次重试降低瞬时错误概率)
 - 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)
 - AI助手SSE流式输出无法前端强制中断 (需后端cancel机制, 当前只能等输出完成)
 - **MLAlpha whitelist 覆盖 9 个 estimator** (V2.14 扩展) — 7 sklearn (Ridge/Lasso/LR/EN/DT/RF/GBR) + LGBMRegressor + XGBRegressor. 其中 Ridge/RF/GBR/LGBM/XGB 有 deepcopy + e2e backtest 测试, Lasso/LR/EN/DT 有 deepcopy 测试. **Classifier (LGBMClassifier/XGBClassifier) 未列入** — 需要先定义分类契约 (predict 输出语义 + TopNRotation 兼容性). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task.

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import DateRangePicker from './DateRangePicker'
+import { useToast } from './shared/Toast'
 
 interface ResearchTask {
   task_id: string; goal: string; config: string; status: string
@@ -46,6 +47,7 @@ function formatEvent(e: SSEEvent): { icon: string; text: string; color: string }
 }
 
 export default function ResearchPanel() {
+  const { showToast } = useToast()
   const [tasks, setTasks] = useState<ResearchTask[]>([])
   const [selectedTask, setSelectedTask] = useState<ResearchTask | null>(null)
   const [events, setEvents] = useState<SSEEvent[]>([])
@@ -101,7 +103,7 @@ export default function ResearchPanel() {
         await loadTasks()
         streamTask(data.task_id)
       } else if (res.status === 409) {
-        alert('已有研究任务运行中，请等待完成或取消后重试')
+        showToast('warning', '已有研究任务运行中，请等待完成或取消后重试')
       }
     } catch (e) {
       console.error('Start research failed:', e)
@@ -215,13 +217,13 @@ export default function ResearchPanel() {
         if (data.success) {
           setPromoted(prev => new Set([...prev, filename]))
         } else {
-          alert(`注册失败: ${data.errors?.join(', ')}`)
+          showToast('error', `注册失败: ${data.errors?.join(', ')}`)
         }
       } else {
         const errData = await res.json().catch(() => ({ detail: res.statusText }))
-        alert(`注册失败 (${res.status}): ${errData.detail || '未知错误'}`)
+        showToast('error', `注册失败 (${res.status}): ${errData.detail || '未知错误'}`)
       }
-    } catch (e) { alert(`注册失败: ${e}`) }
+    } catch (e) { showToast('error', `注册失败: ${e}`) }
   }
 
   const statusColor = (s: string) => ({ running: '#3b82f6', completed: '#22c55e', failed: '#ef4444', cancelled: '#6b7280' }[s] || '#6b7280')

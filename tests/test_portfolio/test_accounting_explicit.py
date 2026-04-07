@@ -7,7 +7,7 @@ import pytest
 def test_no_assert_for_accounting_invariants_source():
     """Source-level guard: no assert statements mentioning cash or equity."""
     engine_path = Path("ez/portfolio/engine.py")
-    source = engine_path.read_text()
+    source = engine_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in ast.walk(tree):
         if isinstance(node, ast.Assert):

@@ -107,8 +107,17 @@ class Scheduler:
             self.store.update_status(deployment_id, "running")
             logger.info("Resumed deployment %s", deployment_id)
 
-    async def stop_deployment(self, deployment_id: str, reason: str) -> None:
-        """Stop: release engine, update DB status. Validates record exists and is stoppable."""
+    async def stop_deployment(self, deployment_id: str, reason: str, liquidate: bool = False) -> None:
+        """Stop: release engine, update DB status. Validates record exists and is stoppable.
+
+        Parameters
+        ----------
+        liquidate : bool
+            If True, generate empty target weights to close all positions
+            before stopping. The liquidation trades are saved as a final
+            snapshot. If the engine is not found (e.g., after a restart),
+            liquidation is skipped and a warning is logged.
+        """
         async with self._lock:
             record = self.store.get_record(deployment_id)
             if record is None:
@@ -117,6 +126,64 @@ class Scheduler:
                 raise ValueError(
                     f"Cannot stop deployment {deployment_id!r}: "
                     f"status is {record.status!r}")
+
+            liquidation_trades: list[dict] = []
+            if liquidate and deployment_id in self._engines:
+                engine = self._engines[deployment_id]
+                if engine.holdings:
+                    try:
+                        from datetime import date as _date
+                        from ez.portfolio.execution import CostModel, execute_portfolio_trades
+                        today = _date.today()
+                        prices = dict(engine._last_prices)
+                        raw_closes = dict(prices)
+                        prev_raw = dict(prices)
+                        has_bar = {s: True for s in engine.holdings}
+                        cost_model = CostModel(
+                            buy_commission_rate=engine.spec.buy_commission_rate,
+                            sell_commission_rate=engine.spec.sell_commission_rate,
+                            min_commission=engine.spec.min_commission,
+                            stamp_tax_rate=engine.spec.stamp_tax_rate,
+                            slippage_rate=engine.spec.slippage_rate,
+                        )
+                        equity = engine._mark_to_market(prices)
+                        exec_trades, new_holdings, new_cash, _ = execute_portfolio_trades(
+                            target_weights={},
+                            holdings=engine.holdings,
+                            equity=equity,
+                            cash=engine.cash,
+                            prices=prices,
+                            raw_close_today=raw_closes,
+                            prev_raw_close=prev_raw,
+                            has_bar_today=has_bar,
+                            cost_model=cost_model,
+                            lot_size=engine.spec.lot_size,
+                            limit_pct=0.0,  # no limit check on liquidation
+                            t_plus_1=False,  # allow selling everything
+                        )
+                        liquidation_trades = [
+                            {"symbol": t.symbol, "side": t.side, "shares": t.shares,
+                             "price": t.price, "cost": t.cost, "amount": t.amount}
+                            for t in exec_trades
+                        ]
+                        engine.holdings = new_holdings
+                        engine.cash = new_cash
+                        # Save liquidation snapshot
+                        self.store.save_daily_snapshot(deployment_id, today, {
+                            "date": str(today), "equity": new_cash,
+                            "cash": new_cash, "holdings": {},
+                            "weights": {}, "trades": liquidation_trades,
+                            "risk_events": [], "rebalanced": False,
+                            "liquidation": True,
+                        })
+                        logger.info("Liquidated %d positions for %s", len(liquidation_trades), deployment_id)
+                    except Exception:
+                        logger.error("Liquidation failed for %s", deployment_id, exc_info=True)
+                else:
+                    logger.info("No holdings to liquidate for %s", deployment_id)
+            elif liquidate:
+                logger.warning("Engine not found for %s, skipping liquidation", deployment_id)
+
             self._engines.pop(deployment_id, None)
             self._paused.discard(deployment_id)
             self.store.update_status(deployment_id, "stopped", stop_reason=reason)

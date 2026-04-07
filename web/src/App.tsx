@@ -7,6 +7,7 @@ import ResearchPanel from './components/ResearchPanel'
 import PortfolioPanel from './components/PortfolioPanel'
 import DocsPage from './pages/DocsPage'
 import PaperTradingPage from './pages/PaperTradingPage'
+import { ToastProvider } from './components/shared/Toast'
 import './styles/global.css'
 
 export default function App() {
@@ -19,19 +20,21 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-primary)' }}>
-      <Navbar activeTab={activeTab} onTabChange={handleTabChange} />
-      {activeTab === 'dashboard' && <Dashboard />}
-      {activeTab === 'portfolio' && <PortfolioPanel />}
-      {activeTab === 'experiments' && <ExperimentPanel onNavigate={handleTabChange} />}
-      {editorMounted && (
-        <div style={{ display: activeTab === 'editor' ? 'block' : 'none', height: 'calc(100vh - 48px)' }}>
-          <CodeEditor onNavigate={handleTabChange} />
-        </div>
-      )}
-      {activeTab === 'research' && <ResearchPanel />}
-      {activeTab === 'paper-trading' && <PaperTradingPage />}
-      {activeTab === 'docs' && <DocsPage />}
-    </div>
+    <ToastProvider>
+      <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-primary)' }}>
+        <Navbar activeTab={activeTab} onTabChange={handleTabChange} />
+        {activeTab === 'dashboard' && <Dashboard />}
+        {activeTab === 'portfolio' && <PortfolioPanel />}
+        {activeTab === 'experiments' && <ExperimentPanel onNavigate={handleTabChange} />}
+        {editorMounted && (
+          <div style={{ display: activeTab === 'editor' ? 'block' : 'none', height: 'calc(100vh - 48px)' }}>
+            <CodeEditor onNavigate={handleTabChange} />
+          </div>
+        )}
+        {activeTab === 'research' && <ResearchPanel />}
+        {activeTab === 'paper-trading' && <PaperTradingPage />}
+        {activeTab === 'docs' && <DocsPage />}
+      </div>
+    </ToastProvider>
   )
 }

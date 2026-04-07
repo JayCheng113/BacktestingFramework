@@ -4,6 +4,7 @@ import { listStrategies, runBacktest, runWalkForward } from '../api'
 import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
 import BacktestSettings, { getDefaultSettings } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
+import { useToast } from './shared/Toast'
 
 interface Props {
   symbol: string; market: string; period?: string; startDate: string; endDate: string
@@ -13,6 +14,7 @@ interface Props {
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 export default function BacktestPanel({ symbol, market, period = 'daily', startDate, endDate, onTradesUpdate }: Props) {
+  const { showToast } = useToast()
   const [strategies, setStrategies] = useState<StrategyInfo[]>([])
   const [selected, setSelected] = useState('')
   const [params, setParams] = useState<Record<string, number | string | boolean>>({})
@@ -131,7 +133,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         setWfResult(res.data)
       }
     } catch (e: any) {
-      if (runTokenRef.current === myToken) alert(e?.response?.data?.detail || 'Failed')
+      if (runTokenRef.current === myToken) showToast('error', e?.response?.data?.detail || 'Failed')
     } finally {
       // Only reset loading if we're still the latest request — otherwise
       // a newer in-flight request would be marked as "done" prematurely.
