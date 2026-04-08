@@ -23,8 +23,13 @@ from ez.portfolio.portfolio_strategy import PortfolioStrategy
 
 def _weekly_macd_signal(close: pd.Series) -> bool:
     """Weekly MACD filter: True = bullish (MACD bar increasing).
-    Matches QMT MACD_PLUS(): condition1 = (macd_bar > REF(macd_bar, 1))."""
+    Matches QMT MACD_PLUS(): condition1 = (macd_bar > REF(macd_bar, 1)).
+    QMT uses bar_week['close'].iloc[:-1] — excludes current (possibly incomplete) week."""
     weekly = close.resample("W").last().dropna()
+    # QMT: close_data = bar_week['close'].iloc[:-1]
+    # Exclude current/last week (may be incomplete on Thu/Fri)
+    if len(weekly) > 1:
+        weekly = weekly.iloc[:-1]
     if len(weekly) < 15:
         return False
     ema12 = weekly.ewm(span=12, adjust=False).mean()
