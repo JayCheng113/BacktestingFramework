@@ -8,24 +8,7 @@ import type { DiagnosticsResult } from '../types'
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
-
-// IC/ICIR color rating (aligned with FactorPanel thresholds)
-const rateIc = (v: number | null) => {
-  if (v == null) return null
-  const a = Math.abs(v)
-  if (a >= 0.05) return { color: CHART.success, hint: '强' }
-  if (a >= 0.03) return { color: CHART.accent, hint: '中' }
-  if (a >= 0.01) return { color: CHART.warn, hint: '弱' }
-  return { color: CHART.error, hint: '无效' }
-}
-const rateIcir = (v: number | null) => {
-  if (v == null) return null
-  const a = Math.abs(v)
-  if (a >= 0.5) return { color: CHART.success, hint: '很稳定' }
-  if (a >= 0.3) return { color: CHART.accent, hint: '较稳定' }
-  if (a >= 0.1) return { color: CHART.warn, hint: '一般' }
-  return { color: CHART.error, hint: '不稳定' }
-}
+import { rateIc, rateIcir } from './shared/metricRatings'
 
 // ── Factor evaluation types ──────────────────────────────────────
 

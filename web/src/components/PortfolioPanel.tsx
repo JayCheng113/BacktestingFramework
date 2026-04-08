@@ -373,7 +373,8 @@ export default function PortfolioPanel() {
   }
 
   // Shared helpers for factor research validation
-  const isEtfCode = (s: string) => /^(51|15|16)\d{4}\.\w+$/.test(s)
+  // ETF code detection: covers SH (51x/52x/56x/58x/588/589) + SZ (15x/16x)
+  const isEtfCode = (s: string) => /^(5[01245689]|1[56])\d{4}\.\w+$/.test(s)
 
   const isFundamentalFactor = (f: string): boolean => {
     return factorCategories.some(cat =>

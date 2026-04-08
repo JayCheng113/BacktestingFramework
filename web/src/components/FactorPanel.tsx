@@ -4,6 +4,7 @@ import { listFactors, evaluateFactor } from '../api'
 import type { FactorResult } from '../types'
 import { useToast } from './shared/Toast'
 import { CHART } from './shared/chartTheme'
+import { rateIc as sharedRateIc, rateIcir as sharedRateIcir } from './shared/metricRatings'
 
 interface Props {
   symbol: string; market: string; startDate: string; endDate: string
@@ -137,20 +138,8 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
           {/* Metric cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             {(() => {
-              const rateIc = (v: number) => {
-                const a = Math.abs(v)
-                if (a >= 0.05) return { color: '#22c55e', hint: '强' }
-                if (a >= 0.03) return { color: CHART.accent, hint: '中' }
-                if (a >= 0.01) return { color: '#f59e0b', hint: '弱' }
-                return { color: '#ef4444', hint: '无效' }
-              }
-              const rateIcir = (v: number) => {
-                const a = Math.abs(v)
-                if (a >= 0.5) return { color: '#22c55e', hint: '很稳定' }
-                if (a >= 0.3) return { color: CHART.accent, hint: '较稳定' }
-                if (a >= 0.1) return { color: '#f59e0b', hint: '一般' }
-                return { color: '#ef4444', hint: '不稳定' }
-              }
+              const rateIc = (v: number) => sharedRateIc(v) ?? { color: CHART.error, hint: '无效' }
+              const rateIcir = (v: number) => sharedRateIcir(v) ?? { color: CHART.error, hint: '不稳定' }
               const rateTurnover = (v: number) => {
                 if (v <= 0.3) return { color: '#22c55e', hint: '低换手' }
                 if (v <= 0.6) return { color: '#f59e0b', hint: '中等' }
