@@ -36,7 +36,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
 
   return (
     <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-      <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置 <span className="font-normal" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>(费率为小数, 如 0.0003 = 万3 = 0.03%)</span></div>
+      <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置 <span className="font-normal" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>(费率为小数, 如 0.00008 = 万0.8 = 0.008%)</span></div>
       <div className="flex flex-wrap gap-3 items-end mb-2">
         {showInitialCash && (
           <div className="flex flex-col gap-1">
@@ -114,11 +114,11 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
 export const DEFAULT_SETTINGS: BacktestSettingsValue = {
   initial_cash: 1_000_000,
   benchmark: '510300.SH',
-  buy_commission_rate: 0.0003,
-  sell_commission_rate: 0.0003,
-  min_commission: 5,
-  stamp_tax_rate: 0.0005,
-  slippage_rate: 0,
+  buy_commission_rate: 0.00008,   // 万0.8 — QMT量化账户标准
+  sell_commission_rate: 0.00008,  // 万0.8
+  min_commission: 0,              // 量化账户通常免五
+  stamp_tax_rate: 0.0005,         // 万5 — 国家规定, 仅卖出
+  slippage_rate: 0.001,           // 万1 — 保守滑点估计
   lot_size: 100,
   limit_pct: 0.10,
 }

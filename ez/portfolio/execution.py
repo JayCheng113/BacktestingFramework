@@ -13,11 +13,11 @@ EPS_FUND = 0.01  # accounting tolerance (cents)
 
 @dataclass
 class CostModel:
-    buy_commission_rate: float = 0.0003
-    sell_commission_rate: float = 0.0003
-    min_commission: float = 5.0
-    stamp_tax_rate: float = 0.0005  # sell-side only (A-share)
-    slippage_rate: float = 0.0
+    buy_commission_rate: float = 0.00008   # 万0.8 — QMT量化账户标准
+    sell_commission_rate: float = 0.00008  # 万0.8
+    min_commission: float = 0.0            # 量化账户通常免五
+    stamp_tax_rate: float = 0.0005         # 万5 — 国家规定, 仅卖出
+    slippage_rate: float = 0.001           # 万1 — 保守滑点估计
 
 
 @dataclass
