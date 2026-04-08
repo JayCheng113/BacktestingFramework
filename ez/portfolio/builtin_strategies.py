@@ -572,11 +572,19 @@ class EtfRotateCombo(PortfolioStrategy):
                 mapped = self._SYMBOL_MAP.get(sym, sym)
                 switch_bucket[mapped] = switch_bucket.get(mapped, 0) + w * com_rate
 
+        # Merge both buckets
         combined = {}
         for sym, w in rotate_bucket.items():
             combined[sym] = combined.get(sym, 0) + w
         for sym, w in switch_bucket.items():
             combined[sym] = combined.get(sym, 0) + w
+
+        # QMT line 240: if trade_holding_list == total_position: pass (no trade)
+        # Compare merged weights with last known weights — if identical, skip.
+        last_combined = self.state.get("_last_combined")
+        if last_combined is not None and combined == last_combined:
+            return None  # same weights → no trade (matches QMT behavior)
+        self.state["_last_combined"] = dict(combined)
 
         return combined if combined else {}
 
