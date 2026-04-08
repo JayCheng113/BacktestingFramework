@@ -293,13 +293,17 @@ class EtfSectorSwitch(PortfolioStrategy):
 
 
 class EtfRotateCombo(PortfolioStrategy):
-    """轮动 + 加权切换组合策略。
+    """轮动 + 加权切换组合策略 (严格复刻 QMT "轮动加多组合回测V1.2")。
 
-    逻辑 (移植自 QMT "轮动加多组合回测V1.2"):
-    1. 轮动部分: EtfMacdRotation 选 top 2, 占 rotate_rate 仓位
-    2. 加权部分: EtfSectorSwitch 选 top 1, 占 1 - rotate_rate 仓位
-    3. 两部分权重合并 (同一标的可能出现在两个子策略中, 权重叠加)
-    4. 轮动池和加权池可以不同 (通过 rotate_symbols 区分)
+    双日程调仓 — 需配合 freq="daily" 使用:
+    - 周四 (rotate_weekday=3): 重算轮动仓位桶 (EtfMacdRotation, top 2, 30%)
+    - 周五 (com_weekday=4): 重算加权仓位桶 (EtfSectorSwitch, top 1, 70%)
+    - 其他交易日: 返回上次合并持仓 (不触发交易)
+    - 两桶独立更新、合并输出, 同一标的可叠加权重
+
+    QMT 特殊逻辑:
+    - 510880.SH → 515100.SH 映射 (加权分支)
+    - 不归一化: 30%+70%=100%, 一桶空则该部分为现金
     """
 
     DEFAULT_BROAD_ETFS = EtfSectorSwitch.DEFAULT_BROAD_ETFS
@@ -311,14 +315,19 @@ class EtfRotateCombo(PortfolioStrategy):
         "518880.SH", "159985.SZ",
     })
 
+    # QMT 510880.SH → 515100.SH mapping in weighted branch
+    _SYMBOL_MAP = {"510880.SH": "515100.SH"}
+
     def __init__(self, rotate_rate: float = 0.3, rotate_top_n: int = 2,
-                 com_top_n: int = 1, rotate_symbols: list[str] | None = None,
+                 com_top_n: int = 1, rotate_weekday: int = 3, com_weekday: int = 4,
+                 rotate_symbols: list[str] | None = None,
                  broad_symbols: list[str] | None = None,
                  sector_symbols: list[str] | None = None, **params):
         super().__init__(**params)
         self.rotate_rate = max(0, min(1, rotate_rate))
+        self._rotate_weekday = rotate_weekday  # 0=Mon..4=Fri
+        self._com_weekday = com_weekday
         self._rotate_syms = set(rotate_symbols) if rotate_symbols else set(self.DEFAULT_ROTATE_SYMBOLS)
-        # Inner strategies share state via self.state
         self._rotator = EtfMacdRotation(top_n=rotate_top_n)
         self._switcher = EtfSectorSwitch(top_n=com_top_n, broad_symbols=broad_symbols, sector_symbols=sector_symbols)
 
@@ -328,7 +337,7 @@ class EtfRotateCombo(PortfolioStrategy):
 
     @classmethod
     def get_description(cls) -> str:
-        return "轮动(30%) + 加权切换(70%) 组合策略"
+        return "轮动(30%周四) + 加权切换(70%周五) 双日程组合, 需 freq=日度"
 
     @classmethod
     def get_parameters_schema(cls) -> dict:
@@ -336,29 +345,59 @@ class EtfRotateCombo(PortfolioStrategy):
             "rotate_rate": {"type": "float", "default": 0.3, "min": 0, "max": 1, "label": "轮动仓位占比"},
             "rotate_top_n": {"type": "int", "default": 2, "min": 1, "max": 10, "label": "轮动持仓数"},
             "com_top_n": {"type": "int", "default": 1, "min": 1, "max": 10, "label": "加权持仓数"},
+            "rotate_weekday": {"type": "int", "default": 3, "min": 0, "max": 4, "label": "轮动调仓日 (0=周一..4=周五)"},
+            "com_weekday": {"type": "int", "default": 4, "min": 0, "max": 4, "label": "加权调仓日 (0=周一..4=周五)"},
         }
 
     def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        from datetime import datetime as dt
+        weekday = date.weekday() if hasattr(date, 'weekday') else date
+
+        # Persistent position buckets (survive across calls)
+        rotate_bucket: dict[str, float] = self.state.setdefault("rotate_bucket", {})
+        switch_bucket: dict[str, float] = self.state.setdefault("switch_bucket", {})
+
         # Share state with inner strategies
-        self._rotator.state = self.state.setdefault("_rotate", {})
-        self._switcher.state = self.state.setdefault("_switch", {})
+        self._rotator.state = self.state.setdefault("_rotate_inner", {})
+        self._switcher.state = self.state.setdefault("_switch_inner", {})
 
-        # Rotation: only operates on rotate pool symbols
-        rotate_data = {s: df for s, df in universe_data.items() if s in self._rotate_syms}
-        rotate_w = self._rotator.generate_weights(rotate_data, date, prev_weights, prev_returns) if rotate_data else {}
+        is_rotate_day = (weekday == self._rotate_weekday)
+        is_com_day = (weekday == self._com_weekday)
 
-        # Weighted switch: operates on full pool
-        switch_w = self._switcher.generate_weights(universe_data, date, prev_weights, prev_returns)
+        # Skip non-rebalance days (return merged buckets unchanged → engine sees same weights → no trade)
+        if not is_rotate_day and not is_com_day:
+            combined: dict[str, float] = {}
+            for sym, w in rotate_bucket.items():
+                combined[sym] = combined.get(sym, 0) + w
+            for sym, w in switch_bucket.items():
+                combined[sym] = combined.get(sym, 0) + w
+            return combined if combined else {}
 
-        # Combine: rotate × rotate_rate + switch × (1 - rotate_rate)
-        combined: dict[str, float] = {}
-        com_rate = 1.0 - self.rotate_rate
-        for sym, w in rotate_w.items():
-            combined[sym] = combined.get(sym, 0) + w * self.rotate_rate
-        for sym, w in switch_w.items():
-            combined[sym] = combined.get(sym, 0) + w * com_rate
+        # Thursday: recompute rotate bucket
+        if is_rotate_day:
+            rotate_data = {s: df for s, df in universe_data.items() if s in self._rotate_syms}
+            raw = self._rotator.generate_weights(rotate_data, date, prev_weights, prev_returns) if rotate_data else {}
+            rotate_bucket.clear()
+            for sym, w in raw.items():
+                rotate_bucket[sym] = w * self.rotate_rate
 
-        return combined
+        # Friday: recompute weighted switch bucket
+        if is_com_day:
+            raw = self._switcher.generate_weights(universe_data, date, prev_weights, prev_returns)
+            switch_bucket.clear()
+            com_rate = 1.0 - self.rotate_rate
+            for sym, w in raw.items():
+                mapped = self._SYMBOL_MAP.get(sym, sym)  # 510880→515100
+                switch_bucket[mapped] = switch_bucket.get(mapped, 0) + w * com_rate
+
+        # Merge both buckets (no normalization — 30%+70%=100%, empty bucket = cash)
+        combined = {}
+        for sym, w in rotate_bucket.items():
+            combined[sym] = combined.get(sym, 0) + w
+        for sym, w in switch_bucket.items():
+            combined[sym] = combined.get(sym, 0) + w
+
+        return combined if combined else {}
 
 
 class EtfStockEnhance(PortfolioStrategy):
