@@ -141,9 +141,9 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
               const rateIc = (v: number) => sharedRateIc(v) ?? { color: CHART.error, hint: '无效' }
               const rateIcir = (v: number) => sharedRateIcir(v) ?? { color: CHART.error, hint: '不稳定' }
               const rateTurnover = (v: number) => {
-                if (v <= 0.3) return { color: '#22c55e', hint: '低换手' }
-                if (v <= 0.6) return { color: '#f59e0b', hint: '中等' }
-                return { color: '#ef4444', hint: '高换手' }
+                if (v <= 0.3) return { color: CHART.success, hint: '低换手' }
+                if (v <= 0.6) return { color: CHART.warn, hint: '中等' }
+                return { color: CHART.error, hint: '高换手' }
               }
 
               const metrics: { label: string; val: number; rating: { color: string; hint: string }; tooltip: string }[] = [

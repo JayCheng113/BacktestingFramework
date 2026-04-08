@@ -373,7 +373,9 @@ export default function PortfolioPanel() {
   }
 
   // Shared helpers for factor research validation
-  // ETF code detection: covers SH (51x/52x/56x/58x/588/589) + SZ (15x/16x)
+  // ETF/fund code detection: SH 5[01245689]xxxx (ETF+LOF+封基) + SZ 1[56]xxxx (ETF+LOF)
+  // All lack fundamental data (no PE/PB/financial statements). 50=LOF/封基, 51=ETF,
+  // 52=ETF(A500), 54/55=预留, 56=REITs, 58=科创ETF(588/589), 59=预留
   const isEtfCode = (s: string) => /^(5[01245689]|1[56])\d{4}\.\w+$/.test(s)
 
   const isFundamentalFactor = (f: string): boolean => {
