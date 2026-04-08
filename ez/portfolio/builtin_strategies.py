@@ -233,10 +233,13 @@ class EtfMacdRotation(PortfolioStrategy):
         result = {sym: w for sym, _ in top}
 
         # QMT V1.2 line 188: if trade_code_list == win_etf: pass (no trade)
-        last_result = self.state.get("_last_result")
-        self.state["_last_result"] = dict(result)
-        if last_result is not None and result == last_result:
-            return None  # same selection → no trade
+        # QMT compares LISTS (ordered) — [A,B] != [B,A] even if same ETFs.
+        # If ranking order changed, QMT rebalances (adjusts held positions to target).
+        current_syms = [sym for sym, _ in top]
+        last_syms = self.state.get("_last_syms")
+        self.state["_last_syms"] = list(current_syms)
+        if last_syms is not None and current_syms == last_syms:
+            return None  # same selection AND same order → no trade
 
         return result
 
