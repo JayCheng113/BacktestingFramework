@@ -860,6 +860,8 @@ def run_portfolio(req: PortfolioRunRequest):
     # un-reproducible.
     run_config = {
         "market": req.market,
+        "freq": req.freq,
+        "rebal_weekday": req.rebal_weekday,
         "_cost": {
             "buy_commission_rate": buy_rate, "sell_commission_rate": sell_rate,
             "min_commission": req.min_commission, "stamp_tax_rate": req.stamp_tax_rate,

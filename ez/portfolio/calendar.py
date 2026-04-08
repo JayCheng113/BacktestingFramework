@@ -134,16 +134,25 @@ class TradingCalendar:
             result = []
             for _, week_days in groupby(days, key=lambda d: d.isocalendar()[:2]):
                 week_list = list(week_days)
-                # Find target weekday or nearest preceding trading day
+                # Find target weekday or nearest trading day:
+                # 1. Exact match
+                # 2. Nearest FOLLOWING trading day in the same week (e.g. Mon holiday → Tue)
+                # 3. Nearest PRECEDING trading day (e.g. Fri holiday → Thu)
                 best = None
+                best_after = None
                 for d in week_list:
                     if d.weekday() == rebal_weekday:
                         best = d
                         break
                     if d.weekday() < rebal_weekday:
-                        best = d  # keep updating — last one before target
+                        best = d  # last one before target
+                    elif best_after is None and d.weekday() > rebal_weekday:
+                        best_after = d  # first one after target
+                # Prefer exact > next-after > last-before > last-of-week
+                if best is None and best_after is not None:
+                    best = best_after
                 if best is None:
-                    best = week_list[-1]  # fallback: last trading day of week
+                    best = week_list[-1]
                 result.append(best)
             return result
 

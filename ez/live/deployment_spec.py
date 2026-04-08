@@ -60,6 +60,7 @@ class DeploymentSpec:
         "_optimizer_params_json",  # canonical JSON string
         "_risk_control",
         "_risk_params_json",       # canonical JSON string
+        "_rebal_weekday",
         "_initial_cash",
         "_spec_id",
     )
@@ -84,6 +85,7 @@ class DeploymentSpec:
         optimizer_params: dict | None = None,
         risk_control: bool = False,
         risk_params: dict | None = None,
+        rebal_weekday: int | None = None,
         initial_cash: float = 1_000_000.0,
     ):
         # Use object.__setattr__ to bypass our guard during __init__
@@ -111,6 +113,7 @@ class DeploymentSpec:
         _set(self, "_risk_params_json", json.dumps(
             _sort_keys_recursive(risk_params or {}), sort_keys=True, ensure_ascii=False,
         ))
+        _set(self, "_rebal_weekday", int(rebal_weekday) if rebal_weekday is not None else None)
         _set(self, "_initial_cash", float(initial_cash))
 
         # Compute content hash
@@ -200,6 +203,10 @@ class DeploymentSpec:
         return json.loads(self._risk_params_json)
 
     @property
+    def rebal_weekday(self) -> int | None:
+        return self._rebal_weekday
+
+    @property
     def initial_cash(self) -> float:
         return self._initial_cash
 
@@ -225,6 +232,7 @@ class DeploymentSpec:
             "optimizer_params": self._optimizer_params_json,
             "risk_control": self._risk_control,
             "risk_params": self._risk_params_json,
+            "rebal_weekday": self._rebal_weekday,
             "initial_cash": self._initial_cash,
         }
 
@@ -261,6 +269,7 @@ class DeploymentSpec:
             optimizer_params=optimizer_params,
             risk_control=d.get("risk_control", False),
             risk_params=risk_params,
+            rebal_weekday=d.get("rebal_weekday"),
             initial_cash=d.get("initial_cash", 1_000_000.0),
         )
 

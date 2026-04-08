@@ -158,6 +158,7 @@ def _build_spec_from_run(run: dict) -> DeploymentSpec:
         optimizer_params=config.get("optimizer_params"),
         risk_control=config.get("risk_control", False),
         risk_params=config.get("risk_params"),
+        rebal_weekday=config.get("rebal_weekday"),
         initial_cash=float(run.get("initial_cash", 1_000_000.0)),
     )
 
