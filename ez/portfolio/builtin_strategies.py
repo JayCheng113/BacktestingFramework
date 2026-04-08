@@ -116,13 +116,18 @@ class EtfMacdRotation(PortfolioStrategy):
     6. 周线 MACD 过滤, 选 top N 等权
     """
 
-    def __init__(self, top_n: int = 2, rank_period: int = 20, ma_period: int = 2, **params):
+    def __init__(self, top_n: int = 2, rank_period: int = 20, ma_period: int = 2,
+                 strict_weekday: int | None = None, **params):
         super().__init__(**params)
         if top_n < 1:
             raise ValueError(f"top_n must be >= 1, got {top_n}")
         self.top_n = top_n
         self.rank_period = rank_period
         self.ma_period = ma_period
+        # QMT strict weekday: only trade if date.weekday() == strict_weekday.
+        # Holiday on that weekday = no trade (QMT: if weekday != changeNum: return).
+        # Use with freq=daily so engine calls every day, strategy skips non-target days.
+        self._strict_weekday = strict_weekday
 
     @property
     def lookback_days(self) -> int:
@@ -140,6 +145,12 @@ class EtfMacdRotation(PortfolioStrategy):
         }
 
     def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        # QMT strict weekday mode: only trade on exact weekday, no holiday fallback
+        if self._strict_weekday is not None:
+            weekday = date.weekday() if hasattr(date, 'weekday') else date
+            if weekday != self._strict_weekday:
+                return None  # skip: QMT returns early if weekday != changeNum
+
         returns = {}
         macd_ok = {}
         history_returns: dict[str, list[float]] = {}
