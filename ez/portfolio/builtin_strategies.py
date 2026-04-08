@@ -219,7 +219,15 @@ class EtfMacdRotation(PortfolioStrategy):
 
         top = candidates[:self.top_n]
         w = 1.0 / len(top)
-        return {sym: w for sym, _ in top}
+        result = {sym: w for sym, _ in top}
+
+        # QMT V1.2 line 188: if trade_code_list == win_etf: pass (no trade)
+        last_result = self.state.get("_last_result")
+        self.state["_last_result"] = dict(result)
+        if last_result is not None and result == last_result:
+            return None  # same selection → no trade
+
+        return result
 
 
 # ---------------------------------------------------------------------------

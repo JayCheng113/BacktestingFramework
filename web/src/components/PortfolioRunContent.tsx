@@ -29,14 +29,16 @@ interface LivePreset {
 const LIVE_PRESETS: LivePreset[] = [
   {
     id: 'macd_rotation',
-    name: 'ETF MACD轮动',
-    desc: '10只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权, 周四调仓',
+    name: 'ETF MACD轮动 V1.2',
+    desc: '12只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权, 周四调仓',
     strategy: 'EtfMacdRotation',
     params: { top_n: 2, rank_period: 20 },
-    symbols: '510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ',
+    // QMT V1.2 etf_list: 12 symbols (added 513630 恒生红利 + 162411 油气 vs V1.0)
+    symbols: '510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,513630.SH,518880.SH,159985.SZ,162411.SZ',
     freq: 'weekly',
-    rebalWeekday: 3,
+    rebalWeekday: 3,  // QMT V1.2: A.changeNum = 3 (周四)
     color: '#2563eb',
+    skipTerminalLiquidation: true,
   },
   {
     id: 'sector_switch',
