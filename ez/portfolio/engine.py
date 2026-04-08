@@ -261,16 +261,35 @@ def run_portfolio_backtest(
                 prev_weights, prev_returns,
             )
 
-            # Strategy returns None → skip this rebalance day entirely (no trade).
-            # Used by dual-schedule strategies (e.g. EtfRotateCombo) on non-active days.
+            # Strategy returns None → skip rebalance (no trade).
+            # Must still record daily equity/dates/weights before continuing.
             if raw_weights is None:
-                # Still update prev_weights so next active day gets correct actual weights
                 new_eq = cash + sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)
                 if new_eq > 0:
                     prev_weights = {s: (holdings.get(s, 0) * prices.get(s, 0)) / new_eq
                                     for s in holdings if s in prices}
+                # Record daily equity even on skip days (critical for correct annualization)
+                position_value = sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)
+                equity = cash + position_value
+                daily_weights: dict[str, float] = {}
+                if equity > 0:
+                    for sym, sh in holdings.items():
+                        if sh > 0 and sym in prices and prices[sym] > 0:
+                            daily_weights[sym] = (sh * prices[sym]) / equity
+                result.equity_curve.append(equity)
+                result.dates.append(day)
+                result.weights_history.append(daily_weights)
+                # Update prev_prices/prev_returns for next day
+                current_returns: dict[str, float] = {}
+                for sym in holdings:
+                    if sym in prices and sym in prev_prices:
+                        old_p = prev_prices[sym]
+                        if old_p > 0:
+                            current_returns[sym] = (prices[sym] - old_p) / old_p
+                prev_returns = current_returns
+                prev_prices = dict(prices)
+                prev_raw_close = dict(raw_close_today)
                 continue
-
             # V2.12: Optimizer takes priority over allocator
             if optimizer:
                 optimizer.set_context(day, sliced_tradeable)
