@@ -962,8 +962,8 @@ Agent 循环:
           <table style={tbl}><thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>说明</th></tr></thead><tbody>
             <tr><td style={tds}>初始资金</td><td style={tds}>1,000,000</td><td style={tds}>回测起始资金</td></tr>
             <tr><td style={tds}>基准</td><td style={tds}>510300.SH</td><td style={tds}>基准标的（留空=现金基准）</td></tr>
-            <tr><td style={tds}>买入佣金</td><td style={tds}>0.00008 (万0.8)</td><td style={tds}>按成交额比例</td></tr>
-            <tr><td style={tds}>卖出佣金</td><td style={tds}>0.00008</td><td style={tds}>可与买入不同</td></tr>
+            <tr><td style={tds}>买入佣金率</td><td style={tds}>0.00008 (万0.8)</td><td style={tds}>按成交额比例</td></tr>
+            <tr><td style={tds}>卖出佣金率</td><td style={tds}>0.00008</td><td style={tds}>可与买入不同</td></tr>
             <tr><td style={tds}>最低佣金</td><td style={tds}>0 元 (免五)</td><td style={tds}>每笔最低</td></tr>
             <tr><td style={tds}>印花税(卖)</td><td style={tds}>0.0005 (万五)</td><td style={tds}>A 股卖出时收取</td></tr>
             <tr><td style={tds}>滑点率</td><td style={tds}>0</td><td style={tds}>模拟市场冲击</td></tr>
