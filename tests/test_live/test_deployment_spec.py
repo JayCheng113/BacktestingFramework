@@ -137,6 +137,38 @@ class TestDeploymentSpec:
         assert s.min_commission == 0.0
         assert s.initial_cash == 1_000_000.0
 
+    def test_rebal_weekday_round_trip(self):
+        """rebal_weekday survives to_json / from_json round-trip."""
+        s1 = DeploymentSpec(
+            strategy_name="TopN", strategy_params={},
+            symbols=("A", "B"), market="cn_stock", freq="weekly",
+            rebal_weekday=3,
+        )
+        assert s1.rebal_weekday == 3
+        s2 = DeploymentSpec.from_json(s1.to_json())
+        assert s2.rebal_weekday == 3
+        assert s1.spec_id == s2.spec_id
+
+    def test_rebal_weekday_none_round_trip(self):
+        """rebal_weekday=None (default) also round-trips cleanly."""
+        s = DeploymentSpec(
+            strategy_name="TopN", strategy_params={},
+            symbols=("A",), market="cn_stock", freq="weekly",
+        )
+        assert s.rebal_weekday is None
+        s2 = DeploymentSpec.from_json(s.to_json())
+        assert s2.rebal_weekday is None
+
+    def test_rebal_weekday_affects_spec_id(self):
+        """Different rebal_weekday → different spec_id."""
+        base = dict(strategy_name="TopN", strategy_params={},
+                    symbols=("A",), market="cn_stock", freq="weekly")
+        s_none = DeploymentSpec(**base)
+        s_thu = DeploymentSpec(**base, rebal_weekday=3)
+        s_fri = DeploymentSpec(**base, rebal_weekday=4)
+        assert s_none.spec_id != s_thu.spec_id
+        assert s_thu.spec_id != s_fri.spec_id
+
 
 # ---------------------------------------------------------------------------
 # DeploymentRecord

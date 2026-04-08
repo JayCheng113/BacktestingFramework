@@ -91,3 +91,63 @@ class TestRebalanceDates:
         rebal = cal.rebalance_dates(date(2024, 1, 2), date(2024, 1, 12), "weekly")
         assert rebal[0] == date(2024, 1, 4)  # Thursday (last day of week 1)
         assert rebal[1] == date(2024, 1, 12)  # Friday (last day of week 2)
+
+
+class TestRebalWeekday:
+    """V2.16.2: rebal_weekday parameter for weekly rebalancing."""
+
+    def _make_cal(self):
+        # Week 1 (Jan 1-5): Mon-Fri all trading
+        # Week 2 (Jan 8-12): Mon is holiday, Tue-Fri trading
+        days = [date(2024, 1, d) for d in [1, 2, 3, 4, 5, 9, 10, 11, 12]]
+        return TradingCalendar.from_dates(days)
+
+    def test_exact_match(self):
+        """Target weekday is a trading day — pick it."""
+        cal = self._make_cal()
+        # Thursday = weekday 3
+        rebal = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "weekly", rebal_weekday=3)
+        assert rebal[0] == date(2024, 1, 4)  # Week 1 Thu
+        assert rebal[1] == date(2024, 1, 11)  # Week 2 Thu
+
+    def test_friday_exact(self):
+        """Friday (weekday=4) — exact match both weeks."""
+        cal = self._make_cal()
+        rebal = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "weekly", rebal_weekday=4)
+        assert rebal[0] == date(2024, 1, 5)  # Week 1 Fri
+        assert rebal[1] == date(2024, 1, 12)  # Week 2 Fri
+
+    def test_next_after_fallback(self):
+        """Monday is holiday in week 2 — should fall back to Tuesday (next-after)."""
+        cal = self._make_cal()
+        # Monday = weekday 0; week 2 has no Mon
+        rebal = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "weekly", rebal_weekday=0)
+        assert rebal[0] == date(2024, 1, 1)   # Week 1 Mon (exact)
+        assert rebal[1] == date(2024, 1, 9)   # Week 2 Tue (next-after, NOT Fri!)
+
+    def test_last_before_fallback(self):
+        """Target is Fri but Fri is holiday — fall back to Thu (last-before)."""
+        # Week with only Mon-Thu
+        days = [date(2024, 1, d) for d in [1, 2, 3, 4]]
+        cal = TradingCalendar.from_dates(days)
+        rebal = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 4), "weekly", rebal_weekday=4)
+        assert rebal[0] == date(2024, 1, 4)  # Thu (last-before Fri)
+
+    def test_none_preserves_default(self):
+        """rebal_weekday=None uses last-of-week (original behavior)."""
+        cal = self._make_cal()
+        default = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "weekly")
+        explicit_none = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "weekly", rebal_weekday=None)
+        assert default == explicit_none
+
+    def test_invalid_weekday_raises(self):
+        cal = self._make_cal()
+        with pytest.raises(ValueError, match="rebal_weekday must be 0-4"):
+            cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "weekly", rebal_weekday=5)
+
+    def test_non_weekly_ignores(self):
+        """rebal_weekday is ignored for non-weekly freq."""
+        cal = self._make_cal()
+        daily = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "daily", rebal_weekday=3)
+        daily_no = cal.rebalance_dates(date(2024, 1, 1), date(2024, 1, 12), "daily")
+        assert daily == daily_no

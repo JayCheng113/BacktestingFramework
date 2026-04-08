@@ -111,8 +111,9 @@ class TradingCalendar:
         - daily: every trading day
         - weekly: last trading day of each calendar week (default), or the
           trading day closest to ``rebal_weekday`` (0=Mon .. 4=Fri) within
-          each week.  If that weekday is not a trading day, the nearest
-          **preceding** trading day in the same week is used.
+          each week.  Fallback priority when target weekday is not a trading
+          day: exact match > next trading day after target > last trading day
+          before target > last trading day of week.
         - monthly: last trading day of each calendar month
         - quarterly: last trading day of each calendar quarter
         """

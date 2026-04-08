@@ -305,6 +305,7 @@ class PaperTradingEngine:
                 self._calendar = TradingCalendar.from_market(self.spec.market)
             reb_dates = self._calendar.rebalance_dates(
                 self._calendar.start, self._calendar.end, self.spec.freq,
+                rebal_weekday=getattr(self.spec, 'rebal_weekday', None),
             )
             self._rebalance_dates_cache = set(reb_dates)
         return today in self._rebalance_dates_cache
