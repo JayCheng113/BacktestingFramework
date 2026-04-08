@@ -152,6 +152,14 @@ class EtfSectorSwitch(PortfolioStrategy):
     5. 选 Top N 持有
     """
 
+    # Default broad ETFs for auto-classification when caller doesn't specify.
+    # Strategy owns this list (not the route layer) so it stays in sync with QMT config.
+    DEFAULT_BROAD_ETFS = frozenset({
+        "510300.SH", "510500.SH", "159915.SZ", "510880.SH", "515100.SH", "159531.SZ",
+        "513100.SH", "513880.SH", "513260.SH", "513660.SH", "513600.SH",
+        "518880.SH", "159985.SZ", "162411.SZ",
+    })
+
     def __init__(self, top_n: int = 1, broad_symbols: list[str] | None = None,
                  sector_symbols: list[str] | None = None, **params):
         super().__init__(**params)

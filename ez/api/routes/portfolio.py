@@ -522,18 +522,19 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
         return ensemble, all_warnings
     elif name in PortfolioStrategy.get_registry():
         cls = PortfolioStrategy.get_registry()[name]
-        # Auto-inject broad/sector symbol classification for EtfSectorSwitch / EtfStockEnhance
-        if cls in (EtfSectorSwitch, EtfStockEnhance) and symbols:
-            _BROAD_ETFS = {
-                "510300.SH", "510500.SH", "159915.SZ", "510880.SH", "515100.SH", "159531.SZ",
-                "513100.SH", "513880.SH", "513260.SH", "513660.SH", "513600.SH",
-                "518880.SH", "159985.SZ", "162411.SZ",
-            }
-            broad = [s for s in symbols if s in _BROAD_ETFS]
-            sector = [s for s in symbols if s not in _BROAD_ETFS]
-            if broad and sector:
-                p.setdefault("broad_symbols", broad)
-                p.setdefault("sector_symbols", sector)
+        # Auto-inject broad/sector classification from strategy's own DEFAULT_BROAD_ETFS
+        # (codex fix #3: strategy owns the list, route just reads it)
+        if symbols and "broad_symbols" not in p and "sector_symbols" not in p:
+            default_broad = getattr(cls, "DEFAULT_BROAD_ETFS", None)
+            if default_broad is None and hasattr(cls, "_inner"):
+                # EtfStockEnhance delegates to EtfSectorSwitch
+                default_broad = getattr(EtfSectorSwitch, "DEFAULT_BROAD_ETFS", None)
+            if default_broad:
+                broad = [s for s in symbols if s in default_broad]
+                sector = [s for s in symbols if s not in default_broad]
+                if broad and sector:
+                    p["broad_symbols"] = broad
+                    p["sector_symbols"] = sector
         return cls(**p), []
     else:
         raise HTTPException(404, f"Strategy '{name}' not found")
