@@ -13,6 +13,32 @@ import { useToast } from './shared/Toast'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
+// ── 实盘策略快速加载 (static, hoisted outside component) ──
+// NOTE: EtfStockEnhance preset removed (codex review #1) — without individual
+// stocks in the symbol pool it degrades to pure ETF rotation, misleading users.
+const LIVE_PRESETS = [
+  {
+    id: 'macd_rotation',
+    name: 'ETF MACD轮动',
+    desc: '10只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权',
+    strategy: 'EtfMacdRotation',
+    params: { top_n: 2, rank_period: 20 } as Record<string, number>,
+    symbols: '510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ',
+    freq: 'weekly',
+    color: '#2563eb',
+  },
+  {
+    id: 'sector_switch',
+    name: 'ETF行业宽基切换',
+    desc: '22只ETF, 多因子加权 + 累积投票 + 宽基/行业切换, 选前1',
+    strategy: 'EtfSectorSwitch',
+    params: { top_n: 1 } as Record<string, number>,
+    symbols: '510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH',
+    freq: 'weekly',
+    color: '#059669',
+  },
+] as const
+
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
 // ── Types for PortfolioRunContent ────────────────────────────────
@@ -267,34 +293,6 @@ export default function PortfolioRunContent(props: Props) {
   // depend on useEffect ordering or React batching.
   const weightsToShow = result ? (fullWeights || result.weights_history) : undefined
 
-  // ── 实盘策略快速加载 ──
-  // NOTE: EtfStockEnhance preset removed (codex review #1) — without individual
-  // stocks in the symbol pool it degrades to pure ETF rotation, misleading users.
-  // The QMT "个股增强" requires A-share individual stock data which our daily-bar
-  // framework cannot fully replicate (盘中5分钟选股 + 涨跌停实时判断).
-  const LIVE_PRESETS = [
-    {
-      id: 'macd_rotation',
-      name: 'ETF MACD轮动',
-      desc: '10只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权 (日线近似)',
-      strategy: 'EtfMacdRotation',
-      params: { top_n: 2, rank_period: 20 },
-      symbols: '510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ',
-      freq: 'weekly',
-      color: '#2563eb',
-    },
-    {
-      id: 'sector_switch',
-      name: 'ETF行业宽基切换',
-      desc: '22只ETF, 多因子加权 + 累积投票 + 宽基/行业切换, 选前1 (日线近似)',
-      strategy: 'EtfSectorSwitch',
-      params: { top_n: 1 },
-      symbols: '510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH',
-      freq: 'weekly',
-      color: '#059669',
-    },
-  ]
-
   // Fix codex #2: deferred param hydration — wait for schema to update after
   // strategy switch instead of using fragile setTimeout(50ms).
   const [pendingPresetParams, setPendingPresetParams] = useState<Record<string, ParamValue> | null>(null)
@@ -310,12 +308,12 @@ export default function PortfolioRunContent(props: Props) {
     }
   }, [currentSchema, pendingPresetParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const applyPreset = (preset: typeof LIVE_PRESETS[0]) => {
-    setSelected(preset.strategy)
-    setSymbols(preset.symbols)
-    setFreq(preset.freq)
+  const applyPreset = (preset: typeof LIVE_PRESETS[number]) => {
+    setSelected(preset.strategy as string)
+    setSymbols(preset.symbols as string)
+    setFreq(preset.freq as string)
     setMarket('cn_stock')
-    setPendingPresetParams(preset.params as Record<string, ParamValue>)
+    setPendingPresetParams({ ...preset.params } as Record<string, ParamValue>)
     showToast('success', `已加载实盘预设: ${preset.name}`)
   }
 

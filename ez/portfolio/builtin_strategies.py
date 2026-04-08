@@ -302,6 +302,9 @@ class EtfStockEnhance(PortfolioStrategy):
     注: 简化版 — 个股选择使用动量排名
     """
 
+    # Inherit broad ETF classification from EtfSectorSwitch (reviewer I1 fix)
+    DEFAULT_BROAD_ETFS = EtfSectorSwitch.DEFAULT_BROAD_ETFS
+
     def __init__(self, top_n: int = 1, stock_ratio: float = 0.0,
                  broad_symbols: list[str] | None = None,
                  sector_symbols: list[str] | None = None, **params):

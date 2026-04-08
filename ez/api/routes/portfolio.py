@@ -526,9 +526,6 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
         # (codex fix #3: strategy owns the list, route just reads it)
         if symbols and "broad_symbols" not in p and "sector_symbols" not in p:
             default_broad = getattr(cls, "DEFAULT_BROAD_ETFS", None)
-            if default_broad is None and hasattr(cls, "_inner"):
-                # EtfStockEnhance delegates to EtfSectorSwitch
-                default_broad = getattr(EtfSectorSwitch, "DEFAULT_BROAD_ETFS", None)
             if default_broad:
                 broad = [s for s in symbols if s in default_broad]
                 sector = [s for s in symbols if s not in default_broad]
