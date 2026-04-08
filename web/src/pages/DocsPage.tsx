@@ -1441,14 +1441,14 @@ FMP_API_KEY=your_key_here`}</pre>
               <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>1000000</td><td style={tds}>初始资金</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.00008</td><td style={tds}>手续费率 (万0.8)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>min_commission</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>最低佣金 (免五)</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>滑点率 (0~0.1)</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.001</td><td style={tds}>滑点率 (万1 = 0.1%)</td></tr>
             </tbody>
           </table>
           <div style={h3s}>响应体</div>
           <pre style={code}>{`{
   "metrics": { "sharpe_ratio", "total_return", "max_drawdown", "win_rate", ... },
-  "equity_curve": [1000000, 100120, ...],
-  "benchmark_curve": [1000000, 100050, ...],
+  "equity_curve": [1000000, 1001200, ...],
+  "benchmark_curve": [1000000, 1000500, ...],
   "trades": [{ "entry_time", "exit_time", "entry_price", "exit_price", "pnl", ... }],
   "significance": { "monte_carlo_p_value", "sharpe_ci_lower", "sharpe_ci_upper", "is_significant" }
 }`}</pre>
@@ -1508,7 +1508,7 @@ FMP_API_KEY=your_key_here`}</pre>
               <tr><td style={{...tds, fontFamily:'monospace'}}>start_date / end_date</td><td style={tds}>string</td><td style={tds}>—</td><td style={tds}>日期范围 (YYYY-MM-DD)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>1000000</td><td style={tds}>初始资金</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.00008</td><td style={tds}>手续费率</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>滑点率 (0~0.1)</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.001</td><td style={tds}>滑点率 (万1 = 0.1%)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>run_wfo</td><td style={tds}>bool</td><td style={{...tds, fontFamily:'monospace'}}>true</td><td style={tds}>是否运行 Walk-Forward</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>wfo_n_splits</td><td style={tds}>int</td><td style={{...tds, fontFamily:'monospace'}}>5</td><td style={tds}>WFO 分割段数 (2~20)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>wfo_train_ratio</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.7</td><td style={tds}>WFO 训练比例 (0.5~0.9)</td></tr>

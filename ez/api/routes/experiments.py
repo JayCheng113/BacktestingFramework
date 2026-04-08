@@ -36,7 +36,7 @@ class ExperimentRequest(BaseModel):
     initial_capital: float = 1_000_000.0
     commission_rate: float = 0.00008
     min_commission: float = 0.0
-    slippage_rate: float = Field(default=0.0, ge=0, le=0.1)
+    slippage_rate: float = Field(default=0.001, ge=0, le=0.1)
     run_backtest: bool = True
     run_wfo: bool = True
     wfo_n_splits: int = Field(default=5, ge=2, le=20)

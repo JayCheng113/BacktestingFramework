@@ -115,13 +115,6 @@ def _close_chain_providers() -> None:
     _tushare_provider = None
 
 
-def invalidate_chain() -> None:
-    """Force chain rebuild on next get_chain() call (e.g., after token change)."""
-    global _chain, _tushare_provider
-    _chain = None
-    _tushare_provider = None
-
-
 def _rebuild_chain() -> None:
     """Force rebuild of the data provider chain (e.g., after Tushare token change)."""
     _close_chain_providers()

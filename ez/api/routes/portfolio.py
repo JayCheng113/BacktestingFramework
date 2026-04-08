@@ -290,7 +290,7 @@ class PortfolioCommonConfig(BaseModel):
         if market != "cn_stock" and "stamp_tax_rate" not in self.model_fields_set:
             self.stamp_tax_rate = 0.0
         return self
-    slippage_rate: float = Field(default=0.0, ge=0)
+    slippage_rate: float = Field(default=0.001, ge=0)
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)
     benchmark_symbol: str = ""

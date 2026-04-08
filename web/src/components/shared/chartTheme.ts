@@ -13,6 +13,8 @@ export const CHART = {
   up: '#ef4444',           // var(--color-up) — red = up (A-stock)
   down: '#22c55e',         // var(--color-down) — green = down
   warn: '#f59e0b',         // warning/amber
+  success: '#22c55e',      // semantic: good/pass/healthy (same hue as down)
+  error: '#ef4444',        // semantic: bad/fail/error (same hue as up)
   ma5: '#f59e0b',
   ma10: '#3b82f6',
   ma20: '#a855f7',

@@ -65,7 +65,7 @@ class BacktestRequest(BaseModel):
     buy_commission_rate: float | None = Field(default=None, ge=0, description="Buy-side commission rate; None = use commission_rate")
     sell_commission_rate: float | None = Field(default=None, ge=0, description="Sell-side commission rate; None = use commission_rate")
     min_commission: float | None = Field(default=None, ge=0, description="Min commission per trade; None = use config default")
-    slippage_rate: float = Field(default=0.0, ge=0, le=0.1, description="Slippage rate (e.g., 0.001 = 0.1%)")
+    slippage_rate: float = Field(default=0.001, ge=0, le=0.1, description="Slippage rate (万1 = 0.1%)")
     stamp_tax_rate: float = Field(default=0.0, ge=0, description="Sell-side stamp tax (A-share: 0.0005)")
     lot_size: int = Field(default=0, ge=0, description="Lot size (A-share: 100, 0=disabled)")
     limit_pct: float = Field(default=0.0, ge=0, le=0.3, description="Limit up/down pct (A-share: 0.10, 0=disabled)")

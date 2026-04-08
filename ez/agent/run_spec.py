@@ -30,7 +30,7 @@ class RunSpec:
     initial_capital: float = 1_000_000.0
     commission_rate: float = 0.00008
     min_commission: float = 0.0
-    slippage_rate: float = 0.0
+    slippage_rate: float = 0.001
 
     # Market rules (V2.6)
     use_market_rules: bool = False
