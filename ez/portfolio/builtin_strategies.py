@@ -142,28 +142,35 @@ class EtfMacdRotation(PortfolioStrategy):
             if len(valid) < self.rank_period + 2:
                 continue
 
-            # QMT: ratio = (close_ma[index_end] - close_ma[index_start]) / close_ma[index_start]
-            # QMT: ratio = ratio / close_ma[index_end]  ← second normalization
-            start_val = valid.iloc[-(self.rank_period + 1)]
-            end_val = valid.iloc[-1]  # data is already [date-lookback, date-1]
+            # Engine data is [date-lookback, date-1] (anti-lookahead), so iloc[-1] = QMT's close_ma[-2].
+            # QMT index_end=-2, index_start=-(day+1). In our indexing: [-1] = QMT[-2], [-2] = QMT[-3].
+            # QMT: ratio = (close_ma[-2] - close_ma[-(day+1)]) / close_ma[-(day+1)]
+            # QMT: ratio = ratio / close_ma[-2]
+            end_val = valid.iloc[-1]       # = QMT close_ma[-2]
+            start_val = valid.iloc[-(self.rank_period)]  # = QMT close_ma[-(day+1)]
             if start_val == 0 or end_val == 0:
                 continue
             ratio = (end_val - start_val) / start_val
-            ratio = ratio / end_val  # QMT second normalization
+            ratio = ratio / end_val
             returns[sym] = ratio
 
-            # Historical returns (sliding window)
+            # QMT hr: close_ma[-2-i] to close_ma[-21-i], both using QMT indexing.
+            # Our [-1] = QMT[-2], so: our[-1-i] = QMT[-2-i], our[-(rank+1)-i] = QMT[-(rank+1)-i-1]
+            # Wait — QMT uses fixed -21 (hardcoded), not -(day+1). Let's match exactly:
+            # QMT: r = (close_ma[-2-i] - close_ma[-21-i]) / close_ma[-21-i]
+            # Our: r = (valid[-1-i] - valid[-20-i]) / valid[-20-i]
             hr: list[float] = []
             for i in range(20):
-                idx_end = -2 - i
-                idx_start = -(self.rank_period + 1) - i
+                idx_end = -1 - i       # = QMT close_ma[-2-i]
+                idx_start = -20 - i    # = QMT close_ma[-21-i]
                 if abs(idx_start) >= len(valid):
                     break
                 v = valid.iloc[idx_start]
                 if v != 0:
                     hr.append(float((valid.iloc[idx_end] - v) / v))
             history_returns[sym] = hr
-            cur_close_prices[sym] = float(end_val)
+            cur_close_prices[sym] = float(end_val)  # = QMT close_ma[-2]
+            # QMT: cur_returns = close_ma[-2] - close_ma[-3]
             cur_returns_map[sym] = float(valid.iloc[-1] - valid.iloc[-2]) if len(valid) > 2 else 0
 
             macd_ok[sym] = _weekly_macd_signal(close)
@@ -182,12 +189,9 @@ class EtfMacdRotation(PortfolioStrategy):
             exp_rets[sym] = math.exp(min(((max(hr) - c)) * 1.02, 500))
             total_exp += exp_rets[sym]
 
-        # Market panic: >75% negative → cash
-        if lessthan_zero_n > len(returns) * 3 / 4:
-            return {}
-
-        # Apply exp weighting
-        if total_exp > 0:
+        # QMT: >75% negative → skip exp weighting (continue in per-symbol loop),
+        # but still sort and rank by raw ratio. NOT return {} (that would be full cash).
+        if lessthan_zero_n <= len(returns) * 3 / 4 and total_exp > 0:
             for sym in returns:
                 if sym in exp_rets:
                     exp_rets[sym] /= total_exp
