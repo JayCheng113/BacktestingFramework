@@ -36,7 +36,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
 
   return (
     <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-      <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置</div>
+      <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置 <span className="font-normal" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>(费率为小数: 0.0003 = 0.03%)</span></div>
       <div className="flex flex-wrap gap-3 items-end mb-2">
         {showInitialCash && (
           <div className="flex flex-col gap-1">
@@ -55,14 +55,14 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
           </div>
         )}
         <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>买入佣金</label>
+          <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>买入佣金率</label>
           <input type="number" value={value.buy_commission_rate} step={0.0001} min={0}
             onChange={e => set('buy_commission_rate', Number(e.target.value))}
             className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
         </div>
         {showSellCommission && (
           <div className="flex flex-col gap-1">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>卖出佣金</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>卖出佣金率</label>
             <input type="number" value={value.sell_commission_rate} step={0.0001} min={0}
               onChange={e => set('sell_commission_rate', Number(e.target.value))}
               className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
@@ -78,7 +78,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
       <div className="flex flex-wrap gap-3 items-end">
         {showStampTax && (
           <div className="flex flex-col gap-1">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>印花税(卖)</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>印花税率(卖)</label>
             <input type="number" value={value.stamp_tax_rate} step={0.0001} min={0}
               onChange={e => set('stamp_tax_rate', Number(e.target.value))}
               className="px-3 py-1.5 rounded text-xs w-24" style={inputStyle} />
