@@ -19,9 +19,9 @@ data_sources:
   max_retries: 2
 
 backtest:
-  default_initial_capital: 100000.0
-  default_commission_rate: 0.0003
-  default_min_commission: 5.0
+  default_initial_capital: 1000000.0
+  default_commission_rate: 0.00008   # 万0.8 — QMT量化标准
+  default_min_commission: 0.0        # 免五
   risk_free_rate: 0.03
 
 strategy:

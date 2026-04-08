@@ -23,7 +23,7 @@ class TestRunSpec:
     def test_basic_creation(self):
         spec = _make_spec()
         assert spec.strategy_name == "MACrossStrategy"
-        assert spec.initial_capital == 100_000.0
+        assert spec.initial_capital == 1_000_000.0
 
     def test_spec_id_deterministic(self):
         s1 = _make_spec()

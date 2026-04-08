@@ -27,7 +27,7 @@ class RunSpec:
 
     # Defaults
     period: str = "daily"
-    initial_capital: float = 100_000.0
+    initial_capital: float = 1_000_000.0
     commission_rate: float = 0.00008
     min_commission: float = 0.0
     slippage_rate: float = 0.0

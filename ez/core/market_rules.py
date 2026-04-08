@@ -6,7 +6,7 @@ Wraps an inner Matcher (SimpleMatcher/SlippageMatcher) and enforces:
 - Lot size: shares must be multiples of lot_size (A-share = 100)
 
 Usage:
-    inner = SimpleMatcher(commission_rate=0.0003)
+    inner = SimpleMatcher(commission_rate=0.00008)
     matcher = MarketRulesMatcher(inner, t_plus_1=True, lot_size=100)
     engine = VectorizedBacktestEngine(matcher=matcher)
 """

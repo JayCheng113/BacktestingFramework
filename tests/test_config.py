@@ -6,8 +6,8 @@ def test_load_default_config():
     config = load_config()
     assert config.server.port == 8000
     assert config.database.path == "data/ez_trading.db"
-    assert config.backtest.default_initial_capital == 100000.0
-    assert config.backtest.default_commission_rate == 0.0003
+    assert config.backtest.default_initial_capital == 1000000.0
+    assert config.backtest.default_commission_rate == 0.00008
 
 
 def test_config_data_sources():

@@ -43,7 +43,7 @@ class SearchConfig:
     end_date: date = field(default_factory=lambda: date(2024, 12, 31))
     run_wfo: bool = True
     wfo_n_splits: int = 3
-    initial_capital: float = 100_000.0
+    initial_capital: float = 1_000_000.0
     commission_rate: float = 0.00008
     min_commission: float = 0.0
     slippage_rate: float = 0.0
