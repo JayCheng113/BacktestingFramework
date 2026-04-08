@@ -395,6 +395,13 @@ export default function PortfolioPanel() {
   const handleFetchFundamental = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) return
+    // ETF codes (51xxxx/15xxxx/16xxxx) have no fundamental data (no PE/PB/financial statements)
+    const isEtf = (s: string) => /^(51|15|16)\d{4}\.\w+$/.test(s)
+    const allEtf = symbolList.every(isEtf)
+    if (allEtf) {
+      showToast('warning', '当前标的池全是 ETF，ETF 没有基本面数据（无PE/PB/财报）。基本面因子仅适用于个股。')
+      return
+    }
     // Check if any selected factor needs fundamental data
     const fundamentalFactorKeys = new Set<string>()
     factorCategories.forEach(cat => {
