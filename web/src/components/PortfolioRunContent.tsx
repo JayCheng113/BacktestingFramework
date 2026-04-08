@@ -418,10 +418,11 @@ export default function PortfolioRunContent(props: Props) {
 
   useEffect(() => {
     if (pendingPresetParams && Object.keys(currentSchema).length > 0) {
+      // Apply ALL preset params — both schema-visible and hidden (e.g., strict_weekday).
+      // Schema-visible params populate the form; hidden params pass through to the API
+      // via strategyParams even though no UI control renders for them.
       for (const [k, v] of Object.entries(pendingPresetParams)) {
-        if (k in currentSchema) {
-          updateParam(k, v)
-        }
+        updateParam(k, v)
       }
       setPendingPresetParams(null)
     }
