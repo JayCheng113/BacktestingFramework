@@ -580,11 +580,13 @@ class EtfRotateCombo(PortfolioStrategy):
             combined[sym] = combined.get(sym, 0) + w
 
         # QMT line 240: if trade_holding_list == total_position: pass (no trade)
-        # Compare merged weights with last known weights — if identical, skip.
-        last_combined = self.state.get("_last_combined")
-        if last_combined is not None and combined == last_combined:
-            return None  # same weights → no trade (matches QMT behavior)
-        self.state["_last_combined"] = dict(combined)
+        # QMT updates trade_holding_list = total_position EVERY Thu/Fri (line 272),
+        # whether or not a trade happened. So comparison is always vs the PREVIOUS
+        # Thu/Fri's merged weights, not vs "last time weights changed".
+        last_holding = self.state.get("_last_holding")
+        self.state["_last_holding"] = dict(combined)  # always update (like QMT line 272)
+        if last_holding is not None and combined == last_holding:
+            return None  # same as previous Thu/Fri → no trade
 
         return combined if combined else {}
 
