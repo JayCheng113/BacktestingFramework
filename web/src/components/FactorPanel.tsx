@@ -64,9 +64,9 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   const icStd = result && icN > 1 ? Math.sqrt(result.ic_series.reduce((s: number, v: number) => s + (v - icMean) ** 2, 0) / (icN - 1)) : 0
   const icTimeSeriesOption = result ? {
     backgroundColor: CHART.bg,
-    title: { text: '预测能力随时间变化', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
+    title: { text: '预测能力随时间变化 (IC)', subtext: '柱高代表每期预测准确度，正值=方向正确，蓝线=均值', textStyle: { color: CHART.text, fontSize: 12 }, subtextStyle: { color: CHART.textSecondary, fontSize: 10 }, left: 'center' },
     tooltip: { trigger: 'axis' },
-    grid: { left: 60, right: 20, top: 40, bottom: 30 },
+    grid: { left: 60, right: 20, top: 55, bottom: 30 },
     xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: CHART.textSecondary } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
@@ -80,9 +80,9 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
   // IC Decay curve
   const icDecayOption = result && result.ic_decay ? {
     backgroundColor: CHART.bg,
-    title: { text: '信号持续性 (天数越长衰减越多)', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
+    title: { text: '信号持续性 (IC衰减)', subtext: '曲线越平=信号越持久，快速降零=需频繁调仓', textStyle: { color: CHART.text, fontSize: 12 }, subtextStyle: { color: CHART.textSecondary, fontSize: 10 }, left: 'center' },
     tooltip: { trigger: 'axis' },
-    grid: { left: 60, right: 20, top: 40, bottom: 30 },
+    grid: { left: 60, right: 20, top: 55, bottom: 30 },
     xAxis: { type: 'category', data: Object.keys(result.ic_decay).map(k => `${k}d`), axisLabel: { color: CHART.textSecondary } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
@@ -103,9 +103,9 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     const labels = Array.from({ length: bins }, (_, i) => (min + step * (i + 0.5)).toFixed(3))
     return {
       backgroundColor: CHART.bg,
-      title: { text: '预测能力分布', textStyle: { color: CHART.text, fontSize: 12 }, left: 'center' },
+      title: { text: '预测能力分布 (IC直方图)', subtext: '集中在正区间=因子稳定有效，分散在零附近=噪音大', textStyle: { color: CHART.text, fontSize: 12 }, subtextStyle: { color: CHART.textSecondary, fontSize: 10 }, left: 'center' },
       tooltip: { trigger: 'axis' },
-      grid: { left: 60, right: 20, top: 40, bottom: 30 },
+      grid: { left: 60, right: 20, top: 55, bottom: 30 },
       xAxis: { type: 'category', data: labels, axisLabel: { color: CHART.textSecondary, rotate: 45, fontSize: 10 } },
       yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
       series: [{ type: 'bar', data: counts, itemStyle: { color: CHART.accent + '80' } }],
@@ -179,7 +179,10 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
             })()}
           </div>
           {/* Charts: IC series + IC decay + IC distribution */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="text-xs mb-2 px-1" style={{ color: 'var(--text-secondary)' }}>
+            IC (Information Coefficient) = 因子值与未来收益的相关性。|IC| 越大 = 预测越准，正/负表示方向。
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {icTimeSeriesOption && <ReactECharts option={icTimeSeriesOption} style={{ height: 250 }} />}
             {icDecayOption && <ReactECharts option={icDecayOption} style={{ height: 250 }} />}
           </div>
