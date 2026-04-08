@@ -131,11 +131,21 @@ export default function PaperTradingPage() {
     setActionLoading(true)
     try {
       await action()
+      showToast('success', '操作成功')
       await refreshList()
       if (selectedId) await refreshDetail(selectedId)
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      showToast('error', err?.response?.data?.detail || err?.message || '操作失败')
+      const err = e as { response?: { data?: { detail?: unknown } }; message?: string }
+      const detail = err?.response?.data?.detail
+      // Backend returns object {message, verdict} for gate failures, string for others
+      let msg: string
+      if (typeof detail === 'object' && detail !== null) {
+        const d = detail as { message?: string; verdict?: { summary?: string } }
+        msg = d.message || d.verdict?.summary || '操作失败'
+      } else {
+        msg = (typeof detail === 'string' ? detail : err?.message) || '操作失败'
+      }
+      showToast('error', msg)
     } finally {
       setActionLoading(false)
     }
