@@ -15,7 +15,7 @@ from ez.portfolio.calendar import TradingCalendar
 from ez.portfolio.cross_factor import CrossSectionalFactor, MomentumRank, VolumeRank, ReverseVolatilityRank
 from ez.portfolio.engine import CostModel, run_portfolio_backtest
 from ez.portfolio.portfolio_strategy import PortfolioStrategy, TopNRotation, MultiFactorRotation
-from ez.portfolio.builtin_strategies import EtfMacdRotation, EtfSectorSwitch, EtfStockEnhance  # noqa: F401
+from ez.portfolio.builtin_strategies import EtfMacdRotation, EtfSectorSwitch, EtfStockEnhance, EtfRotateCombo  # noqa: F401
 from ez.portfolio.universe import Universe
 
 router = APIRouter()
@@ -538,6 +538,11 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
                 if broad and sector:
                     p["broad_symbols"] = broad
                     p["sector_symbols"] = sector
+        # Auto-inject rotate_symbols for EtfRotateCombo
+        if symbols and "rotate_symbols" not in p:
+            default_rotate = getattr(cls, "DEFAULT_ROTATE_SYMBOLS", None)
+            if default_rotate:
+                p["rotate_symbols"] = [s for s in symbols if s in default_rotate]
         return cls(**p), []
     else:
         raise HTTPException(404, f"Strategy '{name}' not found")

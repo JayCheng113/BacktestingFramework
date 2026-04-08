@@ -292,6 +292,75 @@ class EtfSectorSwitch(PortfolioStrategy):
         return {sym: w for sym, _ in top}
 
 
+class EtfRotateCombo(PortfolioStrategy):
+    """轮动 + 加权切换组合策略。
+
+    逻辑 (移植自 QMT "轮动加多组合回测V1.2"):
+    1. 轮动部分: EtfMacdRotation 选 top 2, 占 rotate_rate 仓位
+    2. 加权部分: EtfSectorSwitch 选 top 1, 占 1 - rotate_rate 仓位
+    3. 两部分权重合并 (同一标的可能出现在两个子策略中, 权重叠加)
+    4. 轮动池和加权池可以不同 (通过 rotate_symbols 区分)
+    """
+
+    DEFAULT_BROAD_ETFS = EtfSectorSwitch.DEFAULT_BROAD_ETFS
+
+    # Default rotate pool (QMT etf_list_rotate)
+    DEFAULT_ROTATE_SYMBOLS = frozenset({
+        "510500.SH", "159915.SZ", "159531.SZ", "515100.SH",
+        "513100.SH", "513880.SH", "513260.SH", "513660.SH",
+        "518880.SH", "159985.SZ",
+    })
+
+    def __init__(self, rotate_rate: float = 0.3, rotate_top_n: int = 2,
+                 com_top_n: int = 1, rotate_symbols: list[str] | None = None,
+                 broad_symbols: list[str] | None = None,
+                 sector_symbols: list[str] | None = None, **params):
+        super().__init__(**params)
+        self.rotate_rate = max(0, min(1, rotate_rate))
+        self._rotate_syms = set(rotate_symbols) if rotate_symbols else set(self.DEFAULT_ROTATE_SYMBOLS)
+        # Inner strategies share state via self.state
+        self._rotator = EtfMacdRotation(top_n=rotate_top_n)
+        self._switcher = EtfSectorSwitch(top_n=com_top_n, broad_symbols=broad_symbols, sector_symbols=sector_symbols)
+
+    @property
+    def lookback_days(self) -> int:
+        return 300
+
+    @classmethod
+    def get_description(cls) -> str:
+        return "轮动(30%) + 加权切换(70%) 组合策略"
+
+    @classmethod
+    def get_parameters_schema(cls) -> dict:
+        return {
+            "rotate_rate": {"type": "float", "default": 0.3, "min": 0, "max": 1, "label": "轮动仓位占比"},
+            "rotate_top_n": {"type": "int", "default": 2, "min": 1, "max": 10, "label": "轮动持仓数"},
+            "com_top_n": {"type": "int", "default": 1, "min": 1, "max": 10, "label": "加权持仓数"},
+        }
+
+    def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        # Share state with inner strategies
+        self._rotator.state = self.state.setdefault("_rotate", {})
+        self._switcher.state = self.state.setdefault("_switch", {})
+
+        # Rotation: only operates on rotate pool symbols
+        rotate_data = {s: df for s, df in universe_data.items() if s in self._rotate_syms}
+        rotate_w = self._rotator.generate_weights(rotate_data, date, prev_weights, prev_returns) if rotate_data else {}
+
+        # Weighted switch: operates on full pool
+        switch_w = self._switcher.generate_weights(universe_data, date, prev_weights, prev_returns)
+
+        # Combine: rotate × rotate_rate + switch × (1 - rotate_rate)
+        combined: dict[str, float] = {}
+        com_rate = 1.0 - self.rotate_rate
+        for sym, w in rotate_w.items():
+            combined[sym] = combined.get(sym, 0) + w * self.rotate_rate
+        for sym, w in switch_w.items():
+            combined[sym] = combined.get(sym, 0) + w * com_rate
+
+        return combined
+
+
 class EtfStockEnhance(PortfolioStrategy):
     """ETF 轮动 + 个股增强 (复合策略)。
 
