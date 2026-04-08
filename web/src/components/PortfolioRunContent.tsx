@@ -549,11 +549,16 @@ export default function PortfolioRunContent(props: Props) {
             </button>
           )}
           <input type="number" value={wfSplits} min={2} max={20} onChange={e => setWfSplits(Number(e.target.value) || 5)}
-            className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle} title="折数" />
+            className="w-14 px-2 py-1.5 rounded text-xs" style={inputStyle}
+            title="将数据分成N段，每段轮流做测试集。折数越多验证越充分，但每段越短" />
           <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>折</span>
           <input type="number" value={wfTrainRatio} min={0.1} max={0.9} step={0.1} onChange={e => setWfTrainRatio(Number(e.target.value) || 0.7)}
-            className="w-16 px-2 py-1.5 rounded text-xs" style={inputStyle} title="训练比例" />
+            className="w-16 px-2 py-1.5 rounded text-xs" style={inputStyle}
+            title="每段中用于训练的比例。0.7=70%训练+30%测试，越高训练数据越多但测试段越短" />
           <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>训练</span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+            ({wfSplits}段 × {Math.round(wfTrainRatio * 100)}%训练/{Math.round((1 - wfTrainRatio) * 100)}%测试)
+          </span>
         </div>
       </div>
 
