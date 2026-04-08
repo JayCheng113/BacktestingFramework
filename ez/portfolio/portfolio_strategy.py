@@ -126,8 +126,8 @@ class PortfolioStrategy(ABC):
         date: datetime,
         prev_weights: dict[str, float],
         prev_returns: dict[str, float],
-    ) -> dict[str, float]:
-        """Return target weights {symbol: weight}.
+    ) -> dict[str, float] | None:
+        """Return target weights {symbol: weight}, or None to skip this rebalance.
 
         - universe_data: already sliced to [date-lookback, date-1] by engine.
         - self.state: freely maintained across rebalance calls.
