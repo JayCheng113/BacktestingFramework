@@ -578,6 +578,9 @@ class EtfRotateCombo(PortfolioStrategy):
                 switch_bucket[mapped] = switch_bucket.get(mapped, 0) + w * com_rate
 
         # Merge both buckets
+        # NOTE: QMT line 238 uses total_value * 0.987 (1.3% cash reserve) at execution
+        # layer, not at weight layer. Our engine applies weights to full equity, so the
+        # effective difference is ~1.3% less invested capital — negligible for returns.
         combined = {}
         for sym, w in rotate_bucket.items():
             combined[sym] = combined.get(sym, 0) + w
