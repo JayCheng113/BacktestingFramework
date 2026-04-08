@@ -522,6 +522,18 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
         return ensemble, all_warnings
     elif name in PortfolioStrategy.get_registry():
         cls = PortfolioStrategy.get_registry()[name]
+        # Auto-inject broad/sector symbol classification for EtfSectorSwitch / EtfStockEnhance
+        if cls in (EtfSectorSwitch, EtfStockEnhance) and symbols:
+            _BROAD_ETFS = {
+                "510300.SH", "510500.SH", "159915.SZ", "510880.SH", "515100.SH", "159531.SZ",
+                "513100.SH", "513880.SH", "513260.SH", "513660.SH", "513600.SH",
+                "518880.SH", "159985.SZ", "162411.SZ",
+            }
+            broad = [s for s in symbols if s in _BROAD_ETFS]
+            sector = [s for s in symbols if s not in _BROAD_ETFS]
+            if broad and sector:
+                p.setdefault("broad_symbols", broad)
+                p.setdefault("sector_symbols", sector)
         return cls(**p), []
     else:
         raise HTTPException(404, f"Strategy '{name}' not found")

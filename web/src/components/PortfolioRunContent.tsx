@@ -267,8 +267,73 @@ export default function PortfolioRunContent(props: Props) {
   // depend on useEffect ordering or React batching.
   const weightsToShow = result ? (fullWeights || result.weights_history) : undefined
 
+  // ── 实盘策略快速加载 ──
+  const LIVE_PRESETS = [
+    {
+      id: 'macd_rotation',
+      name: 'ETF MACD轮动',
+      desc: '10只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权',
+      strategy: 'EtfMacdRotation',
+      params: { top_n: 2, rank_period: 20 },
+      symbols: '510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ',
+      freq: 'weekly',
+      color: '#2563eb',
+    },
+    {
+      id: 'sector_switch',
+      name: 'ETF行业宽基切换',
+      desc: '22只ETF, 多因子加权 + 累积投票 + 宽基/行业切换, 选前1',
+      strategy: 'EtfSectorSwitch',
+      params: { top_n: 1 },
+      symbols: '510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH',
+      freq: 'weekly',
+      color: '#059669',
+    },
+    {
+      id: 'stock_enhance',
+      name: 'ETF轮动+个股增强',
+      desc: '22只ETF基础 + 个股动量增强, 涨跌停过滤由MarketRules处理',
+      strategy: 'EtfStockEnhance',
+      params: { top_n: 1, stock_ratio: 0.0 },
+      symbols: '510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH',
+      freq: 'weekly',
+      color: '#d97706',
+    },
+  ]
+
+  const applyPreset = (preset: typeof LIVE_PRESETS[0]) => {
+    setSelected(preset.strategy)
+    setSymbols(preset.symbols)
+    setFreq(preset.freq)
+    setMarket('cn_stock')
+    // Apply params after React processes strategy change
+    setTimeout(() => {
+      for (const [k, v] of Object.entries(preset.params)) {
+        updateParam(k, v as ParamValue)
+      }
+    }, 50)
+    showToast('success', `已加载实盘预设: ${preset.name}`)
+  }
+
   return (
     <>
+      {/* 实盘策略快速加载 */}
+      <div className="mb-3 p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>实盘策略预设</span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>一键加载 QMT 实盘配置</span>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {LIVE_PRESETS.map(p => (
+            <button key={p.id} onClick={() => applyPreset(p)}
+              className="text-xs px-3 py-1.5 rounded flex flex-col items-start"
+              style={{ border: `1px solid ${p.color}40`, backgroundColor: `${p.color}10`, minWidth: 160 }}>
+              <span style={{ color: p.color, fontWeight: 600 }}>{p.name}</span>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '10px', marginTop: 2 }}>{p.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="p-4 rounded mb-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
         <h3 className="text-sm font-medium mb-3">组合回测配置</h3>
         <div className="flex flex-wrap gap-3 items-end mb-3">
