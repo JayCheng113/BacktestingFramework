@@ -49,8 +49,11 @@ def _remove_outliers_and_refit(prices) -> tuple[float, float, np.ndarray, float]
     if s < 4:
         return 0.0, 0.0, np.array([]), 1e-8
 
-    # First weighted fit
+    # First weighted fit — QMT sets last 3 weights equal (emphasize recent bars)
     weights = np.linspace(1, s, s)
+    if s >= 3:
+        weights[-2] = weights[-1]
+        weights[-3] = weights[-1]
     x = np.arange(s)
     A = np.vstack([x, np.ones(s)]).T
     W = np.diag(weights)
@@ -281,31 +284,44 @@ class EtfSectorSwitch(PortfolioStrategy):
             if len(valid) < self.rank_period + 5:
                 continue
 
+            # Engine data = [date-lookback, date-1] (no today). valid = dropna(close_ma).
+            # valid[-1] = QMT close_ma[-2] (yesterday)
+            # valid[-k] = QMT close_ma[-(k+1)]
             # QMT: ratio = (close_ma[-2] - close_ma[-day-1]) / close_ma[-day-1]
+            # Ours: ratio = (valid[-1] - valid[-day]) / valid[-day]
             day = self.rank_period
-            if valid.iloc[-(day + 1)] == 0:
+            if abs(-day) >= len(valid) or valid.iloc[-day] == 0:
                 continue
-            ratio = (valid.iloc[-2] - valid.iloc[-(day + 1)]) / valid.iloc[-(day + 1)]
+            ratio = (valid.iloc[-1] - valid.iloc[-day]) / valid.iloc[-day]
 
-            # QMT: ratio5 for broad/sector tracking
-            ratio5 = (valid.iloc[-2] - valid.iloc[-5]) / valid.iloc[-5] if valid.iloc[-5] != 0 else 0
+            # QMT ratio5 = (close_ma[-2] - close_ma[-5]) / close_ma[-5]
+            # Ours: (valid[-1] - valid[-4]) / valid[-4]
+            ratio5 = (valid.iloc[-1] - valid.iloc[-4]) / valid.iloc[-4] if len(valid) > 4 and valid.iloc[-4] != 0 else 0
             if sym in self._broad:
                 etf_ratio_top1[sym] = ratio5
             elif sym in self._sector:
                 etf_ratio_top2[sym] = ratio5
 
-            # QMT: multi-window slopes
-            ratio2 = (valid.iloc[-2] - valid.iloc[-7]) / valid.iloc[-7] if valid.iloc[-7] != 0 else 0
-            ratio3 = (valid.iloc[-2] - valid.iloc[-4]) / valid.iloc[-4] if valid.iloc[-4] != 0 else 0
-            slope1 = (valid.iloc[-2] - valid.iloc[-5]) / valid.iloc[-5] if valid.iloc[-5] != 0 else 0
-            slope3 = (valid.iloc[-4] - valid.iloc[-7]) / valid.iloc[-7] if valid.iloc[-7] != 0 else 0
-            slope2 = (valid.iloc[-2] - valid.iloc[-(day - 3)]) / valid.iloc[-(day - 3)] if valid.iloc[-(day - 3)] != 0 else 0
+            # QMT multi-window slopes (all using close_ma[-2] as "now")
+            # ratio2 = (close_ma[-2]-close_ma[-7])/close_ma[-7] → (valid[-1]-valid[-6])/valid[-6]
+            # ratio3 = (close_ma[-2]-close_ma[-4])/close_ma[-4] → (valid[-1]-valid[-3])/valid[-3]
+            # slope1 = (close_ma[-2]-close_ma[-5])/close_ma[-5] → (valid[-1]-valid[-4])/valid[-4]
+            # slope3 = (close_ma[-4]-close_ma[-7])/close_ma[-7] → (valid[-3]-valid[-6])/valid[-6]
+            # slope2 = (close_ma[-2]-close_ma[-day+3])/close_ma[-day+3] → (valid[-1]-valid[-(day-4)])/valid[-(day-4)]
+            ratio2 = (valid.iloc[-1] - valid.iloc[-6]) / valid.iloc[-6] if len(valid) > 6 and valid.iloc[-6] != 0 else 0
+            ratio3 = (valid.iloc[-1] - valid.iloc[-3]) / valid.iloc[-3] if len(valid) > 3 and valid.iloc[-3] != 0 else 0
+            slope1 = (valid.iloc[-1] - valid.iloc[-4]) / valid.iloc[-4] if len(valid) > 4 and valid.iloc[-4] != 0 else 0
+            slope3 = (valid.iloc[-3] - valid.iloc[-6]) / valid.iloc[-6] if len(valid) > 6 and valid.iloc[-6] != 0 else 0
+            slope2 = (valid.iloc[-1] - valid.iloc[-(day - 4)]) / valid.iloc[-(day - 4)] if len(valid) > (day - 4) and valid.iloc[-(day - 4)] != 0 else 0
 
-            # QMT: remove_outliers_and_refit on raw close[-12:-2]
+            # QMT: remove_outliers_and_refit(closes['close'][-12:-2])
+            # QMT [-12:-2] = 10 bars ending at yesterday. Our data has no today,
+            # so [-11:-1] gives the same 10 bars.
+            # QMT: mse = mse / closes['close'][-2]. Our: / raw_close.iloc[-1] (yesterday)
             raw_vals = raw_close.values
-            if len(raw_vals) >= 12:
-                slp, _incp, _outliers, mse = _remove_outliers_and_refit(raw_vals[-12:-2])
-                mse = mse / raw_vals[-2] if raw_vals[-2] != 0 else 1e-8
+            if len(raw_vals) >= 11:
+                slp, _incp, _outliers, mse = _remove_outliers_and_refit(raw_vals[-11:-1])
+                mse = mse / raw_vals[-1] if raw_vals[-1] != 0 else 1e-8
             else:
                 mse = 1e-8
 
@@ -343,9 +359,9 @@ class EtfSectorSwitch(PortfolioStrategy):
                 if n >= N:
                     break
 
-            # QMT: penalty from previous period returns
-            # QMT: last_peri_ra = (closes['close'][-2] - closes['close'][-2-5]) / closes['close'][-2-5]
-            last_peri_ra = (raw_close.iloc[-2] - raw_close.iloc[-7]) / raw_close.iloc[-7] if len(raw_close) > 7 and raw_close.iloc[-7] != 0 else None
+            # QMT: last_peri_ra = (closes['close'][-2] - closes['close'][-7]) / closes['close'][-7]
+            # Our data: [-1]=QMT[-2]=yesterday, [-6]=QMT[-7]
+            last_peri_ra = (raw_close.iloc[-1] - raw_close.iloc[-6]) / raw_close.iloc[-6] if len(raw_close) > 6 and raw_close.iloc[-6] != 0 else None
             # QMT: ContextInfo.pre_profit[etf] = last_peri_ra (for >6% check later)
             pre_profit = self.state.setdefault("pre_profit", {})
             if last_peri_ra is not None:
@@ -499,8 +515,9 @@ class EtfRotateCombo(PortfolioStrategy):
         # 159531.SZ is in QMT etf_list but not in etf_list1 or etf_list2.
         # QMT's else branch (line 369-370) classifies it as sector (etf_ratio_top2).
         _sector = sector_symbols if sector_symbols else list(self.DEFAULT_SECTOR_ETFS | {"159531.SZ"})
-        self._rotator = EtfMacdRotation(top_n=rotate_top_n)
-        self._switcher = EtfSectorSwitch(top_n=com_top_n, broad_symbols=_broad, sector_symbols=_sector)
+        # QMT V1.2: ContextInfo.day=21 for BOTH rotate and com signals
+        self._rotator = EtfMacdRotation(top_n=rotate_top_n, rank_period=21)
+        self._switcher = EtfSectorSwitch(top_n=com_top_n, rank_period=21, broad_symbols=_broad, sector_symbols=_sector)
 
     @property
     def lookback_days(self) -> int:
