@@ -395,16 +395,30 @@ export default function PortfolioPanel() {
   const handleFetchFundamental = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) return
+    // Check if any selected factor needs fundamental data
+    const fundamentalFactorKeys = new Set<string>()
+    factorCategories.forEach(cat => {
+      if (Array.isArray(cat.factors)) cat.factors.forEach((f: string | FactorInfo) => {
+        if (typeof f === 'object' && f.needs_fina) fundamentalFactorKeys.add(f.key || f.class_name || '')
+      })
+    })
+    const hasFundamentalSelected = evalFactors.some(f => {
+      // Check if factor belongs to Value/Quality/Growth/Size/Liquidity/Leverage categories
+      return fundamentalFactorKeys.has(f) || factorCategories.some(cat =>
+        ['value', 'quality', 'growth', 'size', 'liquidity', 'leverage'].includes(cat.key) &&
+        (Array.isArray(cat.factors) ? cat.factors : []).some((cf: string | FactorInfo) =>
+          (typeof cf === 'string' ? cf : (cf.key || cf.class_name || '')) === f
+        )
+      )
+    })
+    if (!hasFundamentalSelected) {
+      showToast('warning', '当前选中的因子都是技术因子，不需要获取基本面数据。基本面因子包括: 价值(EP/BP)、质量(ROE)、成长(营收增长)等')
+      return
+    }
     const myToken = ++fundaTokenRef.current
     setFetchingFunda(true); setFundaStatus('获取中...')
     try {
-      const finaFactorKeys = new Set<string>()
-      factorCategories.forEach(cat => {
-        if (Array.isArray(cat.factors)) cat.factors.forEach((f: string | FactorInfo) => {
-          if (typeof f === 'object' && f.needs_fina) finaFactorKeys.add(f.key || f.class_name || '')
-        })
-      })
-      const hasFina = evalFactors.some(f => finaFactorKeys.has(f))
+      const hasFina = evalFactors.some(f => fundamentalFactorKeys.has(f))
       const res = await fetchFundamentalData({ symbols: symbolList, market, start_date: startDate, end_date: endDate, include_fina: hasFina })
       if (fundaTokenRef.current !== myToken) return
       setFundaStatus(res.data.message || '完成')

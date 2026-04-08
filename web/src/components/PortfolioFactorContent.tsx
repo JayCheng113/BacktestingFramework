@@ -9,6 +9,24 @@ const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid va
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
+// IC/ICIR color rating (aligned with FactorPanel thresholds)
+const rateIc = (v: number | null) => {
+  if (v == null) return null
+  const a = Math.abs(v)
+  if (a >= 0.05) return { color: CHART.success, hint: '强' }
+  if (a >= 0.03) return { color: CHART.accent, hint: '中' }
+  if (a >= 0.01) return { color: CHART.warn, hint: '弱' }
+  return { color: CHART.error, hint: '无效' }
+}
+const rateIcir = (v: number | null) => {
+  if (v == null) return null
+  const a = Math.abs(v)
+  if (a >= 0.5) return { color: CHART.success, hint: '很稳定' }
+  if (a >= 0.3) return { color: CHART.accent, hint: '较稳定' }
+  if (a >= 0.1) return { color: CHART.warn, hint: '一般' }
+  return { color: CHART.error, hint: '不稳定' }
+}
+
 // ── Factor evaluation types ──────────────────────────────────────
 
 interface FactorInfo {
@@ -229,17 +247,35 @@ export default function PortfolioFactorContent(props: Props) {
                   <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                 ))}
               </tr></thead>
-              <tbody>{evalResult.results.map((r: EvalFactorResult) => (
-                <tr key={r.factor_name} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td className="px-3 py-1.5">{FACTOR_LABELS[r.factor_name] || r.factor_name}</td>
-                  <td className="px-3 py-1.5" style={{ color: (r.mean_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_ic)}</td>
-                  <td className="px-3 py-1.5" style={{ color: (r.mean_rank_ic ?? 0) > 0 ? 'var(--color-up)' : 'var(--color-down)' }}>{fmt(r.mean_rank_ic)}</td>
-                  <td className="px-3 py-1.5">{fmt(r.icir)}</td>
-                  <td className="px-3 py-1.5">{fmt(r.rank_icir)}</td>
-                  <td className="px-3 py-1.5">{r.n_eval_dates}</td>
-                  <td className="px-3 py-1.5">{r.avg_stocks_per_date?.toFixed(0) ?? '-'}</td>
-                </tr>
-              ))}</tbody>
+              <tbody>{evalResult.results.map((r: EvalFactorResult) => {
+                const icR = rateIc(r.mean_ic)
+                const rkIcR = rateIc(r.mean_rank_ic)
+                const icirR = rateIcir(r.icir)
+                const rkIcirR = rateIcir(r.rank_icir)
+                return (
+                  <tr key={r.factor_name} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td className="px-3 py-1.5">{FACTOR_LABELS[r.factor_name] || r.factor_name}</td>
+                    <td className="px-3 py-1.5" title="|IC|≥0.05强, ≥0.03中, ≥0.01弱">
+                      <span style={{ color: icR?.color }}>{fmt(r.mean_ic)}</span>
+                      {icR && <span className="ml-1" style={{ color: icR.color, fontSize: '10px', opacity: 0.8 }}>{icR.hint}</span>}
+                    </td>
+                    <td className="px-3 py-1.5" title="|RankIC|≥0.05强, ≥0.03中, ≥0.01弱">
+                      <span style={{ color: rkIcR?.color }}>{fmt(r.mean_rank_ic)}</span>
+                      {rkIcR && <span className="ml-1" style={{ color: rkIcR.color, fontSize: '10px', opacity: 0.8 }}>{rkIcR.hint}</span>}
+                    </td>
+                    <td className="px-3 py-1.5" title="|ICIR|≥0.5很稳定, ≥0.3较稳定, ≥0.1一般">
+                      <span style={{ color: icirR?.color }}>{fmt(r.icir)}</span>
+                      {icirR && <span className="ml-1" style={{ color: icirR.color, fontSize: '10px', opacity: 0.8 }}>{icirR.hint}</span>}
+                    </td>
+                    <td className="px-3 py-1.5" title="|RankICIR|≥0.5很稳定, ≥0.3较稳定, ≥0.1一般">
+                      <span style={{ color: rkIcirR?.color }}>{fmt(r.rank_icir)}</span>
+                      {rkIcirR && <span className="ml-1" style={{ color: rkIcirR.color, fontSize: '10px', opacity: 0.8 }}>{rkIcirR.hint}</span>}
+                    </td>
+                    <td className="px-3 py-1.5">{r.n_eval_dates}</td>
+                    <td className="px-3 py-1.5">{r.avg_stocks_per_date?.toFixed(0) ?? '-'}</td>
+                  </tr>
+                )
+              })}</tbody>
             </table>
           </div>
 
