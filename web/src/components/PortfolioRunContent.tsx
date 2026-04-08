@@ -372,6 +372,10 @@ export default function PortfolioRunContent(props: Props) {
   // Fix codex #2: deferred param hydration — wait for schema to update after
   // strategy switch instead of using fragile setTimeout(50ms).
   const [pendingPresetParams, setPendingPresetParams] = useState<Record<string, ParamValue> | null>(null)
+  // Search result sorting — reset when new results arrive
+  const [searchSortKey, setSearchSortKey] = useState<string>('')
+  const [searchSortDir, setSearchSortDir] = useState<'asc' | 'desc'>('desc')
+  useEffect(() => { setSearchSortKey(''); setSearchSortDir('desc') }, [searchResults])
 
   useEffect(() => {
     if (pendingPresetParams && Object.keys(currentSchema).length > 0) {
@@ -773,34 +777,61 @@ export default function PortfolioRunContent(props: Props) {
               </div>
             </details>
           )}
-          {searchResults.length > 0 ? (
-            <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
-              <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
-                <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
-                  {['#', '参数', '夏普比率', '总收益率', '年化收益率', '最大回撤', '交易次数'].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>{searchResults.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i === 0 ? 'rgba(34,197,94,0.08)' : i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
-                    <td className="px-3 py-1.5 font-medium">{r.rank}</td>
-                    <td className="px-3 py-1.5">{Object.entries(r.params || {}).map(([k, v]) => {
-                      const label = currentSchema[k]?.label || k
-                      const val = typeof v === 'string' ? (FACTOR_LABELS[v] || v) : String(v)
-                      return `${label}=${val}`
-                    }).join(', ')}</td>
-                    <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? CHART.success : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
-                    <td className="px-3 py-1.5">{r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}</td>
-                    <td className="px-3 py-1.5">{r.annualized_return != null ? (r.annualized_return * 100).toFixed(1) + '%' : '-'}</td>
-                    <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{r.max_drawdown != null ? (r.max_drawdown * 100).toFixed(1) + '%' : '-'}</td>
-                    <td className="px-3 py-1.5">{r.trade_count ?? '-'}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          ) : searchMeta && !searchLoading && (
+          {searchResults.length > 0 ? (() => {
+            const sortableColumns: { key: string; label: string; field: keyof SearchResultRow }[] = [
+              { key: 'sharpe', label: '夏普比率', field: 'sharpe' },
+              { key: 'total_return', label: '总收益率', field: 'total_return' },
+              { key: 'annualized_return', label: '年化收益率', field: 'annualized_return' },
+              { key: 'max_drawdown', label: '最大回撤', field: 'max_drawdown' },
+              { key: 'trade_count', label: '交易次数', field: 'trade_count' },
+            ]
+            const sorted = [...searchResults].sort((a, b) => {
+              if (!searchSortKey) return 0
+              const av = (a[searchSortKey as keyof SearchResultRow] as number) ?? -Infinity
+              const bv = (b[searchSortKey as keyof SearchResultRow] as number) ?? -Infinity
+              return searchSortDir === 'asc' ? av - bv : bv - av
+            })
+            return (
+              <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+                <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
+                    <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>#</th>
+                    <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>参数</th>
+                    {sortableColumns.map(col => (
+                      <th key={col.key} className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none' }}
+                        onClick={() => {
+                          if (searchSortKey === col.field) {
+                            setSearchSortDir(prev => prev === 'desc' ? 'asc' : 'desc')
+                          } else {
+                            setSearchSortKey(col.field as string)
+                            setSearchSortDir(col.field === 'max_drawdown' ? 'asc' : 'desc')
+                          }
+                        }}>
+                        {col.label} {searchSortKey === col.field ? (searchSortDir === 'desc' ? '▼' : '▲') : '↕'}
+                      </th>
+                    ))}
+                  </tr></thead>
+                  <tbody>{sorted.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)', backgroundColor: i === 0 ? 'rgba(34,197,94,0.08)' : i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }}>
+                      <td className="px-3 py-1.5 font-medium">{i + 1}</td>
+                      <td className="px-3 py-1.5">{Object.entries(r.params || {}).map(([k, v]) => {
+                        const label = currentSchema[k]?.label || k
+                        const val = typeof v === 'string' ? (FACTOR_LABELS[v] || v) : String(v)
+                        return `${label}=${val}`
+                      }).join(', ')}</td>
+                      <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? CHART.success : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
+                      <td className="px-3 py-1.5">{r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}</td>
+                      <td className="px-3 py-1.5">{r.annualized_return != null ? (r.annualized_return * 100).toFixed(1) + '%' : '-'}</td>
+                      <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{r.max_drawdown != null ? (r.max_drawdown * 100).toFixed(1) + '%' : '-'}</td>
+                      <td className="px-3 py-1.5">{r.trade_count ?? '-'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )
+          })() : searchMeta && !searchLoading ? (
             <div className="mt-3 py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>搜索结果为空</div>
-          )}
+          ) : null}
         </div>
       )}
 
