@@ -14,9 +14,12 @@ interface ChatMsg {
 }
 
 const _TOOL_LABELS: Record<string, string> = {
-  create_strategy: '创建策略', update_strategy: '更新策略', create_ml_alpha: '创建ML Alpha',
+  create_strategy: '创建策略', update_strategy: '更新策略',
+  create_portfolio_strategy: '创建组合策略', create_cross_factor: '创建截面因子',
+  create_ml_alpha: '创建ML Alpha',
   read_source: '读取代码', list_strategies: '查询策略列表',
-  list_factors: '查询因子列表', run_backtest: '运行回测',
+  list_factors: '查询因子列表', list_portfolio_strategies: '查询组合策略',
+  run_backtest: '运行回测', run_portfolio_backtest: '运行组合回测',
   run_experiment: '运行实验', list_experiments: '查询实验',
   explain_metrics: '查看指标',
 }
