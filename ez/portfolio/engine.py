@@ -183,7 +183,7 @@ def run_portfolio_backtest(
         prices: dict[str, float] = {}
         raw_close_today: dict[str, float] = {}
         has_bar_today: set[str] = set()
-        is_rebal_day = day in rebal_dates
+        exec_prices: dict[str, float] = {}  # open prices for trade execution only
         for sym in holdings.keys() | tradeable:
             if sym not in _sym_data:
                 continue
@@ -193,17 +193,23 @@ def run_portfolio_backtest(
             if idx >= 0:
                 adj_val = adj_arr[idx]
                 raw_val = raw_arr[idx]
-                # QMT 5-min compat: on rebalance days, use open price for execution
-                if use_open_price and is_rebal_day and day in date_set:
-                    open_val = open_arr[idx]
-                    if not np.isnan(open_val):
-                        prices[sym] = open_val
+                # prices = close for equity tracking
+                # QMT compat (use_open_price): use raw close, not adj_close
+                if use_open_price:
+                    if not np.isnan(raw_val):
+                        prices[sym] = raw_val
                     elif not np.isnan(adj_val):
                         prices[sym] = adj_val
-                elif not np.isnan(adj_val):
-                    prices[sym] = adj_val
-                elif not np.isnan(raw_val):
-                    prices[sym] = raw_val
+                else:
+                    if not np.isnan(adj_val):
+                        prices[sym] = adj_val
+                    elif not np.isnan(raw_val):
+                        prices[sym] = raw_val
+                # exec_prices = open (for trade execution only, when use_open_price)
+                if use_open_price and day in date_set:
+                    open_val = open_arr[idx]
+                    if not np.isnan(open_val):
+                        exec_prices[sym] = open_val
                 elif sym in prev_prices and not np.isnan(prev_prices[sym]):
                     prices[sym] = prev_prices[sym]
                 if not np.isnan(raw_val):
@@ -342,12 +348,14 @@ def run_portfolio_backtest(
 
             # V2.15 A1: delegate to shared execute_portfolio_trades()
             sold_today: set[str] = set()
+            # use_open_price: trade at open, but equity/weights tracked at close
+            trade_prices = exec_prices if use_open_price and exec_prices else prices
             exec_trades, holdings, cash, trade_volume = execute_portfolio_trades(
                 target_weights=weights,
                 holdings=holdings,
                 equity=equity,
                 cash=cash,
-                prices=prices,
+                prices=trade_prices,
                 raw_close_today=raw_close_today,
                 prev_raw_close=prev_raw_close,
                 has_bar_today=has_bar_today,
