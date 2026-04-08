@@ -340,7 +340,12 @@ class EtfSectorSwitch(PortfolioStrategy):
                     break
 
             # QMT: penalty from previous period returns
+            # QMT: last_peri_ra = (closes['close'][-2] - closes['close'][-2-5]) / closes['close'][-2-5]
             last_peri_ra = (raw_close.iloc[-2] - raw_close.iloc[-7]) / raw_close.iloc[-7] if len(raw_close) > 7 and raw_close.iloc[-7] != 0 else None
+            # QMT: ContextInfo.pre_profit[etf] = last_peri_ra (for >6% check later)
+            pre_profit = self.state.setdefault("pre_profit", {})
+            if last_peri_ra is not None:
+                pre_profit[sym] = last_peri_ra
             for prev_sym in select_assets:
                 if last_peri_ra is not None and prev_sym == sym:
                     if sym not in hReturns:
@@ -383,19 +388,26 @@ class EtfSectorSwitch(PortfolioStrategy):
         if not candidates:
             return {}
 
-        # QMT: broad/sector switching
+        # QMT: broad/sector switching (V1.2 lines 476-498)
+        # QMT iterates final_etf: first broad → append ratio to list_ratio1 (only first),
+        # sector → append ratio to list_ratio2 (QMT bug: f2 never becomes 1, so ALL sector
+        # entries are appended, not just the first. We replicate this exact behavior.)
+        pre_profit: dict[str, float] = self.state.setdefault("pre_profit", {})
         if self._broad and self._sector and candidates:
-            # Track top-1 ratio for broad/sector switching
-            top_sym = candidates[0][0]
-            if top_sym in etf_ratio_top1:
-                broad_ratios.append(etf_ratio_top1[top_sym])
-            elif top_sym in etf_ratio_top2:
-                sector_ratios.append(etf_ratio_top2[top_sym])
-
-            if len(broad_ratios) > 20:
-                broad_ratios[:] = broad_ratios[-20:]
-            if len(sector_ratios) > 20:
-                sector_ratios[:] = sector_ratios[-20:]
+            final_etf = [sym for sym, _ in candidates]
+            f1_done = False
+            for k in final_etf:
+                if k in self._broad and k in etf_ratio_top1:
+                    if not f1_done:
+                        f1_done = True
+                        if len(broad_ratios) > 10:
+                            broad_ratios.pop(0)
+                        broad_ratios.append(etf_ratio_top1[k])
+                elif k in self._sector and k in etf_ratio_top2:
+                    # QMT bug: f2 = 0 (never becomes 1), so all sector entries appended
+                    if len(sector_ratios) > 10:
+                        sector_ratios.pop(0)
+                    sector_ratios.append(etf_ratio_top2[k])
 
             L1 = min(8, len(broad_ratios))
             L2 = min(8, len(sector_ratios))
@@ -404,9 +416,16 @@ class EtfSectorSwitch(PortfolioStrategy):
             if profit1 - profit2 > 0.02:
                 candidates = [(s, sc) for s, sc in candidates if s in self._broad]
 
-        # Update select_assets for next call's penalty computation
-        final = [sym for sym, _ in candidates[:self.top_n]]
+        # QMT: select_assets = final_etf[:etf_pos]
+        etf_pos = self.top_n
+        final = [sym for sym, _ in candidates[:etf_pos]]
         self.state["select_assets"] = final
+
+        # QMT V1.2 lines 503-506: if top-1 last period return > 6%, select one more
+        if final and final[0] in pre_profit and pre_profit[final[0]] > 0.06:
+            etf_pos += 1
+            final = [sym for sym, _ in candidates[:etf_pos]]
+            self.state["select_assets"] = final
 
         if not final:
             return {}
