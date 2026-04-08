@@ -494,6 +494,43 @@ def create_cross_factor(filename: str, code: str) -> dict:
 
 
 @tool(
+    name="create_ml_alpha",
+    description=(
+        "Create a new ML Alpha factor file in ml_alphas/. "
+        "An MLAlpha is a CrossSectionalFactor that trains a scikit-learn model "
+        "(Ridge/Lasso/RF/GBR/LGBM/XGB only) on historical data to predict "
+        "forward returns. Must define model_factory, feature_fn, target_fn. "
+        "Runs contract test (instantiation + whitelist check). Returns test result."
+    ),
+    params={
+        "type": "object",
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Filename like 'ridge_momentum.py'",
+            },
+            "code": {
+                "type": "string",
+                "description": (
+                    "Python code defining an MLAlpha subclass. Must include: "
+                    "model_factory (callable returning sklearn estimator), "
+                    "feature_fn (universe_data → DataFrame), "
+                    "target_fn (universe_data → Series). "
+                    "Only whitelisted estimators: Ridge, Lasso, LinearRegression, "
+                    "ElasticNet, DecisionTreeRegressor, RandomForestRegressor, "
+                    "GradientBoostingRegressor, LGBMRegressor, XGBRegressor."
+                ),
+            },
+        },
+        "required": ["filename", "code"],
+    },
+)
+def create_ml_alpha(filename: str, code: str) -> dict:
+    from ez.agent.sandbox import save_and_validate_code
+    return save_and_validate_code(filename, code, kind="ml_alpha")
+
+
+@tool(
     name="run_portfolio_backtest",
     description="Run a portfolio backtest with multiple stocks. Returns metrics (Sharpe, return, drawdown, turnover).",
     params={

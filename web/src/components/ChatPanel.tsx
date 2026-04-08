@@ -14,7 +14,7 @@ interface ChatMsg {
 }
 
 const _TOOL_LABELS: Record<string, string> = {
-  create_strategy: '创建策略', update_strategy: '更新策略',
+  create_strategy: '创建策略', update_strategy: '更新策略', create_ml_alpha: '创建ML Alpha',
   read_source: '读取代码', list_strategies: '查询策略列表',
   list_factors: '查询因子列表', run_backtest: '运行回测',
   run_experiment: '运行实验', list_experiments: '查询实验',
@@ -303,14 +303,16 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
                 })
                 // Push code to editor when strategy is created/updated
                 if ((data.name === 'create_strategy' || data.name === 'update_strategy'
-                    || data.name === 'create_portfolio_strategy' || data.name === 'create_cross_factor') && onCodeUpdate) {
+                    || data.name === 'create_portfolio_strategy' || data.name === 'create_cross_factor'
+                    || data.name === 'create_ml_alpha') && onCodeUpdate) {
                   try {
                     const r = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
                     if (r.success && r.path) {
-                      const bareName = r.path.replace('strategies/', '').replace('portfolio_strategies/', '').replace('cross_factors/', '').replace('factors/', '')
+                      const bareName = r.path.replace('strategies/', '').replace('portfolio_strategies/', '').replace('cross_factors/', '').replace('factors/', '').replace('ml_alphas/', '')
                       // Detect kind from path prefix for CodeEditor
                       const detectedKind = r.path.startsWith('portfolio_strategies/') ? 'portfolio_strategy'
                         : r.path.startsWith('cross_factors/') ? 'cross_factor'
+                        : r.path.startsWith('ml_alphas/') ? 'ml_alpha'
                         : r.path.startsWith('factors/') ? 'factor' : 'strategy'
                       // V2.12.2 codex: fileKey must match CodeEditor's
                       // `${kind}:${filename}` format, otherwise useEffect[fileKey]
