@@ -130,11 +130,11 @@ class TestDeploymentSpec:
             strategy_name="TopN", strategy_params={},
             symbols=("A",), market="cn_stock", freq="monthly",
         )
-        assert s.buy_commission_rate == 0.0003
-        assert s.sell_commission_rate == 0.0003
+        assert s.buy_commission_rate == 0.00008
+        assert s.sell_commission_rate == 0.00008
         assert s.stamp_tax_rate == 0.0005
         assert s.slippage_rate == 0.001
-        assert s.min_commission == 5.0
+        assert s.min_commission == 0.0
         assert s.initial_cash == 1_000_000.0
 
 

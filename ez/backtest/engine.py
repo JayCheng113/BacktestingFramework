@@ -18,8 +18,8 @@ class VectorizedBacktestEngine:
 
     def __init__(
         self,
-        commission_rate: float = 0.0003,
-        min_commission: float = 5.0,
+        commission_rate: float = 0.00008,
+        min_commission: float = 0.0,
         risk_free_rate: float = 0.03,
         matcher: Matcher | None = None,
     ):

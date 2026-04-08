@@ -35,8 +35,8 @@ class DataSourcesConfig(BaseModel):
 
 class BacktestConfig(BaseModel):
     default_initial_capital: float = 100000.0
-    default_commission_rate: float = 0.0003
-    default_min_commission: float = 5.0
+    default_commission_rate: float = 0.00008
+    default_min_commission: float = 0.0
     risk_free_rate: float = 0.03
 
 

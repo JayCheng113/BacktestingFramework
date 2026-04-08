@@ -275,9 +275,9 @@ class PortfolioCommonConfig(BaseModel):
     """
 
     # Cost model
-    buy_commission_rate: float = Field(default=0.0003, ge=0)
-    sell_commission_rate: float = Field(default=0.0003, ge=0)
-    min_commission: float = Field(default=5.0, ge=0)
+    buy_commission_rate: float = Field(default=0.00008, ge=0)
+    sell_commission_rate: float = Field(default=0.00008, ge=0)
+    min_commission: float = Field(default=0.0, ge=0)
     stamp_tax_rate: float = Field(default=0.0005, ge=0)
     # V2.13.2 G1.2: stamp_tax is A-share specific (0.05% sell-side).
     # For non-CN markets, zero it unless user explicitly set it.

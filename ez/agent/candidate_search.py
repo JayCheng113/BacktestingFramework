@@ -44,8 +44,8 @@ class SearchConfig:
     run_wfo: bool = True
     wfo_n_splits: int = 3
     initial_capital: float = 100_000.0
-    commission_rate: float = 0.0003
-    min_commission: float = 5.0
+    commission_rate: float = 0.00008
+    min_commission: float = 0.0
     slippage_rate: float = 0.0
     # Market rules (V2.12.1 codex fix)
     use_market_rules: bool = False

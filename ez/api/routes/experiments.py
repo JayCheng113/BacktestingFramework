@@ -34,8 +34,8 @@ class ExperimentRequest(BaseModel):
     start_date: date
     end_date: date
     initial_capital: float = 100_000.0
-    commission_rate: float = 0.0003
-    min_commission: float = 5.0
+    commission_rate: float = 0.00008
+    min_commission: float = 0.0
     slippage_rate: float = Field(default=0.0, ge=0, le=0.1)
     run_backtest: bool = True
     run_wfo: bool = True

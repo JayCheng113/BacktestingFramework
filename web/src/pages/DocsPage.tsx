@@ -557,8 +557,8 @@ def generate_signals(self, data: pd.DataFrame) -> pd.Series:
           <table style={tbl}>
             <thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>计算方式</th></tr></thead>
             <tbody>
-              <tr><td style={tds}>手续费率 (commission_rate)</td><td style={tds}>0.03% (万三)</td><td style={tds}>每笔交易按成交金额计算</td></tr>
-              <tr><td style={tds}>最低手续费 (min_commission)</td><td style={tds}>5 元</td><td style={tds}>每笔交易不低于此金额</td></tr>
+              <tr><td style={tds}>手续费率 (commission_rate)</td><td style={tds}>0.008% (万0.8)</td><td style={tds}>每笔交易按成交金额计算</td></tr>
+              <tr><td style={tds}>最低手续费 (min_commission)</td><td style={tds}>0 元 (免五)</td><td style={tds}>每笔交易不低于此金额</td></tr>
               <tr><td style={tds}>滑点率 (slippage_rate)</td><td style={tds}>0%</td><td style={tds}>买入价上浮 / 卖出价下浮</td></tr>
             </tbody>
           </table>
@@ -566,11 +566,11 @@ def generate_signals(self, data: pd.DataFrame) -> pd.Series:
           <div style={h3s}>手续费计算公式</div>
           <pre style={code}>{`commission = max(成交金额 * commission_rate, min_commission)
 
-# 示例: 买入 50,000 元股票，费率 0.03%
-# commission = max(50000 * 0.0003, 5) = max(15, 5) = 15 元
+# 示例: 买入 50,000 元股票，费率 0.008% (QMT 量化标准)
+# commission = max(50000 * 0.00008, 0) = max(4, 0) = 4 元
 
 # 示例: 买入 1,000 元股票（小额交易）
-# commission = max(1000 * 0.0003, 5) = max(0.3, 5) = 5 元（最低佣金兜底）`}</pre>
+# commission = max(1000 * 0.00008, 0) = max(0.08, 0) = 0.08 元（免五无兜底）`}</pre>
 
           <div style={h3s}>滑点计算</div>
           <pre style={code}>{`# 滑点模拟市场冲击: 买入推高价格，卖出压低价格
@@ -962,9 +962,9 @@ Agent 循环:
           <table style={tbl}><thead><tr><th style={ths}>参数</th><th style={ths}>默认值</th><th style={ths}>说明</th></tr></thead><tbody>
             <tr><td style={tds}>初始资金</td><td style={tds}>1,000,000</td><td style={tds}>回测起始资金</td></tr>
             <tr><td style={tds}>基准</td><td style={tds}>510300.SH</td><td style={tds}>基准标的（留空=现金基准）</td></tr>
-            <tr><td style={tds}>买入佣金</td><td style={tds}>0.0003 (万三)</td><td style={tds}>按成交额比例</td></tr>
-            <tr><td style={tds}>卖出佣金</td><td style={tds}>0.0003</td><td style={tds}>可与买入不同</td></tr>
-            <tr><td style={tds}>最低佣金</td><td style={tds}>5 元</td><td style={tds}>每笔最低</td></tr>
+            <tr><td style={tds}>买入佣金</td><td style={tds}>0.00008 (万0.8)</td><td style={tds}>按成交额比例</td></tr>
+            <tr><td style={tds}>卖出佣金</td><td style={tds}>0.00008</td><td style={tds}>可与买入不同</td></tr>
+            <tr><td style={tds}>最低佣金</td><td style={tds}>0 元 (免五)</td><td style={tds}>每笔最低</td></tr>
             <tr><td style={tds}>印花税(卖)</td><td style={tds}>0.0005 (万五)</td><td style={tds}>A 股卖出时收取</td></tr>
             <tr><td style={tds}>滑点率</td><td style={tds}>0</td><td style={tds}>模拟市场冲击</td></tr>
             <tr><td style={tds}>整手</td><td style={tds}>100 股</td><td style={tds}>A 股最小交易单位</td></tr>
@@ -1439,8 +1439,8 @@ FMP_API_KEY=your_key_here`}</pre>
               <tr><td style={{...tds, fontFamily:'monospace'}}>start_date</td><td style={tds}>string</td><td style={tds}>是</td><td style={tds}>—</td><td style={tds}>开始日期 (YYYY-MM-DD)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>end_date</td><td style={tds}>string</td><td style={tds}>是</td><td style={tds}>—</td><td style={tds}>结束日期 (YYYY-MM-DD)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>100000</td><td style={tds}>初始资金</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0003</td><td style={tds}>手续费率 (万三)</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>min_commission</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>5.0</td><td style={tds}>最低佣金 (元)</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.00008</td><td style={tds}>手续费率 (万0.8)</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>min_commission</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>最低佣金 (免五)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>滑点率 (0~0.1)</td></tr>
             </tbody>
           </table>
@@ -1507,7 +1507,7 @@ FMP_API_KEY=your_key_here`}</pre>
               <tr><td style={{...tds, fontFamily:'monospace'}}>period</td><td style={tds}>string</td><td style={{...tds, fontFamily:'monospace'}}>daily</td><td style={tds}>周期</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>start_date / end_date</td><td style={tds}>string</td><td style={tds}>—</td><td style={tds}>日期范围 (YYYY-MM-DD)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>100000</td><td style={tds}>初始资金</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.0003</td><td style={tds}>手续费率</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.00008</td><td style={tds}>手续费率</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>滑点率 (0~0.1)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>run_wfo</td><td style={tds}>bool</td><td style={{...tds, fontFamily:'monospace'}}>true</td><td style={tds}>是否运行 Walk-Forward</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>wfo_n_splits</td><td style={tds}>int</td><td style={{...tds, fontFamily:'monospace'}}>5</td><td style={tds}>WFO 分割段数 (2~20)</td></tr>

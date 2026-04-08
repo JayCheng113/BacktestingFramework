@@ -65,8 +65,8 @@ class SimpleMatcher(Matcher):
 
     def __init__(
         self,
-        commission_rate: float = 0.0003,
-        min_commission: float = 5.0,
+        commission_rate: float = 0.00008,
+        min_commission: float = 0.0,
         sell_commission_rate: float | None = None,
     ) -> None:
         if commission_rate < 0 or min_commission < 0:
@@ -132,8 +132,8 @@ class SlippageMatcher(Matcher):
     def __init__(
         self,
         slippage_rate: float = 0.001,
-        commission_rate: float = 0.0003,
-        min_commission: float = 5.0,
+        commission_rate: float = 0.00008,
+        min_commission: float = 0.0,
         sell_commission_rate: float | None = None,
     ) -> None:
         if slippage_rate < 0 or commission_rate < 0 or min_commission < 0:
