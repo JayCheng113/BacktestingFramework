@@ -473,6 +473,10 @@ class EtfRotateCombo(PortfolioStrategy):
 
     _SYMBOL_MAP = {"510880.SH": "515100.SH"}
 
+    # QMT etf_list = etf_list1 + etf_list2 = 21 symbols (the weighted scoring pool).
+    # 159531.SZ and 515100.SH are rotate-only — they must NOT enter Friday weighted scoring.
+    DEFAULT_COM_SYMBOLS = DEFAULT_BROAD_ETFS | DEFAULT_SECTOR_ETFS  # 10 + 11 = 21
+
     def __init__(self, rotate_rate: float = 0.3, rotate_top_n: int = 2,
                  com_top_n: int = 1, rotate_weekday: int = 3, com_weekday: int = 4,
                  rotate_symbols: list[str] | None = None,
@@ -536,7 +540,10 @@ class EtfRotateCombo(PortfolioStrategy):
                 rotate_bucket[sym] = w * self.rotate_rate
 
         if is_com_day:
-            raw = self._switcher.generate_weights(universe_data, date, prev_weights, prev_returns)
+            # QMT: Friday weighted scoring only uses etf_list (21 symbols).
+            # 159531.SZ and 515100.SH are rotate-only, must not be candidates here.
+            com_data = {s: df for s, df in universe_data.items() if s in self.DEFAULT_COM_SYMBOLS}
+            raw = self._switcher.generate_weights(com_data, date, prev_weights, prev_returns)
             switch_bucket.clear()
             com_rate = 1.0 - self.rotate_rate
             for sym, w in raw.items():
