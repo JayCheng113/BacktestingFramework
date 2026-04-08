@@ -12,3 +12,11 @@ ez_trading.egg-info/
 dist/
 build/
 ez-trading.spec
+
+# User-created files (runtime, not source)
+strategies/*.py
+factors/*.py
+portfolio_strategies/*.py
+cross_factors/*.py
+ml_alphas/*.py
+web/data/
