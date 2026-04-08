@@ -980,10 +980,10 @@ export default function PortfolioRunContent(props: Props) {
 
       {/* 前推验证 Result */}
       {wfResult && (() => {
-        const oosSharpe = wfResult.oos_metrics?.sharpe_ratio ?? 0
-        const oosReturn = wfResult.oos_metrics?.total_return ?? 0
-        const overfit = wfResult.overfitting_score ?? 0
-        const pVal = wfResult.significance?.p_value ?? 1
+        const oosSharpe = wfResult.oos_metrics?.sharpe_ratio
+        const oosReturn = wfResult.oos_metrics?.total_return
+        const overfit = wfResult.overfitting_score
+        const pVal = wfResult.significance?.p_value
         const isSig = wfResult.significance?.is_significant ?? false
 
         const rateSharpe = (v: number) => {
@@ -1011,16 +1011,17 @@ export default function PortfolioRunContent(props: Props) {
           return { color: CHART.error, hint: '不显著' }
         }
 
-        const sharpeR = rateSharpe(oosSharpe)
-        const returnR = rateReturn(oosReturn)
-        const overfitR = rateOverfit(overfit)
-        const pvalR = ratePval(isSig, pVal)
+        const _noData = { color: 'var(--text-muted)', hint: '—' }
+        const sharpeR = oosSharpe != null ? rateSharpe(oosSharpe) : _noData
+        const returnR = oosReturn != null ? rateReturn(oosReturn) : _noData
+        const overfitR = overfit != null ? rateOverfit(overfit) : _noData
+        const pvalR = pVal != null ? ratePval(isSig, pVal) : _noData
 
         const metrics = [
-          { label: '样本外夏普', value: oosSharpe.toFixed(4), ...sharpeR, tooltip: '>=1.0优秀, >=0.5可接受, <0偏弱' },
-          { label: '样本外总收益', value: (oosReturn * 100).toFixed(2) + '%', ...returnR, tooltip: '>=20%高, >=5%正, <0亏损' },
-          { label: '过拟合评分', value: overfit.toFixed(2), ...overfitR, tooltip: '<=0.2稳健, <=0.3轻微, >0.5严重' },
-          ...(wfResult.significance ? [{ label: '显著性 p', value: pVal.toFixed(3), ...pvalR, tooltip: 'p<0.05显著, p<0.01极显著' }] : []),
+          { label: '样本外夏普', value: oosSharpe != null ? oosSharpe.toFixed(4) : '-', ...sharpeR, tooltip: '>=1.0优秀, >=0.5可接受, <0偏弱' },
+          { label: '样本外总收益', value: oosReturn != null ? (oosReturn * 100).toFixed(2) + '%' : '-', ...returnR, tooltip: '>=20%高, >=5%正, <0亏损' },
+          { label: '过拟合评分', value: overfit != null ? overfit.toFixed(2) : '-', ...overfitR, tooltip: '<=0.2稳健, <=0.3轻微, >0.5严重' },
+          ...(wfResult.significance ? [{ label: '显著性 p', value: pVal != null ? pVal.toFixed(3) : '-', ...pvalR, tooltip: 'p<0.05显著, p<0.01极显著' }] : []),
         ]
 
         return (
