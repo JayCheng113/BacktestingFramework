@@ -792,7 +792,11 @@ export default function PortfolioRunContent(props: Props) {
               return searchSortDir === 'asc' ? av - bv : bv - av
             })
             return (
-              <div className="mt-3 overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+              <div className="mt-3">
+                <div className="text-xs mb-1 px-1" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                  点击列头可按该指标排序 (再次点击切换升序/降序){searchSortKey ? `，当前: ${sortableColumns.find(c => c.field === searchSortKey)?.label ?? searchSortKey} ${searchSortDir === 'desc' ? '降序' : '升序'}` : ''}
+                </div>
+                <div className="overflow-x-auto" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
                 <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                   <thead><tr style={{ backgroundColor: 'var(--bg-primary)' }}>
                     <th className="px-3 py-2 text-left font-medium" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>#</th>
@@ -827,6 +831,7 @@ export default function PortfolioRunContent(props: Props) {
                     </tr>
                   ))}</tbody>
                 </table>
+                </div>
               </div>
             )
           })() : searchMeta && !searchLoading ? (
