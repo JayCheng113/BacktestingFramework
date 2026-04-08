@@ -199,7 +199,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     const rows = result.trades.map(t =>
       `${t.entry_time.slice(0,10)},${t.exit_time.slice(0,10)},${t.entry_price},${t.exit_price},${t.pnl.toFixed(2)},${(t.pnl_pct*100).toFixed(2)}%,${t.commission.toFixed(2)}`
     ).join('\n')
-    const blob = new Blob([headers + rows], { type: 'text/csv' })
+    const blob = new Blob(['\uFEFF' + headers + rows], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
