@@ -787,8 +787,11 @@ export default function PortfolioRunContent(props: Props) {
             ]
             const sorted = [...searchResults].sort((a, b) => {
               if (!searchSortKey) return 0
-              const av = (a[searchSortKey as keyof SearchResultRow] as number) ?? -Infinity
-              const bv = (b[searchSortKey as keyof SearchResultRow] as number) ?? -Infinity
+              const isAbs = searchSortKey === 'max_drawdown'
+              const nullVal = searchSortDir === 'asc' ? Infinity : -Infinity
+              let av = (a[searchSortKey as keyof SearchResultRow] as number) ?? nullVal
+              let bv = (b[searchSortKey as keyof SearchResultRow] as number) ?? nullVal
+              if (isAbs) { av = Math.abs(av); bv = Math.abs(bv) }
               return searchSortDir === 'asc' ? av - bv : bv - av
             })
             return (
