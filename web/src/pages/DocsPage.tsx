@@ -1438,7 +1438,7 @@ FMP_API_KEY=your_key_here`}</pre>
               <tr><td style={{...tds, fontFamily:'monospace'}}>period</td><td style={tds}>string</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>daily</td><td style={tds}>K 线周期</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>start_date</td><td style={tds}>string</td><td style={tds}>是</td><td style={tds}>—</td><td style={tds}>开始日期 (YYYY-MM-DD)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>end_date</td><td style={tds}>string</td><td style={tds}>是</td><td style={tds}>—</td><td style={tds}>结束日期 (YYYY-MM-DD)</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>100000</td><td style={tds}>初始资金</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>1000000</td><td style={tds}>初始资金</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.00008</td><td style={tds}>手续费率 (万0.8)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>min_commission</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>最低佣金 (免五)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={tds}>否</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>滑点率 (0~0.1)</td></tr>
@@ -1447,8 +1447,8 @@ FMP_API_KEY=your_key_here`}</pre>
           <div style={h3s}>响应体</div>
           <pre style={code}>{`{
   "metrics": { "sharpe_ratio", "total_return", "max_drawdown", "win_rate", ... },
-  "equity_curve": [100000, 100120, ...],
-  "benchmark_curve": [100000, 100050, ...],
+  "equity_curve": [1000000, 100120, ...],
+  "benchmark_curve": [1000000, 100050, ...],
   "trades": [{ "entry_time", "exit_time", "entry_price", "exit_price", "pnl", ... }],
   "significance": { "monte_carlo_p_value", "sharpe_ci_lower", "sharpe_ci_upper", "is_significant" }
 }`}</pre>
@@ -1478,7 +1478,7 @@ FMP_API_KEY=your_key_here`}</pre>
   "oos_metrics": { "sharpe_ratio": 0.45 },
   "overfitting_score": 0.25,
   "is_vs_oos_degradation": 0.25,
-  "oos_equity_curve": [100000, ...]
+  "oos_equity_curve": [1000000, ...]
 }`}</pre>
 
           {/* Strategies List */}
@@ -1506,7 +1506,7 @@ FMP_API_KEY=your_key_here`}</pre>
               <tr><td style={{...tds, fontFamily:'monospace'}}>market</td><td style={tds}>string</td><td style={{...tds, fontFamily:'monospace'}}>cn_stock</td><td style={tds}>市场</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>period</td><td style={tds}>string</td><td style={{...tds, fontFamily:'monospace'}}>daily</td><td style={tds}>周期</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>start_date / end_date</td><td style={tds}>string</td><td style={tds}>—</td><td style={tds}>日期范围 (YYYY-MM-DD)</td></tr>
-              <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>100000</td><td style={tds}>初始资金</td></tr>
+              <tr><td style={{...tds, fontFamily:'monospace'}}>initial_capital</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>1000000</td><td style={tds}>初始资金</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>commission_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.00008</td><td style={tds}>手续费率</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>slippage_rate</td><td style={tds}>float</td><td style={{...tds, fontFamily:'monospace'}}>0.0</td><td style={tds}>滑点率 (0~0.1)</td></tr>
               <tr><td style={{...tds, fontFamily:'monospace'}}>run_wfo</td><td style={tds}>bool</td><td style={{...tds, fontFamily:'monospace'}}>true</td><td style={tds}>是否运行 Walk-Forward</td></tr>

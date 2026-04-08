@@ -564,9 +564,9 @@ class TestRunner:
         import inspect
         from ez.agent import tools as _t
         src = inspect.getsource(_t.run_portfolio_backtest_tool.__wrapped__ if hasattr(_t.run_portfolio_backtest_tool, '__wrapped__') else _t.run_portfolio_backtest_tool)
-        # Must mention min_commission is market-gated
-        assert "min_commission=5.0 if is_cn" in src or "min_commission = 5.0 if is_cn" in src, (
-            "AI portfolio tool must gate min_commission by market"
+        # Must gate stamp_tax by market (min_commission now uses CostModel default 0.0)
+        assert "stamp_tax_rate=0.0005 if is_cn" in src or "stamp_tax_rate = 0.0005 if is_cn" in src, (
+            "AI portfolio tool must gate stamp_tax by market"
         )
 
     def test_portfolio_request_config_parity(self):

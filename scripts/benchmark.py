@@ -57,7 +57,7 @@ def bench_ts_ops(data: pd.DataFrame, n_runs: int = 50) -> dict[str, float]:
 
 def bench_matcher(n_fills: int = 100000) -> dict[str, float]:
     """Benchmark matcher fill operations."""
-    matcher = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+    matcher = SimpleMatcher(commission_rate=0.00008, min_commission=0.0)
     results = {}
 
     t0 = time.perf_counter()

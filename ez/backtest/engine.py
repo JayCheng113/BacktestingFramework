@@ -30,7 +30,7 @@ class VectorizedBacktestEngine:
         self,
         data: pd.DataFrame,
         strategy: Strategy,
-        initial_capital: float = 100000.0,
+        initial_capital: float = 1000000.0,
     ) -> BacktestResult:
         df = data.copy()
 

@@ -589,16 +589,12 @@ def run_portfolio_backtest_tool(
     calendar = TradingCalendar.from_dates(sorted(all_dates))
     universe = Universe(symbols)
 
-    # A-share rules gated on market (lot_size / T+1 / limit_pct / stamp_tax /
-    # min_commission only for cn_stock). V2.12.1 codex follow-up: previously
-    # only stamp_tax was gated; CostModel().min_commission=5.0 default was
-    # still applied to US/HK, inflating small-trade costs. Now all A-share
-    # specific cost fields are market-gated.
+    # A-share rules gated on market (stamp_tax only for cn_stock).
+    # Commission/min_commission use CostModel defaults (万0.8, 免五).
     from ez.portfolio.engine import CostModel as _CostModel
     is_cn = market == "cn_stock"
     cost_model = _CostModel(
         stamp_tax_rate=0.0005 if is_cn else 0.0,
-        min_commission=5.0 if is_cn else 0.0,
     )
     result = run_portfolio_backtest(
         strategy=strategy, universe=universe, universe_data=universe_data,

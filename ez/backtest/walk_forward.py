@@ -45,7 +45,7 @@ class WalkForwardValidator:
         strategy: Strategy,
         n_splits: int = 5,
         train_ratio: float = 0.7,
-        initial_capital: float = 100000.0,
+        initial_capital: float = 1000000.0,
     ) -> WalkForwardResult:
         if n_splits < 2:
             raise ValueError(f"n_splits must be >= 2, got {n_splits}")
