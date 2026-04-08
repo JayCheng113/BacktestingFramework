@@ -372,10 +372,40 @@ export default function PortfolioPanel() {
     }
   }
 
+  // Shared helpers for factor research validation
+  const isEtfCode = (s: string) => /^(51|15|16)\d{4}\.\w+$/.test(s)
+
+  const isFundamentalFactor = (f: string): boolean => {
+    return factorCategories.some(cat =>
+      ['value', 'quality', 'growth', 'size', 'liquidity', 'leverage'].includes(cat.key) &&
+      (Array.isArray(cat.factors) ? cat.factors : []).some((cf: string | FactorInfo) =>
+        (typeof cf === 'string' ? cf : (cf.key || cf.class_name || '')) === f
+      )
+    )
+  }
+
   const handleEvaluateFactors = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length < 5) { showToast('warning', '因子评估需要至少 5 个标的'); return }
     if (evalFactors.length === 0) { showToast('warning', '请选择至少 1 个因子'); return }
+
+    // Problem A: ETF + fundamental factor → warn (ETF has no PE/PB/financials)
+    const allEtf = symbolList.every(isEtfCode)
+    const hasFundaFactor = evalFactors.some(isFundamentalFactor)
+    if (allEtf && hasFundaFactor) {
+      showToast('warning', 'ETF 没有基本面数据（无PE/PB/财报），基本面因子评估结果会全部为空。建议换成个股池或只选技术因子。')
+    }
+
+    // Problem B: fundamental factor selected but data not fetched
+    if (hasFundaFactor && !allEtf && !fundaStatus) {
+      showToast('warning', '选中了基本面因子，建议先点"获取基本面数据"以确保数据完整，否则评估结果可能不准确。')
+    }
+
+    // Problem D: neutralize with ETF pool — ETFs have no industry classification
+    if (neutralize && allEtf) {
+      showToast('warning', '行业中性化需要个股的行业分类信息，ETF 没有行业归属，中性化不会生效。')
+    }
+
     const myToken = ++evalTokenRef.current
     setEvalLoading(true); setEvalResult(null); setCorrResult(null)
     try {
@@ -395,36 +425,29 @@ export default function PortfolioPanel() {
   const handleFetchFundamental = async () => {
     const symbolList = symbols.split(',').map(s => s.trim()).filter(Boolean)
     if (symbolList.length === 0) return
-    // ETF codes (51xxxx/15xxxx/16xxxx) have no fundamental data (no PE/PB/financial statements)
-    const isEtf = (s: string) => /^(51|15|16)\d{4}\.\w+$/.test(s)
-    const allEtf = symbolList.every(isEtf)
+    const allEtf = symbolList.every(isEtfCode)
     if (allEtf) {
       showToast('warning', '当前标的池全是 ETF，ETF 没有基本面数据（无PE/PB/财报）。基本面因子仅适用于个股。')
       return
     }
-    // Check if any selected factor needs fundamental data
-    const fundamentalFactorKeys = new Set<string>()
-    factorCategories.forEach(cat => {
-      if (Array.isArray(cat.factors)) cat.factors.forEach((f: string | FactorInfo) => {
-        if (typeof f === 'object' && f.needs_fina) fundamentalFactorKeys.add(f.key || f.class_name || '')
-      })
-    })
-    const hasFundamentalSelected = evalFactors.some(f => {
-      // Check if factor belongs to Value/Quality/Growth/Size/Liquidity/Leverage categories
-      return fundamentalFactorKeys.has(f) || factorCategories.some(cat =>
-        ['value', 'quality', 'growth', 'size', 'liquidity', 'leverage'].includes(cat.key) &&
-        (Array.isArray(cat.factors) ? cat.factors : []).some((cf: string | FactorInfo) =>
-          (typeof cf === 'string' ? cf : (cf.key || cf.class_name || '')) === f
-        )
-      )
-    })
-    if (!hasFundamentalSelected) {
+    if (!evalFactors.some(isFundamentalFactor)) {
       showToast('warning', '当前选中的因子都是技术因子，不需要获取基本面数据。基本面因子包括: 价值(EP/BP)、质量(ROE)、成长(营收增长)等')
       return
+    }
+    // Problem C: mixed pool (ETF + stocks) — ETF part will have no fundamental data
+    const etfCount = symbolList.filter(isEtfCode).length
+    if (etfCount > 0) {
+      showToast('info', `标的池中有 ${etfCount} 只 ETF 没有基本面数据，仅对 ${symbolList.length - etfCount} 只个股获取。`)
     }
     const myToken = ++fundaTokenRef.current
     setFetchingFunda(true); setFundaStatus('获取中...')
     try {
+      const fundamentalFactorKeys = new Set<string>()
+      factorCategories.forEach(cat => {
+        if (Array.isArray(cat.factors)) cat.factors.forEach((f: string | FactorInfo) => {
+          if (typeof f === 'object' && f.needs_fina) fundamentalFactorKeys.add(f.key || f.class_name || '')
+        })
+      })
       const hasFina = evalFactors.some(f => fundamentalFactorKeys.has(f))
       const res = await fetchFundamentalData({ symbols: symbolList, market, start_date: startDate, end_date: endDate, include_fina: hasFina })
       if (fundaTokenRef.current !== myToken) return
