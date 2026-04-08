@@ -529,8 +529,10 @@ def _create_strategy(name: str, params: dict, symbols: list[str] | None = None,
     elif name in PortfolioStrategy.get_registry():
         cls = PortfolioStrategy.get_registry()[name]
         # Auto-inject broad/sector classification from strategy's own DEFAULT_BROAD_ETFS
-        # (codex fix #3: strategy owns the list, route just reads it)
-        if symbols and "broad_symbols" not in p and "sector_symbols" not in p:
+        # EtfRotateCombo has its own DEFAULT_SECTOR_ETFS and handles classification
+        # internally — don't override with route's "symbols - broad" heuristic.
+        has_own_sector = hasattr(cls, "DEFAULT_SECTOR_ETFS")
+        if symbols and "broad_symbols" not in p and "sector_symbols" not in p and not has_own_sector:
             default_broad = getattr(cls, "DEFAULT_BROAD_ETFS", None)
             if default_broad:
                 broad = [s for s in symbols if s in default_broad]

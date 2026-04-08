@@ -54,6 +54,9 @@ const LIVE_PRESETS: LivePreset[] = [
     desc: '23只ETF, 轮动30%(top2)周四 + 加权70%(top1)周五, 双日程严格复刻, 需日度频率',
     strategy: 'EtfRotateCombo',
     params: { rotate_rate: 0.3, rotate_top_n: 2, com_top_n: 1, rotate_weekday: 3, com_weekday: 4 },
+    // Combined: etf_list(21) + etf_list_rotate(10) deduplicated = 23 unique
+    // 515100 is in rotate pool only (enters weighted branch via 510880→515100 mapping)
+    // 159531 is in both etf_list and rotate pool
     symbols: '510300.SH,510500.SH,159915.SZ,159531.SZ,510880.SH,515100.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH',
     freq: 'daily',      // Must be daily — strategy handles Thu/Fri scheduling internally
     rebalWeekday: null,  // Not applicable for daily freq

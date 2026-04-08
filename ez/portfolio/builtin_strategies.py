@@ -306,9 +306,21 @@ class EtfRotateCombo(PortfolioStrategy):
     - 不归一化: 30%+70%=100%, 一桶空则该部分为现金
     """
 
-    DEFAULT_BROAD_ETFS = EtfSectorSwitch.DEFAULT_BROAD_ETFS
+    # QMT V1.2 etf_list1 (宽基 broad) — NOT the same as EtfSectorSwitch.DEFAULT_BROAD_ETFS
+    # Key differences: no 515100 (only enters via 510880 mapping), no 162411 (commented out in V1.2)
+    DEFAULT_BROAD_ETFS = frozenset({
+        "510300.SH", "510500.SH", "159915.SZ", "510880.SH",
+        "513100.SH", "513880.SH", "513260.SH", "513660.SH",
+        "518880.SH", "159985.SZ",
+    })
 
-    # Default rotate pool (QMT etf_list_rotate)
+    # QMT V1.2 etf_list2 (行业 sector)
+    DEFAULT_SECTOR_ETFS = frozenset({
+        "512010.SH", "512690.SH", "515700.SH", "159852.SZ", "159813.SZ",
+        "159851.SZ", "515220.SH", "159869.SZ", "515880.SH", "512660.SH", "512980.SH",
+    })
+
+    # QMT V1.2 etf_list_rotate (轮动池) — different from broad: has 515100+159531, no 510300/510880
     DEFAULT_ROTATE_SYMBOLS = frozenset({
         "510500.SH", "159915.SZ", "159531.SZ", "515100.SH",
         "513100.SH", "513880.SH", "513260.SH", "513660.SH",
@@ -325,11 +337,16 @@ class EtfRotateCombo(PortfolioStrategy):
                  sector_symbols: list[str] | None = None, **params):
         super().__init__(**params)
         self.rotate_rate = max(0, min(1, rotate_rate))
-        self._rotate_weekday = rotate_weekday  # 0=Mon..4=Fri
+        self._rotate_weekday = rotate_weekday
         self._com_weekday = com_weekday
+        if rotate_weekday == com_weekday:
+            raise ValueError(f"rotate_weekday ({rotate_weekday}) must differ from com_weekday ({com_weekday})")
         self._rotate_syms = set(rotate_symbols) if rotate_symbols else set(self.DEFAULT_ROTATE_SYMBOLS)
+        # Use QMT V1.2 specific broad/sector, not EtfSectorSwitch defaults
+        _broad = broad_symbols if broad_symbols else list(self.DEFAULT_BROAD_ETFS)
+        _sector = sector_symbols if sector_symbols else list(self.DEFAULT_SECTOR_ETFS)
         self._rotator = EtfMacdRotation(top_n=rotate_top_n)
-        self._switcher = EtfSectorSwitch(top_n=com_top_n, broad_symbols=broad_symbols, sector_symbols=sector_symbols)
+        self._switcher = EtfSectorSwitch(top_n=com_top_n, broad_symbols=_broad, sector_symbols=_sector)
 
     @property
     def lookback_days(self) -> int:
