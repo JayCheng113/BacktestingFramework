@@ -491,7 +491,7 @@ export default function PortfolioRunContent(props: Props) {
                 const psSize = selCount > 0 ? (1 << selCount) - 1 : 0
                 const over = psSize > 64
                 return (
-                  <span className="text-xs" style={{ color: over ? CHART.up : 'var(--text-secondary)' }}>
+                  <span className="text-xs" style={{ color: over ? CHART.error : 'var(--text-secondary)' }}>
                     {selCount > 0 ? `${selCount} 因子 → ${psSize} 种组合` : '请先选择因子'}
                     {over && ' (超过 64 上限，请减少因子)'}
                   </span>
@@ -584,10 +584,10 @@ export default function PortfolioRunContent(props: Props) {
           {searchMeta && (searchMeta.sampled > 0 || searchMeta.failed > 0) && (
             <div className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
               共 {searchMeta.total_combinations} 种组合, 采样 {searchMeta.sampled},
-              成功 <span style={{ color: CHART.down }}>{searchMeta.completed}</span>
+              成功 <span style={{ color: CHART.success }}>{searchMeta.completed}</span>
               {searchMeta.failed > 0 && (
                 <>
-                  , 失败 <span style={{ color: CHART.up, fontWeight: 600 }}>{searchMeta.failed}</span>
+                  , 失败 <span style={{ color: CHART.error, fontWeight: 600 }}>{searchMeta.failed}</span>
                 </>
               )}
             </div>
@@ -625,7 +625,7 @@ export default function PortfolioRunContent(props: Props) {
                       const val = typeof v === 'string' ? (FACTOR_LABELS[v] || v) : String(v)
                       return `${label}=${val}`
                     }).join(', ')}</td>
-                    <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? CHART.down : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
+                    <td className="px-3 py-1.5" style={{ color: (r.sharpe || 0) > 1 ? CHART.success : 'var(--text-primary)' }}>{r.sharpe?.toFixed(3) ?? '-'}</td>
                     <td className="px-3 py-1.5">{r.total_return != null ? (r.total_return * 100).toFixed(1) + '%' : '-'}</td>
                     <td className="px-3 py-1.5">{r.annualized_return != null ? (r.annualized_return * 100).toFixed(1) + '%' : '-'}</td>
                     <td className="px-3 py-1.5" style={{ color: 'var(--color-down)' }}>{r.max_drawdown != null ? (r.max_drawdown * 100).toFixed(1) + '%' : '-'}</td>

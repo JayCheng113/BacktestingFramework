@@ -133,8 +133,8 @@ class TestPrefilter:
             price_limit_pct=0.20,  # ChiNext — NOT the default 0.10
             lot_size=200,          # NOT the default 100
             initial_capital=500_000.0,  # NOT the default 100_000
-            commission_rate=0.0005,     # NOT the default 0.0003
-            slippage_rate=0.001,        # NOT the default 0.0
+            commission_rate=0.0005,     # NOT the default 0.00008
+            slippage_rate=0.001,        # matches the default 0.001
             tags=["market-rules-test"],
             description="verify prefilter propagates all fields",
         )

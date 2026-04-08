@@ -70,7 +70,7 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
     xAxis: { type: 'category', data: result.ic_series.map((_: number, i: number) => i), axisLabel: { color: CHART.textSecondary } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: CHART.grid } }, axisLabel: { color: CHART.textSecondary } },
     series: [
-      { type: 'bar', data: result.ic_series.map((v: number) => ({ value: v, itemStyle: { color: v >= 0 ? CHART.accent + '80' : CHART.up + '80' } })), barMaxWidth: 4 },
+      { type: 'bar', data: result.ic_series.map((v: number) => ({ value: v, itemStyle: { color: v >= 0 ? CHART.accent + '80' : CHART.error + '80' } })), barMaxWidth: 4 },
       { type: 'line', data: result.ic_series.map(() => icMean), lineStyle: { color: CHART.warn, type: 'dashed', width: 1 }, showSymbol: false, name: 'Mean' },
       { type: 'line', data: result.ic_series.map(() => icMean + icStd), lineStyle: { color: CHART.warn + '40', type: 'dotted', width: 1 }, showSymbol: false, name: '+1σ' },
       { type: 'line', data: result.ic_series.map(() => icMean - icStd), lineStyle: { color: CHART.warn + '40', type: 'dotted', width: 1 }, showSymbol: false, name: '-1σ' },

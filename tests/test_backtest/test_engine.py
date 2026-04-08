@@ -101,7 +101,7 @@ def test_engine_partial_fill_prev_weight_tracks_actual():
         "close": [7.0] * n, "adj_close": [7.0] * n, "volume": [100000.0] * n,
     }, index=pd.date_range("2024-01-02", periods=n, freq="B"))
 
-    inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+    inner = SimpleMatcher(commission_rate=0.00008, min_commission=5.0)
     matcher = MarketRulesMatcher(inner, t_plus_1=False, lot_size=100, price_limit_pct=0)
     engine = VectorizedBacktestEngine(matcher=matcher)
     strategy = _AlwaysInStrategy()

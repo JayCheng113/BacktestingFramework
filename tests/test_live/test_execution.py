@@ -8,9 +8,9 @@ from ez.portfolio.execution import (
 
 def _default_cost() -> CostModel:
     return CostModel(
-        buy_commission_rate=0.0003,
-        sell_commission_rate=0.0003,
-        min_commission=5.0,
+        buy_commission_rate=0.00008,
+        sell_commission_rate=0.00008,
+        min_commission=0.0,
         stamp_tax_rate=0.0005,
         slippage_rate=0.0,
     )

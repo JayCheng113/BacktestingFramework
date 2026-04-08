@@ -9,7 +9,7 @@ from ez.core.matcher import FillResult, SimpleMatcher
 
 @pytest.fixture
 def inner():
-    return SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+    return SimpleMatcher(commission_rate=0.00008, min_commission=5.0)
 
 
 @pytest.fixture
@@ -121,10 +121,10 @@ class TestLotSize:
         """
         # Small trade where original commission hits min floor:
         # 1200 cash @ 10/share → ~120 shares → rounds to 100 shares
-        # Original comm: max(1200 * 0.0003, 5) = 5 (floor)
+        # Original comm: max(1200 * 0.00008, 5) = 5 (floor)
         # Prior bug: scaled to 5 * (100/120) = 4.17 (below floor!)
-        # Fixed: max(100 * 10 * 0.0003, 5) = max(0.3, 5) = 5 (stays at floor)
-        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+        # Fixed: max(100 * 10 * 0.00008, 5) = max(0.08, 5) = 5 (stays at floor)
+        inner = SimpleMatcher(commission_rate=0.00008, min_commission=5.0)
         matcher = MarketRulesMatcher(inner, t_plus_1=False, lot_size=100, price_limit_pct=0)
         matcher.on_bar(bar_index=1, prev_close=10.0)
         fill = matcher.fill_buy(10.0, 1200)
@@ -134,7 +134,7 @@ class TestLotSize:
             f"Lot-rounding dropped commission below min_commission floor: "
             f"{fill.commission} (expected >= 5.0)"
         )
-        # Exact expected: max(100 * 10 * 0.0003, 5) = max(0.3, 5) = 5
+        # Exact expected: max(100 * 10 * 0.00008, 5) = max(0.08, 5) = 5
         assert abs(fill.commission - 5.0) < 1e-6
 
     def test_lot_rounding_rate_based_commission(self):
@@ -164,7 +164,7 @@ class TestRetryAfterReject:
         """If buy is rejected (e.g., price limit), engine should retry next bar."""
         from ez.backtest.engine import VectorizedBacktestEngine
 
-        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+        inner = SimpleMatcher(commission_rate=0.00008, min_commission=5.0)
         matcher = MarketRulesMatcher(inner, t_plus_1=True, lot_size=0, price_limit_pct=0.1)
         engine = VectorizedBacktestEngine(matcher=matcher)
 
@@ -279,7 +279,7 @@ class TestEngineIntegration:
             "volume": rng.integers(100_000, 5_000_000, n),
         }, index=dates)
 
-        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+        inner = SimpleMatcher(commission_rate=0.00008, min_commission=5.0)
         mr_matcher = MarketRulesMatcher(inner, t_plus_1=True, lot_size=100)
         engine = VectorizedBacktestEngine(matcher=mr_matcher)
         strategy = MACrossStrategy(short_period=5, long_period=20)
@@ -314,11 +314,11 @@ class TestEngineIntegration:
 
         # Without market rules
         engine_plain = VectorizedBacktestEngine(
-            matcher=SimpleMatcher(commission_rate=0.0003, min_commission=5.0))
+            matcher=SimpleMatcher(commission_rate=0.00008, min_commission=5.0))
         r_plain = engine_plain.run(data, strategy, initial_capital=100_000)
 
         # With market rules
-        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5.0)
+        inner = SimpleMatcher(commission_rate=0.00008, min_commission=5.0)
         engine_mr = VectorizedBacktestEngine(
             matcher=MarketRulesMatcher(inner, t_plus_1=True, lot_size=100))
         r_mr = engine_mr.run(data, strategy, initial_capital=100_000)

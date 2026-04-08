@@ -352,7 +352,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             <span className="text-xs px-2 py-0.5 rounded"
               style={{
                 backgroundColor: result.significance.is_significant ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                color: result.significance.is_significant ? CHART.down : CHART.up,
+                color: result.significance.is_significant ? CHART.success : CHART.error,
               }}>
               {result.significance.is_significant ? '显著' : '不显著'}
             </span>
@@ -423,7 +423,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             </div>
             <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
               <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>过拟合评分</div>
-              <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.5 ? CHART.up : CHART.down }}>
+              <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.5 ? CHART.error : CHART.success }}>
                 {wfResult.overfitting_score.toFixed(4)}
               </div>
             </div>
@@ -440,7 +440,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
             <span className="text-xs px-2 py-0.5 rounded"
               style={{
                 backgroundColor: wfResult.overfitting_score <= 0.3 ? 'rgba(34,197,94,0.15)' : wfResult.overfitting_score <= 0.6 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                color: wfResult.overfitting_score <= 0.3 ? CHART.down : wfResult.overfitting_score <= 0.6 ? CHART.warn : CHART.up,
+                color: wfResult.overfitting_score <= 0.3 ? CHART.success : wfResult.overfitting_score <= 0.6 ? CHART.warn : CHART.error,
               }}>
               {wfResult.overfitting_score <= 0.3 ? '稳健' : wfResult.overfitting_score <= 0.6 ? '轻微过拟合' : '过拟合'}
             </span>

@@ -30,11 +30,11 @@ def _make_spec(symbols=("AAA", "BBB"), market="cn_stock", freq="weekly",
         initial_cash=initial_cash,
         t_plus_1=True,
         lot_size=100,
-        buy_commission_rate=0.0003,
-        sell_commission_rate=0.0003,
+        buy_commission_rate=0.00008,
+        sell_commission_rate=0.00008,
         stamp_tax_rate=0.0005,
         slippage_rate=0.0,
-        min_commission=5.0,
+        min_commission=0.0,
     )
     defaults.update(overrides)
     return DeploymentSpec(**defaults)

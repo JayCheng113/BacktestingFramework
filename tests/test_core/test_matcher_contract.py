@@ -10,10 +10,10 @@ def all_matchers() -> list[Matcher]:
     """Return instances of every Matcher implementation to validate."""
     return [
         SimpleMatcher(commission_rate=0.001, min_commission=0.0),
-        SimpleMatcher(commission_rate=0.0003, min_commission=5.0),
+        SimpleMatcher(commission_rate=0.00008, min_commission=5.0),
         SimpleMatcher(commission_rate=0.0, min_commission=0.0),
         SlippageMatcher(slippage_rate=0.001, commission_rate=0.001, min_commission=0.0),
-        SlippageMatcher(slippage_rate=0.005, commission_rate=0.0003, min_commission=5.0),
+        SlippageMatcher(slippage_rate=0.005, commission_rate=0.00008, min_commission=5.0),
         SlippageMatcher(slippage_rate=0.0, commission_rate=0.0, min_commission=0.0),
     ]
 

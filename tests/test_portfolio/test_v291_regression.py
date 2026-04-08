@@ -402,7 +402,7 @@ class TestSellSideTaxMatcher:
         from ez.api.routes.backtest import _SellSideTaxMatcher
         from ez.core.matcher import SimpleMatcher
 
-        inner = SimpleMatcher(commission_rate=0.0003, min_commission=0)
+        inner = SimpleMatcher(commission_rate=0.00008, min_commission=0)
         wrapper = _SellSideTaxMatcher(inner, stamp_tax_rate=0.001)
 
         # Buy: wrapper should match inner exactly
@@ -422,7 +422,7 @@ class TestSellSideTaxMatcher:
         from ez.api.routes.backtest import _SellSideTaxMatcher
         from ez.core.matcher import SimpleMatcher
 
-        inner = SimpleMatcher(commission_rate=0.0003, min_commission=5)
+        inner = SimpleMatcher(commission_rate=0.00008, min_commission=5)
         wrapper = _SellSideTaxMatcher(inner, stamp_tax_rate=0.001)
         # Sell 0 shares: no tax
         result = wrapper.fill_sell(10.0, 0)

@@ -426,7 +426,7 @@ export default function PaperTradingPage() {
                 {gateVerdict.reasons && gateVerdict.reasons.length > 0 && (
                   <div className="grid grid-cols-2 gap-1 mt-2">
                     {gateVerdict.reasons.map((r, i) => (
-                      <span key={i} className="text-xs" style={{ color: r.passed ? CHART.textSecondary : CHART.up }}>
+                      <span key={i} className="text-xs" style={{ color: r.passed ? CHART.textSecondary : CHART.error }}>
                         {r.passed ? '  ' : '  '} {r.message}
                       </span>
                     ))}

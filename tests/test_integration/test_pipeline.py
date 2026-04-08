@@ -38,7 +38,7 @@ def test_full_pipeline_with_mock(tmp_path):
     ]).set_index("time")
 
     strategy = MACrossStrategy(short_period=3, long_period=5)
-    engine = VectorizedBacktestEngine(commission_rate=0.0003)
+    engine = VectorizedBacktestEngine(commission_rate=0.00008)
     result = engine.run(df, strategy, initial_capital=100000)
 
     assert result.metrics["sharpe_ratio"] is not None
@@ -113,9 +113,9 @@ def test_backtest_with_market_rules(sample_df):
 
     inner = SlippageMatcher(
         slippage_rate=0.001,
-        commission_rate=0.0003,
-        sell_commission_rate=0.0003,
-        min_commission=5.0,
+        commission_rate=0.00008,
+        sell_commission_rate=0.00008,
+        min_commission=0.0,
     )
     matcher = MarketRulesMatcher(
         inner=inner,
@@ -191,7 +191,7 @@ def test_portfolio_backtest_with_optimizer():
     data, dates = _make_portfolio_data(symbols)
     cal = TradingCalendar.from_dates([d.date() for d in dates])
     universe = Universe(symbols)
-    cost = CostModel(buy_commission_rate=0.0003, stamp_tax_rate=0.0005)
+    cost = CostModel(buy_commission_rate=0.00008, stamp_tax_rate=0.0005)
 
     optimizer = MeanVarianceOptimizer(
         risk_aversion=1.0,
@@ -230,7 +230,7 @@ def test_full_pipeline_research_gate(sample_df):
 
     # 1. Run backtest — use short warmup (3 bars) to fit 100-bar sample data
     strategy = MACrossStrategy(short_period=2, long_period=3)
-    engine = VectorizedBacktestEngine(commission_rate=0.0003)
+    engine = VectorizedBacktestEngine(commission_rate=0.00008)
     bt_result = engine.run(sample_df, strategy, initial_capital=100_000)
 
     # 2. Run WF — n_splits=2 with short warmup strategy

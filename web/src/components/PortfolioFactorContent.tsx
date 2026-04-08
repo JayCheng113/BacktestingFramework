@@ -337,7 +337,7 @@ export default function PortfolioFactorContent(props: Props) {
 // ─── ML Diagnostics Panel ────────────────────────────────────────
 
 const VERDICT_COLORS: Record<string, string> = {
-  healthy: CHART.down, mild_overfit: '#eab308', severe_overfit: CHART.up,
+  healthy: CHART.success, mild_overfit: '#eab308', severe_overfit: CHART.error,
   unstable: '#f97316', insufficient_data: '#6b7280', unknown: '#6b7280',
 }
 const VERDICT_LABELS: Record<string, string> = {
@@ -463,7 +463,7 @@ function MLDiagnosticsPanel({ symbols, market, startDate, endDate, factorCategor
                     {Object.entries(result.feature_importance_cv).map(([feat, cv]) => (
                       <div key={feat} className="flex justify-between px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-secondary)' }}>
                         <span>{feat}</span>
-                        <span style={{ color: cv != null && cv > 2 ? CHART.up : cv != null && cv > 1 ? '#eab308' : CHART.down }}>
+                        <span style={{ color: cv != null && cv > 2 ? CHART.error : cv != null && cv > 1 ? '#eab308' : CHART.success }}>
                           {cv != null ? cv.toFixed(3) : '-'}
                         </span>
                       </div>
