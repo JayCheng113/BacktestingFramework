@@ -325,6 +325,10 @@ class PortfolioCommonConfig(BaseModel):
         description="Override weekly rebalance day (0=Mon..4=Fri). "
                     "None = last trading day of each week (default).",
     )
+    skip_terminal_liquidation: bool = Field(
+        default=False,
+        description="Skip forced liquidation at backtest end (QMT compat).",
+    )
 
 
 class PortfolioRunRequest(PortfolioCommonConfig):
@@ -838,6 +842,7 @@ def run_portfolio(req: PortfolioRunRequest):
         t_plus_1=(req.market == "cn_stock"),
         strict_lookback=req.strict_lookback,
         rebal_weekday=req.rebal_weekday,
+        skip_terminal_liquidation=req.skip_terminal_liquidation,
     )
 
     # Sanitize NaN/Inf in metrics
@@ -1268,6 +1273,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 risk_manager=combo_rm,
                 strict_lookback=req.strict_lookback,
                 rebal_weekday=req.rebal_weekday,
+                skip_terminal_liquidation=req.skip_terminal_liquidation,
             )
             m = combo_result.metrics
             results.append({

@@ -128,6 +128,7 @@ export default function PortfolioPanel() {
   })
   const [freq, setFreq] = useState('monthly')
   const [rebalWeekday, setRebalWeekday] = useState<number | null>(null)  // 0=Mon..4=Fri, null=default
+  const [skipTerminalLiquidation, setSkipTerminalLiquidation] = useState(false)
   const [strategyParams, setStrategyParams] = useState<Record<string, ParamValue>>({})
   const [settings, setSettings] = useState<BacktestSettingsValue>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(false)
@@ -522,6 +523,7 @@ export default function PortfolioPanel() {
         market,
         start_date: startDate, end_date: endDate, freq,
         rebal_weekday: freq === 'weekly' ? rebalWeekday : null,
+        skip_terminal_liquidation: skipTerminalLiquidation,
         strategy_params: cleanParams,
         initial_cash: settings.initial_cash,
         buy_commission_rate: settings.buy_commission_rate,
@@ -579,6 +581,7 @@ export default function PortfolioPanel() {
         market,
         start_date: startDate, end_date: endDate, freq,
         rebal_weekday: freq === 'weekly' ? rebalWeekday : null,
+        skip_terminal_liquidation: skipTerminalLiquidation,
         strategy_params: selected === 'StrategyEnsemble' && ensembleConfigRef.current
           ? ensembleConfigRef.current
           : Object.fromEntries(Object.entries(strategyParams).filter(([k]) => !k.startsWith('_'))),
@@ -690,6 +693,7 @@ export default function PortfolioPanel() {
         market,
         start_date: startDate, end_date: endDate, freq,
         rebal_weekday: freq === 'weekly' ? rebalWeekday : null,
+        skip_terminal_liquidation: skipTerminalLiquidation,
         param_grid: paramGrid, max_combinations: 50,
         buy_commission_rate: settings.buy_commission_rate, sell_commission_rate: settings.sell_commission_rate,
         min_commission: settings.min_commission, stamp_tax_rate: settings.stamp_tax_rate,
@@ -885,6 +889,7 @@ export default function PortfolioPanel() {
           endDate={endDate} setEndDate={setEndDate}
           freq={freq} setFreq={setFreq}
           rebalWeekday={rebalWeekday} setRebalWeekday={setRebalWeekday}
+          skipTerminalLiquidation={skipTerminalLiquidation} setSkipTerminalLiquidation={setSkipTerminalLiquidation}
           settings={settings} setSettings={setSettings}
           strategies={strategies} factors={factors} factorCategories={factorCategories}
           selected={selected} setSelected={setSelected}

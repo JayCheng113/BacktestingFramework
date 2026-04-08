@@ -66,6 +66,7 @@ def run_portfolio_backtest(
     t_plus_1: bool = True,  # V2.12.1 codex: A-share only; set False for US/HK
     strict_lookback: bool = False,  # V2.13.2 G1.4: raise on insufficient lookback
     rebal_weekday: int | None = None,  # 0=Mon..4=Fri; weekly only
+    skip_terminal_liquidation: bool = False,  # QMT compat: no forced liquidation at end
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -264,13 +265,18 @@ def run_portfolio_backtest(
             # Strategy returns None → skip rebalance (no trade).
             # Must still record daily equity/dates/weights before continuing.
             if raw_weights is None:
-                new_eq = cash + sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)
-                if new_eq > 0:
-                    prev_weights = {s: (holdings.get(s, 0) * prices.get(s, 0)) / new_eq
-                                    for s in holdings if s in prices}
-                # Record daily equity even on skip days (critical for correct annualization)
+                # Compute equity once (reviewer I1: was computed twice)
                 position_value = sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)
                 equity = cash + position_value
+                if equity > 0:
+                    prev_weights = {s: (holdings.get(s, 0) * prices.get(s, 0)) / equity
+                                    for s in holdings if s in prices}
+                # Reviewer I2: accounting invariant check on skip days too
+                if cash < -EPS_FUND:
+                    raise AccountingError(f"Negative cash on {day}: cash={cash:.2f}")
+                if equity <= 0:
+                    raise AccountingError(f"Non-positive equity on {day}: equity={equity:.2f}")
+                # Record daily equity (critical for correct annualization)
                 daily_weights: dict[str, float] = {}
                 if equity > 0:
                     for sym, sh in holdings.items():
@@ -435,7 +441,7 @@ def run_portfolio_backtest(
     # pre-liquidation curve, systematically OVERSTATING returns when positions
     # remained at period end (mark-to-market counted, but commission + stamp +
     # slippage of the final close-out were never charged against the curve).
-    if holdings and prices and trading_days:
+    if holdings and prices and trading_days and not skip_terminal_liquidation:
         liq_date = trading_days[-1] + timedelta(days=1)
         had_liquidation = False
         for sym in list(holdings.keys()):

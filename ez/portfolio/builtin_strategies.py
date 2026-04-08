@@ -44,6 +44,11 @@ def _get_close(df: pd.DataFrame) -> pd.Series:
     return df["adj_close"] if "adj_close" in df.columns else df["close"]
 
 
+def _get_raw_close(df: pd.DataFrame) -> pd.Series:
+    """QMT strategies use raw close (not adjusted). QMT: closes['close']."""
+    return df["close"]
+
+
 def _remove_outliers_and_refit(prices) -> tuple[float, float, np.ndarray, float]:
     """QMT remove_outliers_and_refit(): weighted linear regression with
     2-outlier removal. Returns (slope, intercept, outlier_indices, mse).
@@ -144,7 +149,7 @@ class EtfMacdRotation(PortfolioStrategy):
         for sym, df in universe_data.items():
             if len(df) < self.rank_period + self.ma_period + 10:
                 continue
-            close = _get_close(df)
+            close = _get_raw_close(df)  # QMT uses raw close, not adj_close
             close_ma = close.rolling(self.ma_period).mean()
             valid = close_ma.dropna()
             if len(valid) < self.rank_period + 2:
@@ -282,8 +287,8 @@ class EtfSectorSwitch(PortfolioStrategy):
         for sym, df in universe_data.items():
             if len(df) < self.rank_period + self.ma_period + 15:
                 continue
-            close = _get_close(df)
-            raw_close = df["close"] if "close" in df.columns else close
+            close = _get_raw_close(df)  # QMT uses raw close throughout
+            raw_close = close  # same — QMT has no adj_close concept
             close_ma = close.rolling(self.ma_period).mean()
             valid = close_ma.dropna()
             if len(valid) < self.rank_period + 5:

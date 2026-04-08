@@ -20,6 +20,7 @@ interface LivePreset {
   id: string; name: string; desc: string; strategy: string
   params: Record<string, number>; symbols: string; freq: string
   rebalWeekday: number | null; color: string
+  skipTerminalLiquidation?: boolean
   // Optional overrides for dates / cost settings / benchmark
   startDate?: string; endDate?: string; benchmark?: string
   costOverrides?: Partial<{ buy_commission_rate: number; sell_commission_rate: number; min_commission: number; stamp_tax_rate: number; slippage_rate: number }>
@@ -71,6 +72,7 @@ const LIVE_PRESETS: LivePreset[] = [
       stamp_tax_rate: 0.0,            // ETF无印花税
       slippage_rate: 0.001,           // QMT图: 滑点0.001
     },
+    skipTerminalLiquidation: true,    // QMT: no forced liquidation at end
   },
 ]
 
@@ -227,6 +229,7 @@ interface Props {
   endDate: string; setEndDate: (v: string) => void
   freq: string; setFreq: (v: string) => void
   rebalWeekday: number | null; setRebalWeekday: (v: number | null) => void
+  skipTerminalLiquidation: boolean; setSkipTerminalLiquidation: (v: boolean) => void
   settings: BacktestSettingsValue; setSettings: (v: BacktestSettingsValue) => void
   strategies: { name: string; description: string; parameters: Record<string, ParamSchema> }[]
   factors: string[]
@@ -286,6 +289,7 @@ export default function PortfolioRunContent(props: Props) {
   const {
     symbols, setSymbols, market, setMarket,
     startDate, setStartDate, endDate, setEndDate, freq, setFreq, rebalWeekday, setRebalWeekday,
+    skipTerminalLiquidation: _skipTermLiq, setSkipTerminalLiquidation,
     settings, setSettings, strategies, factors, factorCategories,
     selected, setSelected, strategyParams, updateParam, currentSchema, currentDesc,
     result, loading, wfResult, setWfResult, wfLoading, wfSplits, setWfSplits, wfTrainRatio, setWfTrainRatio,
@@ -426,6 +430,7 @@ export default function PortfolioRunContent(props: Props) {
     setSymbols(preset.symbols)
     setFreq(preset.freq)
     setRebalWeekday(preset.rebalWeekday)
+    setSkipTerminalLiquidation(!!preset.skipTerminalLiquidation)
     setMarket('cn_stock')
     setPendingPresetParams(preset.params as Record<string, ParamValue>)
     // Optional: override dates
