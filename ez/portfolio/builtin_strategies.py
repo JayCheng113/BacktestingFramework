@@ -422,10 +422,11 @@ class EtfSectorSwitch(PortfolioStrategy):
         self.state["select_assets"] = final
 
         # QMT V1.2 lines 503-506: if top-1 last period return > 6%, select one more
+        # NOTE: QMT only updates win_etf_com (return value), NOT select_assets.
+        # select_assets stays at original etf_pos for next call's penalty loop.
         if final and final[0] in pre_profit and pre_profit[final[0]] > 0.06:
             etf_pos += 1
             final = [sym for sym, _ in candidates[:etf_pos]]
-            self.state["select_assets"] = final
 
         if not final:
             return {}
@@ -473,9 +474,10 @@ class EtfRotateCombo(PortfolioStrategy):
 
     _SYMBOL_MAP = {"510880.SH": "515100.SH"}
 
-    # QMT etf_list = etf_list1 + etf_list2 = 21 symbols (the weighted scoring pool).
-    # 159531.SZ and 515100.SH are rotate-only — they must NOT enter Friday weighted scoring.
-    DEFAULT_COM_SYMBOLS = DEFAULT_BROAD_ETFS | DEFAULT_SECTOR_ETFS  # 10 + 11 = 21
+    # QMT etf_list = etf_list1 + etf_list2 + 159531.SZ = 22 symbols (the weighted scoring pool).
+    # 159531.SZ is in etf_list (line 21) AND etf_list_rotate — it participates in BOTH branches.
+    # Only 515100.SH is rotate-only (not in etf_list, enters weighted via 510880 mapping).
+    DEFAULT_COM_SYMBOLS = DEFAULT_BROAD_ETFS | DEFAULT_SECTOR_ETFS | {"159531.SZ"}  # 10 + 11 + 1 = 22
 
     def __init__(self, rotate_rate: float = 0.3, rotate_top_n: int = 2,
                  com_top_n: int = 1, rotate_weekday: int = 3, com_weekday: int = 4,
@@ -490,7 +492,9 @@ class EtfRotateCombo(PortfolioStrategy):
             raise ValueError(f"rotate_weekday ({rotate_weekday}) must differ from com_weekday ({com_weekday})")
         self._rotate_syms = set(rotate_symbols) if rotate_symbols else set(self.DEFAULT_ROTATE_SYMBOLS)
         _broad = broad_symbols if broad_symbols else list(self.DEFAULT_BROAD_ETFS)
-        _sector = sector_symbols if sector_symbols else list(self.DEFAULT_SECTOR_ETFS)
+        # 159531.SZ is in QMT etf_list but not in etf_list1 or etf_list2.
+        # QMT's else branch (line 369-370) classifies it as sector (etf_ratio_top2).
+        _sector = sector_symbols if sector_symbols else list(self.DEFAULT_SECTOR_ETFS | {"159531.SZ"})
         self._rotator = EtfMacdRotation(top_n=rotate_top_n)
         self._switcher = EtfSectorSwitch(top_n=com_top_n, broad_symbols=_broad, sector_symbols=_sector)
 
