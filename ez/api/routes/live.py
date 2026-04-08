@@ -77,7 +77,7 @@ def reset_live_singletons() -> None:
     global _deployment_store, _scheduler, _monitor
     if _deployment_store is not None:
         try:
-            _deployment_store._conn.close()
+            _deployment_store.close()  # uses lock, not raw _conn.close()
         except Exception:
             pass
     _deployment_store = None

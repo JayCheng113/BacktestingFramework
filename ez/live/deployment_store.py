@@ -426,5 +426,6 @@ class DeploymentStore:
         })
 
     def close(self):
-        if self._conn:
-            self._conn.close()
+        with self._lock:
+            if self._conn:
+                self._conn.close()

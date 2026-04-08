@@ -43,6 +43,7 @@ export default function PaperTradingPage() {
   const { showToast } = useToast()
   // ----- State -----
   const [deployments, setDeployments] = useState<DeploymentSummary[]>([])
+  const [listLoading, setListLoading] = useState(true)  // show spinner on first load
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<DeploymentDetail | null>(null)
   const [healthMap, setHealthMap] = useState<Record<string, DeploymentHealth>>({})
@@ -76,6 +77,8 @@ export default function PaperTradingPage() {
       setAlerts(dashRes.data.alerts)
     } catch {
       // silent — dashboard auto-refreshes
+    } finally {
+      setListLoading(false)
     }
   }, [])
 
@@ -256,7 +259,12 @@ export default function PaperTradingPage() {
             {alerts.length > 0 && <span style={{ color: '#ef4444' }}> | {alerts.length} 个告警</span>}
           </p>
         </div>
-        {deployments.length === 0 && (
+        {listLoading && deployments.length === 0 && (
+          <div className="p-4 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
+            加载中...
+          </div>
+        )}
+        {!listLoading && deployments.length === 0 && (
           <div className="p-4 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
             暂无部署。请先在组合回测中运行策略，然后点击 "部署到模拟盘"。
           </div>
