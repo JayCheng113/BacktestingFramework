@@ -65,6 +65,7 @@ def run_portfolio_backtest(
     risk_manager: RiskManager | None = None,      # V2.12: 风控管理器
     t_plus_1: bool = True,  # V2.12.1 codex: A-share only; set False for US/HK
     strict_lookback: bool = False,  # V2.13.2 G1.4: raise on insufficient lookback
+    rebal_weekday: int | None = None,  # 0=Mon..4=Fri; weekly only
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -120,7 +121,7 @@ def run_portfolio_backtest(
         pass
 
     trading_days = calendar.trading_days_between(start, end)
-    rebal_dates = set(calendar.rebalance_dates(start, end, freq))
+    rebal_dates = set(calendar.rebalance_dates(start, end, freq, rebal_weekday=rebal_weekday))
 
     # State
     cash = initial_cash

@@ -20,24 +20,26 @@ const LIVE_PRESETS = [
   {
     id: 'macd_rotation',
     name: 'ETF MACD轮动',
-    desc: '10只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权',
+    desc: '10只ETF, 20日均线动量 + 周线MACD过滤, 选前2等权, 周四调仓',
     strategy: 'EtfMacdRotation',
     params: { top_n: 2, rank_period: 20 } as Record<string, number>,
     symbols: '510500.SH,159915.SZ,515100.SH,159531.SZ,513100.SH,513880.SH,513260.SH,513600.SH,518880.SH,159985.SZ',
     freq: 'weekly',
+    rebalWeekday: 3 as number | null,  // QMT: 周四 (weekday=3)
     color: '#2563eb',
   },
   {
     id: 'sector_switch',
     name: 'ETF行业宽基切换',
-    desc: '22只ETF, 多因子加权 + 累积投票 + 宽基/行业切换, 选前1',
+    desc: '22只ETF, 多因子加权 + 累积投票 + 宽基/行业切换, 选前1, 周五调仓',
     strategy: 'EtfSectorSwitch',
     params: { top_n: 1 } as Record<string, number>,
     symbols: '510300.SH,510500.SH,159915.SZ,510880.SH,513100.SH,513880.SH,513260.SH,513660.SH,518880.SH,159985.SZ,162411.SZ,512010.SH,512690.SH,515700.SH,159852.SZ,159813.SZ,159851.SZ,515220.SH,159869.SZ,515880.SH,512660.SH,512980.SH',
     freq: 'weekly',
+    rebalWeekday: 4 as number | null,  // QMT: 周五 (weekday=4)
     color: '#059669',
   },
-] as const
+]
 
 import { CATEGORY_LABELS, FACTOR_LABELS } from './shared/portfolioLabels'
 
@@ -118,6 +120,7 @@ interface Props {
   startDate: string; setStartDate: (v: string) => void
   endDate: string; setEndDate: (v: string) => void
   freq: string; setFreq: (v: string) => void
+  rebalWeekday: number | null; setRebalWeekday: (v: number | null) => void
   settings: BacktestSettingsValue; setSettings: (v: BacktestSettingsValue) => void
   strategies: { name: string; description: string; parameters: Record<string, ParamSchema> }[]
   factors: string[]
@@ -176,7 +179,7 @@ export default function PortfolioRunContent(props: Props) {
   const { showToast } = useToast()
   const {
     symbols, setSymbols, market, setMarket,
-    startDate, setStartDate, endDate, setEndDate, freq, setFreq,
+    startDate, setStartDate, endDate, setEndDate, freq, setFreq, rebalWeekday, setRebalWeekday,
     settings, setSettings, strategies, factors, factorCategories,
     selected, setSelected, strategyParams, updateParam, currentSchema, currentDesc,
     result, loading, wfResult, setWfResult, wfLoading, wfSplits, setWfSplits, wfTrainRatio, setWfTrainRatio,
@@ -312,6 +315,7 @@ export default function PortfolioRunContent(props: Props) {
     setSelected(preset.strategy as string)
     setSymbols(preset.symbols as string)
     setFreq(preset.freq as string)
+    setRebalWeekday('rebalWeekday' in preset ? (preset as Record<string, unknown>).rebalWeekday as number | null : null)
     setMarket('cn_stock')
     setPendingPresetParams({ ...preset.params } as Record<string, ParamValue>)
     showToast('success', `已加载实盘预设: ${preset.name}`)
@@ -393,13 +397,28 @@ export default function PortfolioRunContent(props: Props) {
           )}
           <div className="flex flex-col gap-1">
             <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>换仓频率</label>
-            <select value={freq} onChange={e => setFreq(e.target.value)} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+            <select value={freq} onChange={e => { setFreq(e.target.value); if (e.target.value !== 'weekly') setRebalWeekday(null) }} className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
               <option value="daily">日度</option>
               <option value="weekly">周度</option>
               <option value="monthly">月度</option>
               <option value="quarterly">季度</option>
             </select>
           </div>
+          {freq === 'weekly' && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>调仓日</label>
+              <select value={rebalWeekday === null ? '' : String(rebalWeekday)}
+                onChange={e => setRebalWeekday(e.target.value === '' ? null : Number(e.target.value))}
+                className="px-3 py-1.5 rounded text-sm" style={inputStyle}>
+                <option value="">默认 (周末)</option>
+                <option value="0">周一</option>
+                <option value="1">周二</option>
+                <option value="2">周三</option>
+                <option value="3">周四</option>
+                <option value="4">周五</option>
+              </select>
+            </div>
+          )}
         </div>
         {currentDesc && (
           <div className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>{currentDesc}</div>

@@ -319,6 +319,12 @@ class PortfolioCommonConfig(BaseModel):
         description="When True, raise ValueError if strategy.lookback_days "
                     "< max factor warmup_period (instead of just warning).",
     )
+    # Weekly rebalance day (V2.16.2): 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
+    rebal_weekday: int | None = Field(
+        default=None, ge=0, le=4,
+        description="Override weekly rebalance day (0=Mon..4=Fri). "
+                    "None = last trading day of each week (default).",
+    )
 
 
 class PortfolioRunRequest(PortfolioCommonConfig):
@@ -824,6 +830,7 @@ def run_portfolio(req: PortfolioRunRequest):
         optimizer=optimizer_instance, risk_manager=risk_mgr,
         t_plus_1=(req.market == "cn_stock"),
         strict_lookback=req.strict_lookback,
+        rebal_weekday=req.rebal_weekday,
     )
 
     # Sanitize NaN/Inf in metrics
@@ -1063,6 +1070,7 @@ def portfolio_walk_forward_api(req: PortfolioWFRequest):
             optimizer_factory=optimizer_factory,
             risk_manager_factory=risk_manager_factory,
             strict_lookback=req.strict_lookback,
+            rebal_weekday=req.rebal_weekday,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -1250,6 +1258,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 optimizer=combo_opt,
                 risk_manager=combo_rm,
                 strict_lookback=req.strict_lookback,
+                rebal_weekday=req.rebal_weekday,
             )
             m = combo_result.metrics
             results.append({

@@ -102,13 +102,17 @@ class TradingCalendar:
 
     def rebalance_dates(
         self, start: date, end: date, freq: RebalanceFreq,
+        rebal_weekday: int | None = None,
     ) -> list[date]:
         """Compute rebalance dates within [start, end].
 
         Raises ValueError for unrecognized freq.
 
         - daily: every trading day
-        - weekly: last trading day of each calendar week
+        - weekly: last trading day of each calendar week (default), or the
+          trading day closest to ``rebal_weekday`` (0=Mon .. 4=Fri) within
+          each week.  If that weekday is not a trading day, the nearest
+          **preceding** trading day in the same week is used.
         - monthly: last trading day of each calendar month
         - quarterly: last trading day of each calendar quarter
         """
@@ -121,6 +125,27 @@ class TradingCalendar:
 
         if freq == "daily":
             return days
+
+        # Weekly with specific weekday: group by ISO week, pick target day
+        if freq == "weekly" and rebal_weekday is not None:
+            if not (0 <= rebal_weekday <= 4):
+                raise ValueError(f"rebal_weekday must be 0-4 (Mon-Fri), got {rebal_weekday}")
+            from itertools import groupby
+            result = []
+            for _, week_days in groupby(days, key=lambda d: d.isocalendar()[:2]):
+                week_list = list(week_days)
+                # Find target weekday or nearest preceding trading day
+                best = None
+                for d in week_list:
+                    if d.weekday() == rebal_weekday:
+                        best = d
+                        break
+                    if d.weekday() < rebal_weekday:
+                        best = d  # keep updating — last one before target
+                if best is None:
+                    best = week_list[-1]  # fallback: last trading day of week
+                result.append(best)
+            return result
 
         result = []
         for i, d in enumerate(days):
