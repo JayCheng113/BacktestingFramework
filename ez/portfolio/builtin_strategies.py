@@ -146,8 +146,10 @@ class EtfMacdRotation(PortfolioStrategy):
 
     def generate_weights(self, universe_data, date, prev_weights, prev_returns):
         # QMT strict weekday mode: only trade on exact weekday, no holiday fallback
-        # QMT exception: first trading day always triggers (line 277: if date_index == 0: return True)
+        # QMT exception: date_index==0 fires exactly once (one-shot, unconditional)
         is_first_day = not self.state.get("_has_traded", False)
+        if is_first_day:
+            self.state["_has_traded"] = True  # one-shot: set immediately, not on trade success
         if self._strict_weekday is not None and not is_first_day:
             weekday = date.weekday() if hasattr(date, 'weekday') else date
             if weekday != self._strict_weekday:
@@ -246,7 +248,6 @@ class EtfMacdRotation(PortfolioStrategy):
         if last_syms is not None and current_syms == last_syms:
             return None  # same selection AND same order → no trade
 
-        self.state["_has_traded"] = True
         return result
 
 
