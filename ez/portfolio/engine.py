@@ -261,6 +261,16 @@ def run_portfolio_backtest(
                 prev_weights, prev_returns,
             )
 
+            # Strategy returns None → skip this rebalance day entirely (no trade).
+            # Used by dual-schedule strategies (e.g. EtfRotateCombo) on non-active days.
+            if raw_weights is None:
+                # Still update prev_weights so next active day gets correct actual weights
+                new_eq = cash + sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)
+                if new_eq > 0:
+                    prev_weights = {s: (holdings.get(s, 0) * prices.get(s, 0)) / new_eq
+                                    for s in holdings if s in prices}
+                continue
+
             # V2.12: Optimizer takes priority over allocator
             if optimizer:
                 optimizer.set_context(day, sliced_tradeable)

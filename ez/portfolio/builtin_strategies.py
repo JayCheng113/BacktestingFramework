@@ -550,14 +550,9 @@ class EtfRotateCombo(PortfolioStrategy):
         is_com_day = (weekday == self._com_weekday)
 
         if not is_rotate_day and not is_com_day:
-            # Non-rebalance day: signal "no change" by returning prev_weights.
-            # This must be the ACTUAL current weights (not target), so the engine
-            # sees target == actual → no trades. prev_weights from the engine IS
-            # the actual post-drift weights.
-            if prev_weights:
-                return dict(prev_weights)
-            # First few days before any Thu/Fri: stay in cash
-            return {}
+            # Non-rebalance day: return None → engine skips this day entirely (no trade).
+            # QMT: handlebar returns early on non-Thu/Fri — no trade at all.
+            return None
 
         if is_rotate_day:
             rotate_data = {s: df for s, df in universe_data.items() if s in self._rotate_syms}
