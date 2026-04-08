@@ -11,8 +11,9 @@ from ez.agent.tools import _TOOLS, execute_tool, get_all_tool_schemas
 class TestToolRegistry:
     def test_tools_registered(self):
         schemas = get_all_tool_schemas()
-        assert len(schemas) >= 8
+        assert len(schemas) >= 14
         names = {s["function"]["name"] for s in schemas}
+        # Original 9 tools (V2.7)
         assert "list_strategies" in names
         assert "list_factors" in names
         assert "read_source" in names
@@ -22,6 +23,13 @@ class TestToolRegistry:
         assert "run_experiment" in names
         assert "list_experiments" in names
         assert "explain_metrics" in names
+        # V2.9+ portfolio tools
+        assert "list_portfolio_strategies" in names
+        assert "create_portfolio_strategy" in names
+        assert "create_cross_factor" in names
+        assert "run_portfolio_backtest" in names
+        # V2.16.2 ML Alpha tool
+        assert "create_ml_alpha" in names
 
     def test_schema_format(self):
         for schema in get_all_tool_schemas():
