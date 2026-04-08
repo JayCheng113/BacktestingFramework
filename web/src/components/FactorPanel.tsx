@@ -136,17 +136,47 @@ export default function FactorPanel({ symbol, market, startDate, endDate }: Prop
         <div>
           {/* Metric cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-            {[
-              ['预测能力(IC)', result.ic_mean], ['排名IC', result.rank_ic_mean],
-              ['稳定性(ICIR)', result.icir], ['排名ICIR', result.rank_icir], ['换手率', result.turnover],
-            ].map(([label, val]) => (
-              <div key={label as string} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{label as string}</div>
-                <div className="text-sm font-medium" style={{ color: Math.abs(val as number) > 0.03 ? CHART.accent : 'var(--text-primary)' }}>
-                  {(val as number).toFixed(4)}
+            {(() => {
+              const rateIc = (v: number) => {
+                const a = Math.abs(v)
+                if (a >= 0.05) return { color: '#22c55e', hint: '强' }
+                if (a >= 0.03) return { color: CHART.accent, hint: '中' }
+                if (a >= 0.01) return { color: '#f59e0b', hint: '弱' }
+                return { color: '#ef4444', hint: '无效' }
+              }
+              const rateIcir = (v: number) => {
+                const a = Math.abs(v)
+                if (a >= 0.5) return { color: '#22c55e', hint: '很稳定' }
+                if (a >= 0.3) return { color: CHART.accent, hint: '较稳定' }
+                if (a >= 0.1) return { color: '#f59e0b', hint: '一般' }
+                return { color: '#ef4444', hint: '不稳定' }
+              }
+              const rateTurnover = (v: number) => {
+                if (v <= 0.3) return { color: '#22c55e', hint: '低换手' }
+                if (v <= 0.6) return { color: '#f59e0b', hint: '中等' }
+                return { color: '#ef4444', hint: '高换手' }
+              }
+
+              const metrics: { label: string; val: number; rating: { color: string; hint: string }; tooltip: string }[] = [
+                { label: '预测能力(IC)', val: result.ic_mean, rating: rateIc(result.ic_mean), tooltip: '|IC|≥0.05强, ≥0.03中, ≥0.01弱' },
+                { label: '排名IC', val: result.rank_ic_mean, rating: rateIc(result.rank_ic_mean), tooltip: '排名IC更稳健, 评判标准同IC' },
+                { label: '稳定性(ICIR)', val: result.icir, rating: rateIcir(result.icir), tooltip: '|ICIR|≥0.5很稳定, ≥0.3较稳定' },
+                { label: '排名ICIR', val: result.rank_icir, rating: rateIcir(result.rank_icir), tooltip: '排名ICIR, 评判标准同ICIR' },
+                { label: '换手率', val: result.turnover, rating: rateTurnover(result.turnover), tooltip: '≤0.3低(好), ≤0.6中, >0.6高(成本大)' },
+              ]
+
+              return metrics.map(m => (
+                <div key={m.label} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }} title={m.tooltip}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{m.label}</div>
+                  <div className="text-sm font-medium" style={{ color: m.rating.color }}>
+                    {m.val.toFixed(4)}
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: m.rating.color, opacity: 0.8 }}>
+                    {m.rating.hint}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            })()}
           </div>
           {/* Charts: IC series + IC decay + IC distribution */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
