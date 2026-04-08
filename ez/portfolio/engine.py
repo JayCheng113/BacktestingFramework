@@ -67,6 +67,7 @@ def run_portfolio_backtest(
     strict_lookback: bool = False,  # V2.13.2 G1.4: raise on insufficient lookback
     rebal_weekday: int | None = None,  # 0=Mon..4=Fri; weekly only
     skip_terminal_liquidation: bool = False,  # QMT compat: no forced liquidation at end
+    use_open_price: bool = False,  # QMT 5-min compat: trade at open instead of close
 ) -> PortfolioResult:
     """Run a portfolio backtest with discrete-share accounting.
 
@@ -137,30 +138,35 @@ def run_portfolio_backtest(
     # V2.9.1 PERF: Pre-build price arrays for O(1) lookup by date index
     # {sym: (sorted_dates, adj_prices, raw_prices, date_set)}
     import bisect
-    _sym_data: dict[str, tuple[list[date], list[float], list[float], set[date]]] = {}
+    # Pre-build price arrays for O(1) lookup: (dates, adj_close, raw_close, open, date_set)
+    _sym_data: dict[str, tuple[list[date], list[float], list[float], list[float], set[date]]] = {}
     for sym, df in universe_data.items():
         has_adj = "adj_close" in df.columns
+        has_open = "open" in df.columns
         dates_list = []
         adj_list = []
         raw_list = []
+        open_list = []
         for i in range(len(df)):
             d = df.index[i].date() if isinstance(df.index, pd.DatetimeIndex) else df.index[i]
             dates_list.append(d)
             adj_list.append(float(df.iloc[i]["adj_close"]) if has_adj else float(df.iloc[i]["close"]))
             raw_list.append(float(df.iloc[i]["close"]))
+            open_list.append(float(df.iloc[i]["open"]) if has_open else float(df.iloc[i]["close"]))
         # Ensure sorted for bisect correctness (guard against unsorted input)
         if dates_list != sorted(dates_list):
             order = sorted(range(len(dates_list)), key=lambda i: dates_list[i])
             dates_list = [dates_list[i] for i in order]
             adj_list = [adj_list[i] for i in order]
             raw_list = [raw_list[i] for i in order]
-        _sym_data[sym] = (dates_list, adj_list, raw_list, set(dates_list))
+            open_list = [open_list[i] for i in order]
+        _sym_data[sym] = (dates_list, adj_list, raw_list, open_list, set(dates_list))
 
     # Initialize prev_prices/prev_raw_close from data before first trading day
     # so that limit check works on the very first day of the backtest
     if trading_days:
         first_day = trading_days[0]
-        for sym, (sdates, adj_arr, raw_arr, date_set) in _sym_data.items():
+        for sym, (sdates, adj_arr, raw_arr, _open_arr, date_set) in _sym_data.items():
             idx = bisect.bisect_left(sdates, first_day) - 1
             if idx >= 0:
                 if not np.isnan(adj_arr[idx]):
@@ -177,16 +183,24 @@ def run_portfolio_backtest(
         prices: dict[str, float] = {}
         raw_close_today: dict[str, float] = {}
         has_bar_today: set[str] = set()
+        is_rebal_day = day in rebal_dates
         for sym in holdings.keys() | tradeable:
             if sym not in _sym_data:
                 continue
-            sdates, adj_arr, raw_arr, date_set = _sym_data[sym]
+            sdates, adj_arr, raw_arr, open_arr, date_set = _sym_data[sym]
             # bisect: find rightmost index where date <= day
             idx = bisect.bisect_right(sdates, day) - 1
             if idx >= 0:
                 adj_val = adj_arr[idx]
                 raw_val = raw_arr[idx]
-                if not np.isnan(adj_val):
+                # QMT 5-min compat: on rebalance days, use open price for execution
+                if use_open_price and is_rebal_day and day in date_set:
+                    open_val = open_arr[idx]
+                    if not np.isnan(open_val):
+                        prices[sym] = open_val
+                    elif not np.isnan(adj_val):
+                        prices[sym] = adj_val
+                elif not np.isnan(adj_val):
                     prices[sym] = adj_val
                 elif not np.isnan(raw_val):
                     prices[sym] = raw_val

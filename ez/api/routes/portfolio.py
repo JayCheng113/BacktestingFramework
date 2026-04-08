@@ -329,6 +329,10 @@ class PortfolioCommonConfig(BaseModel):
         default=False,
         description="Skip forced liquidation at backtest end (QMT compat).",
     )
+    use_open_price: bool = Field(
+        default=False,
+        description="Execute trades at open price instead of close (QMT 5-min compat).",
+    )
 
 
 class PortfolioRunRequest(PortfolioCommonConfig):
@@ -843,6 +847,7 @@ def run_portfolio(req: PortfolioRunRequest):
         strict_lookback=req.strict_lookback,
         rebal_weekday=req.rebal_weekday,
         skip_terminal_liquidation=req.skip_terminal_liquidation,
+        use_open_price=req.use_open_price,
     )
 
     # Sanitize NaN/Inf in metrics
@@ -1274,6 +1279,7 @@ def portfolio_search(req: PortfolioSearchRequest):
                 strict_lookback=req.strict_lookback,
                 rebal_weekday=req.rebal_weekday,
                 skip_terminal_liquidation=req.skip_terminal_liquidation,
+                use_open_price=req.use_open_price,
             )
             m = combo_result.metrics
             results.append({

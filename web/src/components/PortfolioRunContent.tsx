@@ -21,6 +21,7 @@ interface LivePreset {
   params: Record<string, number>; symbols: string; freq: string
   rebalWeekday: number | null; color: string
   skipTerminalLiquidation?: boolean
+  useOpenPrice?: boolean
   // Optional overrides for dates / cost settings / benchmark
   startDate?: string; endDate?: string; benchmark?: string
   costOverrides?: Partial<{ buy_commission_rate: number; sell_commission_rate: number; min_commission: number; stamp_tax_rate: number; slippage_rate: number }>
@@ -39,6 +40,7 @@ const LIVE_PRESETS: LivePreset[] = [
     rebalWeekday: null,  // Not applicable (strict_weekday handles it)
     color: '#2563eb',
     skipTerminalLiquidation: true,
+    useOpenPrice: true,    // QMT 5-min backtest: executes at open, not close
   },
   {
     id: 'sector_switch',
@@ -232,6 +234,7 @@ interface Props {
   freq: string; setFreq: (v: string) => void
   rebalWeekday: number | null; setRebalWeekday: (v: number | null) => void
   skipTerminalLiquidation: boolean; setSkipTerminalLiquidation: (v: boolean) => void
+  useOpenPrice: boolean; setUseOpenPrice: (v: boolean) => void
   settings: BacktestSettingsValue; setSettings: (v: BacktestSettingsValue) => void
   strategies: { name: string; description: string; parameters: Record<string, ParamSchema> }[]
   factors: string[]
@@ -292,6 +295,7 @@ export default function PortfolioRunContent(props: Props) {
     symbols, setSymbols, market, setMarket,
     startDate, setStartDate, endDate, setEndDate, freq, setFreq, rebalWeekday, setRebalWeekday,
     skipTerminalLiquidation: _skipTermLiq, setSkipTerminalLiquidation,
+    useOpenPrice: _useOpen, setUseOpenPrice,
     settings, setSettings, strategies, factors, factorCategories,
     selected, setSelected, strategyParams, updateParam, currentSchema, currentDesc,
     result, loading, wfResult, setWfResult, wfLoading, wfSplits, setWfSplits, wfTrainRatio, setWfTrainRatio,
@@ -434,6 +438,7 @@ export default function PortfolioRunContent(props: Props) {
     setFreq(preset.freq)
     setRebalWeekday(preset.rebalWeekday)
     setSkipTerminalLiquidation(!!preset.skipTerminalLiquidation)
+    setUseOpenPrice(!!preset.useOpenPrice)
     setMarket('cn_stock')
     setPendingPresetParams(preset.params as Record<string, ParamValue>)
     // Optional: override dates
