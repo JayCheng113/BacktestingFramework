@@ -926,41 +926,74 @@ export default function PortfolioRunContent(props: Props) {
       )}
 
       {/* 前推验证 Result */}
-      {wfResult && (
-        <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <h4 className="text-sm font-medium mb-2">前推验证结果 ({wfResult.n_splits} 折)</h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>样本外夏普</div>
-              <div className="text-sm font-medium">{wfResult.oos_metrics?.sharpe_ratio?.toFixed(4) ?? '-'}</div>
-            </div>
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>样本外总收益</div>
-              <div className="text-sm font-medium">{wfResult.oos_metrics?.total_return != null ? (wfResult.oos_metrics.total_return * 100).toFixed(2) + '%' : '-'}</div>
-            </div>
-            <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>过拟合评分 (越小越好)</div>
-              <div className="text-sm font-medium" style={{ color: wfResult.overfitting_score > 0.3 ? 'var(--color-down)' : 'var(--text-primary)' }}>
-                {wfResult.overfitting_score?.toFixed(2) ?? '-'}
-              </div>
-            </div>
-            {wfResult.significance && (
-              <div className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>显著性 p</div>
-                <div className="text-sm font-medium" style={{ color: wfResult.significance.is_significant ? 'var(--color-up)' : 'var(--color-down)' }}>
-                  {wfResult.significance.p_value?.toFixed(3) ?? '-'}
+      {wfResult && (() => {
+        const oosSharpe = wfResult.oos_metrics?.sharpe_ratio ?? 0
+        const oosReturn = wfResult.oos_metrics?.total_return ?? 0
+        const overfit = wfResult.overfitting_score ?? 0
+        const pVal = wfResult.significance?.p_value ?? 1
+        const isSig = wfResult.significance?.is_significant ?? false
+
+        const rateSharpe = (v: number) => {
+          if (v >= 1.0) return { color: CHART.success, hint: '优秀' }
+          if (v >= 0.5) return { color: CHART.accent, hint: '可接受' }
+          if (v >= 0) return { color: CHART.warn, hint: '偏弱' }
+          return { color: CHART.error, hint: '亏损' }
+        }
+        const rateReturn = (v: number) => {
+          if (v >= 0.2) return { color: CHART.success, hint: '高收益' }
+          if (v >= 0.05) return { color: CHART.accent, hint: '正收益' }
+          if (v >= 0) return { color: CHART.warn, hint: '微利' }
+          return { color: CHART.error, hint: '亏损' }
+        }
+        const rateOverfit = (v: number) => {
+          if (v <= 0.2) return { color: CHART.success, hint: '稳健' }
+          if (v <= 0.3) return { color: CHART.accent, hint: '轻微' }
+          if (v <= 0.5) return { color: CHART.warn, hint: '中等' }
+          return { color: CHART.error, hint: '严重过拟合' }
+        }
+        const ratePval = (sig: boolean, p: number) => {
+          if (sig && p < 0.01) return { color: CHART.success, hint: '极显著' }
+          if (sig) return { color: CHART.accent, hint: '显著' }
+          if (p < 0.1) return { color: CHART.warn, hint: '边缘' }
+          return { color: CHART.error, hint: '不显著' }
+        }
+
+        const sharpeR = rateSharpe(oosSharpe)
+        const returnR = rateReturn(oosReturn)
+        const overfitR = rateOverfit(overfit)
+        const pvalR = ratePval(isSig, pVal)
+
+        const metrics = [
+          { label: '样本外夏普', value: oosSharpe.toFixed(4), ...sharpeR, tooltip: '>=1.0优秀, >=0.5可接受, <0偏弱' },
+          { label: '样本外总收益', value: (oosReturn * 100).toFixed(2) + '%', ...returnR, tooltip: '>=20%高, >=5%正, <0亏损' },
+          { label: '过拟合评分', value: overfit.toFixed(2), ...overfitR, tooltip: '<=0.2稳健, <=0.3轻微, >0.5严重' },
+          ...(wfResult.significance ? [{ label: '显著性 p', value: pVal.toFixed(3), ...pvalR, tooltip: 'p<0.05显著, p<0.01极显著' }] : []),
+        ]
+
+        return (
+          <div className="p-4 rounded mt-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+            <h4 className="text-sm font-medium mb-2">前推验证结果 ({wfResult.n_splits} 折)</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              {metrics.map(m => (
+                <div key={m.label} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }} title={m.tooltip}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{m.label}</div>
+                  <div className="text-sm font-medium" style={{ color: m.color }}>{m.value}</div>
+                  <div className="text-xs mt-0.5" style={{ color: m.color, opacity: 0.8 }}>{m.hint}</div>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+            <div className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
+              样本内夏普: [{wfResult.is_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}] |
+              样本外夏普: [{wfResult.oos_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}]
+            </div>
+            <div className="text-xs mb-2 px-1" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+              前推验证将数据分为训练/测试段,检验策略在未见数据上的表现。过拟合评分 = (样本内 - 样本外) / |样本内|,越低越好。
+            </div>
+            <button onClick={() => setWfResult(null)} className="text-xs px-2 py-1 rounded"
+              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>
           </div>
-          <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            样本内夏普: [{wfResult.is_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}] |
-            样本外夏普: [{wfResult.oos_sharpes?.map((s: number) => s.toFixed(2)).join(', ')}]
-          </div>
-          <button onClick={() => setWfResult(null)} className="mt-2 text-xs px-2 py-1 rounded"
-            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>关闭</button>
-        </div>
-      )}
+        )
+      })()}
     </>
   )
 }
