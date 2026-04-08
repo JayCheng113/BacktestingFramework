@@ -36,7 +36,7 @@ export default function BacktestSettings({ value, onChange, showBenchmark = true
 
   return (
     <div className="p-4 rounded" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-      <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置 <span className="font-normal" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>(费率为小数: 0.0003 = 0.03%)</span></div>
+      <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>回测设置 <span className="font-normal" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>(费率为小数, 如 0.0003 = 万3 = 0.03%)</span></div>
       <div className="flex flex-wrap gap-3 items-end mb-2">
         {showInitialCash && (
           <div className="flex flex-col gap-1">
