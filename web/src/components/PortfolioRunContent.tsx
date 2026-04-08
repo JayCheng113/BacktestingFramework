@@ -113,6 +113,49 @@ const fmt = (v: number | null | undefined, pct = false) => {
   return pct ? `${(v * 100).toFixed(2)}%` : v.toFixed(4)
 }
 
+// Color-coded metric ratings for portfolio backtest results
+const rateMetric = (key: string, v: number): { color: string; hint: string; tooltip: string } | null => {
+  switch (key) {
+    case 'sharpe_ratio': {
+      if (v >= 1.5) return { color: CHART.success, hint: '优秀', tooltip: '>=1.5优秀, >=1.0良好, >=0.5一般, <0亏损' }
+      if (v >= 1.0) return { color: CHART.accent, hint: '良好', tooltip: '>=1.5优秀, >=1.0良好, >=0.5一般, <0亏损' }
+      if (v >= 0.5) return { color: CHART.warn, hint: '一般', tooltip: '>=1.5优秀, >=1.0良好, >=0.5一般, <0亏损' }
+      return { color: CHART.error, hint: v < 0 ? '亏损' : '偏弱', tooltip: '>=1.5优秀, >=1.0良好, >=0.5一般, <0亏损' }
+    }
+    case 'sortino_ratio': {
+      if (v >= 2.0) return { color: CHART.success, hint: '优秀', tooltip: '>=2.0优秀, >=1.0良好, >=0.5一般' }
+      if (v >= 1.0) return { color: CHART.accent, hint: '良好', tooltip: '>=2.0优秀, >=1.0良好, >=0.5一般' }
+      if (v >= 0.5) return { color: CHART.warn, hint: '一般', tooltip: '>=2.0优秀, >=1.0良好, >=0.5一般' }
+      return { color: CHART.error, hint: '偏弱', tooltip: '>=2.0优秀, >=1.0良好, >=0.5一般' }
+    }
+    case 'max_drawdown': {
+      const a = Math.abs(v)
+      if (a <= 0.1) return { color: CHART.success, hint: '低风险', tooltip: '<=10%低, <=20%中, <=30%高, >30%极高' }
+      if (a <= 0.2) return { color: CHART.accent, hint: '可控', tooltip: '<=10%低, <=20%中, <=30%高, >30%极高' }
+      if (a <= 0.3) return { color: CHART.warn, hint: '偏高', tooltip: '<=10%低, <=20%中, <=30%高, >30%极高' }
+      return { color: CHART.error, hint: '高风险', tooltip: '<=10%低, <=20%中, <=30%高, >30%极高' }
+    }
+    case 'annualized_return': {
+      if (v >= 0.2) return { color: CHART.success, hint: '高收益', tooltip: '>=20%高, >=10%中, >=0正, <0亏损' }
+      if (v >= 0.1) return { color: CHART.accent, hint: '中等', tooltip: '>=20%高, >=10%中, >=0正, <0亏损' }
+      if (v >= 0) return { color: CHART.warn, hint: '微利', tooltip: '>=20%高, >=10%中, >=0正, <0亏损' }
+      return { color: CHART.error, hint: '亏损', tooltip: '>=20%高, >=10%中, >=0正, <0亏损' }
+    }
+    case 'alpha': {
+      if (v >= 0.1) return { color: CHART.success, hint: '强超额', tooltip: '>=10%强, >=5%中, >=0正, <0跑输基准' }
+      if (v >= 0.05) return { color: CHART.accent, hint: '正超额', tooltip: '>=10%强, >=5%中, >=0正, <0跑输基准' }
+      if (v >= 0) return { color: CHART.warn, hint: '持平', tooltip: '>=10%强, >=5%中, >=0正, <0跑输基准' }
+      return { color: CHART.error, hint: '跑输基准', tooltip: '>=10%强, >=5%中, >=0正, <0跑输基准' }
+    }
+    case 'annualized_volatility': {
+      if (v <= 0.15) return { color: CHART.success, hint: '低波动', tooltip: '<=15%低, <=25%中, >25%高' }
+      if (v <= 0.25) return { color: CHART.warn, hint: '中波动', tooltip: '<=15%低, <=25%中, >25%高' }
+      return { color: CHART.error, hint: '高波动', tooltip: '<=15%低, <=25%中, >25%高' }
+    }
+    default: return null
+  }
+}
+
 interface Props {
   // Shared state
   symbols: string; setSymbols: (v: string) => void
@@ -749,14 +792,19 @@ export default function PortfolioRunContent(props: Props) {
             {result.trades.length > 0 && <button onClick={exportTrades} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>导出交易CSV</button>}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            {Object.entries(result.metrics).filter(([k]) => k in metricLabels).map(([k, v]) => (
-              <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{metricLabels[k] || k}</div>
-                <div className="text-sm font-medium" style={{ color: k === 'max_drawdown' ? 'var(--color-down)' : k === 'sharpe_ratio' && (v as number) > 1 ? 'var(--color-up)' : 'var(--text-primary)' }}>
-                  {['total_return', 'annualized_return', 'max_drawdown', 'annualized_volatility', 'turnover_per_rebalance', 'benchmark_return', 'alpha'].includes(k) ? fmt(v as number, true) : k === 'trade_count' || k === 'n_rebalances' || k === 'max_drawdown_duration' ? String(v) : fmt(v as number)}
+            {Object.entries(result.metrics).filter(([k]) => k in metricLabels).map(([k, v]) => {
+              const rating = rateMetric(k, v as number)
+              const displayValue = ['total_return', 'annualized_return', 'max_drawdown', 'annualized_volatility', 'turnover_per_rebalance', 'benchmark_return', 'alpha'].includes(k) ? fmt(v as number, true) : k === 'trade_count' || k === 'n_rebalances' || k === 'max_drawdown_duration' ? String(v) : fmt(v as number)
+              return (
+                <div key={k} className="p-2 rounded text-center" style={{ backgroundColor: 'var(--bg-primary)' }} title={rating?.tooltip}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{metricLabels[k] || k}</div>
+                  <div className="text-sm font-medium" style={{ color: rating?.color || 'var(--text-primary)' }}>
+                    {displayValue}
+                  </div>
+                  {rating && <div className="text-xs mt-0.5" style={{ color: rating.color, opacity: 0.8 }}>{rating.hint}</div>}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
           {equityOption && <ReactECharts option={equityOption} style={{ height: 300 }} />}
           {/* 持仓分布饼图.
