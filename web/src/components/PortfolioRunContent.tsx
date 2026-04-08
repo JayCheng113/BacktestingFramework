@@ -115,6 +115,7 @@ const fmt = (v: number | null | undefined, pct = false) => {
 
 // Color-coded metric ratings for portfolio backtest results
 const rateMetric = (key: string, v: number): { color: string; hint: string; tooltip: string } | null => {
+  if (v == null || !isFinite(v)) return null
   switch (key) {
     case 'sharpe_ratio': {
       if (v >= 1.5) return { color: CHART.success, hint: '优秀', tooltip: '>=1.5优秀, >=1.0良好, >=0.5一般, <0亏损' }
@@ -154,6 +155,35 @@ const rateMetric = (key: string, v: number): { color: string; hint: string; tool
     }
     default: return null
   }
+}
+
+// WF OOS rating functions — hoisted to module scope (pure, no component deps).
+// Thresholds are intentionally lower than backtest `rateMetric` because
+// out-of-sample performance is expected to degrade 30-50% vs in-sample.
+type Rating = { color: string; hint: string }
+const rateWfSharpe = (v: number): Rating => {
+  if (v >= 1.0) return { color: CHART.success, hint: '优秀' }
+  if (v >= 0.5) return { color: CHART.accent, hint: '可接受' }
+  if (v >= 0) return { color: CHART.warn, hint: '偏弱' }
+  return { color: CHART.error, hint: '亏损' }
+}
+const rateWfReturn = (v: number): Rating => {
+  if (v >= 0.2) return { color: CHART.success, hint: '高收益' }
+  if (v >= 0.05) return { color: CHART.accent, hint: '正收益' }
+  if (v >= 0) return { color: CHART.warn, hint: '微利' }
+  return { color: CHART.error, hint: '亏损' }
+}
+const rateWfOverfit = (v: number): Rating => {
+  if (v <= 0.2) return { color: CHART.success, hint: '稳健' }
+  if (v <= 0.3) return { color: CHART.accent, hint: '轻微' }
+  if (v <= 0.5) return { color: CHART.warn, hint: '中等' }
+  return { color: CHART.error, hint: '严重过拟合' }
+}
+const rateWfPval = (sig: boolean, p: number): Rating => {
+  if (sig && p < 0.01) return { color: CHART.success, hint: '极显著' }
+  if (sig) return { color: CHART.accent, hint: '显著' }
+  if (p < 0.1) return { color: CHART.warn, hint: '边缘' }
+  return { color: CHART.error, hint: '不显著' }
 }
 
 interface Props {
@@ -986,36 +1016,11 @@ export default function PortfolioRunContent(props: Props) {
         const pVal = wfResult.significance?.p_value
         const isSig = wfResult.significance?.is_significant ?? false
 
-        const rateSharpe = (v: number) => {
-          if (v >= 1.0) return { color: CHART.success, hint: '优秀' }
-          if (v >= 0.5) return { color: CHART.accent, hint: '可接受' }
-          if (v >= 0) return { color: CHART.warn, hint: '偏弱' }
-          return { color: CHART.error, hint: '亏损' }
-        }
-        const rateReturn = (v: number) => {
-          if (v >= 0.2) return { color: CHART.success, hint: '高收益' }
-          if (v >= 0.05) return { color: CHART.accent, hint: '正收益' }
-          if (v >= 0) return { color: CHART.warn, hint: '微利' }
-          return { color: CHART.error, hint: '亏损' }
-        }
-        const rateOverfit = (v: number) => {
-          if (v <= 0.2) return { color: CHART.success, hint: '稳健' }
-          if (v <= 0.3) return { color: CHART.accent, hint: '轻微' }
-          if (v <= 0.5) return { color: CHART.warn, hint: '中等' }
-          return { color: CHART.error, hint: '严重过拟合' }
-        }
-        const ratePval = (sig: boolean, p: number) => {
-          if (sig && p < 0.01) return { color: CHART.success, hint: '极显著' }
-          if (sig) return { color: CHART.accent, hint: '显著' }
-          if (p < 0.1) return { color: CHART.warn, hint: '边缘' }
-          return { color: CHART.error, hint: '不显著' }
-        }
-
-        const _noData = { color: 'var(--text-muted)', hint: '—' }
-        const sharpeR = oosSharpe != null ? rateSharpe(oosSharpe) : _noData
-        const returnR = oosReturn != null ? rateReturn(oosReturn) : _noData
-        const overfitR = overfit != null ? rateOverfit(overfit) : _noData
-        const pvalR = pVal != null ? ratePval(isSig, pVal) : _noData
+        const nullRating = { color: 'var(--text-muted)', hint: '—' }
+        const sharpeR = oosSharpe != null ? rateWfSharpe(oosSharpe) : nullRating
+        const returnR = oosReturn != null ? rateWfReturn(oosReturn) : nullRating
+        const overfitR = overfit != null ? rateWfOverfit(overfit) : nullRating
+        const pvalR = pVal != null ? rateWfPval(isSig, pVal) : nullRating
 
         const metrics = [
           { label: '样本外夏普', value: oosSharpe != null ? oosSharpe.toFixed(4) : '-', ...sharpeR, tooltip: '>=1.0优秀, >=0.5可接受, <0偏弱' },
