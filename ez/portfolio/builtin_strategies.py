@@ -533,12 +533,14 @@ class EtfRotateCombo(PortfolioStrategy):
         is_com_day = (weekday == self._com_weekday)
 
         if not is_rotate_day and not is_com_day:
-            combined: dict[str, float] = {}
-            for sym, w in rotate_bucket.items():
-                combined[sym] = combined.get(sym, 0) + w
-            for sym, w in switch_bucket.items():
-                combined[sym] = combined.get(sym, 0) + w
-            return combined if combined else {}
+            # Non-rebalance day: signal "no change" by returning prev_weights.
+            # This must be the ACTUAL current weights (not target), so the engine
+            # sees target == actual → no trades. prev_weights from the engine IS
+            # the actual post-drift weights.
+            if prev_weights:
+                return dict(prev_weights)
+            # First few days before any Thu/Fri: stay in cash
+            return {}
 
         if is_rotate_day:
             rotate_data = {s: df for s, df in universe_data.items() if s in self._rotate_syms}
