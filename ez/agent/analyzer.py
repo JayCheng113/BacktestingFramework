@@ -42,21 +42,24 @@ def _build_summary(batch_result, hypothesis_texts: list[str]) -> str:
         for c in all_candidates[:5]:
             report = getattr(c, "report", None)
             if report:
-                sharpe = getattr(report, "sharpe", 0) or 0
-                ret = getattr(report, "total_return", 0) or 0
-                dd = getattr(report, "max_drawdown", 0) or 0
-                trades = getattr(report, "trade_count", 0) or 0
-                name = getattr(c, "strategy_name", getattr(c, "name", "?"))
-                lines.append(f"- {name}: 夏普={sharpe:.2f} 收益={ret*100:.1f}% 回撤={dd*100:.1f}% 交易={trades}次")
-                # Diagnostic hints
-                if trades <= 2:
-                    lines.append(f"  → 问题: 交易次数太少({trades}次), 信号条件太严格")
-                elif trades > 200:
-                    lines.append(f"  → 问题: 交易太频繁({trades}次), 需要加趋势过滤或hold机制")
-                if sharpe < 0:
-                    lines.append(f"  → 问题: 夏普为负, 信号方向可能反了或逻辑有误")
-                elif 0 < sharpe < 0.3:
-                    lines.append(f"  → 建议: 夏普偏低, 尝试组合多因子或加趋势过滤")
+                try:
+                    sharpe = float(getattr(report, "sharpe", 0) or 0)
+                    ret = float(getattr(report, "total_return", 0) or 0)
+                    dd = float(getattr(report, "max_drawdown", 0) or 0)
+                    trades = int(getattr(report, "trade_count", 0) or 0)
+                    name = getattr(c, "strategy_name", getattr(c, "name", "?"))
+                    lines.append(f"- {name}: 夏普={sharpe:.2f} 收益={ret*100:.1f}% 回撤={dd*100:.1f}% 交易={trades}次")
+                    # Diagnostic hints
+                    if trades <= 2:
+                        lines.append(f"  → 问题: 交易次数太少({trades}次), 信号条件太严格")
+                    elif trades > 200:
+                        lines.append(f"  → 问题: 交易太频繁({trades}次), 需要加趋势过滤或hold机制")
+                    if sharpe < 0:
+                        lines.append(f"  → 问题: 夏普为负, 信号方向可能反了或逻辑有误")
+                    elif 0 < sharpe < 0.3:
+                        lines.append(f"  → 建议: 夏普偏低, 尝试组合多因子或加趋势过滤")
+                except (TypeError, ValueError):
+                    continue  # skip if report attributes are mock/invalid
 
     # Sample failure reasons
     failure_reasons: list[str] = []

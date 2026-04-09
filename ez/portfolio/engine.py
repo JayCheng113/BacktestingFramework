@@ -210,7 +210,8 @@ def run_portfolio_backtest(
                     open_val = open_arr[idx]
                     if not np.isnan(open_val):
                         exec_prices[sym] = open_val
-                elif sym in prev_prices and not np.isnan(prev_prices[sym]):
+                # Fallback: if both adj and raw were NaN, carry forward prev price
+                if sym not in prices and sym in prev_prices and not np.isnan(prev_prices[sym]):
                     prices[sym] = prev_prices[sym]
                 if not np.isnan(raw_val):
                     raw_close_today[sym] = raw_val
@@ -496,7 +497,7 @@ def run_portfolio_backtest(
     # Benchmark curve (buy & hold of benchmark_symbol, or initial cash)
     # O(n) single-pass via pre-indexed prices
     if benchmark_symbol and benchmark_symbol in _sym_data and result.dates:
-        bench_dates, bench_adj, bench_raw, _ = _sym_data[benchmark_symbol]
+        bench_dates, bench_adj, bench_raw, _bench_open, _ = _sym_data[benchmark_symbol]
 
         def _bench_price_at(idx: int) -> float:
             """Get benchmark price: prefer adj_close, fallback to raw close."""
