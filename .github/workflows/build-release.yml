@@ -63,6 +63,7 @@ jobs:
             --add-data "portfolio_strategies${SEP}portfolio_strategies" \
             --add-data "cross_factors${SEP}cross_factors" \
             --add-data "factors${SEP}factors" \
+            --add-data "ml_alphas${SEP}ml_alphas" \
             --hidden-import "ez.api.app" \
             --hidden-import "ez.api.routes.market_data" \
             --hidden-import "ez.api.routes.backtest" \
@@ -75,6 +76,7 @@ jobs:
             --hidden-import "ez.api.routes.research" \
             --hidden-import "ez.api.routes.portfolio" \
             --hidden-import "ez.api.routes.fundamental" \
+            --hidden-import "ez.api.routes.live" \
             --hidden-import "ez.api.deps" \
             --hidden-import "ez.strategy.builtin.ma_cross" \
             --hidden-import "ez.factor.builtin.technical" \
