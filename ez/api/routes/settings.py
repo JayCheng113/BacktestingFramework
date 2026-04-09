@@ -120,7 +120,7 @@ def _update_yaml_llm(provider: str, model: str, base_url: str, temperature: floa
     import yaml
     data: dict = {}
     if _YAML_FILE.exists():
-        with open(_YAML_FILE) as f:
+        with open(_YAML_FILE, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     if "llm" not in data:
         data["llm"] = {}
@@ -135,7 +135,7 @@ def _update_yaml_llm(provider: str, model: str, base_url: str, temperature: floa
         del data["llm"]["base_url"]
     data["llm"]["temperature"] = temperature
     _YAML_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_YAML_FILE, "w") as f:
+    with open(_YAML_FILE, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
