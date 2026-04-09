@@ -82,11 +82,17 @@ Tushare `daily` API returns **raw** OHLCV (no adj_close). Forward-adjusted close
 adj_close = close × adj_factor[date] / latest_factor[symbol]
 ```
 
-Where `latest_factor` = max adj_factor across all dates for that symbol.
+Where `latest_factor` = max adj_factor across all dates **for that specific symbol** (per-symbol groupby, NOT global max).
+
+**Edge cases:**
+- **Newly listed stocks**: may have adj_factor data for only part of the range. If `adj_factor` is missing for a date, fallback: `adj_close = close`.
+- **Suspended stocks**: no `daily` row during suspension, but `adj_factor` may change (split while suspended). Formula still works because `latest_factor` incorporates the split.
+- **Validation**: assert `adj_factor > 0` for all fetched rows. Zero or negative factors indicate corrupt API data.
 
 **Two-pass approach:**
-1. Fetch `adj_factor` for the most recent trading day → `latest_factor` per symbol
-2. For each historical day, join with daily raw data to compute adj_close
+1. Fetch `adj_factor` by trade_date (batch) → build per-symbol factor series
+2. Compute `latest_factor` = per-symbol groupby max of adj_factor
+3. Merge with daily raw data: `adj_close = close × factor / latest_factor`, fallback to `close` when factor missing
 
 ### Source Priority
 
@@ -95,7 +101,7 @@ Where `latest_factor` = max adj_factor across all dates for that symbol.
 | A-share daily OHLCV | Tushare `daily` | By trade_date (1 call = all stocks) | 500/min | ~1250 calls for 5 years |
 | Adjustment factors | Tushare `adj_factor` | By trade_date (1 call = all stocks) | 500/min | ~1250 calls (NOT per-symbol) |
 | ETF daily OHLCV | BaoStock | Per symbol, `adjustflag=3` (raw) + `adjustflag=2` (qfq) | **≤100K/day** | ~30 ETFs = 60 calls |
-| Index daily | Tushare `index_daily` | Per index code | 500/min | 000300.SH, 000905.SH, 000852.SH etc. Stored in same parquet with market="cn_stock" so benchmark queries hit parquet |
+| Index daily | Tushare `index_daily` | Per index code | 500/min | 000300.SH, 000905.SH, 000852.SH etc. **MUST store with `market="cn_stock"`** (not "cn_index") because `_ensure_benchmark()` queries with the portfolio's market. Mismatch causes cache miss. |
 | Cross-validation | AKShare + Tencent + BaoStock | Sample 50 symbols | See below | Verification only |
 
 ### Rate Limits & Safety
@@ -193,6 +199,10 @@ if error_count == 0:
 python scripts/build_data_cache.py --exclude-symbols 162411.SZ
 ```
 Excluded symbols are logged in `manifest.json` under `"excluded"` with reason.
+
+**ETF-only builds also run validation.** Seed data ships with releases and is the most trust-critical. BaoStock ETF data is cross-validated against AKShare (25 symbols, <30 seconds). Only `--no-verify` skips validation.
+
+**BaoStock raw vs qfq sanity check.** For each ETF, verify `pct_change(raw) ≈ pct_change(qfq)` within 1bp. This catches BaoStock data quality issues (corrupt adjustment) before they enter the parquet.
 
 ### Validation Report
 
@@ -296,10 +306,18 @@ def query_kline_batch(self, symbols, market, period, start_date, end_date):
 
 This ensures the portfolio backtest hot path (`_fetch_data()` → `chain.get_kline_batch()` → `store.query_kline_batch()`) hits parquet first with a single SQL query. Symbols not in parquet fall through to DuckDB → API chain as before.
 
-### _find_parquet_cache() path resolution
+### _find_parquet_cache() path resolution + date-range guard
 
 - Dev mode: `data/cache/{market}_{period}.parquet`
 - Frozen mode (PyInstaller): `sys._MEIPASS/data/cache/...` or `EZ_DATA_DIR`
+
+**Date-range guard (prevents staleness loop):** On first access, read `manifest.json` from the cache directory and cache its `date_range.end`. If the requested `end_date` exceeds `manifest.date_range.end + 7 days`, skip parquet and fall through to DuckDB/API. This prevents the following loop:
+1. Parquet returns stale data → chain's completeness check fails → fetches from API → saves to DuckDB
+2. Next call → parquet wins again with stale data → loop repeats
+
+The 7-day grace period avoids false negatives from weekends/holidays where the manifest end_date is Friday but the request end_date is the following Monday.
+
+**Parquet is authoritative within its date range.** To extend coverage, users rebuild the parquet with `--end <new_date>`.
 
 ### Benchmark symbol coverage
 

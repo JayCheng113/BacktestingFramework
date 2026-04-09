@@ -20,7 +20,7 @@
 | WARNING | > 0.1pp | Continue. Flag in manifest `"warnings"` list. Print yellow in build output. |
 | CLEAN | ≤ 0.1pp | Pass silently. |
 
-`validation_report.json` is always written (for debugging), but parquet files are ONLY written after `error_count == 0`. `--exclude-symbols` is the escape hatch for known-bad symbols (e.g., 162411.SZ).
+`validation_report.json` is always written (for debugging), but parquet files are ONLY written after `error_count == 0`. `--exclude-symbols` is the escape hatch for known-bad symbols (e.g., 162411.SZ). **ETF-only builds also run validation** (seed data ships with release, must be most trustworthy).
 
 ### C2: Offline scope is explicit per build mode
 
@@ -29,7 +29,15 @@
 | `--etf-only` (seed) | 25 preset ETFs + 5 indices | **Yes — these symbols fully offline** | Other symbols still fall back to API at runtime |
 | Full build (default) | All A-shares + ETFs + indices | **Yes — entire cn_stock daily is offline** | Only truly new symbols (IPO after build date) fall back |
 
-Benchmark symbols (000300.SH, 000905.SH, etc.) are explicitly included in BOTH modes via `INDEX_SYMBOLS` constant in the build script. `_ensure_benchmark()` in portfolio routes goes through `store.query_kline()` which checks parquet first.
+Benchmark symbols (000300.SH, 000905.SH, etc.) are explicitly included in BOTH modes via `INDEX_SYMBOLS` constant in the build script. **Index data MUST be stored with `market="cn_stock"`** (not `"cn_index"`) because `_ensure_benchmark()` queries with the portfolio's market string. Mismatch = silent cache miss → API fallback.
+
+### C4: Parquet date-range guard prevents staleness loop
+
+`_find_parquet_cache()` reads `manifest.json` on first access and caches `date_range.end`. If the requested `end_date > manifest_end + 7 days`, skip parquet entirely. This prevents: parquet returns stale data → chain fails completeness → fetches from API → saves to DuckDB → next call parquet wins again → infinite loop. The 7-day grace covers weekends/holidays.
+
+### C5: adj_close per-symbol computation + edge cases
+
+`latest_factor` MUST be computed as per-symbol groupby max (not global max). Stocks with no adj_factor data: fallback `adj_close = close`. Assert `adj_factor > 0` for all fetched rows. BaoStock ETFs: sanity check `pct_change(raw) ≈ pct_change(qfq)` within 1bp.
 
 ### C3: `query_kline_batch()` is THE primary entry point — must be parquet-first
 
@@ -57,7 +65,7 @@ Key test: `test_parquet_priority` — parquet bar has adj_close=99.0, DuckDB has
 
 In `__init__`: resolve `_cache_dir` via EZ_DATA_DIR → `sys._MEIPASS` (frozen) → `project_root/data/cache`. Set to `None` if directory doesn't exist.
 
-`_find_parquet_cache(market, period)`: returns `str` path to `{cache_dir}/{market}_{period}.parquet` if file exists, else `None`.
+`_find_parquet_cache(market, period, end_date)`: returns `str` path to `{cache_dir}/{market}_{period}.parquet` if file exists AND requested `end_date` is within manifest's `date_range.end + 7 days` (C4 staleness guard). Reads and caches manifest on first call. Returns `None` if parquet missing, manifest missing, or date out of range.
 
 `query_kline()`: if parquet found, execute `SELECT ... FROM read_parquet(?) WHERE symbol=? AND time>=? AND time<=?`. If rows returned, build Bar list and return. Otherwise fall through to existing DuckDB query unchanged.
 
@@ -224,6 +232,11 @@ Tests:
 | BaoStock 90K safety | T3 | |
 | Release --add-data | T4 | |
 | Frozen mode (sys._MEIPASS) | T1 | |
+| Index market="cn_stock" (not cn_index) | T3 | **C2** |
+| Date-range guard (staleness loop) | T1 | **C4** |
+| Per-symbol latest_factor + edge cases | T3 | **C5** |
+| ETF-only also runs validation | T3 | **C1** |
+| BaoStock raw/qfq sanity check | T3 | **C5** |
 | Offline scope: seed vs full | T3 | **C2** |
 | Integration tests | T5 | |
 | CLAUDE.md update | T6 | |
