@@ -62,7 +62,7 @@ V2.8 adds autonomous research agent: Hypothesis → CodeGen → BatchExec → An
 - Upstream: ez/backtest/ (Engine, WFO, significance), ez/core/ (Matcher), ez/strategy/ (Strategy registry), ez/llm/ (LLMProvider, V2.7+)
 - Downstream: ez/api/routes/experiments.py, ez/api/routes/candidates.py, ez/api/routes/code.py, ez/api/routes/chat.py, ez/api/routes/research.py, web/
 
-## Agent Tools (V2.7)
+## Agent Tools (V2.7+V2.9+V2.17)
 | Tool | Capability | Permission |
 |------|-----------|------------|
 | list_strategies | List registered strategies + params | Read-only |
@@ -74,6 +74,11 @@ V2.8 adds autonomous research agent: Hypothesis → CodeGen → BatchExec → An
 | run_experiment | Full experiment pipeline | Execute (persists to ExperimentStore) |
 | list_experiments | Recent experiment list | Read-only |
 | explain_metrics | Experiment detail + gate reasons | Read-only |
+| list_portfolio_strategies | List portfolio strategies + schemas | Read-only |
+| create_portfolio_strategy | Create portfolio strategy file | Write (portfolio_strategies/ only) |
+| create_cross_factor | Create cross-sectional factor file | Write (cross_factors/ only) |
+| run_portfolio_backtest | Portfolio backtest execution | Execute |
+| create_ml_alpha | Create ML Alpha factor file (V2.17) | Write (ml_alphas/ only) |
 
 ## V2.8 Research Agent Pipeline
 ```
@@ -153,3 +158,4 @@ pending → running → completed
 
 ## Status
 - experimental (V2.4+) — interfaces may change
+- V2.17: create_ml_alpha tool (14 total), enhanced research prompts (E1/E2/E4), system prompt operation boundaries, analyzer MagicMock tolerance, research input validation (empty goal/invalid dates)

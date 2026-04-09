@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.16.1 | Tests: 2234 passed + 10 skipped (2244 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.17 | Tests: 2252 passed + 10 skipped (2262 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -203,6 +203,52 @@ No version tag without review pass. No push without critical issues resolved.
   - **chartTheme 统一**: 新建 `shared/chartTheme.ts`, 所有 ECharts 组件 (KlineChart/BacktestPanel/FactorPanel/PaperTradingPage/PortfolioRunContent/PortfolioFactorContent/PortfolioHistoryContent) 的 ~100 处硬编码颜色迁移到 `CHART.*` 常量. MA60 从绿色改为青色 (避免与跌色混淆)
   - **全局样式增强**: global.css 新增暗色滚动条 + focus-visible 蓝色焦点环 + ::selection 蓝底白字 + disabled cursor + button hover brightness
   - **组件视觉**: EnsembleBuilder radio→styled buttons, PortfolioHistoryContent 选中行 accent 左边框, 模态框背景→var(--bg-secondary), 斑马纹 opacity 0.02→0.04, BacktestSettings padding 对齐, DocsPage h3 颜色变量化
+
+- **V2.17**: QMT 策略严格移植 + 引擎增强 + AI Agent 能力 + UX 打磨:
+  - **QMT 策略严格 1:1 移植** (3 个生产策略从 QMT 5分钟回测源码完整移植):
+    - `EtfMacdRotation` V1.2 — ETF动量轮动+周线MACD过滤, QMT `calc_rotate_signal` 完整还原: 2日均线+20日ratio+二次归一化+exp加权+>75%负收益跳过exp+周线MACD(iloc[:-1]排除当周)+top_n等权+0.987现金保留+ordered list比较(同选股同排序=不交易)
+    - `EtfSectorSwitch` — ETF加权行业宽基切换, QMT `calc_com_signal` 完整还原: 多窗口斜率(5/7/21d)+`_remove_outliers_and_refit()`加权线性回归(QMT特殊weights[-2]=weights[-3]=weights[-1])+MSE归一化+动态alpha(0.15→2.5→3.5→6.5→1.5→25)+累积投票cW(最近2期加权)+惩罚机制penaltyW[0.5,1.0]+宽基/行业切换
+    - `EtfRotateCombo` — 轮动加多组合V1.2, QMT双日程: 周四轮动(10只ETF MACD排名, top_n select)+周五加权(21只ETF行业/宽基切换, sector/broad scoring), `DEFAULT_BROAD_ETFS`(10)+`DEFAULT_SECTOR_ETFS`(11)+`DEFAULT_COM_SYMBOLS`(22)+`DEFAULT_ROTATE_SYMBOLS`(10)
+  - **引擎增强 (engine.py)**:
+    - `generate_weights` 返回 `None` → 跳过调仓但仍记录日权益/日期/权重 (critical: 修复前 None 导致 equity_curve 缺失, 年化收益从 18% 膨胀到 1043%)
+    - `use_open_price` 参数: 交易用 open, 权益跟踪用 close (QMT 5分钟兼容)
+    - `skip_terminal_liquidation` 参数: 跳过期末强平 (QMT 无期末清仓)
+    - `rebal_weekday` 参数: 按星期几调仓, 4级fallback (exact > next-after > last-before > last-of-week)
+    - `_sym_data` 5元组: (dates, adj_close, raw_close, open, date_set) — 支持 raw close 和 open price
+    - **critical fix**: 价格carry-forward bug — `elif` 误接 `use_open_price` 条件, 导致 `use_open_price=False` 时每天 `prices[sym]` 被 `prev_prices[sym]` 覆盖, 权益曲线恒定. 改为 `if sym not in prices` 仅在 adj/raw 均 NaN 时 fallback
+    - `exec_prices` 与 `prices` 分离: 交易执行用 open (或 close), 权益追踪始终用 close
+  - **一键预设 (Live Presets)**:
+    - PortfolioRunContent 3张预设卡片 (MACD轮动/行业切换/组合), 点击加载策略+参数+标的池+日期
+    - 策略类属性 `broad_etfs`/`sector_etfs`/`rotate_etfs` 自动注入 API symbols
+    - `pendingPresetParams` useEffect-based deferred hydration (替换 setTimeout)
+  - **AI Agent 能力增强**:
+    - `create_ml_alpha` 专用工具 (14 tools total): LLM 可通过 tool calling 创建 ML Alpha 因子
+    - 系统 prompt "操作边界" 规则: 严禁 AI 自动执行删除/回测/部署等操作, 必须用户确认
+    - ML Alpha 创建指南: 含模板 + 白名单限制 + 完整 feature_fn/target_fn 示例
+    - 研究管线质量增强: E1/E2/E4 prompt 加入高表现策略模式 (连续信号/多因子/趋势过滤/波动率自适应) + 常见错误 + 逐策略诊断, best sharpe 从 0.36 提升到 0.72
+    - 研究输入校验: goal min_length=1 + start_date >= end_date 422 拒绝
+    - analyzer MagicMock 容错: `float()` cast + try/except 防测试中 format error
+  - **UX 打磨**:
+    - 搜索结果可排序: 点击表头排序 (asc/desc/原始), max_drawdown abs 比较, null 方向感知
+    - WF 指标颜色提示: sharpe/p_value/overfitting_score 按阈值着色 + 中文提示
+    - 组合回测指标颜色: rateMetric/rateWfSharpe 等 6 个分级函数 + 中文一句话建议
+    - WF 折数/比例输入: tooltip + 实时摘要 ("5折, 训练比例 0.80 → 80%训练/20%测试")
+    - IC/ICIR 颜色评级: 共享 `metricRatings.ts` (rateIc/rateIcir), 因子面板+组合面板统一
+    - 搜索排序提示: 表头显示当前排序状态
+  - **因子研究修复**:
+    - ETF 基本面数据警告: ETF 无基本面数据时前端 toast 提示
+    - 4 个验证 guard: 日期选择器空值/无因子/无标的/ETF 基本面不可用
+  - **模拟盘修复**:
+    - PaperTradingPage 审批黑屏: DeployGate 返回 400 时 `detail` 为 object `{message, verdict}`, `showToast` 收到 object → React 崩溃. 修复: typeof 检查 + 提取 message 字符串
+    - 部署列表加载优化: DeploymentStore 连接改独立 + thread lock
+    - rebal_weekday 持久化: run_config + DeploymentSpec 新增字段 + calendar fallback 修复
+  - **代码质量**:
+    - `_get_raw_close()` helper: QMT 策略使用 raw close (非 adj_close)
+    - `_weekly_macd_signal()`: `weekly.iloc[:-1]` 排除当前/不完整周
+    - shared `metricRatings.ts`: rateIc/rateIcir 单一真相源
+    - ChatPanel 14 tools 完整中文标签
+    - tool registry test 收紧: `>= 8` → `>= 14`
+  - 2234 → 2252 tests (+18)
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)

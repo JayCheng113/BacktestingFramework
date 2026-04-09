@@ -101,3 +101,8 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
   - 15 一次性 warning flags + 容错: feature_fn/target_fn/predict/model_factory/fit 异常全 catch + log
   - **123 tests** (1813 → 1936), Ridge/RF/GBR 三个 estimator × backtest + walk_forward 端到端.
 - **V2.14 — ML 白名单扩展**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor` (lightgbm) + `XGBRegressor` (xgboost), 仅 regressor (classifier 待分类契约). GPU 拦截 (tree_method/device/device_type). 白名单不缓存 (每次 rebuild). 补齐 V1 sklearn deepcopy 缺口 (Lasso/LR/EN/DT + GBR cross-instance). +12 tests.
+- **V2.17 — QMT 策略严格移植 + 引擎增强**:
+  - `builtin_strategies.py`: 3 个 QMT 生产策略完整移植 (EtfMacdRotation V1.2 / EtfSectorSwitch / EtfRotateCombo), 含 `_remove_outliers_and_refit()` 加权线性回归, `_weekly_macd_signal()` 周线 MACD, `_get_raw_close()` helper
+  - `engine.py`: `generate_weights → None` 跳过调仓+记录日权益, `use_open_price`/`skip_terminal_liquidation`/`rebal_weekday` 参数, `_sym_data` 5元组, **critical** 价格 carry-forward bug 修复 (`elif` → `if sym not in prices`)
+  - `calendar.py`: `rebalance_dates()` 接受 `rebal_weekday` 参数 + 4级 fallback
+  - `execution.py`: `CostModel` 独立 `sell_commission_rate` 字段
