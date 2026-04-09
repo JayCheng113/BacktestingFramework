@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class ResearchRequest(BaseModel):
-    goal: str
+    goal: str = Field(min_length=1, description="研究目标描述，不能为空")
     symbol: str = "000001.SZ"
     market: str = "cn_stock"
     period: str = "daily"
@@ -43,6 +43,8 @@ async def start_research(req: ResearchRequest):
     """Start an autonomous research task in the background."""
     end = req.end_date or date.today()
     start = req.start_date or (end - timedelta(days=365 * 3))
+    if start >= end:
+        raise HTTPException(422, f"start_date ({start}) must be before end_date ({end})")
 
     goal = ResearchGoal(
         description=req.goal, market=req.market, symbol=req.symbol,
