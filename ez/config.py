@@ -113,7 +113,7 @@ def load_config(config_path: str = "configs/default.yaml") -> EzConfig:
     if not path.is_absolute():
         path = _PROJECT_ROOT / path
     if path.exists():
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         _config = EzConfig(**raw)
     else:
