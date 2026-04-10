@@ -596,20 +596,26 @@ class EtfRotateCombo(PortfolioStrategy):
         if is_rotate_day:
             rotate_data = {s: df for s, df in universe_data.items() if s in self._rotate_syms}
             raw = self._rotator.generate_weights(rotate_data, date, prev_weights, prev_returns) if rotate_data else {}
-            rotate_bucket.clear()
-            for sym, w in raw.items():
-                rotate_bucket[sym] = w * self.rotate_rate
+            # Sub-strategy may return None to signal "skip this rebalance"
+            # (e.g., EtfMacdRotation returns None when selection unchanged).
+            # Treat None as "keep previous bucket unchanged" (not "empty bucket").
+            if raw is not None:
+                rotate_bucket.clear()
+                for sym, w in raw.items():
+                    rotate_bucket[sym] = w * self.rotate_rate
 
         if is_com_day:
             # QMT: Friday weighted scoring only uses etf_list (21 symbols).
             # 159531.SZ and 515100.SH are rotate-only, must not be candidates here.
             com_data = {s: df for s, df in universe_data.items() if s in self.DEFAULT_COM_SYMBOLS}
             raw = self._switcher.generate_weights(com_data, date, prev_weights, prev_returns)
-            switch_bucket.clear()
-            com_rate = 1.0 - self.rotate_rate
-            for sym, w in raw.items():
-                mapped = self._SYMBOL_MAP.get(sym, sym)
-                switch_bucket[mapped] = switch_bucket.get(mapped, 0) + w * com_rate
+            # Same None-handling as rotate branch
+            if raw is not None:
+                switch_bucket.clear()
+                com_rate = 1.0 - self.rotate_rate
+                for sym, w in raw.items():
+                    mapped = self._SYMBOL_MAP.get(sym, sym)
+                    switch_bucket[mapped] = switch_bucket.get(mapped, 0) + w * com_rate
 
         # Merge both buckets
         # NOTE: QMT line 238 uses total_value * 0.987 (1.3% cash reserve) at execution
