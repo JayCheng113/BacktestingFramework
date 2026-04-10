@@ -48,15 +48,11 @@ jobs:
         shell: bash
         run: python -m pytest tests/ -q --tb=short -x
 
-      - name: Build seed data cache (ETF + indices)
+      - name: Verify seed data cache exists
         shell: bash
-        env:
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: |
-          python scripts/build_data_cache.py --etf-only
-          ls -la data/cache/
-          # Verify parquet files exist (hard fail if missing)
-          test -f data/cache/cn_stock_daily.parquet || { echo "FATAL: seed parquet not generated"; exit 1; }
+          test -f data/cache/cn_stock_daily.parquet || { echo "FATAL: seed parquet missing from repo"; exit 1; }
+          ls -la data/cache/*.parquet
 
       - name: Build with PyInstaller
         run: |

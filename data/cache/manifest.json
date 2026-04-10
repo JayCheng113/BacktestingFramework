@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "build_timestamp": "2026-04-09T20:16:49.482589",
+  "date_range": {
+    "start": "2021-01-01",
+    "end": "2026-04-08"
+  },
+  "symbols": {
+    "stocks": 0,
+    "etfs": 25,
+    "indices": 5,
+    "total": 30
+  },
+  "files": {
+    "cn_stock_daily.parquet": {
+      "rows": 37003,
+      "file_size": 1076341,
+      "md5": "4d96a3a0849e7b20ce6df0dcfacbe981"
+    },
+    "cn_stock_weekly.parquet": {
+      "rows": 7822,
+      "file_size": 293817,
+      "md5": "06dac06bbd142d7b95466431b3be7181"
+    },
+    "cn_stock_monthly.parquet": {
+      "rows": 1863,
+      "file_size": 85368,
+      "md5": "481d886990986d681c5b83e64633a8b4"
+    }
+  },
+  "mode": "etf_only",
+  "excluded_symbols": [],
+  "validation": {
+    "skipped": true,
+    "error_count": 0,
+    "warning_count": 0,
+    "warnings": []
+  }
+}
