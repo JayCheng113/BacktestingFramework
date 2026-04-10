@@ -1,46 +1,39 @@
 {
   "version": "1.0",
-  "build_timestamp": "2026-04-10T02:47:41.093593",
+  "build_timestamp": "2026-04-10T05:02:52.812903",
   "date_range": {
     "start": "2015-01-01",
     "end": "2026-04-08"
   },
   "symbols": {
     "stocks": 0,
-    "etfs": 25,
+    "etfs": 309,
     "indices": 5,
-    "total": 30
+    "total": 314
   },
   "files": {
     "cn_stock_daily.parquet": {
-      "rows": 62752,
-      "file_size": 1827944,
-      "md5": "057db1840ffed29f9f11c94ca2771b5c"
+      "rows": 628338,
+      "file_size": 12124539,
+      "md5": "86607bafb96612c76af5c44fc01aa4a4"
     },
     "cn_stock_weekly.parquet": {
-      "rows": 13238,
-      "file_size": 435230,
-      "md5": "9e5c7bfe1c20480a7149b3e6f08afe16"
+      "rows": 133946,
+      "file_size": 2768024,
+      "md5": "78d2f2bfc80b3e20920adb9a21f51a82"
     },
     "cn_stock_monthly.parquet": {
-      "rows": 3135,
-      "file_size": 137593,
-      "md5": "ff38b93b83773a715d5a7cf9ee17773c"
+      "rows": 31782,
+      "file_size": 728880,
+      "md5": "07f35c94bbe525da3048488fc3993603"
     }
   },
-  "mode": "etf_only_merged",
-  "excluded_symbols": [
-    "159531.SZ",
-    "159851.SZ",
-    "159852.SZ",
-    "159869.SZ",
-    "513260.SH"
-  ],
+  "mode": "custom",
+  "excluded_symbols": [],
   "validation": {
-    "skipped": false,
+    "skipped": true,
     "error_count": 0,
     "warning_count": 0,
-    "warnings": [],
-    "note": "2021-2026 portion was cross-validated on 2026-04-09. 2015-2020 portion was built with --no-verify due to network constraints."
+    "warnings": []
   }
 }
