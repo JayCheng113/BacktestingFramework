@@ -634,6 +634,63 @@ def download_etfs_akshare(
     return pd.DataFrame(all_rows)
 
 
+# ── Step 3c: Download ETFs from Tushare fund_daily ────────────────────
+
+def download_etfs_tushare(
+    client: "TushareClient",
+    etf_symbols: list[str],
+    start_date: date,
+    end_date: date,
+    exclude_symbols: set[str],
+) -> pd.DataFrame:
+    """Download ETF data from Tushare fund_daily. ETFs have no adj_factor — close = adj_close."""
+    _print_step(f"Downloading {len(etf_symbols)} ETFs from Tushare fund_daily")
+    all_rows: list[dict] = []
+    ts_start = _date_to_ts(start_date)
+    ts_end = _date_to_ts(end_date)
+
+    for sym in etf_symbols:
+        if sym in exclude_symbols:
+            print(f"  [SKIP] {sym} (excluded)")
+            continue
+        data = client.call(
+            api_name="fund_daily",
+            params={"ts_code": sym, "start_date": ts_start, "end_date": ts_end},
+            fields="ts_code,trade_date,open,high,low,close,vol,amount",
+        )
+        if data is None or not data.get("items"):
+            print(f"  [WARN] No data for {sym}")
+            continue
+        fields = data["fields"]
+        idx = {f: i for i, f in enumerate(fields)}
+        count = 0
+        for row in data["items"]:
+            try:
+                close_val = float(row[idx["close"]])
+                vol_raw = row[idx.get("vol", idx.get("amount", -1))]
+                volume = int(float(vol_raw) * 100) if vol_raw else 0  # 手 → 股
+                all_rows.append({
+                    "time": pd.Timestamp(_ts_to_datetime(row[idx["trade_date"]])),
+                    "symbol": sym,
+                    "market": "cn_stock",
+                    "open": float(row[idx["open"]]),
+                    "high": float(row[idx["high"]]),
+                    "low": float(row[idx["low"]]),
+                    "close": close_val,
+                    "adj_close": close_val,  # ETF: no adj_factor, close = adj_close
+                    "volume": volume,
+                })
+                count += 1
+            except (ValueError, KeyError, TypeError):
+                continue
+        print(f"  {sym} → {count} rows")
+
+    print(f"  Total ETF rows: {len(all_rows):,}")
+    if not all_rows:
+        return pd.DataFrame(columns=PARQUET_COLUMNS)
+    return pd.DataFrame(all_rows)
+
+
 # ── Step 4: Download indices from Tushare ─────────────────────────────
 
 def download_indices(
@@ -1153,16 +1210,15 @@ def main():
             etf_list = SEED_ETFS  # Full mode also includes seed ETFs
 
         if etf_list:
-            # AKShare primary for ETFs (BaoStock doesn't support ETF codes)
-            df_etfs = download_etfs_akshare(
-                etf_list,
-                start_date.isoformat(),
-                end_date.isoformat(),
-                exclude_set,
-            )
-            # Fallback to BaoStock if AKShare returned nothing
+            # Tushare fund_daily primary for ETFs (same data source as stocks)
+            if client:
+                df_etfs = download_etfs_tushare(
+                    client, etf_list, start_date, end_date, exclude_set)
+            else:
+                df_etfs = pd.DataFrame(columns=PARQUET_COLUMNS)
+            # AKShare fallback if Tushare returned nothing
             if df_etfs.empty:
-                df_etfs = download_etfs_baostock(
+                df_etfs = download_etfs_akshare(
                     etf_list,
                     start_date.isoformat(),
                     end_date.isoformat(),
