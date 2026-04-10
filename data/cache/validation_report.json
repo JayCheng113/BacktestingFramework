@@ -1,9 +1,14 @@
 {
-  "skipped": true,
-  "reason": "--no-verify flag",
+  "timestamp": "2026-04-09T21:50:44.039686",
+  "sample_size": 15,
+  "error_count": 0,
+  "warning_count": 0,
+  "clean_count": 0,
   "errors": [],
   "warnings": [],
   "clean": [],
-  "error_count": 0,
-  "warning_count": 0
+  "thresholds": {
+    "error_pp": 1.0,
+    "warning_pp": 0.1
+  }
 }

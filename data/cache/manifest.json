@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "build_timestamp": "2026-04-09T20:16:49.482589",
+  "build_timestamp": "2026-04-09T21:50:44.220380",
   "date_range": {
     "start": "2021-01-01",
     "end": "2026-04-08"
@@ -31,7 +31,7 @@
   "mode": "etf_only",
   "excluded_symbols": [],
   "validation": {
-    "skipped": true,
+    "skipped": false,
     "error_count": 0,
     "warning_count": 0,
     "warnings": []

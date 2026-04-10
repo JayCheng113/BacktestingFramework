@@ -14,6 +14,8 @@ from ez.data.store import DuckDBStore
 def store(tmp_path):
     db_path = str(tmp_path / "test.db")
     s = DuckDBStore(db_path)
+    s._cache_dir = None  # Isolate from real parquet cache on developer machines
+    s._manifest_loaded = True
     yield s
     s.close()
 

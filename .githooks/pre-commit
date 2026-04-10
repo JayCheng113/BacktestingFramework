@@ -1,0 +1,15 @@
+#!/bin/sh
+# Prevent accidental commit of full A-share parquet (>5MB)
+# Seed ETF data is ~1.4MB; full build is ~136MB
+MAX_SIZE=5242880  # 5MB
+for f in data/cache/*.parquet; do
+    if [ -f "$f" ] && git diff --cached --name-only | grep -q "$f"; then
+        size=$(wc -c < "$f" | tr -d ' ')
+        if [ "$size" -gt "$MAX_SIZE" ]; then
+            echo "BLOCKED: $f is ${size} bytes (>5MB). Full A-share parquet should not be committed."
+            echo "Only seed ETF data (~1.4MB) should be in git."
+            echo "Run: git reset HEAD data/cache/"
+            exit 1
+        fi
+    fi
+done
