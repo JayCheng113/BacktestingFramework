@@ -543,6 +543,97 @@ def download_etfs_baostock(
     return pd.DataFrame(all_rows)
 
 
+# ── Step 3b: Download ETFs from AKShare (fallback when BaoStock fails) ──
+
+def download_etfs_akshare(
+    etf_symbols: list[str],
+    start_date: str,
+    end_date: str,
+    exclude_symbols: set[str],
+) -> pd.DataFrame:
+    """Download ETF data from AKShare (raw + qfq) as BaoStock fallback.
+
+    BaoStock query_history_k_data_plus does NOT support ETF codes (51/15/16).
+    AKShare fund_etf_hist_em works for all ETFs.
+    """
+    try:
+        import akshare as ak
+    except ImportError:
+        print("  [ERROR] akshare not installed. pip install akshare")
+        return pd.DataFrame(columns=PARQUET_COLUMNS)
+
+    _print_step(f"Downloading {len(etf_symbols)} ETFs from AKShare (BaoStock fallback)")
+    all_rows: list[dict] = []
+    sanity_failures: list[str] = []
+
+    for sym in etf_symbols:
+        if sym in exclude_symbols:
+            print(f"  [SKIP] {sym} (excluded)")
+            continue
+        code = sym.split(".")[0]
+        try:
+            import time as _time
+            _time.sleep(0.6)  # AKShare throttle
+
+            # Raw (unadjusted)
+            df_raw = ak.fund_etf_hist_em(symbol=code, adjust="",
+                                          start_date=start_date.replace("-", ""),
+                                          end_date=end_date.replace("-", ""))
+            _time.sleep(0.6)
+
+            # Forward-adjusted (qfq)
+            df_qfq = ak.fund_etf_hist_em(symbol=code, adjust="qfq",
+                                          start_date=start_date.replace("-", ""),
+                                          end_date=end_date.replace("-", ""))
+
+            if df_raw is None or df_raw.empty:
+                print(f"  [WARN] No data for {sym}")
+                continue
+
+            # Sanity check: raw vs qfq returns within 1bp
+            if df_qfq is not None and not df_qfq.empty and len(df_raw) > 5:
+                raw_rets = df_raw["收盘"].astype(float).pct_change().dropna().values
+                qfq_rets = df_qfq["收盘"].astype(float).pct_change().dropna().values
+                min_len = min(len(raw_rets), len(qfq_rets))
+                if min_len > 0:
+                    max_diff = float(np.nanmax(np.abs(raw_rets[:min_len] - qfq_rets[:min_len])))
+                    if max_diff > 0.0001:
+                        sanity_failures.append(f"{sym}: raw/qfq diff={max_diff:.6f}")
+
+            for _, row in df_raw.iterrows():
+                dt_str = str(row["日期"]).replace("-", "")
+                raw_close = float(row["收盘"])
+                # Find matching qfq close
+                adj_close = raw_close
+                if df_qfq is not None and not df_qfq.empty:
+                    qfq_match = df_qfq[df_qfq["日期"].astype(str) == str(row["日期"])]
+                    if not qfq_match.empty:
+                        adj_close = round(float(qfq_match.iloc[0]["收盘"]), 4)
+
+                all_rows.append({
+                    "time": pd.Timestamp(str(row["日期"])),
+                    "symbol": sym,
+                    "market": "cn_stock",
+                    "open": float(row["开盘"]),
+                    "high": float(row["最高"]),
+                    "low": float(row["最低"]),
+                    "close": raw_close,
+                    "adj_close": adj_close,
+                    "volume": int(float(row["成交量"])),
+                })
+            print(f"  {sym} → {len(df_raw)} rows")
+        except Exception as e:
+            print(f"  [ERROR] {sym}: {e}")
+
+    if sanity_failures:
+        print(f"  [WARN] raw/qfq sanity issues: {sanity_failures}")
+
+    print(f"  Total ETF rows: {len(all_rows):,}")
+    if not all_rows:
+        return pd.DataFrame(columns=PARQUET_COLUMNS)
+    return pd.DataFrame(all_rows)
+
+
 # ── Step 4: Download indices from Tushare ─────────────────────────────
 
 def download_indices(
@@ -1062,12 +1153,21 @@ def main():
             etf_list = SEED_ETFS  # Full mode also includes seed ETFs
 
         if etf_list:
-            df_etfs = download_etfs_baostock(
+            # AKShare primary for ETFs (BaoStock doesn't support ETF codes)
+            df_etfs = download_etfs_akshare(
                 etf_list,
                 start_date.isoformat(),
                 end_date.isoformat(),
                 exclude_set,
             )
+            # Fallback to BaoStock if AKShare returned nothing
+            if df_etfs.empty:
+                df_etfs = download_etfs_baostock(
+                    etf_list,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                    exclude_set,
+                )
         else:
             df_etfs = pd.DataFrame(columns=PARQUET_COLUMNS)
 
