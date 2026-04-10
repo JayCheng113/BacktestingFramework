@@ -261,6 +261,29 @@ No version tag without review pass. No push without critical issues resolved.
   - **数据源**: Tushare (股票+ETF+指数, 主) → AKShare (ETF fallback). BaoStock 不支持 ETF K 线数据 (已验证)
   - 2252 → 2259 tests (+7 parquet cache tests)
 
+- **V2.18.1**: 引擎分红处理 + Tushare fund_adj 数据质量修复 (2 个相关问题):
+  - **引擎 bug: use_open_price=True 用 raw_close 估值导致长期持有策略低估** (`ez/portfolio/engine.py`):
+    - 问题: V2.17 引入 `use_open_price=True` (QMT 5 分钟兼容模式) 用 raw_close 做每日估值, 但引擎没有分红账务处理. ETF/股票分红日 raw_close 跳变 -50% 时被当成亏损, 实际分红以现金形式入账, 总资产不变. 长期持有策略被系统性低估 (StaticLowVol 年化收益 **-0.5% vs +13.9%**, MDD **-58% vs -15.8%**)
+    - 修复方案 A (统一 adj 单位系统, `docs/core-changes/2026-04-10-engine-dividend-fix.md`):
+      - 估值**永远**用 `adj_close` (不管 use_open_price 参数)
+      - use_open_price=True 时交易价格用 `adj_open = open × (adj_close / close)` (复权 open)
+      - benchmark 曲线已经优先 adj_close (无需修改)
+      - raw_close 保留用于涨跌停判定 (市场规则必须用真实价格)
+    - 影响: 默认行为 (use_open_price=False) 完全不变. use_open_price=True 的高换手 QMT 策略非分红日结果不变, 分红日才会更准 (不是更差). 长期持有策略从此正确处理分红
+    - **测试**: 新建 `tests/test_portfolio/test_engine_dividend_handling.py` (6 个测试: equity 连续性/use_open 一致性/adj_open 计算/benchmark 追踪/长期持有/双模式对比). 合成数据验证修复正确
+  - **数据 bug: Tushare fund_adj API 返回的 adj_factor 在某些日期异常**:
+    - 问题: 57 个 ETF 的 131 个日期的 adj_close 有数据异常, 两类 pattern:
+      - **Type A — 单日 factor spike**: 2020-09-18 等日期 Tushare 对多个 ETF 批量返回 `adj_factor=1.0` (应为 0.488), 导致 adj_close 突然跳 +100% 再跳 -50% (512890/510030/510150/510170/510210/510580 等)
+      - **Type A — 历史初期截断**: 159901.SZ 2018-01-04 之前 factor=1.0 (错), 2018-01-05 降到 0.4882 (对). Tushare 对某些早期数据的复权因子返回了 raw 值
+      - **Type B — raw 异常**: 512100 等 ETF 在某个日期 raw_close 突然 scale 变化 (+176% 不是真实市场事件). Tushare 对 raw 数据本身的 bug
+    - 修复工具: `validation/fix_adj_close_anomalies.py` 和 `validation/fix_adj_close_v2.py`
+      - 规则 C: 历史初期 factor≈1.0 连续段 → 用后续稳定 factor 反向重算
+      - 规则 B-adj: adj_close daily return > 15% 但 raw_close < 10% 变动 (严格 Type A) → 用 raw ret 修复 adj_close. **不做双日 spike fallback, 避免误修真实涨停+跌回**
+      - 规则 B-raw (Tencent 重建): 检测到 raw_close > 50% 单日变动持续, 用 Tencent qfq API (`ak.stock_zh_a_hist_tx`) 作为 ground truth 重建整个序列
+    - **持久化**: `scripts/build_data_cache.py` 加 `sanitize_adj_close()` 函数集成到 build 流程, 未来 rebuild parquet 会自动处理 Type A anomalies (Type B 需要离线跑 v2 脚本)
+    - **多源独立验证**: `validation/verify_parquet_multi_source.py` 用 Tencent qfq + Sina raw 双数据源交叉验证修复后的 parquet
+  - 2259 → 2265 tests (+6 dividend handling tests)
+
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
 - T+1 / 涨跌停 / 整手 — V2.6 已实现

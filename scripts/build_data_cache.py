@@ -609,6 +609,99 @@ def download_indices(
 
 # ── Step 5: Cross-validation against AKShare ──────────────────────────
 
+def sanitize_adj_close(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """V2.18.1: 修复 Tushare fund_adj 的 adj_close 异常 (Type A).
+
+    检测和修复两类 factor 异常:
+    - 规则 C: 历史初期 factor≈1.0 的连续段, 用后续稳定 factor 反向修复
+      (典型 case: 159901.SZ 2018-01 之前 factor=1.0, 之后降到 0.488)
+    - 规则 B-adj: adj_close daily return > 15% 但 raw_close < 10% 变动
+      (factor 异常, 非真实市场事件). 用 raw ret 修复 adj_close.
+      (典型 case: 512890.SH 2020-09-18 factor spike 到 1.0)
+
+    不处理 Type B (raw 和 adj 同步大变动) — 可能是真实涨停/分红/拆分, 或者
+    Tushare 对 raw_close 本身的 bug. 后者需要外部数据源 (如 Tencent qfq) 重建,
+    由 validation/fix_adj_close_v2.py 离线处理.
+
+    修复后会对异常未清除的 symbol 发 warning, 交由 cross-validation 最终判断.
+
+    Returns:
+        (df_sanitized, stats) — stats 包含 rule_c_fixed, rule_b_fixed, flagged
+    """
+    _print_step("Sanitizing adj_close anomalies (V2.18.1)")
+    if df.empty:
+        return df, {"rule_c_fixed": 0, "rule_b_fixed": 0, "flagged": 0}
+
+    df = df.sort_values(["symbol", "time"]).reset_index(drop=True)
+    new_adj = df["adj_close"].values.copy()
+    stats = {"rule_c_fixed": 0, "rule_b_fixed": 0, "flagged": 0,
+             "flagged_syms": []}
+
+    for sym, g in df.groupby("symbol"):
+        idx = g.index.values
+        close = g["close"].values
+        adj = new_adj[idx].copy()
+        n = len(adj)
+        if n < 10:
+            continue
+
+        # 规则 C: 历史初期 factor=1 连续段
+        factor = np.where(close > 0, adj / close, 0.0)
+        for i in range(1, n - 5):
+            if factor[i - 1] > 0.95 and 0.1 < factor[i] < 0.95:
+                post = factor[i:i + 5]
+                post = post[post > 0]
+                if len(post) >= 3 and post.std() < 0.05:
+                    true_factor = float(factor[i])
+                    n_fixed_c = 0
+                    for j in range(i):
+                        if close[j] > 0 and factor[j] > 0.95:
+                            adj[j] = close[j] * true_factor
+                            n_fixed_c += 1
+                    stats["rule_c_fixed"] += n_fixed_c
+                    break  # 每个 symbol 只修一次历史初期
+
+        # 规则 B-adj: factor 异常 (adj 大变动 + raw 小变动)
+        for i in range(1, n):
+            if adj[i - 1] <= 0 or adj[i] <= 0:
+                continue
+            if close[i - 1] <= 0 or close[i] <= 0:
+                continue
+            ret_in = (adj[i] - adj[i - 1]) / adj[i - 1]
+            if abs(ret_in) < 0.15:
+                continue
+            raw_ret = (close[i] - close[i - 1]) / close[i - 1]
+            # Type A: adj 大变动, raw 小变动
+            if abs(raw_ret) < 0.1:
+                adj[i] = adj[i - 1] * (1 + raw_ret)
+                stats["rule_b_fixed"] += 1
+
+        new_adj[idx] = adj
+
+        # 检查修复后是否还有 > 50% 的 adj_close daily return (可能是 Type B)
+        final_ret = np.diff(adj) / (adj[:-1] + 1e-9)
+        if np.any(np.abs(final_ret) > 0.5):
+            stats["flagged"] += 1
+            stats["flagged_syms"].append(sym)
+
+    df["adj_close"] = new_adj
+
+    print(f"  规则 C (历史 factor): {stats['rule_c_fixed']:,} 日修复")
+    print(f"  规则 B-adj (factor spike): {stats['rule_b_fixed']:,} 日修复")
+    if stats["flagged"] > 0:
+        print(f"  [WARN] {stats['flagged']} 个 symbol 仍有 > 50% 单日异常, "
+              f"可能需要 Tencent 重建:")
+        for s in stats["flagged_syms"][:10]:
+            print(f"    {s}")
+        if len(stats["flagged_syms"]) > 10:
+            print(f"    ... {len(stats['flagged_syms']) - 10} more")
+        print(f"  运行 `python validation/fix_adj_close_v2.py` 做 Tencent 重建")
+    else:
+        print(f"  ✓ 所有 symbol 修复后无 > 50% adj_close 异常")
+
+    return df, stats
+
+
 def cross_validate(
     df: pd.DataFrame,
     start_date: date,
@@ -1101,6 +1194,9 @@ def main():
 
         n_syms = df_daily["symbol"].nunique()
         print(f"  Combined: {len(df_daily):,} rows, {n_syms:,} symbols")
+
+        # ── V2.18.1: Sanitize adj_close anomalies ─────────────────────
+        df_daily, sanitize_stats = sanitize_adj_close(df_daily)
 
         # ── Coverage completeness check (hard fail on missing required symbols) ──
         present_syms = set(df_daily["symbol"].unique())
