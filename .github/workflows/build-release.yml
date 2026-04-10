@@ -53,7 +53,7 @@ jobs:
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: |
-          python scripts/build_data_cache.py --etf-only --no-verify
+          python scripts/build_data_cache.py --etf-only
           ls -la data/cache/
           # Verify parquet files exist (hard fail if missing)
           test -f data/cache/cn_stock_daily.parquet || { echo "FATAL: seed parquet not generated"; exit 1; }

@@ -45,10 +45,6 @@ TUSHARE_RATE_DELAY = 0.15       # 500/min rate limit, 0.15s between calls
 TUSHARE_MAX_RETRIES = 3
 TUSHARE_BACKOFF_BASE = 1.0      # seconds, doubles on each retry
 
-# BaoStock safety limits
-BAOSTOCK_WARN_THRESHOLD = 50_000
-BAOSTOCK_ABORT_THRESHOLD = 90_000
-
 # Cross-validation thresholds (in percentage points of daily return)
 CV_ERROR_THRESHOLD = 1.0        # > 1pp = ERROR
 CV_WARNING_THRESHOLD = 0.1      # > 0.1pp = WARNING
@@ -143,22 +139,6 @@ def _date_to_ts(d: date) -> str:
 def _ts_to_datetime(s: str) -> datetime:
     """'YYYYMMDD' -> datetime."""
     return datetime.strptime(s, "%Y%m%d")
-
-
-def _tushare_code_to_baostock(code: str) -> str:
-    """'510300.SH' -> 'sh.510300'."""
-    parts = code.split(".")
-    if len(parts) == 2:
-        return f"{parts[1].lower()}.{parts[0]}"
-    return code
-
-
-def _baostock_code_to_tushare(code: str) -> str:
-    """'sh.510300' -> '510300.SH'."""
-    parts = code.split(".")
-    if len(parts) == 2:
-        return f"{parts[1]}.{parts[0].upper()}"
-    return code
 
 
 def _is_etf(symbol: str) -> bool:
@@ -374,173 +354,10 @@ def merge_adj_close(df_stocks: pd.DataFrame, df_adj: pd.DataFrame) -> pd.DataFra
     return df_merged
 
 
-# ── Step 3: Download ETFs from BaoStock ───────────────────────────────
-
-def download_etfs_baostock(
-    etf_symbols: list[str],
-    start_date: str,
-    end_date: str,
-    exclude_symbols: set[str],
-) -> pd.DataFrame:
-    """Download ETF data from BaoStock (raw + qfq), sanity-check returns.
-
-    adjustflag=3 → raw prices (close = real market price)
-    adjustflag=2 → qfq (forward adjusted for splits/dividends)
-
-    Sanity check: pct_change(raw) ~= pct_change(qfq) within 1bp per ETF.
-    """
-    try:
-        import baostock as bs
-    except ImportError:
-        print("  [ERROR] baostock not installed. pip install baostock")
-        print("  Skipping BaoStock ETF download.")
-        return pd.DataFrame(columns=PARQUET_COLUMNS)
-
-    _print_step(f"Downloading {len(etf_symbols)} ETFs from BaoStock")
-
-    login_result = bs.login()
-    if login_result.error_code != "0":
-        print(f"  [ERROR] BaoStock login failed: {login_result.error_msg}")
-        return pd.DataFrame(columns=PARQUET_COLUMNS)
-
-    api_call_count = 0
-    all_rows: list[dict] = []
-    sanity_failures: list[str] = []
-
-    try:
-        for sym in etf_symbols:
-            if sym in exclude_symbols:
-                print(f"  Skipping excluded ETF: {sym}")
-                continue
-
-            bs_code = _tushare_code_to_baostock(sym)
-            print(f"  Fetching {sym} ({bs_code}) ...")
-
-            # BaoStock safety counter
-            if api_call_count >= BAOSTOCK_ABORT_THRESHOLD:
-                print(f"  [ABORT] BaoStock call count reached {BAOSTOCK_ABORT_THRESHOLD}. "
-                      f"Stopping ETF download to avoid ban.")
-                break
-            if api_call_count >= BAOSTOCK_WARN_THRESHOLD:
-                print(f"  [WARN] BaoStock call count: {api_call_count} "
-                      f"(abort at {BAOSTOCK_ABORT_THRESHOLD})")
-
-            # --- Fetch raw (adjustflag=3) ---
-            rs_raw = bs.query_history_k_data_plus(
-                bs_code,
-                "date,code,open,high,low,close,volume",
-                start_date=start_date,
-                end_date=end_date,
-                frequency="d",
-                adjustflag="3",
-            )
-            api_call_count += 1
-            raw_rows = []
-            while rs_raw.error_code == "0" and rs_raw.next():
-                raw_rows.append(rs_raw.get_row_data())
-
-            # --- Fetch qfq (adjustflag=2) ---
-            rs_qfq = bs.query_history_k_data_plus(
-                bs_code,
-                "date,code,open,high,low,close,volume",
-                start_date=start_date,
-                end_date=end_date,
-                frequency="d",
-                adjustflag="2",
-            )
-            api_call_count += 1
-            qfq_rows = []
-            while rs_qfq.error_code == "0" and rs_qfq.next():
-                qfq_rows.append(rs_qfq.get_row_data())
-
-            if not raw_rows or not qfq_rows:
-                print(f"    [WARN] No data for {sym} (raw={len(raw_rows)}, qfq={len(qfq_rows)})")
-                continue
-
-            # Build DataFrames for sanity check
-            df_raw = pd.DataFrame(raw_rows, columns=["date", "code", "open", "high", "low", "close", "volume"])
-            df_qfq = pd.DataFrame(qfq_rows, columns=["date", "code", "open", "high", "low", "close", "volume"])
-
-            for col in ["open", "high", "low", "close", "volume"]:
-                df_raw[col] = pd.to_numeric(df_raw[col], errors="coerce")
-                df_qfq[col] = pd.to_numeric(df_qfq[col], errors="coerce")
-
-            # --- Sanity check: pct_change(raw) ~= pct_change(qfq) within 1bp ---
-            if len(df_raw) >= 2 and len(df_qfq) >= 2:
-                raw_ret = df_raw["close"].pct_change().dropna()
-                qfq_ret = df_qfq["close"].pct_change().dropna()
-                # Align by date
-                df_raw_dated = df_raw.set_index("date")
-                df_qfq_dated = df_qfq.set_index("date")
-                common_dates = df_raw_dated.index.intersection(df_qfq_dated.index)
-                if len(common_dates) > 1:
-                    raw_c = df_raw_dated.loc[common_dates, "close"].astype(float)
-                    qfq_c = df_qfq_dated.loc[common_dates, "close"].astype(float)
-                    r_raw = raw_c.pct_change().dropna()
-                    r_qfq = qfq_c.pct_change().dropna()
-                    common_idx = r_raw.index.intersection(r_qfq.index)
-                    if len(common_idx) > 0:
-                        diffs = (r_raw.loc[common_idx] - r_qfq.loc[common_idx]).abs()
-                        max_diff_bp = diffs.max() * 10000  # in basis points
-                        if max_diff_bp > 1.0:
-                            sanity_failures.append(
-                                f"{sym}: max raw/qfq return diff = {max_diff_bp:.2f}bp "
-                                f"(threshold 1bp)"
-                            )
-                            print(f"    [WARN] Sanity check FAIL: max diff = {max_diff_bp:.2f}bp")
-
-            # --- Build output rows using raw close + qfq adj_close ---
-            raw_by_date = {r[0]: r for r in raw_rows}
-            for row in qfq_rows:
-                date_str, code_str = row[0], row[1]
-                raw_row = raw_by_date.get(date_str)
-                try:
-                    dt = datetime.strptime(date_str, "%Y-%m-%d")
-                    adj_close = float(row[3])  # qfq close = adj_close
-
-                    if raw_row:
-                        open_p = float(raw_row[2])
-                        high_p = float(raw_row[3])
-                        low_p = float(raw_row[4])
-                        close_p = float(raw_row[5])
-                        vol = int(float(raw_row[6])) if raw_row[6] else 0
-                    else:
-                        # Fallback to qfq values if raw missing for this date
-                        open_p = float(row[2])
-                        high_p = float(row[3])
-                        low_p = float(row[4])
-                        close_p = adj_close
-                        vol = int(float(row[6])) if row[6] else 0
-
-                    all_rows.append({
-                        "time": dt,
-                        "symbol": sym,
-                        "market": "cn_stock",
-                        "open": open_p,
-                        "high": high_p,
-                        "low": low_p,
-                        "close": close_p,
-                        "adj_close": round(adj_close, 4),
-                        "volume": vol,
-                    })
-                except (ValueError, TypeError, IndexError):
-                    continue
-
-            print(f"    rows: {len(qfq_rows)}")
-
-    finally:
-        bs.logout()
-        print(f"  BaoStock API calls: {api_call_count}")
-
-    if sanity_failures:
-        print(f"\n  [WARN] BaoStock sanity check failures ({len(sanity_failures)}):")
-        for msg in sanity_failures:
-            print(f"    - {msg}")
-
-    print(f"  Total ETF rows: {len(all_rows):,}")
-    if not all_rows:
-        return pd.DataFrame(columns=PARQUET_COLUMNS)
-    return pd.DataFrame(all_rows)
+    # NOTE: BaoStock does NOT support ETF K-line data. query_all_stock returns
+    # 0 ETF codes (51/15/16 prefix), query_history_k_data_plus returns 0 rows.
+    # BaoStock function removed — Tushare fund_daily + fund_adj is the primary
+    # ETF source, AKShare is the fallback.
 
 
 # ── Step 3b: Download ETFs from AKShare (fallback when BaoStock fails) ──
@@ -643,8 +460,12 @@ def download_etfs_tushare(
     end_date: date,
     exclude_symbols: set[str],
 ) -> pd.DataFrame:
-    """Download ETF data from Tushare fund_daily. ETFs have no adj_factor — close = adj_close."""
-    _print_step(f"Downloading {len(etf_symbols)} ETFs from Tushare fund_daily")
+    """Download ETF data from Tushare fund_daily + fund_adj for correct adj_close.
+
+    ETFs can have distributions (dividends), so close != adj_close.
+    Uses fund_adj API for forward-adjustment: adj_close = close * factor / latest_factor.
+    """
+    _print_step(f"Downloading {len(etf_symbols)} ETFs from Tushare fund_daily + fund_adj")
     all_rows: list[dict] = []
     ts_start = _date_to_ts(start_date)
     ts_end = _date_to_ts(end_date)
@@ -653,6 +474,7 @@ def download_etfs_tushare(
         if sym in exclude_symbols:
             print(f"  [SKIP] {sym} (excluded)")
             continue
+        # Fetch OHLCV
         data = client.call(
             api_name="fund_daily",
             params={"ts_code": sym, "start_date": ts_start, "end_date": ts_end},
@@ -661,29 +483,57 @@ def download_etfs_tushare(
         if data is None or not data.get("items"):
             print(f"  [WARN] No data for {sym}")
             continue
+
+        # Fetch adj_factor for this ETF
+        adj_data = client.call(
+            api_name="fund_adj",
+            params={"ts_code": sym, "start_date": ts_start, "end_date": ts_end},
+            fields="ts_code,trade_date,adj_factor",
+        )
+        adj_map: dict[str, float] = {}
+        if adj_data and adj_data.get("items"):
+            adj_fields = adj_data["fields"]
+            adj_idx = {f: i for i, f in enumerate(adj_fields)}
+            for arow in adj_data["items"]:
+                try:
+                    af = float(arow[adj_idx["adj_factor"]])
+                    if af > 0:
+                        adj_map[arow[adj_idx["trade_date"]]] = af
+                except (ValueError, TypeError):
+                    continue
+        latest_factor = max(adj_map.values()) if adj_map else 1.0
+
         fields = data["fields"]
         idx = {f: i for i, f in enumerate(fields)}
         count = 0
         for row in data["items"]:
             try:
                 close_val = float(row[idx["close"]])
+                trade_date = row[idx["trade_date"]]
                 vol_raw = row[idx.get("vol", idx.get("amount", -1))]
-                volume = int(float(vol_raw) * 100) if vol_raw else 0  # 手 → 股
+                volume = int(float(vol_raw) * 100) if vol_raw is not None else 0
+
+                # Forward-adjusted close using fund_adj
+                if trade_date in adj_map and latest_factor > 0:
+                    adj_close = round(close_val * adj_map[trade_date] / latest_factor, 4)
+                else:
+                    adj_close = close_val
+
                 all_rows.append({
-                    "time": pd.Timestamp(_ts_to_datetime(row[idx["trade_date"]])),
+                    "time": pd.Timestamp(_ts_to_datetime(trade_date)),
                     "symbol": sym,
                     "market": "cn_stock",
                     "open": float(row[idx["open"]]),
                     "high": float(row[idx["high"]]),
                     "low": float(row[idx["low"]]),
                     "close": close_val,
-                    "adj_close": close_val,  # ETF: no adj_factor, close = adj_close
+                    "adj_close": adj_close,
                     "volume": volume,
                 })
                 count += 1
             except (ValueError, KeyError, TypeError):
                 continue
-        print(f"  {sym} → {count} rows")
+        print(f"  {sym} → {count} rows (adj_factor: {len(adj_map)} entries)")
 
     print(f"  Total ETF rows: {len(all_rows):,}")
     if not all_rows:
