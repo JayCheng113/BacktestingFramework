@@ -64,6 +64,7 @@ jobs:
             --add-data "cross_factors${SEP}cross_factors" \
             --add-data "factors${SEP}factors" \
             --add-data "ml_alphas${SEP}ml_alphas" \
+            --add-data "data/cache${SEP}data/cache" \
             --hidden-import "ez.api.app" \
             --hidden-import "ez.api.routes.market_data" \
             --hidden-import "ez.api.routes.backtest" \

@@ -33,7 +33,9 @@ akshare = ["akshare>=1.14"]
 ml = ["scikit-learn>=1.5"]
 # V2.14: LightGBM + XGBoost optional (on top of sklearn)
 ml-extra = ["scikit-learn>=1.5", "lightgbm>=4.0", "xgboost>=2.0"]
-all = ["tushare>=1.4", "akshare>=1.14", "scikit-learn>=1.5", "lightgbm>=4.0", "xgboost>=2.0"]
+# V2.18: BaoStock for ETF data (Tushare fund_daily needs 5000 points)
+data-cache = ["baostock>=0.8"]
+all = ["tushare>=1.4", "akshare>=1.14", "scikit-learn>=1.5", "lightgbm>=4.0", "xgboost>=2.0", "baostock>=0.8"]
 
 [tool.scikit-build]
 wheel.packages = ["ez"]
