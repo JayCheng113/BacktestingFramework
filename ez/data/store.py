@@ -1,16 +1,25 @@
 """DuckDB implementation of DataStore.
 
 [CORE] — interface frozen. Implementation details may change.
+
+V2.18: Parquet-first query. Both query_kline() and query_kline_batch()
+check data/cache/{market}_{period}.parquet before DuckDB tables.
+Date-range guard via manifest.json prevents staleness loops.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+import json
+import logging
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import duckdb
 
 from ez.data.provider import DataStore
 from ez.errors import ValidationError
 from ez.types import Bar
+
+logger = logging.getLogger(__name__)
 
 # Whitelist of valid period values — used to prevent SQL injection
 _VALID_PERIODS = frozenset(("daily", "weekly", "monthly"))
@@ -23,26 +32,54 @@ def _safe_table(period: str) -> str:
     return f"kline_{period}"
 
 
+def _rows_to_bars(rows: list) -> list[Bar]:
+    """Convert DB/parquet rows to Bar objects."""
+    return [
+        Bar(time=r[0], symbol=r[1], market=r[2], open=r[3], high=r[4],
+            low=r[5], close=r[6], adj_close=r[7], volume=int(r[8]))
+        for r in rows
+    ]
+
+
 class DuckDBStore(DataStore):
     """DuckDB-backed data store."""
 
     PERIODS = ("daily", "weekly", "monthly")
+    _PARQUET_GRACE_DAYS = 7  # C4: date-range grace for weekends/holidays
 
     def __init__(self, db_path: str = "data/ez_trading.db"):
         import os
-        from pathlib import Path as _P
+        import sys as _sys
         # EZ_DATA_DIR overrides default data location (used in packaged builds)
         data_dir = os.environ.get("EZ_DATA_DIR")
         if data_dir:
-            p = _P(data_dir) / "ez_trading.db"
+            p = Path(data_dir) / "ez_trading.db"
         else:
-            p = _P(db_path)
+            p = Path(db_path)
             if not p.is_absolute():
-                project_root = _P(__file__).resolve().parent.parent.parent
+                project_root = Path(__file__).resolve().parent.parent.parent
                 p = project_root / p
         p.parent.mkdir(parents=True, exist_ok=True)
         self._conn = duckdb.connect(str(p))
         self._init_tables()
+
+        # Parquet cache directory resolution:
+        # 1. EZ_DATA_DIR/cache  (env override)
+        # 2. sys._MEIPASS/data/cache  (PyInstaller frozen)
+        # 3. <project_root>/data/cache  (development)
+        if data_dir:
+            self._cache_dir: Path | None = Path(data_dir) / "cache"
+        elif getattr(_sys, "frozen", False) and hasattr(_sys, "_MEIPASS"):
+            self._cache_dir = Path(_sys._MEIPASS) / "data" / "cache"
+        else:
+            project_root = Path(__file__).resolve().parent.parent.parent
+            self._cache_dir = project_root / "data" / "cache"
+        if not self._cache_dir.is_dir():
+            self._cache_dir = None
+
+        # Manifest cache (lazy-loaded on first parquet access)
+        self._manifest: dict | None = None
+        self._manifest_loaded = False
 
     def _init_tables(self) -> None:
         for period in self.PERIODS:
@@ -71,39 +108,120 @@ class DuckDBStore(DataStore):
             )
         """)
 
+    # ── Parquet cache helpers ─────────────────────────────────────────
+
+    def _load_manifest(self) -> dict | None:
+        """Load and cache manifest.json from parquet cache directory."""
+        if self._manifest_loaded:
+            return self._manifest
+        self._manifest_loaded = True
+        if not self._cache_dir:
+            return None
+        manifest_path = self._cache_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                self._manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.warning("Failed to read parquet manifest: %s", manifest_path)
+        return self._manifest
+
+    def _find_parquet_cache(self, market: str, period: str, end_date: date | None = None) -> str | None:
+        """Return parquet path if file exists and date range is valid.
+
+        C4 date-range guard: if requested end_date exceeds manifest's
+        date_range.end + 7 days, skip parquet to prevent staleness loop.
+        """
+        if not self._cache_dir:
+            return None
+        p = self._cache_dir / f"{market}_{period}.parquet"
+        if not p.exists():
+            return None
+
+        # Date-range guard (C4)
+        if end_date is not None:
+            manifest = self._load_manifest()
+            if manifest:
+                try:
+                    manifest_end = date.fromisoformat(manifest["date_range"]["end"])
+                    if end_date > manifest_end + timedelta(days=self._PARQUET_GRACE_DAYS):
+                        return None  # Request exceeds parquet coverage
+                except (KeyError, ValueError):
+                    pass  # No valid date_range in manifest — allow parquet
+
+        return str(p)
+
+    # ── Query methods ─────────────────────────────────────────────────
+
     def query_kline(
         self, symbol: str, market: str, period: str,
         start_date: date, end_date: date,
     ) -> list[Bar]:
+        # 1. Parquet cache (highest priority)
+        parquet_path = self._find_parquet_cache(market, period, end_date)
+        if parquet_path:
+            rows = self._conn.execute(
+                "SELECT time, symbol, market, open, high, low, close, adj_close, volume "
+                "FROM read_parquet(?) "
+                "WHERE symbol = ? AND time >= ? AND time <= ? ORDER BY time",
+                [parquet_path, symbol,
+                 datetime.combine(start_date, datetime.min.time()),
+                 datetime.combine(end_date, datetime.max.time())],
+            ).fetchall()
+            if rows:
+                return _rows_to_bars(rows)
+
+        # 2. DuckDB table (existing behavior)
         table = _safe_table(period)
         rows = self._conn.execute(
             f"SELECT * FROM {table} WHERE symbol=? AND market=? AND time>=? AND time<=? ORDER BY time",
             [symbol, market, datetime.combine(start_date, datetime.min.time()),
              datetime.combine(end_date, datetime.max.time())],
         ).fetchall()
-        return [
-            Bar(time=r[0], symbol=r[1], market=r[2], open=r[3], high=r[4],
-                low=r[5], close=r[6], adj_close=r[7], volume=int(r[8]))
-            for r in rows
-        ]
+        return _rows_to_bars(rows)
 
     def query_kline_batch(
         self, symbols: list[str], market: str, period: str,
         start_date: date, end_date: date,
     ) -> dict[str, list[Bar]]:
-        """Batch query: single SQL with WHERE symbol IN (...)."""
+        """Batch query: parquet first (C3), then DuckDB for missing symbols."""
         if not symbols:
             return {}
+
+        start_ts = datetime.combine(start_date, datetime.min.time())
+        end_ts = datetime.combine(end_date, datetime.max.time())
+        result: dict[str, list[Bar]] = {s: [] for s in symbols}
+        remaining = list(symbols)
+
+        # 1. Parquet cache
+        parquet_path = self._find_parquet_cache(market, period, end_date)
+        if parquet_path:
+            placeholders = ",".join(["?"] * len(symbols))
+            rows = self._conn.execute(
+                f"SELECT time, symbol, market, open, high, low, close, adj_close, volume "
+                f"FROM read_parquet(?) WHERE symbol IN ({placeholders}) "
+                f"AND time >= ? AND time <= ? ORDER BY symbol, time",
+                [parquet_path, *symbols, start_ts, end_ts],
+            ).fetchall()
+            found_syms: set[str] = set()
+            for r in rows:
+                bar = Bar(time=r[0], symbol=r[1], market=r[2], open=r[3], high=r[4],
+                          low=r[5], close=r[6], adj_close=r[7], volume=int(r[8]))
+                if bar.symbol in result:
+                    result[bar.symbol].append(bar)
+                    found_syms.add(bar.symbol)
+            remaining = [s for s in symbols if s not in found_syms]
+
+        if not remaining:
+            return result
+
+        # 2. DuckDB table for remaining symbols
         table = _safe_table(period)
-        placeholders = ",".join(["?"] * len(symbols))
+        placeholders = ",".join(["?"] * len(remaining))
         rows = self._conn.execute(
             f"SELECT * FROM {table} WHERE symbol IN ({placeholders}) AND market=? "
             f"AND time>=? AND time<=? ORDER BY symbol, time",
-            [*symbols, market,
-             datetime.combine(start_date, datetime.min.time()),
-             datetime.combine(end_date, datetime.max.time())],
+            [*remaining, market, start_ts, end_ts],
         ).fetchall()
-        result: dict[str, list[Bar]] = {s: [] for s in symbols}
         for r in rows:
             bar = Bar(time=r[0], symbol=r[1], market=r[2], open=r[3], high=r[4],
                       low=r[5], close=r[6], adj_close=r[7], volume=int(r[8]))
