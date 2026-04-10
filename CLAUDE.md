@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.17 | Tests: 2252 passed + 10 skipped (2262 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.18 | Tests: 2259 passed + 10 skipped (2269 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -249,6 +249,17 @@ No version tag without review pass. No push without critical issues resolved.
     - ChatPanel 14 tools 完整中文标签
     - tool registry test 收紧: `>= 8` → `>= 14`
   - 2234 → 2252 tests (+18)
+
+- **V2.18**: Parquet Data Cache — 预构建本地数据仓库, 回测零 API 调用:
+  - **Parquet 优先查询**: `DuckDBStore.query_kline()` 和 `query_kline_batch()` 先查 `data/cache/{market}_{period}.parquet`, 命中后不触发 DuckDB 和 API. C4 日期守卫防过期循环 (manifest end + 7天 grace)
+  - **批量下载脚本**: `scripts/build_data_cache.py` — Tushare 按 trade_date 批量拉股票 + `fund_daily` + `fund_adj` 拉 ETF (正确前复权) + `index_daily` 拉指数 (market="cn_stock" 匹配 benchmark 查询)
+  - **交叉验证门控 (C1)**: 比较日收益率 vs AKShare, >1pp = ERROR 中止构建, 不写 parquet. ETF-only 也验证
+  - **覆盖完整性门控**: 所有 required ETF + 指数必须全部存在, 缺失即 `sys.exit(1)`
+  - **ETF 正确前复权**: `fund_adj` API 获取 ETF 复权因子, `adj_close = close × factor / latest_factor` (非 close=adj_close)
+  - **周月线推导**: 从日线 resample (W-FRI/ME), 不单独调 API, 保证三频率一致
+  - **Release 打包**: CI 自动生成种子 ETF 数据 (25 ETF + 5 指数, ~1.4MB), 随发布包. 全 A 股用户跑脚本 (~10 分钟)
+  - **数据源**: Tushare (股票+ETF+指数, 主) → AKShare (ETF fallback). BaoStock 不支持 ETF K 线数据 (已验证)
+  - 2252 → 2259 tests (+7 parquet cache tests)
 
 ## A 股约束 (贯穿所有版本)
 - **不能做空个股**：信号 ∈ [0, 1]，组合优化 w >= 0 (long-only)
