@@ -23,3 +23,10 @@ web/data/
 
 # Full A-share parquet cache (user-generated, too large for git)
 # Seed ETF data IS committed (data/cache/cn_stock_*.parquet, ~1.4MB)
+
+# Local validation tools (not part of platform — user-local only)
+qlib/
+qlib_data/
+validation/
+.qlib/
+*.local
