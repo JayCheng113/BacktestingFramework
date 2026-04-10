@@ -1252,6 +1252,22 @@ def main():
         n_syms = df_daily["symbol"].nunique()
         print(f"  Combined: {len(df_daily):,} rows, {n_syms:,} symbols")
 
+        # ── Coverage completeness check (hard fail on missing required symbols) ──
+        present_syms = set(df_daily["symbol"].unique())
+        required_etfs = set(etf_list) - exclude_set if etf_list else set()
+        required_indices = set(INDEX_SYMBOLS)
+        missing_etfs = required_etfs - present_syms
+        missing_indices = required_indices - present_syms
+        if missing_etfs or missing_indices:
+            print(f"\n[FATAL] Coverage incomplete — required symbols missing from downloaded data:")
+            if missing_etfs:
+                print(f"  Missing ETFs ({len(missing_etfs)}): {sorted(missing_etfs)}")
+            if missing_indices:
+                print(f"  Missing indices ({len(missing_indices)}): {sorted(missing_indices)}")
+            print(f"  Fix: check API credentials/network, or --exclude-symbols to skip known-bad")
+            sys.exit(1)
+        print(f"  Coverage: all {len(required_etfs)} ETFs + {len(required_indices)} indices present ✓")
+
         # ── Cross-validation ──────────────────────────────────────
         validation_report: dict
         if args.no_verify:
