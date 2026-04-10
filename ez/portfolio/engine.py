@@ -193,26 +193,31 @@ def run_portfolio_backtest(
             if idx >= 0:
                 adj_val = adj_arr[idx]
                 raw_val = raw_arr[idx]
-                # prices = close for equity tracking
-                # QMT compat (use_open_price): use raw close, not adj_close
-                if use_open_price:
-                    if not np.isnan(raw_val):
-                        prices[sym] = raw_val
-                    elif not np.isnan(adj_val):
-                        prices[sym] = adj_val
-                else:
-                    if not np.isnan(adj_val):
-                        prices[sym] = adj_val
-                    elif not np.isnan(raw_val):
-                        prices[sym] = raw_val
-                # exec_prices = open (for trade execution only, when use_open_price)
-                if use_open_price and day in date_set:
-                    open_val = open_arr[idx]
-                    if not np.isnan(open_val):
-                        exec_prices[sym] = open_val
+                open_val = open_arr[idx] if day in date_set else float("nan")
+                # V2.18.1: Unified adj unit system — always use adj_close for equity
+                # tracking to avoid underestimating dividend-reinvesting strategies.
+                # Previously use_open_price=True used raw_close, which broke on
+                # dividend days (raw dropped -50% while total return was flat).
+                # See docs/core-changes/2026-04-10-engine-dividend-fix.md
+                if not np.isnan(adj_val):
+                    prices[sym] = adj_val
+                elif not np.isnan(raw_val):
+                    prices[sym] = raw_val
+                # V2.18.1: exec_prices = adj_open for trade execution (same adj unit
+                # as equity tracking). Formula: adj_open = open × (adj_close / close)
+                # Dividend effects are absorbed naturally via adj_close continuity.
+                if use_open_price and day in date_set and not np.isnan(open_val):
+                    if (not np.isnan(raw_val) and raw_val > 0
+                            and not np.isnan(adj_val)):
+                        adj_open = open_val * (adj_val / raw_val)
+                        exec_prices[sym] = adj_open
+                    else:
+                        exec_prices[sym] = open_val  # fallback
                 # Fallback: if both adj and raw were NaN, carry forward prev price
                 if sym not in prices and sym in prev_prices and not np.isnan(prev_prices[sym]):
                     prices[sym] = prev_prices[sym]
+                # raw_close_today retained for price limit checks (market rules
+                # must use real market price, not adjusted)
                 if not np.isnan(raw_val):
                     raw_close_today[sym] = raw_val
             elif sym in prev_prices and not np.isnan(prev_prices[sym]):
