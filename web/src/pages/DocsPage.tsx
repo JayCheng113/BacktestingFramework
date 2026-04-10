@@ -1401,12 +1401,19 @@ class MyRotation(PortfolioStrategy):
           </table>
 
           <div style={h2s}>缓存机制</div>
-          <p style={ps}>数据获取遵循以下优先级链：</p>
-          <pre style={code}>{`1. DuckDB 本地缓存  → 有就直接用（最快）
-2. 主数据源 API     → 缓存未命中，从 API 拉取（Tushare/FMP）
-3. 备用数据源 API   → 主源失败，用备用源（腾讯）
-4. 过期缓存         → 所有 API 都失败，用可能过期的缓存数据`}</pre>
-          <p style={ps}>首次获取某只股票的数据会稍慢（需要 API 调用），之后会从本地 DuckDB 缓存直接读取。</p>
+          <p style={ps}>数据获取遵循以下优先级链（V2.18+）：</p>
+          <pre style={code}>{`1. Parquet 本地仓库 → 最快（毫秒级，300-700x 加速）
+2. DuckDB 运行时缓存 → 有就直接用
+3. 主数据源 API     → 缓存未命中，从 API 拉取（Tushare/FMP）
+4. 备用数据源 API   → 主源失败，用备用源（AKShare/腾讯）
+5. 过期缓存         → 所有 API 都失败，用可能过期的缓存数据`}</pre>
+          <p style={ps}>
+            发布包自带 25 只 ETF + 5 只指数的 5 年种子数据，预设策略开箱即用。
+            构建全 A 股缓存（5700+ 只股票）：
+          </p>
+          <pre style={code}>{`python scripts/build_data_cache.py    # 全量，约 10 分钟
+python scripts/build_data_cache.py --etf-only  # 仅 ETF + 指数`}</pre>
+          <p style={ps}>构建完成后回测完全离线运行，不再调用 API。数据包含交叉验证门控，确保数据质量。</p>
 
           <div style={h2s}>配置数据源</div>
           <p style={ps}>在项目根目录 <code>.env</code> 文件中配置 API Token：</p>
