@@ -1,8 +1,8 @@
 {
   "version": "1.0",
-  "build_timestamp": "2026-04-09T21:50:44.220380",
+  "build_timestamp": "2026-04-10T02:47:41.093593",
   "date_range": {
-    "start": "2021-01-01",
+    "start": "2015-01-01",
     "end": "2026-04-08"
   },
   "symbols": {
@@ -13,27 +13,34 @@
   },
   "files": {
     "cn_stock_daily.parquet": {
-      "rows": 37003,
-      "file_size": 1076341,
-      "md5": "4d96a3a0849e7b20ce6df0dcfacbe981"
+      "rows": 62752,
+      "file_size": 1827944,
+      "md5": "057db1840ffed29f9f11c94ca2771b5c"
     },
     "cn_stock_weekly.parquet": {
-      "rows": 7822,
-      "file_size": 293817,
-      "md5": "06dac06bbd142d7b95466431b3be7181"
+      "rows": 13238,
+      "file_size": 435230,
+      "md5": "9e5c7bfe1c20480a7149b3e6f08afe16"
     },
     "cn_stock_monthly.parquet": {
-      "rows": 1863,
-      "file_size": 85368,
-      "md5": "481d886990986d681c5b83e64633a8b4"
+      "rows": 3135,
+      "file_size": 137593,
+      "md5": "ff38b93b83773a715d5a7cf9ee17773c"
     }
   },
-  "mode": "etf_only",
-  "excluded_symbols": [],
+  "mode": "etf_only_merged",
+  "excluded_symbols": [
+    "159531.SZ",
+    "159851.SZ",
+    "159852.SZ",
+    "159869.SZ",
+    "513260.SH"
+  ],
   "validation": {
     "skipped": false,
     "error_count": 0,
     "warning_count": 0,
-    "warnings": []
+    "warnings": [],
+    "note": "2021-2026 portion was cross-validated on 2026-04-09. 2015-2020 portion was built with --no-verify due to network constraints."
   }
 }
