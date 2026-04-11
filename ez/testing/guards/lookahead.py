@@ -41,6 +41,15 @@ CUTOFF_IDX = 150
 # Each probe uses cutoff=target=idx so the shuffle covers rows strictly
 # after the target; clean strategies are unaffected.
 STRATEGY_PROBE_INDICES = (130, 140, 150, 160, 170, 180, 190)
+# Number of clean runs in the pre-flight non-determinism gate. 2 runs is
+# insufficient — a strategy that happens to return the same value on its
+# first 2 calls (e.g. call-count-dependent code with a constant prefix)
+# would pass the gate and then trigger a false-positive BLOCK on the
+# subsequent shuffle probes. 5 runs makes pathological pass-through much
+# rarer (would need a period ≥ 5 match) and keeps runtime well under
+# the 500 ms budget.
+# Codex round-2 finding P1 #2.
+NONDET_PREFLIGHT_RUNS = 5
 
 
 def _compare_scalar(a: float | None, b: float | None) -> float:
@@ -129,16 +138,19 @@ class LookaheadGuard(Guard):
                 ),
             )
 
-        # Step 1: non-determinism check (single probe at CUTOFF_IDX).
-        # We do this once up-front so that if user code is non-deterministic,
-        # we return WARN immediately and skip the (noisy) multi-probe step.
+        # Step 1: non-determinism pre-flight. Run the user code
+        # NONDET_PREFLIGHT_RUNS (=5) times on fresh clean panels and
+        # verify all outputs agree pairwise. 2 runs was shown insufficient
+        # against call-order-dependent code where the first few calls
+        # happen to agree (codex round-2 finding P1 #2).
         target = target_date_at(CUTOFF_IDX)
-        panel_clean = build_mock_panel()
         try:
-            clean_a = invoke_user_code(context.user_class, context.kind, panel_clean, target)
-            clean_b = invoke_user_code(
-                context.user_class, context.kind, build_mock_panel(), target
-            )
+            preflight_runs = [
+                invoke_user_code(
+                    context.user_class, context.kind, build_mock_panel(), target
+                )
+                for _ in range(NONDET_PREFLIGHT_RUNS)
+            ]
         except Exception as e:
             return GuardResult(
                 guard_name=self.name,
@@ -147,7 +159,12 @@ class LookaheadGuard(Guard):
                 message=f"LookaheadGuard: user code raised: {type(e).__name__}: {e}",
                 runtime_ms=(time.perf_counter() - t0) * 1000,
             )
-        nondet_diff, _ = _compare_outputs(clean_a, clean_b)
+        clean_a = preflight_runs[0]
+        nondet_diff = 0.0
+        for other in preflight_runs[1:]:
+            d, _ = _compare_outputs(clean_a, other)
+            if d > nondet_diff:
+                nondet_diff = d
         if nondet_diff > TOLERANCE:
             return GuardResult(
                 guard_name=self.name,
@@ -155,13 +172,15 @@ class LookaheadGuard(Guard):
                 tier=self.tier,
                 message=(
                     f"LookaheadGuard: code is non-deterministic "
-                    f"(two runs on identical input differ by {nondet_diff:.3e}); "
-                    f"cannot run shuffle-future test. Seed your RNG and re-save."
+                    f"({NONDET_PREFLIGHT_RUNS} clean runs differ by up to "
+                    f"{nondet_diff:.3e}); cannot run shuffle-future test. "
+                    f"Seed your RNG or remove call-count state, then re-save."
                 ),
                 details={
                     "target_date": str(target.date()),
                     "nondet_diff": nondet_diff,
                     "tolerance": TOLERANCE,
+                    "preflight_runs": NONDET_PREFLIGHT_RUNS,
                 },
                 runtime_ms=(time.perf_counter() - t0) * 1000,
             )

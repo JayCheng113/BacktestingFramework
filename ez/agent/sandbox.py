@@ -510,7 +510,10 @@ def save_and_validate_strategy(
     # available — treat as "no guards ran".
     guard_result = _run_guards(safe_name, "strategy", _STRATEGIES_DIR)
     if guard_result is not None and guard_result.blocked:
-        # Disk rollback FIRST (I2: don't leave registry cleaned and disk dirty).
+        # Disk rollback FIRST (I2: don't leave registry cleaned and disk
+        # dirty). Hook 1 runs guards BEFORE _reload_user_strategy, so
+        # the production registry was never touched on this code path —
+        # we only need to roll back the file. No registry surgery here.
         try:
             if had_original:
                 target.write_text(original_code, encoding="utf-8")
@@ -848,13 +851,28 @@ def save_and_validate_code(
                         # _registry and _registry_by_key for this module
                         # (V2.12.2 hot-reload helper), then re-imports
                         # the backup source. One call, atomic semantics.
+                        # Codex round-2 P2 #1: surface re-register failure
+                        # as a half-state CRITICAL, not a silent log line.
                         try:
                             _reload_factor_code(safe_name, target_dir)
                         except Exception as restore_err:
-                            logger.warning(
-                                "Factor guard rollback restored file but re-register failed: %s",
+                            logger.error(
+                                "Factor guard rollback re-register failed: %s",
                                 restore_err,
                             )
+                            return {
+                                "success": False,
+                                "errors": [
+                                    f"Guard failed: {blk.guard_name}: {blk.message}"
+                                    for blk in factor_guard_result.blocks
+                                ] + [
+                                    f"CRITICAL: backup file restored but re-register "
+                                    f"failed — live registry may be in a half-state. "
+                                    f"Run /api/code/refresh or restart the server. "
+                                    f"Details: {type(restore_err).__name__}: {restore_err}"
+                                ],
+                                "guard_result": factor_guard_result.to_payload(),
+                            }
                     else:
                         target.unlink(missing_ok=True)
                         # No backup — manually clean the v2 entries using
@@ -983,13 +1001,29 @@ def save_and_validate_code(
         try:
             if original_code:
                 target.write_text(original_code, encoding="utf-8")
+                # Codex round-2 P2 #1: surface re-register failure as
+                # half-state CRITICAL.
                 try:
                     _reload_portfolio_code(safe_name, kind, target_dir)
                 except Exception as restore_err:
-                    logger.warning(
-                        "Portfolio guard rollback restored file but re-register failed: %s",
+                    logger.error(
+                        "Portfolio guard rollback re-register failed: %s",
                         restore_err,
                     )
+                    return {
+                        "success": False,
+                        "errors": [
+                            f"Guard failed: {blk.guard_name}: {blk.message}"
+                            for blk in portfolio_guard_result.blocks
+                        ] + [
+                            f"CRITICAL: backup file restored but re-register "
+                            f"failed — live registry may be in a half-state. "
+                            f"Run /api/code/refresh or restart the server. "
+                            f"Details: {type(restore_err).__name__}: {restore_err}"
+                        ],
+                        "test_output": test_result["output"],
+                        "guard_result": portfolio_guard_result.to_payload(),
+                    }
             else:
                 target.unlink(missing_ok=True)
                 with _reload_lock:

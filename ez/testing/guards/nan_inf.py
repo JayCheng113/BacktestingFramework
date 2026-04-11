@@ -112,6 +112,9 @@ class NaNInfGuard(Guard):
                 message=f"NaNInfGuard: instantiation failed: {type(e).__name__}: {e}",
             )
         warmup = int(getattr(inst, "warmup_period", 0) or 0)
+        # Single invocation, but still call build_mock_panel() inside the
+        # try block so any future refactor that adds multi-call paths
+        # inherits the fresh-panel discipline (codex round-2 P2 #2).
         panel = build_mock_panel()
         target = target_date_at(MOCK_N_DAYS - 1)
         bad_desc: list[str] = []

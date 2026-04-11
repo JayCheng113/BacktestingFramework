@@ -35,10 +35,11 @@ class NonNegativeWeightsGuard(Guard):
                 tier=self.tier,
                 message=f"NonNegativeWeightsGuard: instantiation failed: {type(e).__name__}: {e}",
             )
-        panel = build_mock_panel()
         violations: list[dict] = []
         for idx in CHECK_INDICES:
             target = target_date_at(idx)
+            # Codex round-2 finding P2 #2: fresh panel per date.
+            panel = build_mock_panel()
             try:
                 w = inst.generate_weights(panel, target, {}, {})
             except Exception:

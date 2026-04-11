@@ -170,15 +170,34 @@ def drop_probe_module(module_name: str, kind: GuardKind) -> None:
             reg.pop(k, None)
 
     # Step 2: for dual-dict kinds, restore any production class whose
-    # name-keyed entry was displaced by the probe import. The full-keyed
-    # dict is authoritative — for each entry there, if its class name is
-    # missing from the name-keyed dict, restore it.
+    # name-keyed entry was displaced by the probe import. The name-keyed
+    # dict is **last-write-wins** per `__init_subclass__` semantics — so
+    # when we restore, we must pick the LAST same-named class in the
+    # full-keyed dict's insertion order, NOT the first.
+    #
+    # Codex round-2 finding P1 #1: a naive forward-scan restore that
+    # stops at the first match would silently downgrade the name-keyed
+    # dict to an older same-named class, causing /api/code routes and
+    # frontend dropdowns to show the wrong production class.
     if has_dual_dict:
         name_keyed = bases[0]
         full_keyed = bases[1]
-        for full_key, cls in full_keyed.items():
-            if cls.__name__ not in name_keyed:
-                name_keyed[cls.__name__] = cls
+        # Identify names that are currently missing from name_keyed.
+        missing = {
+            cls.__name__
+            for cls in full_keyed.values()
+            if cls.__name__ not in name_keyed
+        }
+        if missing:
+            # Walk full_keyed in REVERSE insertion order. For each missing
+            # name, the first reverse-hit is the last-inserted same-named
+            # class — this matches last-write-wins.
+            for cls in reversed(list(full_keyed.values())):
+                if cls.__name__ in missing:
+                    name_keyed[cls.__name__] = cls
+                    missing.discard(cls.__name__)
+                    if not missing:
+                        break
 
     if module_name in sys.modules:
         del sys.modules[module_name]

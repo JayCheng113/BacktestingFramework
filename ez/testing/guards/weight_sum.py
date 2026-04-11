@@ -27,7 +27,6 @@ class WeightSumGuard(Guard):
                     f"Reason: {context.instantiation_error or 'unknown'}"
                 ),
             )
-        panel = build_mock_panel()
         try:
             inst = context.user_class()
         except Exception as e:
@@ -40,6 +39,9 @@ class WeightSumGuard(Guard):
         violations: list[dict] = []
         for idx in CHECK_INDICES:
             target = target_date_at(idx)
+            # Codex round-2 finding P2 #2: fresh panel per date so user
+            # code mutating the panel in place doesn't bleed across calls.
+            panel = build_mock_panel()
             try:
                 w = inst.generate_weights(panel, target, {}, {})
             except Exception as e:

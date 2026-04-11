@@ -70,11 +70,14 @@ class DeterminismGuard(Guard):
                     f"Reason: {context.instantiation_error or 'unknown'}"
                 ),
             )
-        panel = build_mock_panel()
         target = target_date_at(MOCK_N_DAYS - 1)
         try:
-            out_a = invoke_user_code(context.user_class, context.kind, panel, target)
-            out_b = invoke_user_code(context.user_class, context.kind, panel, target)
+            # Codex round-2 finding P2 #2: each invoke gets a FRESH panel
+            # so that user code mutating the panel in place cannot make the
+            # second run see polluted data — which would falsely surface
+            # as "non-determinism" when the user code itself is fine.
+            out_a = invoke_user_code(context.user_class, context.kind, build_mock_panel(), target)
+            out_b = invoke_user_code(context.user_class, context.kind, build_mock_panel(), target)
         except Exception as e:
             return GuardResult(
                 guard_name=self.name,
