@@ -35,6 +35,12 @@ from ._invoke import invoke_user_code
 
 TOLERANCE = 1e-9
 CUTOFF_IDX = 150
+# Multi-probe indices for strategy kind (V2.19.0 post-review I1).
+# Boolean-signal lookahead bugs only affect 1 row per (cutoff, target)
+# probe — 50% coincidental match per probe. 7 probes → 0.5^7 ≈ 0.8% FP.
+# Each probe uses cutoff=target=idx so the shuffle covers rows strictly
+# after the target; clean strategies are unaffected.
+STRATEGY_PROBE_INDICES = (130, 140, 150, 160, 170, 180, 190)
 
 
 def _compare_scalar(a: float | None, b: float | None) -> float:
@@ -67,8 +73,31 @@ def _compare_dict(a: dict, b: dict) -> tuple[float, str]:
     return max_diff, max_key
 
 
+def _compare_tuple(a: tuple, b: tuple) -> tuple[float, str]:
+    """Element-wise scalar comparison over the longer of the two tuples."""
+    n = max(len(a), len(b))
+    if n == 0:
+        return 0.0, "<empty>"
+    max_diff = 0.0
+    max_key = ""
+    for i in range(n):
+        va = a[i] if i < len(a) else None
+        vb = b[i] if i < len(b) else None
+        fa = float(va) if va is not None else None
+        fb = float(vb) if vb is not None else None
+        d = _compare_scalar(fa, fb)
+        if d > max_diff:
+            max_diff = d
+            max_key = f"[{i}]"
+    return max_diff, max_key
+
+
 def _compare_outputs(a, b) -> tuple[float, str]:
-    """Canonical comparison across scalar / dict / None."""
+    """Canonical comparison across tuple / dict / scalar / None."""
+    if isinstance(a, tuple) or isinstance(b, tuple):
+        ta = a if isinstance(a, tuple) else ()
+        tb = b if isinstance(b, tuple) else ()
+        return _compare_tuple(ta, tb)
     if isinstance(a, dict) or isinstance(b, dict):
         da = a if isinstance(a, dict) else {}
         db = b if isinstance(b, dict) else {}
@@ -99,13 +128,17 @@ class LookaheadGuard(Guard):
                     f"Reason: {context.instantiation_error or 'unknown'}"
                 ),
             )
+
+        # Step 1: non-determinism check (single probe at CUTOFF_IDX).
+        # We do this once up-front so that if user code is non-deterministic,
+        # we return WARN immediately and skip the (noisy) multi-probe step.
         target = target_date_at(CUTOFF_IDX)
         panel_clean = build_mock_panel()
-        panel_shuffled = build_shuffled_panel(CUTOFF_IDX)
         try:
             clean_a = invoke_user_code(context.user_class, context.kind, panel_clean, target)
-            clean_b = invoke_user_code(context.user_class, context.kind, panel_clean, target)
-            shuffled = invoke_user_code(context.user_class, context.kind, panel_shuffled, target)
+            clean_b = invoke_user_code(
+                context.user_class, context.kind, build_mock_panel(), target
+            )
         except Exception as e:
             return GuardResult(
                 guard_name=self.name,
@@ -114,15 +147,8 @@ class LookaheadGuard(Guard):
                 message=f"LookaheadGuard: user code raised: {type(e).__name__}: {e}",
                 runtime_ms=(time.perf_counter() - t0) * 1000,
             )
-
-        # Step 1: clean-vs-clean (detect non-determinism)
         nondet_diff, _ = _compare_outputs(clean_a, clean_b)
-        runtime = (time.perf_counter() - t0) * 1000
         if nondet_diff > TOLERANCE:
-            # Non-deterministic code — cannot reliably shuffle-future test.
-            # Surface this as a warning so the user knows lookahead detection
-            # is inconclusive; DeterminismGuard will flag the underlying
-            # non-determinism separately.
             return GuardResult(
                 guard_name=self.name,
                 severity=GuardSeverity.WARN,
@@ -137,38 +163,65 @@ class LookaheadGuard(Guard):
                     "nondet_diff": nondet_diff,
                     "tolerance": TOLERANCE,
                 },
-                runtime_ms=runtime,
+                runtime_ms=(time.perf_counter() - t0) * 1000,
             )
 
-        # Step 2: clean-vs-shuffled (detect lookahead)
-        lookahead_diff, key = _compare_outputs(clean_a, shuffled)
-        if lookahead_diff > TOLERANCE:
+        # Step 2: shuffle-future test. Factor = single probe (continuous
+        # output, 1 position is enough). Strategy = multi-probe (boolean
+        # signal collapse, 1-bit channel → need ≥7 independent probes to
+        # push false-pass rate below 1%).
+        probes = (
+            STRATEGY_PROBE_INDICES if context.kind == "strategy" else (CUTOFF_IDX,)
+        )
+        try:
+            for probe_idx in probes:
+                probe_target = target_date_at(probe_idx)
+                panel_shuffled = build_shuffled_panel(probe_idx)
+                clean_out = invoke_user_code(
+                    context.user_class, context.kind, build_mock_panel(), probe_target
+                )
+                shuffled_out = invoke_user_code(
+                    context.user_class, context.kind, panel_shuffled, probe_target
+                )
+                diff, key = _compare_outputs(clean_out, shuffled_out)
+                if diff > TOLERANCE:
+                    runtime = (time.perf_counter() - t0) * 1000
+                    return GuardResult(
+                        guard_name=self.name,
+                        severity=GuardSeverity.BLOCK,
+                        tier=self.tier,
+                        message=(
+                            f"LookaheadGuard failed: output at t={probe_target.date()} "
+                            f"differs when future data (rows after t) is shuffled. "
+                            f"Max delta at '{key}' = {diff:.3e}. "
+                            f"Strong signal that the code reads future data."
+                        ),
+                        details={
+                            "target_date": str(probe_target.date()),
+                            "probe_idx": probe_idx,
+                            "max_abs_diff": diff,
+                            "max_diff_key": key,
+                            "tolerance": TOLERANCE,
+                            "output_clean_sample": str(clean_out)[:300],
+                            "output_shuffled_sample": str(shuffled_out)[:300],
+                        },
+                        runtime_ms=runtime,
+                    )
+        except Exception as e:
             return GuardResult(
                 guard_name=self.name,
                 severity=GuardSeverity.BLOCK,
                 tier=self.tier,
-                message=(
-                    f"LookaheadGuard failed: output at t={target.date()} differs "
-                    f"when future data (rows after t) is shuffled. "
-                    f"Max delta at '{key}' = {lookahead_diff:.3e}. "
-                    f"Strong signal that the code reads future data."
-                ),
-                details={
-                    "target_date": str(target.date()),
-                    "max_abs_diff": lookahead_diff,
-                    "max_diff_key": key,
-                    "tolerance": TOLERANCE,
-                    "output_clean_sample": str(clean_a)[:300],
-                    "output_shuffled_sample": str(shuffled)[:300],
-                },
-                runtime_ms=runtime,
+                message=f"LookaheadGuard: user code raised during probe: {type(e).__name__}: {e}",
+                runtime_ms=(time.perf_counter() - t0) * 1000,
             )
 
+        runtime = (time.perf_counter() - t0) * 1000
         return GuardResult(
             guard_name=self.name,
             severity=GuardSeverity.PASS,
             tier=self.tier,
             message="",
-            details={"target_date": str(target.date()), "max_abs_diff": lookahead_diff},
+            details={"target_date": str(target.date()), "n_probes": len(probes)},
             runtime_ms=runtime,
         )

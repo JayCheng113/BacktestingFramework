@@ -22,11 +22,13 @@ def _mock_date_index() -> pd.DatetimeIndex:
 
 
 @lru_cache(maxsize=1)
-def build_mock_panel() -> dict[str, pd.DataFrame]:
-    """Return dict[symbol → DataFrame] with OHLCV + adj_close.
+def _cached_mock_seed() -> dict[str, pd.DataFrame]:
+    """Internal: build the seed panel once per process.
 
-    200 B-day bars × 5 symbols, deterministic GBM. Cached so guards reuse
-    the same object. Callers MUST NOT mutate the returned DataFrames.
+    This is the authoritative source. `build_mock_panel()` wraps it to hand
+    out defensive copies so that user code inside a guard can NEVER pollute
+    the cached seed (which would cause cross-test bleed and silently defeat
+    the lookahead test — see C1 in V2.19.0 post-review).
     """
     rng = np.random.default_rng(MOCK_SEED)
     dates = _mock_date_index()
@@ -49,15 +51,28 @@ def build_mock_panel() -> dict[str, pd.DataFrame]:
     return panel
 
 
-@lru_cache(maxsize=4)
+def build_mock_panel() -> dict[str, pd.DataFrame]:
+    """Return a FRESH dict[symbol → DataFrame] with OHLCV + adj_close.
+
+    200 B-day bars × 5 symbols, deterministic GBM from seed 42. A new dict
+    containing fresh ``.copy()`` DataFrames is returned on every call —
+    callers may mutate the result safely without polluting subsequent
+    guard runs. Cost: ~1-2 ms per call (acceptable vs the 500 ms budget).
+    """
+    seed = _cached_mock_seed()
+    return {sym: df.copy() for sym, df in seed.items()}
+
+
 def build_shuffled_panel(cutoff_idx: int) -> dict[str, pd.DataFrame]:
-    """Return a copy of mock panel with rows strictly after cutoff_idx shuffled.
+    """Return a FRESH dict with rows strictly after cutoff_idx shuffled.
 
     Row `cutoff_idx` itself stays in place. Rows `[cutoff_idx + 1, N)` are
     permuted by values (the DatetimeIndex is preserved — only values move).
+    Each call returns fresh DataFrames — never cached — so that downstream
+    mutation cannot leak across guard invocations.
     """
     rng = np.random.default_rng(SHUFFLE_SEED)
-    base = build_mock_panel()
+    base = build_mock_panel()  # already fresh copies
     shuffled: dict[str, pd.DataFrame] = {}
     for sym, df in base.items():
         head = df.iloc[: cutoff_idx + 1].copy()

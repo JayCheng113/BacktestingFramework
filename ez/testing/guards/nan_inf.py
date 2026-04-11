@@ -11,26 +11,32 @@ from .mock_data import build_mock_panel, target_date_at, MOCK_N_DAYS
 
 
 def _scan_dataframe_new_cols(
-    original_df: pd.DataFrame,
+    input_cols: frozenset,
     result_df: pd.DataFrame,
     warmup: int,
 ) -> list[tuple[str, int]]:
-    """Return [(column, position)] of NaN/Inf beyond warmup in newly-added cols."""
+    """Return [(column, position)] of NaN/Inf beyond warmup in newly-added cols.
+
+    **input_cols MUST be captured BEFORE user compute() was called**
+    (V2.19.0 post-review C1). If you pass the post-mutation frame's
+    columns, in-place mutation by user code will make ``new_cols`` empty
+    and the guard will silently pass.
+    """
     if result_df is None or len(result_df) == 0:
         return []
-    input_cols = set(original_df.columns)
     new_cols = [c for c in result_df.columns if c not in input_cols]
     if not new_cols:
         return []
     bad: list[tuple[str, int]] = []
     for col in new_cols:
         values = np.asarray(result_df[col].values, dtype=float)
-        for i in range(len(values)):
-            if i < warmup:
-                continue
-            v = values[i]
-            if math.isnan(v) or math.isinf(v):
-                bad.append((str(col), i))
+        # Vectorized scan: find non-finite positions beyond warmup.
+        if warmup >= len(values):
+            continue
+        scan_slice = values[warmup:]
+        bad_offsets = np.flatnonzero(~np.isfinite(scan_slice))
+        for off in bad_offsets:
+            bad.append((str(col), int(off + warmup)))
     return bad
 
 
@@ -112,9 +118,14 @@ class NaNInfGuard(Guard):
         try:
             if context.kind == "factor":
                 sym = next(iter(panel))
-                df = panel[sym]
-                out = inst.compute(df)
-                bad = _scan_dataframe_new_cols(df, out, warmup)
+                original_df = panel[sym]
+                # Defensive copy + pre-capture input_cols so that user
+                # in-place mutation cannot defeat the new-column diff.
+                # See V2.19.0 post-review C1.
+                input_cols = frozenset(original_df.columns)
+                df_for_user = original_df.copy()
+                out = inst.compute(df_for_user)
+                bad = _scan_dataframe_new_cols(input_cols, out, warmup)
                 bad_desc = [f"{col}@{i}" for col, i in bad]
             elif context.kind == "cross_factor":
                 out = inst.compute(panel, target)

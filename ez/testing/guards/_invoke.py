@@ -21,7 +21,7 @@ import pandas as pd
 
 
 def _factor_output_at(
-    original_df: pd.DataFrame,
+    input_cols: frozenset,
     result: pd.DataFrame,
     target_date: datetime,
 ) -> dict[str, float]:
@@ -30,10 +30,17 @@ def _factor_output_at(
     Factor.compute returns a DataFrame with new columns appended. The
     guard compares only those new columns (ignoring OHLCV passthroughs)
     so that shuffle-future tests stay deterministic.
+
+    **Critical**: `input_cols` MUST be captured BEFORE the user's
+    `compute()` is called. If the user mutates the input DataFrame in
+    place (the default template idiom), passing the post-compute frame's
+    columns would include the new columns in ``input_cols`` and produce
+    an empty ``new_cols`` list — silently bypassing the guard. Caller is
+    responsible for capturing ``input_cols`` before handing the frame to
+    user code. See V2.19.0 post-review C1.
     """
     if result is None or len(result) == 0:
         return {}
-    input_cols = set(original_df.columns)
     new_cols = [c for c in result.columns if c not in input_cols]
     if not new_cols:
         return {}
@@ -67,13 +74,26 @@ def invoke_user_code(
       - None (empty output)
 
     Raises whatever the user code raises — callers should wrap.
+
+    **Factor/strategy defensive copy**: The factor and strategy kinds pass
+    their DataFrame directly to user code. The canonical user idiom (from
+    the sandbox template) is ``data[col] = ...; return data`` — in-place
+    mutation. We pass a ``.copy()`` of the cached panel and capture the
+    input column set BEFORE the user sees the frame, so that in-place
+    mutation cannot retroactively enlarge ``input_cols`` and empty the
+    diff list. See V2.19.0 post-review C1.
     """
     inst = cls()
     if kind == "factor":
         sym = next(iter(panel))
-        df = panel[sym]
-        result = inst.compute(df)
-        return _factor_output_at(df, result, target_date)
+        original_df = panel[sym]
+        # Defensive copy: user may mutate in place. Capture input_cols
+        # BEFORE compute() so that post-mutation the original set is
+        # preserved for the new-column diff.
+        input_cols = frozenset(original_df.columns)
+        df_for_user = original_df.copy()
+        result = inst.compute(df_for_user)
+        return _factor_output_at(input_cols, result, target_date)
     if kind == "strategy":
         sym = next(iter(panel))
         df = panel[sym].copy()
@@ -89,7 +109,8 @@ def invoke_user_code(
         truncated = signals.loc[mask]
         if len(truncated) == 0:
             return None
-        return float(truncated.iloc[-1])
+        val = truncated.iloc[-1]
+        return float(val) if val is not None and not pd.isna(val) else math.nan
     if kind == "cross_factor":
         result = inst.compute(panel, target_date)
         if result is None:

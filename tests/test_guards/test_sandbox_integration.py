@@ -327,3 +327,58 @@ class GuardsCleanPortfolio(PortfolioStrategy):
     result = save_and_validate_code("guards_clean_portfolio.py", code, "portfolio_strategy")
     assert result["success"] is True, result.get("errors")
     assert not result["guard_result"]["blocked"]
+
+
+# ============================================================
+# V2.19.0 post-review C1: template-style in-place mutation bypass
+# ============================================================
+
+def test_template_style_inplace_lookahead_is_blocked(sandbox_tmp):
+    """Regression for C1: the auto-generated factor template idiom
+    ``data[col] = ...; return data`` (in-place mutation) must NOT
+    silently bypass LookaheadGuard.
+    """
+    tmp_path, dirs = sandbox_tmp
+    code = '''
+from ez.factor.base import Factor
+import pandas as pd
+
+class GuardsTemplateInPlaceLookahead(Factor):
+    name = "guards_template_inplace_lookahead"
+    warmup_period = 0
+    def compute(self, data: pd.DataFrame) -> pd.DataFrame:
+        # Template-style in-place mutation + obvious shift(-1) lookahead.
+        data[self.name] = data["close"].shift(-1)
+        return data
+'''
+    result = save_and_validate_code(
+        "guards_template_inplace_lookahead.py", code, "factor",
+    )
+    assert result["success"] is False, (
+        "C1 regression: in-place template-style lookahead slipped past guards"
+    )
+    errs = " ".join(result.get("errors", []))
+    assert "LookaheadGuard" in errs, f"Expected LookaheadGuard block; got: {errs}"
+
+
+def test_template_style_inplace_nan_is_blocked(sandbox_tmp):
+    """Regression for C1: template idiom + NaN-generating op must block."""
+    tmp_path, dirs = sandbox_tmp
+    code = '''
+from ez.factor.base import Factor
+import numpy as np
+import pandas as pd
+
+class GuardsTemplateInPlaceNaN(Factor):
+    name = "guards_template_inplace_nan"
+    warmup_period = 0
+    def compute(self, data: pd.DataFrame) -> pd.DataFrame:
+        data[self.name] = np.log(data["close"] - data["close"])
+        return data
+'''
+    result = save_and_validate_code(
+        "guards_template_inplace_nan.py", code, "factor",
+    )
+    assert result["success"] is False
+    errs = " ".join(result.get("errors", []))
+    assert "NaNInfGuard" in errs, f"Expected NaNInfGuard block; got: {errs}"

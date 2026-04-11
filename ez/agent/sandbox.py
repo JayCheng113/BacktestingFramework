@@ -119,27 +119,45 @@ def _sandbox_registries_for_kind(kind: str) -> list[dict]:
 def _run_guards(filename: str, kind: str, target_dir: Path):
     """Run the GuardSuite against a just-saved user file.
 
-    V2.19.0. Called by all three save flows AFTER contract test passes and
-    BEFORE hot-reload. If blocked, the caller rolls back the file and cleans
-    any registry pollution introduced by the guard's in-process import.
-    Lazy import so ez.testing.guards stays an optional runtime dependency.
+    V2.19.0. Called by all three save flows. The guard imports the file
+    under a **unique probe module name** (not the production
+    `factors.foo` / `strategies.bar` etc.), so `__init_subclass__` does
+    not emit a name-collision warning when the production class has
+    already been registered by hot-reload. The probe module + its
+    registry entries are cleaned up after the suite finishes.
+
+    Graceful degradation: if `ez.testing.guards` cannot be imported (in a
+    hypothetical minimal deployment), return `None`. Callers treat `None`
+    as "no guards ran" and skip the block check.
     """
-    from ez.testing.guards.suite import GuardSuite, load_user_class
-    from ez.testing.guards.base import GuardContext
+    try:
+        from ez.testing.guards.suite import (
+            GuardSuite, load_user_class, drop_probe_module,
+            _unique_probe_module_name,
+        )
+        from ez.testing.guards.base import GuardContext
+    except ImportError as imp_err:
+        logger.warning("ez.testing.guards not available, skipping guard framework: %s", imp_err)
+        return None
 
     stem = filename.replace(".py", "")
-    module_name = f"{target_dir.name}.{stem}"
+    probe_module_name = _unique_probe_module_name(stem)
     file_path = target_dir / filename
-    user_class, err = load_user_class(file_path, module_name, kind)  # type: ignore[arg-type]
-    context = GuardContext(
-        filename=filename,
-        module_name=module_name,
-        file_path=file_path,
-        kind=kind,  # type: ignore[arg-type]
-        user_class=user_class,
-        instantiation_error=err,
-    )
-    return GuardSuite().run(context)
+    user_class, err = load_user_class(file_path, probe_module_name, kind)  # type: ignore[arg-type]
+    try:
+        context = GuardContext(
+            filename=filename,
+            module_name=probe_module_name,
+            file_path=file_path,
+            kind=kind,  # type: ignore[arg-type]
+            user_class=user_class,
+            instantiation_error=err,
+        )
+        return GuardSuite().run(context)
+    finally:
+        # Always drop the probe module so its registry entries (even
+        # abstract-class skeletons) don't accumulate in memory.
+        drop_probe_module(probe_module_name, kind)  # type: ignore[arg-type]
 
 # Modules that user code MUST NOT import
 _FORBIDDEN_MODULES = frozenset({
@@ -212,8 +230,12 @@ class {class_name}(Factor):
         return self._period
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
-        data[self.name] = data["adj_close"].rolling(self._period).mean()
-        return data
+        # Always start with a copy — never mutate the input frame.
+        # The engine (and the guard framework) shares DataFrames across
+        # calls; in-place mutation causes silent cross-call pollution.
+        out = data.copy()
+        out[self.name] = data["adj_close"].rolling(self._period).mean()
+        return out
 '''
 
 
@@ -479,28 +501,32 @@ def save_and_validate_strategy(
         }
 
     # V2.19.0: guard framework — run after contract test passes, before hot-reload.
-    # Guards import the module in-process (firing __init_subclass__), so on block
-    # we must clean the registry + sys.modules to avoid zombie entries.
+    # Because the guard imports the file under a unique _guard_probe.* module
+    # name (see _run_guards / load_user_class), the production module
+    # `strategies.{stem}` is never touched by the probe. On block, we only
+    # need to roll back the file (backup or delete) — no registry cleanup
+    # is required because the strategy was never hot-reloaded on this path.
+    # Graceful: `guard_result is None` means the guard framework is not
+    # available — treat as "no guards ran".
     guard_result = _run_guards(safe_name, "strategy", _STRATEGIES_DIR)
-    if guard_result.blocked:
-        from ez.strategy.base import Strategy
-        module_name = f"strategies.{safe_name.replace('.py', '')}"
-        with _reload_lock:
-            for k in [k for k, v in Strategy._registry.items() if v.__module__ == module_name]:
-                Strategy._registry.pop(k, None)
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-        if had_original:
-            target.write_text(original_code, encoding="utf-8")
-            try:
-                _reload_user_strategy(safe_name)
-            except Exception as restore_err:
-                logger.warning(
-                    "Strategy guard rollback restored file but re-register failed: %s",
-                    restore_err,
-                )
-        else:
-            target.unlink(missing_ok=True)
+    if guard_result is not None and guard_result.blocked:
+        # Disk rollback FIRST (I2: don't leave registry cleaned and disk dirty).
+        try:
+            if had_original:
+                target.write_text(original_code, encoding="utf-8")
+            else:
+                target.unlink(missing_ok=True)
+        except Exception as disk_err:
+            logger.error("Strategy guard rollback disk write failed: %s", disk_err)
+            return {
+                "success": False,
+                "errors": [
+                    f"Guard blocked save AND rollback failed: {disk_err}. "
+                    f"Filesystem state may be inconsistent — please check "
+                    f"strategies/{safe_name} manually.",
+                ],
+                "guard_result": guard_result.to_payload(),
+            }
         return {
             "success": False,
             "errors": [
@@ -530,7 +556,7 @@ def save_and_validate_strategy(
             ],
             "path": f"strategies/{safe_name}",
             "test_output": f"Contract test passed. Hot-reload failed: {e}",
-            "guard_result": guard_result.to_payload(),
+            "guard_result": guard_result.to_payload() if guard_result is not None else None,
         }
 
     return {
@@ -538,7 +564,7 @@ def save_and_validate_strategy(
         "errors": [],
         "path": f"strategies/{safe_name}",
         "test_output": test_result["output"],
-        "guard_result": guard_result.to_payload(),
+        "guard_result": guard_result.to_payload() if guard_result is not None else None,
     }
 
 
@@ -804,31 +830,54 @@ def save_and_validate_code(
                     )
 
             # V2.19.0: guard framework — run after hot-reload succeeds,
-            # before returning success. On block: manually rollback (inline,
-            # not via the `except Exception` block which would mis-categorize
-            # the error as "Factor validation failed").
+            # before returning success. On block: roll back the file and
+            # let _reload_factor_code clean out the now-invalid v2 + load
+            # v0 from the backup (or clean registry if there is no backup).
+            # Straight-line rollback (not via the `except Exception` block
+            # which would mis-categorize the error as "Factor validation failed").
             factor_guard_result = _run_guards(safe_name, "factor", target_dir)
-            if factor_guard_result.blocked:
-                # Clean dual-dict registry (mirrors V2.12.2 rollback pattern).
-                dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
-                for k in dirty:
-                    del Factor._registry[k]
-                dirty_full = [k for k, v in Factor._registry_by_key.items() if v.__module__ == module_name]
-                for k in dirty_full:
-                    del Factor._registry_by_key[k]
-                if module_name in sys.modules:
-                    del sys.modules[module_name]
-                if backup is not None:
-                    target.write_text(backup, encoding="utf-8")
-                    try:
-                        _reload_factor_code(safe_name, target_dir)
-                    except Exception as restore_err:
-                        logger.warning(
-                            "Factor guard rollback restored file but re-register failed: %s",
-                            restore_err,
-                        )
-                else:
-                    target.unlink(missing_ok=True)
+            if factor_guard_result is not None and factor_guard_result.blocked:
+                # I2: disk write first, then rely on _reload_factor_code
+                # to clean the dual-dict registry atomically. Wrap the
+                # disk write in try/except so a disk error is surfaced
+                # instead of swallowed.
+                try:
+                    if backup is not None:
+                        target.write_text(backup, encoding="utf-8")
+                        # _reload_factor_code internally cleans BOTH
+                        # _registry and _registry_by_key for this module
+                        # (V2.12.2 hot-reload helper), then re-imports
+                        # the backup source. One call, atomic semantics.
+                        try:
+                            _reload_factor_code(safe_name, target_dir)
+                        except Exception as restore_err:
+                            logger.warning(
+                                "Factor guard rollback restored file but re-register failed: %s",
+                                restore_err,
+                            )
+                    else:
+                        target.unlink(missing_ok=True)
+                        # No backup — manually clean the v2 entries using
+                        # the shared helper (I4: one source of truth for
+                        # registry cleanup, drift-checked by parity test).
+                        with _reload_lock:
+                            for reg in _sandbox_registries_for_kind("factor"):
+                                for k in [
+                                    k for k, v in reg.items()
+                                    if v.__module__ == module_name
+                                ]:
+                                    reg.pop(k, None)
+                            if module_name in sys.modules:
+                                del sys.modules[module_name]
+                except Exception as disk_err:
+                    logger.error("Factor guard rollback disk op failed: %s", disk_err)
+                    return {
+                        "success": False,
+                        "errors": [
+                            f"Guard blocked save AND rollback failed: {disk_err}",
+                        ],
+                        "guard_result": factor_guard_result.to_payload(),
+                    }
                 return {
                     "success": False,
                     "errors": [
@@ -874,7 +923,7 @@ def save_and_validate_code(
             "success": True,
             "path": str(target),
             "test_output": f"Factor saved. Registered: {registered}",
-            "guard_result": factor_guard_result.to_payload(),
+            "guard_result": factor_guard_result.to_payload() if factor_guard_result is not None else None,
         }
 
 
@@ -924,28 +973,41 @@ def save_and_validate_code(
         }
 
     # V2.19.0: guard framework — run after hot-reload succeeds, before
-    # returning success. On block: clean registries + rollback file.
+    # returning success. On block: roll back the file and either re-run
+    # _reload_portfolio_code (backup path) or manually clean the v2
+    # entries via _sandbox_registries_for_kind (no-backup path).
     portfolio_guard_result = _run_guards(safe_name, kind, target_dir)
-    if portfolio_guard_result.blocked:
+    if portfolio_guard_result is not None and portfolio_guard_result.blocked:
         stem_pf = safe_name.replace(".py", "")
         module_name_pf = f"{target_dir.name}.{stem_pf}"
-        with _reload_lock:
-            for reg in _sandbox_registries_for_kind(kind):
-                for k in [k for k, v in reg.items() if v.__module__ == module_name_pf]:
-                    reg.pop(k, None)
-            if module_name_pf in sys.modules:
-                del sys.modules[module_name_pf]
-        if original_code:
-            target.write_text(original_code, encoding="utf-8")
-            try:
-                _reload_portfolio_code(safe_name, kind, target_dir)
-            except Exception as restore_err:
-                logger.warning(
-                    "Portfolio guard rollback restored file but re-register failed: %s",
-                    restore_err,
-                )
-        else:
-            target.unlink(missing_ok=True)
+        try:
+            if original_code:
+                target.write_text(original_code, encoding="utf-8")
+                try:
+                    _reload_portfolio_code(safe_name, kind, target_dir)
+                except Exception as restore_err:
+                    logger.warning(
+                        "Portfolio guard rollback restored file but re-register failed: %s",
+                        restore_err,
+                    )
+            else:
+                target.unlink(missing_ok=True)
+                with _reload_lock:
+                    for reg in _sandbox_registries_for_kind(kind):
+                        for k in [
+                            k for k, v in reg.items()
+                            if v.__module__ == module_name_pf
+                        ]:
+                            reg.pop(k, None)
+                    if module_name_pf in sys.modules:
+                        del sys.modules[module_name_pf]
+        except Exception as disk_err:
+            logger.error("Portfolio guard rollback disk op failed: %s", disk_err)
+            return {
+                "success": False,
+                "errors": [f"Guard blocked save AND rollback failed: {disk_err}"],
+                "guard_result": portfolio_guard_result.to_payload(),
+            }
         return {
             "success": False,
             "errors": [
@@ -961,7 +1023,7 @@ def save_and_validate_code(
         "errors": [],
         "path": f"{target_dir.name}/{safe_name}",
         "test_output": test_result["output"],
-        "guard_result": portfolio_guard_result.to_payload(),
+        "guard_result": portfolio_guard_result.to_payload() if portfolio_guard_result is not None else None,
     }
 
 

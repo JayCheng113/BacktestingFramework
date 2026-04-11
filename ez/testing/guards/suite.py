@@ -100,14 +100,104 @@ class GuardSuite:
         return SuiteResult(results=tuple(results), total_runtime_ms=total)
 
 
+_PROBE_COUNTER = 0
+_PROBE_LOCK = __import__("threading").Lock()
+
+
+def _unique_probe_module_name(stem: str) -> str:
+    """Return a globally-unique module name for a one-shot guard import.
+
+    V2.19.0 post-review I6: using the canonical production module name
+    (`factors.foo`, `strategies.bar`, etc.) causes `__init_subclass__` to
+    fire a name-collision warning when the guard imports the file in the
+    same process where hot-reload already registered the class. A unique
+    probe name (`_guard_probe.{counter}_{stem}`) sidesteps the registry
+    altogether — the probe class lands in a different dict entry, avoids
+    the collision warning, and is cleaned up via ``drop_probe_module``
+    after the guard runs.
+    """
+    global _PROBE_COUNTER
+    with _PROBE_LOCK:
+        _PROBE_COUNTER += 1
+        n = _PROBE_COUNTER
+    return f"_guard_probe._probe{n}_{stem}"
+
+
+def drop_probe_module(module_name: str, kind: GuardKind) -> None:
+    """Remove a guard-probe module's registry entries + sys.modules entry.
+
+    Called by `_run_guards` / tests to reclaim registry pollution after the
+    guard suite has finished.
+
+    **Dual-dict restore (V2.19.0 post-review follow-up)**: `Factor`,
+    `CrossSectionalFactor`, and `PortfolioStrategy` have dual registries —
+    ``_registry`` is last-write-wins keyed by ``__name__``, while
+    ``_registry_by_key`` is authoritative keyed by ``module.class``. When
+    the probe imports the file under a unique module name, the
+    ``__init_subclass__`` hook inserts a NEW class object into both dicts.
+    Because the probe class has the same ``__name__`` as the production
+    class, it **displaces** the production entry in ``_registry``. Dropping
+    the probe by ``__module__`` filter leaves ``_registry`` missing the
+    production entry entirely.
+
+    Fix: after popping probe entries, rebuild any missing name-keyed
+    entries from the authoritative ``_registry_by_key`` (which was not
+    touched on the production side because the probe class has a
+    different ``module.class`` key).
+    """
+    if kind == "strategy":
+        from ez.strategy.base import Strategy as _Base
+        bases = [_Base._registry]
+        has_dual_dict = False
+    elif kind == "factor":
+        from ez.factor.base import Factor as _Base
+        bases = [_Base._registry, _Base._registry_by_key]
+        has_dual_dict = True
+    elif kind in ("cross_factor", "ml_alpha"):
+        from ez.portfolio.cross_factor import CrossSectionalFactor as _Base
+        bases = [_Base._registry, _Base._registry_by_key]
+        has_dual_dict = True
+    elif kind == "portfolio_strategy":
+        from ez.portfolio.portfolio_strategy import PortfolioStrategy as _Base
+        bases = [_Base._registry, _Base._registry_by_key]
+        has_dual_dict = True
+    else:
+        return
+
+    # Step 1: pop all entries whose __module__ matches the probe module name.
+    for reg in bases:
+        for k in [k for k, v in reg.items() if getattr(v, "__module__", None) == module_name]:
+            reg.pop(k, None)
+
+    # Step 2: for dual-dict kinds, restore any production class whose
+    # name-keyed entry was displaced by the probe import. The full-keyed
+    # dict is authoritative — for each entry there, if its class name is
+    # missing from the name-keyed dict, restore it.
+    if has_dual_dict:
+        name_keyed = bases[0]
+        full_keyed = bases[1]
+        for full_key, cls in full_keyed.items():
+            if cls.__name__ not in name_keyed:
+                name_keyed[cls.__name__] = cls
+
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+
+
 def load_user_class(
     file_path: Path, module_name: str, kind: GuardKind,
 ) -> tuple[type | None, str | None]:
-    """Import a user file and return (class, error_message).
+    """Import a user file under a unique probe module name and return (class, error).
 
-    Returns (None, error) if file cannot be imported or no target class found.
-    Runs in the SAME process as the sandbox — user code has already passed
-    syntax + security checks by the time this is called.
+    Uses a unique ``_guard_probe._probeN_{stem}`` module name so that
+    ``__init_subclass__`` does not collide with the hot-reloaded
+    production class. The caller is responsible for cleaning up via
+    ``drop_probe_module`` after the guard suite finishes.
+
+    The returned `class` object will have `__module__` pointing at the
+    probe module name, NOT the production name — callers must use the
+    class for in-process inspection only, not register it with the
+    engine or persist it.
     """
     try:
         spec = importlib.util.spec_from_file_location(module_name, str(file_path))

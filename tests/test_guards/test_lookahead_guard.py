@@ -182,3 +182,63 @@ def test_lookahead_guard_applies_to_factor_and_strategy():
     guard = LookaheadGuard()
     assert guard.applies("factor") is True
     assert guard.applies("strategy") is True
+
+
+# ============================================================
+# C1 regression: in-place mutation must NOT bypass LookaheadGuard
+# ============================================================
+
+class _InPlaceMutationLookahead:
+    """Template-style factor: mutates input df in place + reads future.
+
+    Without the C1 fix, _factor_output_at sees `input_cols` AFTER mutation,
+    treats the new column as "pre-existing", returns an empty diff, and
+    the guard silently passes.
+    """
+    name = "inplace_bad"
+    warmup_period = 0
+
+    def compute(self, data):
+        # NO .copy() — mutate data in place.
+        data[self.name] = data["close"].shift(-1)
+        return data
+
+
+def test_inplace_mutation_lookahead_is_blocked():
+    """Regression for V2.19.0 post-review C1 — in-place mutation bypass."""
+    result = LookaheadGuard().check(_ctx(_InPlaceMutationLookahead, "factor"))
+    assert result.severity == GuardSeverity.BLOCK, (
+        f"C1 regression: in-place mutation lookahead not caught. {result.message}"
+    )
+
+
+# ============================================================
+# I1 regression: strategy multi-point compare must catch boolean lookahead
+# ============================================================
+
+class _RequiresNothing:
+    def required_factors(self):
+        return []
+
+
+class _BooleanLookaheadStrategy(_RequiresNothing):
+    """Boolean signal (0/1) derived from tomorrow vs today close.
+
+    With single-scalar comparison, two distinct underlying computations
+    can coincidentally agree ~50% of the time — silent pass. The
+    multi-point compare looks at the last 10 positions and makes
+    coincidental agreement exponentially less likely.
+    """
+    def generate_signals(self, data):
+        import pandas as pd
+        tomorrow = data["close"].shift(-1)
+        return (tomorrow > data["close"]).astype(float)
+
+
+def test_boolean_signal_lookahead_is_blocked_by_multi_point_compare():
+    """Regression for V2.19.0 post-review I1 — scalar compare too weak."""
+    result = LookaheadGuard().check(_ctx(_BooleanLookaheadStrategy, "strategy"))
+    assert result.severity == GuardSeverity.BLOCK, (
+        f"I1 regression: boolean-signal lookahead not caught by multi-point compare. "
+        f"{result.message}"
+    )

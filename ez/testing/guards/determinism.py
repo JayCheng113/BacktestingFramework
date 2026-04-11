@@ -20,6 +20,18 @@ def _canonicalize(output) -> str:
         return f"{output:.15e}"
     if isinstance(output, int):
         return f"{float(output):.15e}"
+    if isinstance(output, tuple):
+        items = []
+        for v in output:
+            if v is None:
+                items.append("<None>")
+                continue
+            try:
+                fv = float(v)
+                items.append("<NaN>" if math.isnan(fv) else f"{fv:.15e}")
+            except (TypeError, ValueError):
+                items.append(str(v))
+        return "(" + ",".join(items) + ")"
     if isinstance(output, pd.Series):
         return output.to_json()
     if isinstance(output, dict):
