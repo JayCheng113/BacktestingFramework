@@ -1,8 +1,12 @@
 """Unit tests for RunStrategiesStep.
 
-Uses real ez.backtest.engine + builtin Strategy on synthetic data.
-This is integration-light: tests verify the step's data flow + error
-handling, not the engine's correctness (which is covered by tests/test_backtest/).
+Uses real ez.backtest.engine on synthetic data with **duck-typed**
+strategy/factor classes that DO NOT inherit from ``Strategy`` /
+``Factor``. This avoids polluting the global registries (which would
+make ``test_strategy_contract.py`` discover and try to run them).
+The engine's interface to strategies is duck-typed (it calls
+``strategy.required_factors()`` and ``strategy.generate_signals(df)``)
+so this is sound.
 """
 from __future__ import annotations
 import numpy as np
@@ -12,16 +16,14 @@ import pytest
 from ez.research.context import PipelineContext
 from ez.research.pipeline import ResearchPipeline, StepError
 from ez.research.steps.run_strategies import RunStrategiesStep
-from ez.strategy.base import Strategy
-from ez.factor.base import Factor
 
 
 # ============================================================
-# Test fixtures: minimal synthetic strategy + data
+# Test fixtures: duck-typed strategy + factor (NO ABC inheritance)
 # ============================================================
 
-class _NoopFactor(Factor):
-    """A trivial factor for the test strategy."""
+class _NoopFactor:
+    """Duck-typed factor — does not inherit Factor to avoid registry pollution."""
     name = "noop"
     warmup_period = 0
     def compute(self, data):
@@ -30,16 +32,16 @@ class _NoopFactor(Factor):
         return out
 
 
-class _BuyHoldStrategy(Strategy):
-    """Always-long buy & hold."""
+class _BuyHoldStrategy:
+    """Always-long buy & hold (duck-typed, not a Strategy subclass)."""
     def required_factors(self):
         return [_NoopFactor()]
     def generate_signals(self, data):
         return pd.Series([1.0] * len(data), index=data.index)
 
 
-class _RaisingStrategy(Strategy):
-    """Strategy that crashes during signal generation."""
+class _RaisingStrategy:
+    """Strategy that crashes during signal generation (duck-typed)."""
     def required_factors(self):
         return [_NoopFactor()]
     def generate_signals(self, data):

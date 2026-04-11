@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.18 | Tests: 2259 passed + 10 skipped (2269 collected) with sklearn+lgbm+xgb / ~1818 without sklearn (ml tests skip gracefully) | C++ acceleration: up to 7.9x
+Version: 0.2.20 | Tests: 2391 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -283,6 +283,26 @@ No version tag without review pass. No push without critical issues resolved.
     - **持久化**: `scripts/build_data_cache.py` 加 `sanitize_adj_close()` 函数集成到 build 流程, 未来 rebuild parquet 会自动处理 Type A anomalies (Type B 需要离线跑 v2 脚本)
     - **多源独立验证**: `validation/verify_parquet_multi_source.py` 用 Tencent qfq + Sina raw 双数据源交叉验证修复后的 parquet
   - 2259 → 2265 tests (+6 dividend handling tests)
+
+- **V2.20.0**: ez.research — 研究工作流编排框架 (P1-A MVP)
+  - **动机**: validation/ 目录有 30+ phase scripts (phase_o_nested_oos, phase_p_walk_forward, phase_q_paired_bootstrap...), 每个都重新实现 data load, runner wiring, metrics, report. 痛点是重复造轮子, 无法跨研究复用. ez.research 把这些抽象成 first-class pipeline + step components.
+  - **新模块 `ez/research/`**: PipelineContext (config + artifacts + audit history), ResearchStep ABC, ResearchPipeline orchestrator, StepRecord audit, StepError wrap. Pipeline 顺序执行, 任一 step 抛异常 → 包装为 StepError + 立即停止, history 完整记录 success/failed
+  - **3 个 V2.20.0 MVP steps** (`ez/research/steps/`):
+    - **DataLoadStep**: 复用 `ez.api.deps.fetch_kline_df`, 多 symbol 批量加载, 单股失败 skip 不中断, 全失败 raise. 支持 str/date/datetime 自动 coerce + config 默认值 fallback. 写 `artifacts['universe_data']` (dict[symbol → DataFrame])
+    - **RunStrategiesStep**: 接受 `{label: Strategy_instance}` (label 是 universe_data 的 symbol key), 复用 `ez.backtest.engine.VectorizedBacktestEngine` 跑每个 strategy. 单策略 crash skip 不中断, 全失败 raise. 写 `artifacts['returns']` (DataFrame[date × label]), `metrics`, `equity_curves`, `run_strategies_skipped`
+    - **ReportStep**: 纯 Python f-string + dict 渲染 (零 jinja 依赖), `default_template` 输出 markdown (title + config + metrics table + returns sample + audit log + warnings sections), 支持 custom `template_fn` callable, 可选 `output_path` 落盘
+  - **Lazy import**: DataLoadStep 和 RunStrategiesStep 内部 lazy import `ez.backtest.engine` / `ez.api.deps`, 让 `ez.research` 在轻量环境可被 import
+  - **Pipeline audit**: `_run_guards` 自动 snapshot artifact diff 计算 written_keys, StepRecord 包含 duration_ms / status / error / written_keys
+  - **测试**: 48 unit + integration tests (13 pipeline + 12 data_load + 8 run_strategies + 11 report + 4 e2e). 所有 test strategy/factor 用 **duck typing** (不继承 `Strategy`/`Factor`), 避免污染 global registry — 否则 `test_strategy_contract.py` 会自动 discover 测试用的 `_RaisingStrategy` 并 crash. Engine 接受的是 duck-typed object, 不做 isinstance check.
+  - **后续 V2.20.x 计划**:
+    - NestedOOSStep (IS 优化 → OOS 验证, 替代 phase_o_nested_oos.py 的 411 行)
+    - PairedBlockBootstrapStep (replace phase_q_paired_bootstrap)
+    - WalkForwardStep / RollingWalkForwardStep (replace phase_p)
+    - Optimizer ABC + MultiObjectiveSimplexOptimizer (replace phase_m/n 的差分进化, 解锁 Sharpe / Calmar / Sortino / epsilon-constraint 多目标)
+    - RunPortfolioStrategiesStep (cross_factor + portfolio_strategy 支持)
+    - jinja2-based ReportStep (升级模板能力, 支持 chart embed)
+    - CacheStep / artifact serialization (中间结果落盘加速 re-run)
+  - 2343 → 2391 tests (+48: 13+12+8+11+4)
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
