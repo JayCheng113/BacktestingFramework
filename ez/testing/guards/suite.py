@@ -108,13 +108,25 @@ def _unique_probe_module_name(stem: str) -> str:
     """Return a globally-unique module name for a one-shot guard import.
 
     V2.19.0 post-review I6: using the canonical production module name
-    (`factors.foo`, `strategies.bar`, etc.) causes `__init_subclass__` to
-    fire a name-collision warning when the guard imports the file in the
-    same process where hot-reload already registered the class. A unique
-    probe name (`_guard_probe.{counter}_{stem}`) sidesteps the registry
-    altogether — the probe class lands in a different dict entry, avoids
-    the collision warning, and is cleaned up via ``drop_probe_module``
-    after the guard runs.
+    (``factors.foo``, ``strategies.bar``, etc.) causes
+    ``Strategy.__init_subclass__`` to **raise** ``ValueError`` on the
+    full-key collision (Strategy registry is keyed by ``module.class``),
+    blocking the guard entirely. A unique probe name
+    (``_guard_probe._probe{N}_{stem}``) gives the probe class its own
+    full-key entry in ``_registry_by_key``, so the import succeeds.
+
+    **Note**: the unique full-key does NOT prevent the name-keyed
+    ``_registry`` (for Factor / CrossSectionalFactor / PortfolioStrategy)
+    from being **transiently displaced** — those registries are keyed by
+    ``__name__`` only, and ``__init_subclass__`` is last-write-wins. The
+    probe class displaces the production class for the duration of the
+    guard run; ``drop_probe_module`` restores it via reverse walk over
+    ``_registry_by_key`` (last-write-wins semantics).
+
+    Codex round-2 finding S7 (deferred to V2.19.1): the displacement
+    still emits a "Factor name collision" warning log line. Future fix
+    would suppress the warning when ``cls.__module__`` starts with
+    ``_guard_probe.``.
     """
     global _PROBE_COUNTER
     with _PROBE_LOCK:

@@ -27,56 +27,65 @@ from ez.testing.guards.suite import drop_probe_module
 
 def test_drop_probe_restores_last_write_wins_for_same_named_classes():
     """Two same-named classes in different modules: after probe + drop,
-    name-keyed registry must point to the LAST-inserted (not first)."""
+    name-keyed registry must point to the LAST-inserted (not first).
+
+    Test isolation: classes are created inside the test, and the code
+    after creation pops EVERY entry the test could have introduced —
+    including the auto-registered keys that ``__init_subclass__`` adds
+    using the test module's own name (`tests.test_guards...`). The
+    finally block restores the registries to their pre-test snapshot.
+    """
     from ez.factor.base import Factor
 
-    class V_A(Factor):
-        name = "p1_test_factor"
-        warmup_period = 0
-        def compute(self, data):
-            return data.copy()
-
-    class V_B(Factor):
-        name = "p1_test_factor"
-        warmup_period = 0
-        def compute(self, data):
-            return data.copy()
-
-    class V_PROBE(Factor):
-        name = "p1_test_factor"
-        warmup_period = 0
-        def compute(self, data):
-            return data.copy()
-
-    # Force same __name__ but different __module__
-    V_A.__name__ = V_B.__name__ = V_PROBE.__name__ = "P1RestoreTestFactor"
-    V_A.__module__ = "factors._p1_restore_a"
-    V_B.__module__ = "factors._p1_restore_b"
-    V_PROBE.__module__ = "_guard_probe._p1_restore_probe"
-
-    # Reset any state from class creation
-    for k in ("V_A", "V_B", "V_PROBE", "P1RestoreTestFactor"):
-        Factor._registry.pop(k, None)
-    for k in (
-        "factors._p1_restore_a.P1RestoreTestFactor",
-        "factors._p1_restore_b.P1RestoreTestFactor",
-        "_guard_probe._p1_restore_probe.P1RestoreTestFactor",
-    ):
-        Factor._registry_by_key.pop(k, None)
-
-    # Insert V_A first (older), then V_B (newer = last-write).
-    Factor._registry_by_key["factors._p1_restore_a.P1RestoreTestFactor"] = V_A
-    Factor._registry_by_key["factors._p1_restore_b.P1RestoreTestFactor"] = V_B
-    Factor._registry["P1RestoreTestFactor"] = V_B  # last-write-wins
-
-    # Probe import: displaces name-keyed entry to V_PROBE
-    Factor._registry_by_key["_guard_probe._p1_restore_probe.P1RestoreTestFactor"] = V_PROBE
-    Factor._registry["P1RestoreTestFactor"] = V_PROBE
-
-    # Drop the probe module
-    drop_probe_module("_guard_probe._p1_restore_probe", "factor")
+    # Snapshot pre-test state so the finally block can rebuild it.
+    pre_registry = dict(Factor._registry)
+    pre_registry_by_key = dict(Factor._registry_by_key)
 
     try:
+        class V_A(Factor):
+            name = "p1_test_factor"
+            warmup_period = 0
+            def compute(self, data):
+                return data.copy()
+
+        class V_B(Factor):
+            name = "p1_test_factor"
+            warmup_period = 0
+            def compute(self, data):
+                return data.copy()
+
+        class V_PROBE(Factor):
+            name = "p1_test_factor"
+            warmup_period = 0
+            def compute(self, data):
+                return data.copy()
+
+        # Pop every auto-registered key for these 3 classes BEFORE renaming —
+        # __init_subclass__ already inserted entries under the test module's
+        # name, and renaming __module__ doesn't update the registry.
+        for cls in (V_A, V_B, V_PROBE):
+            for reg in (Factor._registry, Factor._registry_by_key):
+                for k in [k for k, v in reg.items() if v is cls]:
+                    reg.pop(k, None)
+
+        # Force same __name__ but different __module__ (post-pop is fine).
+        V_A.__name__ = V_B.__name__ = V_PROBE.__name__ = "P1RestoreTestFactor"
+        V_A.__module__ = "factors._p1_restore_a"
+        V_B.__module__ = "factors._p1_restore_b"
+        V_PROBE.__module__ = "_guard_probe._p1_restore_probe"
+
+        # Insert V_A first (older), then V_B (newer = last-write).
+        Factor._registry_by_key["factors._p1_restore_a.P1RestoreTestFactor"] = V_A
+        Factor._registry_by_key["factors._p1_restore_b.P1RestoreTestFactor"] = V_B
+        Factor._registry["P1RestoreTestFactor"] = V_B  # last-write-wins
+
+        # Probe import: displaces name-keyed entry to V_PROBE
+        Factor._registry_by_key["_guard_probe._p1_restore_probe.P1RestoreTestFactor"] = V_PROBE
+        Factor._registry["P1RestoreTestFactor"] = V_PROBE
+
+        # Drop the probe module
+        drop_probe_module("_guard_probe._p1_restore_probe", "factor")
+
         restored = Factor._registry.get("P1RestoreTestFactor")
         assert restored is V_B, (
             f"P1 #1 regression: drop_probe restored {restored!r} "
@@ -85,9 +94,12 @@ def test_drop_probe_restores_last_write_wins_for_same_named_classes():
         )
         assert restored is not V_A, "Restored to older V_A instead of newer V_B"
     finally:
-        Factor._registry.pop("P1RestoreTestFactor", None)
-        Factor._registry_by_key.pop("factors._p1_restore_a.P1RestoreTestFactor", None)
-        Factor._registry_by_key.pop("factors._p1_restore_b.P1RestoreTestFactor", None)
+        # Hard restore: clear and rebuild from snapshot. This is the only
+        # way to guarantee no leak from test-internal class definitions.
+        Factor._registry.clear()
+        Factor._registry.update(pre_registry)
+        Factor._registry_by_key.clear()
+        Factor._registry_by_key.update(pre_registry_by_key)
 
 
 # ============================================================
@@ -187,32 +199,90 @@ def test_determinism_guard_uses_fresh_panel_per_run():
     )
 
 
-class _MutatingPortfolio:
-    """Portfolio strategy that mutates panel on each call. Equal-weight
-    output is constant across dates, so WeightSumGuard should pass."""
+class _PriceDependentMutatingPortfolio:
+    """Portfolio whose output **depends on the panel content**, AND mutates
+    the panel in place after reading. Under shared-panel guard infra:
+      - call 1: price > 1.0 → return equal-weight (sum=1.0). Then poison panel.
+      - call 2..5: panel poisoned → price=0.0 → return over-leveraged
+        sum=500 → WeightSumGuard BLOCKs.
+
+    Under fresh-panel guard infra: every call sees pristine prices,
+    every call returns equal-weight, sum=1.0 every time → PASS.
+
+    This is a STRONG canary — without the round-2 fix, the guard MUST
+    surface a violation. (Verified by reverting build_mock_panel to
+    cached-reference and watching this test fail.)
+    """
     warmup_period = 0
 
     def generate_weights(self, panel, target_date, prev_w, prev_r):
         sym = next(iter(panel))
-        n = len(panel)
-        # In-place pollution per call
+        price = float(panel[sym]["adj_close"].iloc[-1])
+        # Mutate panel in place — simulates user's accidental in-place bug
         panel[sym].loc[:, "adj_close"] = 0.0
-        return {s: 1.0 / n for s in panel}
+        if price > 1.0:
+            n = len(panel)
+            return {s: 1.0 / n for s in panel}  # sum = 1.0
+        # price was poisoned by a previous call → over-leveraged response
+        return {s: 100.0 for s in panel}  # sum = 500
 
 
 def test_weight_sum_guard_uses_fresh_panel_per_date():
     """WeightSumGuard checks 5 dates. Each invocation must get a fresh
-    panel so that user code mutation doesn't bleed across dates."""
+    panel so that user code mutation doesn't bleed across dates.
+
+    Strong canary: under shared-panel infra, dates 2..5 see poisoned
+    prices and return sum=500 → BLOCK. Under fresh-panel infra, all 5
+    dates pass.
+    """
     ctx = GuardContext(
         filename="x.py",
         module_name="x",
         file_path=Path("/tmp/x.py"),
         kind="portfolio_strategy",
-        user_class=_MutatingPortfolio,
+        user_class=_PriceDependentMutatingPortfolio,
     )
     result = WeightSumGuard().check(ctx)
     assert result.severity == GuardSeverity.PASS, (
-        f"P2 #2 regression: equal-weight mutating portfolio got "
+        f"P2 #2 regression: price-dependent mutating portfolio got "
+        f"{result.severity.value}, expected PASS. Panel pollution leaked "
+        f"across dates. Message: {result.message}"
+    )
+
+
+class _PriceDependentNegativeMutatingPortfolio:
+    """Same pattern as above but for NonNegativeWeightsGuard. Returns
+    a NEGATIVE weight on calls where the price is poisoned (<=0)."""
+    warmup_period = 0
+
+    def generate_weights(self, panel, target_date, prev_w, prev_r):
+        sym = next(iter(panel))
+        price = float(panel[sym]["adj_close"].iloc[-1])
+        panel[sym].loc[:, "adj_close"] = 0.0
+        if price > 1.0:
+            n = len(panel)
+            return {s: 1.0 / n for s in panel}  # all positive
+        # poisoned: surface a negative weight to trigger non-negative warn
+        syms = list(panel)
+        return {syms[0]: -0.1, syms[1]: 0.5, syms[2]: 0.6}
+
+
+def test_non_negative_weights_guard_uses_fresh_panel_per_date():
+    """NonNegativeWeightsGuard 5-date sweep: under shared-panel infra,
+    poisoned dates surface negative weights → WARN. Under fresh-panel
+    infra, all 5 dates see clean prices → PASS."""
+    from ez.testing.guards.non_negative import NonNegativeWeightsGuard
+
+    ctx = GuardContext(
+        filename="x.py",
+        module_name="x",
+        file_path=Path("/tmp/x.py"),
+        kind="portfolio_strategy",
+        user_class=_PriceDependentNegativeMutatingPortfolio,
+    )
+    result = NonNegativeWeightsGuard().check(ctx)
+    assert result.severity == GuardSeverity.PASS, (
+        f"P2 #2 regression: price-dependent mutating portfolio (negative) got "
         f"{result.severity.value}, expected PASS. Panel pollution leaked "
         f"across dates. Message: {result.message}"
     )

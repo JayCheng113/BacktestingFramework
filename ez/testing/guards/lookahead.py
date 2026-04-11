@@ -49,6 +49,15 @@ STRATEGY_PROBE_INDICES = (130, 140, 150, 160, 170, 180, 190)
 # rarer (would need a period ≥ 5 match) and keeps runtime well under
 # the 500 ms budget.
 # Codex round-2 finding P1 #2.
+#
+# Known limitation (codex round-2 S5, deferred to V2.19.1): the preflight
+# only runs at a single ``CUTOFF_IDX`` target. A strategy that is
+# deterministic at that date but non-deterministic at other probe dates
+# (e.g. ``if target_date.day == 15: random.random()``) will pass preflight
+# and then trigger a probe BLOCK that the user will mis-read as lookahead.
+# Workaround: run the preflight independently at each probe index.
+# Cost: 5 × 7 = 35 invokes for strategy, ~150 ms additional. Acceptable
+# but deferred until we see this in practice.
 NONDET_PREFLIGHT_RUNS = 5
 
 

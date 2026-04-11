@@ -54,16 +54,18 @@ class PortfolioStrategy(ABC):
             name = cls.__name__
             existing = PortfolioStrategy._registry.get(name)
             if existing is not None and existing is not cls:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "PortfolioStrategy name collision: '%s' previously "
-                    "registered by %s.%s, now replaced by %s.%s. "
-                    "Use resolve_class(key) with the full 'module.class' "
-                    "key to disambiguate.",
-                    name,
-                    existing.__module__, existing.__name__,
-                    cls.__module__, cls.__name__,
-                )
+                # V2.19.0 codex round-2 S7: suppress noise from guard probes.
+                if not cls.__module__.startswith("_guard_probe."):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "PortfolioStrategy name collision: '%s' previously "
+                        "registered by %s.%s, now replaced by %s.%s. "
+                        "Use resolve_class(key) with the full 'module.class' "
+                        "key to disambiguate.",
+                        name,
+                        existing.__module__, existing.__name__,
+                        cls.__module__, cls.__name__,
+                    )
             PortfolioStrategy._registry[name] = cls
 
     @classmethod

@@ -121,14 +121,22 @@ def _run_guards(filename: str, kind: str, target_dir: Path):
 
     V2.19.0. Called by all three save flows. The guard imports the file
     under a **unique probe module name** (not the production
-    `factors.foo` / `strategies.bar` etc.), so `__init_subclass__` does
-    not emit a name-collision warning when the production class has
-    already been registered by hot-reload. The probe module + its
-    registry entries are cleaned up after the suite finishes.
+    ``factors.foo`` / ``strategies.bar`` etc.), so ``__init_subclass__``
+    full-key collision is avoided. The probe module + its registry
+    entries are cleaned up after the suite finishes via
+    ``drop_probe_module``.
 
-    Graceful degradation: if `ez.testing.guards` cannot be imported (in a
-    hypothetical minimal deployment), return `None`. Callers treat `None`
-    as "no guards ran" and skip the block check.
+    **Thread safety (codex round-2 S4)**: the entire probe import →
+    suite run → drop_probe sequence is wrapped in ``_reload_lock`` so
+    that a concurrent thread iterating ``Factor._registry`` (e.g.
+    ``/api/factors`` listing, ``ResearchRunner`` background task) cannot
+    observe the transient probe-class displacement of the name-keyed
+    dict between import and drop. Without the lock there is a ~3-8 ms
+    window where the probe class is visible — under multi-thread access
+    this is a real (low-impact) UX bug.
+
+    Graceful degradation: if ``ez.testing.guards`` cannot be imported,
+    return ``None``. Callers treat ``None`` as "no guards ran".
     """
     try:
         from ez.testing.guards.suite import (
@@ -143,21 +151,22 @@ def _run_guards(filename: str, kind: str, target_dir: Path):
     stem = filename.replace(".py", "")
     probe_module_name = _unique_probe_module_name(stem)
     file_path = target_dir / filename
-    user_class, err = load_user_class(file_path, probe_module_name, kind)  # type: ignore[arg-type]
-    try:
-        context = GuardContext(
-            filename=filename,
-            module_name=probe_module_name,
-            file_path=file_path,
-            kind=kind,  # type: ignore[arg-type]
-            user_class=user_class,
-            instantiation_error=err,
-        )
-        return GuardSuite().run(context)
-    finally:
-        # Always drop the probe module so its registry entries (even
-        # abstract-class skeletons) don't accumulate in memory.
-        drop_probe_module(probe_module_name, kind)  # type: ignore[arg-type]
+    with _reload_lock:
+        user_class, err = load_user_class(file_path, probe_module_name, kind)  # type: ignore[arg-type]
+        try:
+            context = GuardContext(
+                filename=filename,
+                module_name=probe_module_name,
+                file_path=file_path,
+                kind=kind,  # type: ignore[arg-type]
+                user_class=user_class,
+                instantiation_error=err,
+            )
+            return GuardSuite().run(context)
+        finally:
+            # Always drop the probe module so its registry entries don't
+            # accumulate in memory.
+            drop_probe_module(probe_module_name, kind)  # type: ignore[arg-type]
 
 # Modules that user code MUST NOT import
 _FORBIDDEN_MODULES = frozenset({

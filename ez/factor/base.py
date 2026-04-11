@@ -36,15 +36,22 @@ class Factor(ABC):
             name = cls.__name__
             existing = Factor._registry.get(name)
             if existing is not None and existing is not cls:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Factor name collision: '%s' previously registered by "
-                    "%s.%s, now replaced by %s.%s. Use Factor.resolve_class() "
-                    "with the full 'module.class' key to disambiguate.",
-                    name,
-                    existing.__module__, existing.__name__,
-                    cls.__module__, cls.__name__,
-                )
+                # V2.19.0 codex round-2 S7: skip the warning for transient
+                # guard probe imports — `_guard_probe.*` modules are
+                # one-shot and immediately cleaned up by `drop_probe_module`
+                # after the guard suite finishes. Their displacement of the
+                # name-keyed dict is by design and does not warrant a log
+                # line on every save.
+                if not cls.__module__.startswith("_guard_probe."):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Factor name collision: '%s' previously registered by "
+                        "%s.%s, now replaced by %s.%s. Use Factor.resolve_class() "
+                        "with the full 'module.class' key to disambiguate.",
+                        name,
+                        existing.__module__, existing.__name__,
+                        cls.__module__, cls.__name__,
+                    )
             Factor._registry[name] = cls
 
     @classmethod
