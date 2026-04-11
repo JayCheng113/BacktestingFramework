@@ -90,6 +90,57 @@ def _get_dir(kind: str) -> Path:
         raise ValueError(f"Invalid kind '{kind}'. Must be one of: {sorted(_VALID_KINDS)}")
     return _KIND_DIR_MAP[kind]
 
+
+def _sandbox_registries_for_kind(kind: str) -> list[dict]:
+    """Return all registry dicts that __init_subclass__ would populate for a kind.
+
+    V2.19.0 guard framework helper. Mirrors `_get_all_registries_for_kind` in
+    `ez/api/routes/code.py` but lives in the agent layer to avoid a layer
+    violation (agent must NOT import from api). Kept in sync via
+    `tests/test_guards/test_sandbox_registries.py` parity test.
+    Returns empty list for unknown kinds — caller will no-op.
+    """
+    if kind == "strategy":
+        from ez.strategy.base import Strategy
+        return [Strategy._registry]
+    if kind == "factor":
+        from ez.factor.base import Factor
+        return [Factor._registry, Factor._registry_by_key]
+    if kind in ("cross_factor", "ml_alpha"):
+        # MLAlpha IS-A CrossSectionalFactor — same registry.
+        from ez.portfolio.cross_factor import CrossSectionalFactor
+        return [CrossSectionalFactor._registry, CrossSectionalFactor._registry_by_key]
+    if kind == "portfolio_strategy":
+        from ez.portfolio.portfolio_strategy import PortfolioStrategy
+        return [PortfolioStrategy._registry, PortfolioStrategy._registry_by_key]
+    return []
+
+
+def _run_guards(filename: str, kind: str, target_dir: Path):
+    """Run the GuardSuite against a just-saved user file.
+
+    V2.19.0. Called by all three save flows AFTER contract test passes and
+    BEFORE hot-reload. If blocked, the caller rolls back the file and cleans
+    any registry pollution introduced by the guard's in-process import.
+    Lazy import so ez.testing.guards stays an optional runtime dependency.
+    """
+    from ez.testing.guards.suite import GuardSuite, load_user_class
+    from ez.testing.guards.base import GuardContext
+
+    stem = filename.replace(".py", "")
+    module_name = f"{target_dir.name}.{stem}"
+    file_path = target_dir / filename
+    user_class, err = load_user_class(file_path, module_name, kind)  # type: ignore[arg-type]
+    context = GuardContext(
+        filename=filename,
+        module_name=module_name,
+        file_path=file_path,
+        kind=kind,  # type: ignore[arg-type]
+        user_class=user_class,
+        instantiation_error=err,
+    )
+    return GuardSuite().run(context)
+
 # Modules that user code MUST NOT import
 _FORBIDDEN_MODULES = frozenset({
     "os", "sys", "subprocess", "socket", "shutil", "pathlib",
@@ -427,6 +478,39 @@ def save_and_validate_strategy(
             "test_output": test_result["output"],
         }
 
+    # V2.19.0: guard framework — run after contract test passes, before hot-reload.
+    # Guards import the module in-process (firing __init_subclass__), so on block
+    # we must clean the registry + sys.modules to avoid zombie entries.
+    guard_result = _run_guards(safe_name, "strategy", _STRATEGIES_DIR)
+    if guard_result.blocked:
+        from ez.strategy.base import Strategy
+        module_name = f"strategies.{safe_name.replace('.py', '')}"
+        with _reload_lock:
+            for k in [k for k, v in Strategy._registry.items() if v.__module__ == module_name]:
+                Strategy._registry.pop(k, None)
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+        if had_original:
+            target.write_text(original_code, encoding="utf-8")
+            try:
+                _reload_user_strategy(safe_name)
+            except Exception as restore_err:
+                logger.warning(
+                    "Strategy guard rollback restored file but re-register failed: %s",
+                    restore_err,
+                )
+        else:
+            target.unlink(missing_ok=True)
+        return {
+            "success": False,
+            "errors": [
+                f"Guard failed: {blk.guard_name}: {blk.message}"
+                for blk in guard_result.blocks
+            ],
+            "test_output": test_result["output"],
+            "guard_result": guard_result.to_payload(),
+        }
+
     # Hot-reload: make the strategy available immediately.
     # V2.12.1 post-review (codex): prior version returned success=True even
     # when _reload_user_strategy raised, hiding the fact that the main
@@ -446,6 +530,7 @@ def save_and_validate_strategy(
             ],
             "path": f"strategies/{safe_name}",
             "test_output": f"Contract test passed. Hot-reload failed: {e}",
+            "guard_result": guard_result.to_payload(),
         }
 
     return {
@@ -453,6 +538,7 @@ def save_and_validate_strategy(
         "errors": [],
         "path": f"strategies/{safe_name}",
         "test_output": test_result["output"],
+        "guard_result": guard_result.to_payload(),
     }
 
 
@@ -716,6 +802,41 @@ def save_and_validate_code(
                     raise ValueError(
                         f"Factor hot-reload succeeded but registry has no entries for {module_name}"
                     )
+
+            # V2.19.0: guard framework — run after hot-reload succeeds,
+            # before returning success. On block: manually rollback (inline,
+            # not via the `except Exception` block which would mis-categorize
+            # the error as "Factor validation failed").
+            factor_guard_result = _run_guards(safe_name, "factor", target_dir)
+            if factor_guard_result.blocked:
+                # Clean dual-dict registry (mirrors V2.12.2 rollback pattern).
+                dirty = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
+                for k in dirty:
+                    del Factor._registry[k]
+                dirty_full = [k for k, v in Factor._registry_by_key.items() if v.__module__ == module_name]
+                for k in dirty_full:
+                    del Factor._registry_by_key[k]
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                if backup is not None:
+                    target.write_text(backup, encoding="utf-8")
+                    try:
+                        _reload_factor_code(safe_name, target_dir)
+                    except Exception as restore_err:
+                        logger.warning(
+                            "Factor guard rollback restored file but re-register failed: %s",
+                            restore_err,
+                        )
+                else:
+                    target.unlink(missing_ok=True)
+                return {
+                    "success": False,
+                    "errors": [
+                        f"Guard failed: {blk.guard_name}: {blk.message}"
+                        for blk in factor_guard_result.blocks
+                    ],
+                    "guard_result": factor_guard_result.to_payload(),
+                }
         except Exception as e:
             # Clean up any dirty registry entries.
             # V2.12.2 codex reviewer: dual-dict registry — clean BOTH dicts
@@ -749,7 +870,12 @@ def save_and_validate_code(
             else:
                 target.unlink(missing_ok=True)
             return {"success": False, "errors": [f"Factor validation failed: {e}"]}
-        return {"success": True, "path": str(target), "test_output": f"Factor saved. Registered: {registered}"}
+        return {
+            "success": True,
+            "path": str(target),
+            "test_output": f"Factor saved. Registered: {registered}",
+            "guard_result": factor_guard_result.to_payload(),
+        }
 
 
     safe_name = _safe_filename(filename)
@@ -797,8 +923,46 @@ def save_and_validate_code(
             "test_output": f"Contract test passed. Hot-reload failed: {e}",
         }
 
-    return {"success": True, "errors": [], "path": f"{target_dir.name}/{safe_name}",
-            "test_output": test_result["output"]}
+    # V2.19.0: guard framework — run after hot-reload succeeds, before
+    # returning success. On block: clean registries + rollback file.
+    portfolio_guard_result = _run_guards(safe_name, kind, target_dir)
+    if portfolio_guard_result.blocked:
+        stem_pf = safe_name.replace(".py", "")
+        module_name_pf = f"{target_dir.name}.{stem_pf}"
+        with _reload_lock:
+            for reg in _sandbox_registries_for_kind(kind):
+                for k in [k for k, v in reg.items() if v.__module__ == module_name_pf]:
+                    reg.pop(k, None)
+            if module_name_pf in sys.modules:
+                del sys.modules[module_name_pf]
+        if original_code:
+            target.write_text(original_code, encoding="utf-8")
+            try:
+                _reload_portfolio_code(safe_name, kind, target_dir)
+            except Exception as restore_err:
+                logger.warning(
+                    "Portfolio guard rollback restored file but re-register failed: %s",
+                    restore_err,
+                )
+        else:
+            target.unlink(missing_ok=True)
+        return {
+            "success": False,
+            "errors": [
+                f"Guard failed: {blk.guard_name}: {blk.message}"
+                for blk in portfolio_guard_result.blocks
+            ],
+            "test_output": test_result["output"],
+            "guard_result": portfolio_guard_result.to_payload(),
+        }
+
+    return {
+        "success": True,
+        "errors": [],
+        "path": f"{target_dir.name}/{safe_name}",
+        "test_output": test_result["output"],
+        "guard_result": portfolio_guard_result.to_payload(),
+    }
 
 
 def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> dict:
