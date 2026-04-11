@@ -173,6 +173,23 @@ interface EditorHandle {
   getValue: () => string
 }
 
+// V2.19.0: guard framework report from sandbox save flow.
+interface GuardReportEntry {
+  name: string
+  severity: 'pass' | 'warn' | 'block'
+  tier: 'block' | 'warn'
+  message: string
+  runtime_ms: number
+  details: Record<string, unknown>
+}
+interface GuardReport {
+  blocked: boolean
+  n_warnings: number
+  n_blocks: number
+  total_runtime_ms: number
+  guards: GuardReportEntry[]
+}
+
 const api = (path: string, opts?: RequestInit) =>
   fetch(`/api/code${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
 
@@ -196,6 +213,8 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
   const [status, setStatus] = useState<string>('')
   const [errors, setErrors] = useState<string[]>([])
   const [testOutput, setTestOutput] = useState('')
+  // V2.19.0: guard framework result from the sandbox save flow.
+  const [guardReport, setGuardReport] = useState<GuardReport | null>(null)
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
   const [showChat, setShowChat] = useState(false)
@@ -252,6 +271,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setStatus(`已加载 ${fname}`)
         setErrors([])
         setTestOutput('')
+        setGuardReport(null)
       }
     } catch (e: unknown) { if (loadFileTokenRef.current === myToken) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
   }
@@ -293,6 +313,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setStatus(`新建${KIND_LABELS[kind]}: ${fn}`)
         setErrors([])
         setTestOutput('')
+        setGuardReport(null)
       }
     } catch {}
   }
@@ -324,7 +345,8 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
     setSaving(true)
     setErrors([])
     setTestOutput('')
-    setStatus('保存中，正在运行合约测试...')
+    setGuardReport(null)
+    setStatus('保存中，正在运行合约测试与代码守卫...')
     try {
       const res = await api('/save', {
         method: 'POST',
@@ -332,9 +354,10 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
       })
       const data = await res.json()
       if (res.ok) {
-        setStatus(`已保存至 ${data.path} — 合约测试通过!`)
+        setStatus(`已保存至 ${data.path} — 合约测试与守卫通过!`)
         setErrors([])
         setTestOutput(data.test_output || '')
+        setGuardReport((data.guard_result as GuardReport) || null)
         // V2.12.2 codex round 6: commit the filename now that the save
         // succeeded — ChatPanel's fileKey will update and a new
         // conversation (or switch to existing) will happen exactly once,
@@ -352,6 +375,7 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
         setStatus('保存失败')
         setErrors(errs)
         if (detail.test_output) setTestOutput(detail.test_output)
+        if (detail.guard_result) setGuardReport(detail.guard_result as GuardReport)
       }
     } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`) }
     finally { setSaving(false) }
@@ -567,11 +591,42 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           </button>
         </div>
 
-        {/* Status bar */}
-        {(status || errors.length > 0) && (
-          <div className="px-3 py-1 text-xs border-b" style={{ borderColor: 'var(--border)', backgroundColor: errors.length ? '#7f1d1d20' : '#14532d20' }}>
+        {/* Status bar (V2.19.0: also renders guard verdict badges) */}
+        {(status || errors.length > 0 || guardReport) && (
+          <div
+            className="px-3 py-1 text-xs border-b"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor:
+                (errors.length || guardReport?.blocked)
+                  ? '#7f1d1d20'
+                  : (guardReport && guardReport.n_warnings > 0 ? '#92400e20' : '#14532d20'),
+            }}
+          >
             {status && <div style={{ color: errors.length ? '#ef4444' : '#22c55e' }}>{status}</div>}
             {errors.map((e, i) => <div key={i} style={{ color: '#ef4444' }}>{e}</div>)}
+            {guardReport && (
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <span style={{ color: 'var(--text-secondary)' }}>代码守卫:</span>
+                {guardReport.guards.map((g, i) => (
+                  <span
+                    key={i}
+                    title={g.message || '通过'}
+                    style={{
+                      color:
+                        g.severity === 'block' ? '#ef4444' :
+                        g.severity === 'warn' ? '#f59e0b' : '#22c55e',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {g.severity === 'block' ? '✗' : g.severity === 'warn' ? '⚠' : '✓'} {g.name}
+                  </span>
+                ))}
+                <span style={{ color: 'var(--text-secondary)', marginLeft: 8 }}>
+                  ({guardReport.total_runtime_ms.toFixed(0)} ms)
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -636,15 +691,41 @@ export default function CodeEditor({ onNavigate }: { onNavigate?: (tab: string) 
           )}
         </div>
 
-        {/* Test output panel */}
-        {testOutput && (
-          <div className="border-t overflow-auto" style={{ borderColor: 'var(--border)', maxHeight: '200px', backgroundColor: 'var(--bg-primary)' }}>
+        {/* Test output + guard detail panel (V2.19.0: combined) */}
+        {(testOutput || (guardReport && (guardReport.n_blocks > 0 || guardReport.n_warnings > 0))) && (
+          <div
+            className="border-t overflow-auto"
+            style={{ borderColor: 'var(--border)', maxHeight: '240px', backgroundColor: 'var(--bg-primary)' }}
+          >
             <div className="flex justify-between items-center px-3 py-1">
-              <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>合约测试输出</span>
-              <button onClick={() => setTestOutput('')} className="text-xs px-1.5 rounded hover:opacity-80"
-                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>✕</button>
+              <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                合约测试 + 代码守卫输出
+              </span>
+              <button
+                onClick={() => { setTestOutput(''); setGuardReport(null) }}
+                className="text-xs px-1.5 rounded hover:opacity-80"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >✕</button>
             </div>
-            <pre className="px-3 pb-2 text-xs whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{testOutput}</pre>
+            {testOutput && (
+              <pre className="px-3 pb-2 text-xs whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>
+                {testOutput}
+              </pre>
+            )}
+            {guardReport && guardReport.guards
+              .filter((g) => g.severity !== 'pass')
+              .map((g, i) => (
+                <div
+                  key={i}
+                  className="px-3 pb-2 text-xs"
+                  style={{ color: g.severity === 'block' ? '#ef4444' : '#f59e0b' }}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    [{g.severity.toUpperCase()}] {g.name} ({g.runtime_ms.toFixed(0)} ms)
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{g.message}</div>
+                </div>
+              ))}
           </div>
         )}
       </div>
