@@ -284,6 +284,28 @@ No version tag without review pass. No push without critical issues resolved.
     - **多源独立验证**: `validation/verify_parquet_multi_source.py` 用 Tencent qfq + Sina raw 双数据源交叉验证修复后的 parquet
   - 2259 → 2265 tests (+6 dividend handling tests)
 
+- **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
+  - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
+  - **新模块 `ez/testing/guards/`**: Guard ABC + GuardContext/GuardResult/GuardSeverity + GuardSuite 编排器 + `load_user_class` (in-process 导入用户文件) + `default_guards()`
+  - **mock 数据**: `build_mock_panel()` 200 B-day × 5 符号, deterministic GBM (seed 42), `@lru_cache` 缓存. `build_shuffled_panel(cutoff_idx)` 保留 [0..cutoff_idx], 打乱 [cutoff_idx+1..] 行值 (index 不变)
+  - **5 guards**:
+    - **LookaheadGuard (Tier 1 Block, `applies_to=("factor","strategy")`)**: **3-run shuffle-future test** — clean₁ vs clean₂ (侦测 non-determinism → WARN, 不 block), clean₁ vs shuffled (侦测 lookahead → BLOCK). tolerance 1e-9, cutoff_idx=150. **不 apply 到 cross_factor/portfolio_strategy/ml_alpha**: engine 会先 slice `[date-lookback, date-1]`, 用户代码合法使用 `iloc[-1]` 假设 pre-slice, guard 传 full panel 会把 `iloc[-1]=row[199]=shuffled` 误判为 lookahead. V2 再考虑针对 MLAlpha `feature_fn`/`target_fn` 的专用 guard
+    - **NaNInfGuard (Tier 1 Block, 5 kinds)**: factor 扫 DataFrame **新列** (非整个 df, 否则 OHLCV 的合法 NaN 会误报), cross_factor/ml_alpha 扫 Series values, portfolio_strategy 扫 dict values, 遵守 `warmup_period` 跳过前 N 行. error message 提示 "warmup_period 声明错误 vs. 真实 rolling window"
+    - **WeightSumGuard (Tier 1 Block, portfolio_strategy)**: 在 5 个 target_date (`[50, 100, 150, 175, 199]`) 调 `generate_weights`, 检查 sum 在 `[-0.001, 1.001]`. 比现有 sandbox contract test 的**单日**检查更强, 捕获日期相关的 over-leverage bug
+    - **NonNegativeWeightsGuard (Tier 2 Warn, portfolio_strategy)**: 同 5 日扫描, 任一 symbol 权重 < -1e-9 即 warn. 不 block 因为有些 workflow 合法返回未归一化 raw alpha
+    - **DeterminismGuard (Tier 2 Warn, 5 kinds)**: 双 run 相同输入, canonical string 比较 (dict sorted, Series to_json, float `.15e` 格式). BLAS 线程 non-determinism 常见, warn-only
+  - **Sandbox 集成**:
+    - `_sandbox_registries_for_kind(kind)` helper: mirrors `ez/api/routes/code._get_all_registries_for_kind` 但在 agent 层避免 layer violation (agent 不能 import api). parametrized parity test 验证两个 helper 返回**同一个**字典对象 (identity)
+    - `_run_guards(filename, kind, target_dir)` helper: lazy import `ez.testing.guards` (module 保持 optional), 构造 `GuardContext`, 跑 `GuardSuite().run(ctx)`, 返回 `SuiteResult`
+    - **Hook 1** (`save_and_validate_strategy`): 合约测试过后 / 热加载前调 guards. Guard block → 清 `Strategy._registry` + `sys.modules` → rollback 文件 → 重注册 backup → 返回失败 + `guard_result` payload
+    - **Hook 2** (factor branch 内联): hot-reload 成功后, 返回 success 前调 guards. Block → 清 dual-dict Factor registry + rollback. **直线 rollback** (不用 exception), 避免和现有 `except Exception` cleanup 块的顺序冲突
+    - **Hook 3** (portfolio/cross_factor/ml_alpha branch): `_reload_portfolio_code` 成功后调 guards. Block → `_sandbox_registries_for_kind(kind)` 清双 dict + rollback + 重注册 backup
+  - **前端**: `web/src/components/CodeEditor.tsx` **零新组件**. 新增 `GuardReport`/`GuardReportEntry` TS 类型 (零 `any`), `guardReport` state, save handler 在 success/failure 两个分支都捕获 `guard_result`, 文件加载/新建路径 reset state. **状态栏**扩展: 每个 guard 一个 badge (✓/⚠/✗ + name), 颜色反映最坏严重度 (红 block / 琥珀 warn / 绿 pass), total_runtime_ms 后缀. **测试输出面板**扩展: 非 pass 的 guards 在合约测试输出下面渲染 `[SEVERITY] name (ms) + full message`, 共享 ✕ 按钮清两者
+  - **Golden bug regression tests** (`tests/test_guards/golden_bugs/`): v1 Dynamic EF (`iloc[t+1]` 作为 factor 值) + MLAlpha 日历购货 (`timedelta(days=5)` 跨周末) — 都编码为 Factor kind (LookaheadGuard V1 scope), 保证**未来任何 LookaheadGuard 回退都会让这两个测试失败** (canary)
+  - **性能预算**: 默认 suite < 500ms (runtime budget test 常驻), 单 guard < 150ms
+  - **零 breaking changes**: GuardSuite 捕获 guard 异常作为 block (guard bug ≠ sandbox crash), 返回 dict 新增 `guard_result` key 被旧客户端忽略. 既有 51 个 sandbox tests 仍然通过
+  - **测试**: 2265 → 2333 tests (+68: guard_base 6 + mock_data 5 + suite 8 + lookahead 10 + nan_inf 6 + weight_sum 5 + non_negative 4 + determinism 5 + sandbox_helpers 7 + sandbox_integration 10 + golden bugs 2)
+
 - **V2.18.1 策略研究发现: A + 国债 + 黄金 降回撤组合** (仅研究结论, 不是代码改动):
   - **背景**: 8 次直接修改策略 C 的尝试全部失败 (factor / chop filter / vol scaling 等), 元诊断确认策略 C 是本地最优. 改变方向, 从"策略层之外"寻找降回撤方案
   - **研究方法**: 三层证据链验证, 避免单一时期过拟合
