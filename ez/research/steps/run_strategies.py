@@ -97,10 +97,24 @@ class RunStrategiesStep(ResearchStep):
                 f"Skipped: {skipped}"
             )
 
-        # Align all returns to a common date index
+        # Align all returns to a common date index, merge with existing
         returns_df = pd.DataFrame(returns_dict)
-        context.artifacts["returns"] = returns_df
+        existing_returns = context.artifacts.get("returns")
+        if existing_returns is not None and isinstance(existing_returns, pd.DataFrame):
+            context.artifacts["returns"] = existing_returns.join(returns_df, how="outer")
+        else:
+            context.artifacts["returns"] = returns_df
+
+        existing_metrics = context.artifacts.get("metrics")
+        if isinstance(existing_metrics, dict):
+            existing_metrics.update(metrics_dict)
+            metrics_dict = existing_metrics
         context.artifacts["metrics"] = metrics_dict
+
+        existing_eq = context.artifacts.get("equity_curves")
+        if isinstance(existing_eq, dict):
+            existing_eq.update(equity_dict)
+            equity_dict = existing_eq
         context.artifacts["equity_curves"] = equity_dict
         if skipped:
             context.artifacts["run_strategies_skipped"] = skipped

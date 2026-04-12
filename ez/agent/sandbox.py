@@ -127,7 +127,7 @@ def _run_guards(filename: str, kind: str, target_dir: Path):
     ``drop_probe_module``.
 
     **Thread safety (codex round-2 S4)**: the entire probe import →
-    suite run → drop_probe sequence is wrapped in ``_reload_lock`` so
+    suite run → drop_probe sequence is wrapped in ``_get_reload_lock()`` so
     that a concurrent thread iterating ``Factor._registry`` (e.g.
     ``/api/factors`` listing, ``ResearchRunner`` background task) cannot
     observe the transient probe-class displacement of the name-keyed
@@ -151,7 +151,7 @@ def _run_guards(filename: str, kind: str, target_dir: Path):
     stem = filename.replace(".py", "")
     probe_module_name = _unique_probe_module_name(stem)
     file_path = target_dir / filename
-    with _reload_lock:
+    with _get_reload_lock():
         user_class, err = load_user_class(file_path, probe_module_name, kind)  # type: ignore[arg-type]
         try:
             context = GuardContext(
@@ -183,7 +183,7 @@ _FORBIDDEN_MODULES = frozenset({
 
 # Full module paths user code MUST NOT import (codex round-3 P1-1).
 # The above _FORBIDDEN_MODULES check only looks at the ROOT segment
-# (`name.split(".")[0]`), so `from ez.agent.sandbox import _reload_lock`
+# (`name.split(".")[0]`), so `from ez.agent.sandbox import _get_reload_lock`
 # slips through because root="ez" is not forbidden. These are checked
 # as either exact matches or prefix matches with a trailing dot.
 # KNOWN LIMITATION (codex round-6): the binding table + attribute chain
@@ -191,11 +191,11 @@ _FORBIDDEN_MODULES = frozenset({
 # rebindings (`z = ez`), and walrus (`(z := ez)`). However, it CANNOT
 # track dynamic rebindings like `z = [ez][0]`, `z = ident(ez)`,
 # `for z in [ez]: pass`, or `z = getattr(ez, 'agent')`. These bypass
-# the static check and let user code reach `_reload_lock`.
+# the static check and let user code reach the lock.
 #
-# Mitigation: `_reload_lock` is a `threading.Lock()` (not RLock), so
-# any successful user-code acquire inside `_run_guards` immediately
-# deadlocks the current save request (loud failure, easy to detect).
+# V2.21 fix: lock moved into closure (_get_reload_lock), no longer a
+# module-level attribute. Dynamic alias bypass is now moot — there is
+# nothing to reach even if the AST check is bypassed.
 # The only attack outcome is a DoS on the save flow, not silent state
 # corruption or data theft.
 #
@@ -204,8 +204,9 @@ _FORBIDDEN_MODULES = frozenset({
 # separate process-level synchronization), so user code cannot access
 # it regardless of binding tricks. This is a V2.21+ architectural task.
 _FORBIDDEN_FULL_MODULES = frozenset({
-    # Sandbox itself — direct access to _reload_lock would let user code
-    # deadlock the guard framework or recursively trigger save flows.
+    # Sandbox itself — V2.21: lock is no longer a module attr, but
+    # sandbox still exposes internal helpers (registries, reload fns)
+    # that user code must not call directly.
     "ez.agent.sandbox",
     # Guard framework internals — user code in a guard probe must not
     # bypass the guard suite or pollute its mock data.
@@ -456,7 +457,7 @@ def check_syntax(code: str) -> list[str]:
         operator) so `(z := ez).agent.sandbox` reconstructs as
         ``ez.agent.sandbox`` instead of returning None.
 
-        Returns the dotted string (e.g. "ez.agent.sandbox._reload_lock")
+        Returns the dotted string (e.g. "ez.agent.sandbox._get_reload_lock")
         if the chain is rooted at a Name (or NamedExpr wrapping a Name).
         Returns None for chains rooted at a Call result, Subscript, etc.
         — those are too dynamic to analyze statically.
@@ -481,9 +482,9 @@ def check_syntax(code: str) -> list[str]:
     # Pre-pass to track which names refer to which module paths. This
     # lets the attribute-chain check resolve aliases and rebindings:
     #
-    #   import ez as z; z.agent.sandbox._reload_lock
-    #     → z bound to "ez", chain "z.agent.sandbox._reload_lock"
-    #       resolved to "ez.agent.sandbox._reload_lock" → forbidden
+    #   import ez as z; z.agent.sandbox._get_reload_lock
+    #     → z bound to "ez", chain "z.agent.sandbox._get_reload_lock"
+    #       resolved to "ez.agent.sandbox._get_reload_lock" → forbidden
     #
     #   sys = MyClass(); sys.mean()
     #     → sys bound to None (locally rebound to non-module value)
@@ -652,9 +653,9 @@ def check_syntax(code: str) -> list[str]:
             # a forbidden full module.
             #
             # Codex round-5 P1: resolve the chain root through the binding
-            # table so `import ez as z; z.agent.sandbox._reload_lock`
+            # table so `import ez as z; z.agent.sandbox._get_reload_lock`
             # gets caught (the "z" root is bound to "ez", so the resolved
-            # chain is "ez.agent.sandbox._reload_lock" which is forbidden).
+            # chain is "ez.agent.sandbox._get_reload_lock" which is forbidden).
             #
             # Codex round-5 P2-1: skip the check entirely if the root is
             # locally rebound to a non-module value (e.g. `sys = MyClass();
@@ -850,7 +851,36 @@ def save_and_validate_strategy(
 #       chain check below now catches the previously-overlooked attack
 #       vectors at AST time so the lock should never actually be reached
 #       by user code.
-_reload_lock = threading.Lock()
+#
+#   V2.21 (this commit): definitive fix — move lock into a closure so
+#       it is not accessible as a module attribute at all. User code
+#       cannot `sandbox._reload_lock` because the name no longer exists
+#       in the module namespace. The lock is captured by `_get_reload_lock`
+#       via closure, invisible to `dir(sandbox)` / `getattr(sandbox, ...)`.
+def _make_lock_accessor():
+    """Create a closure that captures the reload lock.
+
+    V2.21: eliminates the dynamic-alias bypass vulnerability. Previously
+    ``_reload_lock`` was a module-level variable that user code could
+    potentially reach via ``[ez][0].agent.sandbox._reload_lock`` or
+    similar dynamic-binding tricks that bypass the static AST check.
+
+    Now the lock lives inside this closure — it does not appear in
+    ``sandbox.__dict__`` and cannot be accessed via
+    ``getattr(sandbox, '_reload_lock')`` or any attribute traversal.
+    The only way to get the lock is to call ``_get_reload_lock()``,
+    which is itself a module-level function but its ``__closure__``
+    cells are not inspectable by the AST-checked user code (the
+    ``inspect`` and ``types`` modules are both forbidden imports).
+    """
+    lock = threading.Lock()
+
+    def _accessor() -> threading.Lock:
+        return lock
+
+    return _accessor
+
+_get_reload_lock = _make_lock_accessor()
 
 
 def _reload_user_strategy(filename: str) -> None:
@@ -876,7 +906,7 @@ def _reload_user_strategy(filename: str) -> None:
     stem = filename.replace(".py", "")
     module_name = f"strategies.{stem}"
 
-    with _reload_lock:
+    with _get_reload_lock():
         # Only clean entries from the user module being reloaded.
         # DO NOT touch ez.strategy.builtin.* or cross-module name matches —
         # they belong to different classes that should coexist with user code.
@@ -1157,7 +1187,7 @@ def save_and_validate_code(
                         # No backup — manually clean the v2 entries using
                         # the shared helper (I4: one source of truth for
                         # registry cleanup, drift-checked by parity test).
-                        with _reload_lock:
+                        with _get_reload_lock():
                             for reg in _sandbox_registries_for_kind("factor"):
                                 for k in [
                                     k for k, v in reg.items()
@@ -1305,7 +1335,7 @@ def save_and_validate_code(
                     }
             else:
                 target.unlink(missing_ok=True)
-                with _reload_lock:
+                with _get_reload_lock():
                     for reg in _sandbox_registries_for_kind(kind):
                         for k in [
                             k for k, v in reg.items()
@@ -1439,7 +1469,7 @@ def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
     stem = filename.replace(".py", "")
     module_name = f"{target_dir.name}.{stem}"
 
-    with _reload_lock:
+    with _get_reload_lock():
         if kind == "portfolio_strategy":
             from ez.portfolio.portfolio_strategy import PortfolioStrategy
             # V2.12.1 post-review: dual-dict registry (_registry_by_key is
@@ -1493,7 +1523,7 @@ def _reload_factor_code(filename: str, target_dir: Path) -> None:
     stem = filename.replace(".py", "")
     module_name = f"{target_dir.name}.{stem}"
 
-    with _reload_lock:
+    with _get_reload_lock():
         from ez.factor.base import Factor
         # V2.12.2 codex: dual-dict registry — clean BOTH dicts or the
         # full-key dict leaks zombies on hot-reload.

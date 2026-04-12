@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.21 | Tests: 2554 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.25 | Tests: 2632 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -316,12 +316,47 @@ No version tag without review pass. No push without critical issues resolved.
     - Report: `_md_escape()` 对 `|`/`\n`/backtick 统一 escape (tables + warnings + config + audit)
     - Optimizer: stick-breaking 替代 N-dim direct (1/N! feasibility → 100%), `res.success` 三态, callable EpsilonConstraint + non-zero stub validation
   - **后续 V2.20.x 计划**:
-    - RunPortfolioStep (用 `run_portfolio_backtest` 跑 EtfRotateCombo 等 portfolio strategies, 解锁 phase_o 完整 acceptance test)
-    - PairedBlockBootstrapStep (replace phase_q)
-    - WalkForwardStep / RollingWalkForwardStep (replace phase_p)
-    - jinja2-based ReportStep (升级模板能力)
-    - V2.21: sandbox `_reload_lock` 移出 module scope (彻底解决 dynamic alias bypass)
+    - ~~RunPortfolioStep~~ ✅ (V2.20.2)
+    - ~~WalkForwardStep~~ ✅ (V2.20.3)
+    - ~~PairedBlockBootstrapStep~~ ✅ (V2.20.4)
+    - jinja2-based ReportStep (升级模板能力, 低优先级)
+    - ~~V2.21: sandbox `_reload_lock` 移出 module scope~~ ✅
   - 2391 → 2554 tests (+163: 20 _metrics + 22 objectives + 38 epsilon + 18 simplex + 2 label_map + 18 nested_oos + 12 round-5 + 10 round-4 + 23 round-3)
+
+- **V2.20.2**: ez.research — RunPortfolioStep (P1-A 延伸)
+  - **新 `ez/research/steps/run_portfolio.py`**: `RunPortfolioStep` — 单 portfolio strategy per step, 包装 `run_portfolio_backtest()`, 输出 daily returns (equity_curve.pct_change) 到 `artifacts['returns']`
+  - **Market-derived defaults**: cn_stock 自动设 T+1/整手 100/印花税 0.05%/涨跌停 10%, 非 CN market 全部归零
+  - **Merge 语义**: outer join 追加列到已有 returns DataFrame, 支持和 RunStrategiesStep 任意顺序组合. RunStrategiesStep 同步添加 merge 逻辑
+  - **Infrastructure wiring**: 内部构造 TradingCalendar (从 universe_data 日期索引) + Universe + CostModel (market defaults + user overrides)
+  - **Guards**: C1 start>=end guard (short data + large lookback buffer), C2 非重叠日期范围 guard, I3 重复 label warning + drop-before-join
+  - **关键 e2e**: DataLoad → RunPortfolio → RunStrategies → NestedOOS → Report 五步 pipeline 验证 (alpha sleeve + bond/gold → 权重优化)
+  - 2554 → 2583 tests (+29: 27 run_portfolio + 2 e2e pipeline)
+
+- **V2.20.3**: ez.research — WalkForwardStep (P1-A 延伸)
+  - **新 `ez/research/steps/walk_forward.py`**: `WalkForwardStep` — 滚动 N-fold walk-forward 权重优化. NestedOOSStep 的滚动版: 把 returns 按整数区间分成 N 个 non-overlapping folds, 每折 IS 优化权重 + OOS 验证
+  - **Fold splitting**: 整数区间算术 `i*n//n_splits .. (i+1)*n//n_splits` (同 `ez/backtest/walk_forward.py`, 无尾部丢弃)
+  - **聚合**: 拼接所有 OOS returns 重算 metrics (不是折平均 Sharpe, V2.12.2 教训), 计算 degradation = (IS_sharpe - OOS_sharpe) / |IS_sharpe|
+  - **容错**: optimizer 异常跳过该折 + warning (不中断), all-NaN 行自动 drop (outer join gap), 最小数据量 guard
+  - **Baseline**: per-fold baseline IS/OOS metrics + aggregate baseline_avg_oos_sharpe
+  - **ReportStep 增强**: 渲染 walk_forward_results 折表 (Fold/IS Window/OOS Window/Best OOS Sharpe/Ret) + 聚合指标 (OOS Sharpe/Return/MDD/Degradation/Baseline)
+  - 2583 → 2607 tests (+24: 4 constructor + 4 fold boundaries + 4 happy path + 2 real optimizer + 2 baseline + 6 edge cases + 2 degradation)
+
+- **V2.20.4**: ez.research — PairedBlockBootstrapStep (P1-A 完结)
+  - **新 `ez/research/steps/paired_bootstrap.py`**: `PairedBlockBootstrapStep` + `paired_block_bootstrap()` 核心函数
+  - **配对块 bootstrap**: block_size=21 (1 month) 保留自相关, **同 block 索引**采样两条 series 保留横截面配对, Sharpe 差值作为统计量
+  - **输出**: sharpe_diff, 95% percentile CI, two-sided p-value (centered under H0), is_significant (p<0.05), treatment/control 各自 metrics
+  - **Window slicing**: 可选 `window=(start, end)` 限定 bootstrap 区间
+  - **ReportStep 增强**: 渲染 bootstrap 显著性表 (Sharpe diff/CI/p-value/standalone metrics)
+  - **P1-A 完结**: ez.research 7 个 step 全部实现 (DataLoad/RunStrategies/RunPortfolio/NestedOOS/WalkForward/PairedBootstrap/Report), 可替代 validation/ 全部 phase scripts
+  - 2607 → 2631 tests (+24: 3 sharpe helper + 7 core bootstrap + 5 constructor + 3 step happy + 4 edge cases + 2 statistical properties)
+
+- **V2.21**: sandbox `_reload_lock` closure-capture (安全修复)
+  - **问题**: `_reload_lock` 作为 module-level 变量, 用户代码通过 dynamic alias (`[ez][0].agent.sandbox._reload_lock`) 可绕过 AST 检查直接访问
+  - **修复**: `_make_lock_accessor()` 闭包捕获 `threading.Lock()`, 返回 `_get_reload_lock` 函数. Lock 不再出现在 `sandbox.__dict__`, `getattr(sandbox, '_reload_lock')` 返回 `AttributeError`
+  - **攻击面消除**: 即��� dynamic alias bypass 绕过 AST 检查到达 sandbox 模块, 也无法获��� lock (闭包 cell 需要 `inspect`/`types` 模块访问, 均在 forbidden imports 列表)
+  - **向后兼容**: 所有 6 处 `with _reload_lock:` 改为 `with _get_reload_lock():`, 行为不变
+  - **CLAUDE.md Known limitation 关闭**: "dynamic binding bypass" 不再适用
+  - 2631 → 2632 tests (+1: `test_reload_lock_not_module_attr` 防 regression)
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class

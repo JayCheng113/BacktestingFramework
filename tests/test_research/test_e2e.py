@@ -172,6 +172,135 @@ def test_full_pipeline_partial_failure_records_warning(fake_data_chain, monkeypa
     assert "AAA" in report
 
 
+def test_portfolio_pipeline_load_portfolio_report(fake_data_chain, monkeypatch):
+    """Pipeline: DataLoad → RunPortfolio → Report — portfolio strategy e2e."""
+    from ez.research.steps.run_portfolio import RunPortfolioStep
+    from dataclasses import dataclass, field
+    from datetime import date
+
+    # Duck-typed portfolio strategy
+    class _EqualWeight:
+        lookback_days = 20
+        def generate_weights(self, data, target_date, prev_weights, prev_returns):
+            symbols = list(data.keys())
+            if not symbols:
+                return {}
+            w = 1.0 / len(symbols)
+            return {s: w for s in symbols}
+
+    pipeline = ResearchPipeline([
+        DataLoadStep(
+            symbols=["AAA", "BBB"],
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+        ),
+        RunPortfolioStep(
+            strategy=_EqualWeight(),
+            label="EW",
+            symbols=["AAA", "BBB"],
+            freq="monthly",
+            market="cn_stock",
+        ),
+        ReportStep(),
+    ])
+    ctx = PipelineContext(config={
+        "title": "Portfolio E2E",
+        "start_date": "2024-03-01",
+        "end_date": "2024-06-01",
+    })
+    out = pipeline.run(ctx)
+
+    # 3 steps all succeeded
+    assert len(out.history) == 3
+    assert all(r.status == "success" for r in out.history)
+
+    # Returns has the portfolio label
+    returns = out.artifacts["returns"]
+    assert "EW" in returns.columns
+    assert len(returns) > 10
+
+    # Metrics populated
+    assert "EW" in out.artifacts["metrics"]
+
+    # Report references the portfolio
+    report = out.artifacts["report"]
+    assert "EW" in report
+
+
+def test_mixed_pipeline_portfolio_plus_single_stock(fake_data_chain):
+    """Pipeline: DataLoad → RunPortfolio → RunStrategies → NestedOOS → Report.
+
+    This is the core use case: portfolio strategy as alpha sleeve (A),
+    single-stock buy-hold as bond/gold (E/F), then optimize weights.
+    """
+    from ez.research.steps.run_portfolio import RunPortfolioStep
+    from ez.research.steps.nested_oos import NestedOOSStep
+    from ez.research.optimizers import SimplexMultiObjectiveOptimizer
+    from ez.research.optimizers.objectives import MaxSharpe
+
+    class _SimplePortfolio:
+        lookback_days = 20
+        def generate_weights(self, data, target_date, prev_weights, prev_returns):
+            symbols = list(data.keys())
+            if not symbols:
+                return {}
+            w = 1.0 / len(symbols)
+            return {s: w for s in symbols}
+
+    pipeline = ResearchPipeline([
+        DataLoadStep(
+            symbols=["AAA", "BBB", "CCC"],
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+        ),
+        RunPortfolioStep(
+            strategy=_SimplePortfolio(),
+            label="Alpha",
+            symbols=["AAA", "BBB"],
+            freq="monthly",
+        ),
+        RunStrategiesStep(
+            strategies={"Bond": _AlwaysLong()},
+            label_map={"Bond": "CCC"},
+        ),
+        NestedOOSStep(
+            is_window=("2024-02-01", "2024-03-31"),
+            oos_window=("2024-04-01", "2024-05-15"),
+            optimizer=SimplexMultiObjectiveOptimizer(
+                objectives=[MaxSharpe()],
+                seed=42,
+            ),
+            baseline_weights={"Alpha": 0.7, "Bond": 0.3},
+        ),
+        ReportStep(),
+    ])
+    ctx = PipelineContext(config={
+        "title": "Mixed Pipeline E2E",
+        "start_date": "2024-02-01",
+        "end_date": "2024-05-20",
+    })
+    out = pipeline.run(ctx)
+
+    # All 5 steps succeeded
+    assert len(out.history) == 5
+    assert all(r.status == "success" for r in out.history)
+
+    # Returns has both portfolio and single-stock columns
+    returns = out.artifacts["returns"]
+    assert "Alpha" in returns.columns
+    assert "Bond" in returns.columns
+
+    # NestedOOS produced results
+    oos_results = out.artifacts["nested_oos_results"]
+    assert "candidates" in oos_results
+    assert len(oos_results["candidates"]) >= 1
+    assert "baseline_oos" in oos_results
+
+    # Report contains nested OOS table
+    report = out.artifacts["report"]
+    assert "Max Sharpe" in report or "Nested OOS" in report
+
+
 def test_full_pipeline_skip_on_data_load_failure(monkeypatch):
     """If all data load fails, pipeline raises StepError immediately
     and downstream steps don't run."""

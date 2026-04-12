@@ -144,6 +144,90 @@ def default_template(context: PipelineContext) -> str:
                 )
             lines.append("")
 
+    # Walk-Forward results (V2.20.3)
+    wf_results = context.get("walk_forward_results")
+    if wf_results and isinstance(wf_results, dict):
+        folds = wf_results.get("folds", [])
+        agg = wf_results.get("aggregate", {})
+        if folds:
+            lines.append("## Walk-Forward Results")
+            lines.append("")
+            lines.append(
+                f"{wf_results.get('n_folds_completed', '?')}/{wf_results.get('n_splits', '?')} "
+                f"folds completed, train ratio: {wf_results.get('train_ratio', '?')}"
+            )
+            lines.append("")
+            # Per-fold summary table
+            lines.append("| Fold | IS Window | OOS Window | Best OOS Sharpe | Best OOS Ret |")
+            lines.append("|---|---|---|---|---|")
+            for fold in folds:
+                is_w = fold.get("is_window", ("?", "?"))
+                oos_w = fold.get("oos_window", ("?", "?"))
+                # Find best feasible candidate by OOS sharpe
+                best_oos_sharpe = None
+                best_oos_ret = None
+                for c in fold.get("candidates", []):
+                    s = c.get("oos_metrics", {}).get("sharpe")
+                    if s is not None and (best_oos_sharpe is None or s > best_oos_sharpe):
+                        best_oos_sharpe = s
+                        best_oos_ret = c.get("oos_metrics", {}).get("ret")
+                lines.append(
+                    f"| {fold.get('fold', '?')} "
+                    f"| {is_w[0]}→{is_w[1]} "
+                    f"| {oos_w[0]}→{oos_w[1]} "
+                    f"| {_format_metric(best_oos_sharpe)} "
+                    f"| {_format_metric(best_oos_ret)} |"
+                )
+            lines.append("")
+            # Aggregate
+            if agg:
+                lines.append("**Aggregate OOS metrics** (concatenated curve):")
+                lines.append("")
+                lines.append(f"- OOS Sharpe: {_format_metric(agg.get('oos_sharpe'))}")
+                lines.append(f"- OOS Return: {_format_metric(agg.get('oos_return'))}")
+                lines.append(f"- OOS MDD: {_format_metric(agg.get('oos_mdd'))}")
+                lines.append(f"- Avg IS Sharpe: {_format_metric(agg.get('avg_is_sharpe'))}")
+                lines.append(f"- Degradation: {_format_metric(agg.get('degradation'))}")
+                bl_sharpe = agg.get("baseline_oos_sharpe")
+                if bl_sharpe is not None:
+                    lines.append(f"- Baseline Avg OOS Sharpe: {_format_metric(bl_sharpe)}")
+                lines.append("")
+
+    # Bootstrap results (V2.20.4)
+    bootstrap = context.get("bootstrap_results")
+    if bootstrap and isinstance(bootstrap, dict):
+        lines.append("## Bootstrap Significance Test")
+        lines.append("")
+        t_label = _md_escape(bootstrap.get("treatment_label", "Treatment"))
+        c_label = _md_escape(bootstrap.get("control_label", "Control"))
+        lines.append(f"**{t_label}** vs **{c_label}**")
+        lines.append("")
+        diff = bootstrap.get("sharpe_diff")
+        ci_lo = bootstrap.get("ci_lower")
+        ci_hi = bootstrap.get("ci_upper")
+        pval = bootstrap.get("p_value")
+        lines.append(f"- Sharpe difference: {_format_metric(diff)}")
+        lines.append(f"- 95% CI: [{_format_metric(ci_lo)}, {_format_metric(ci_hi)}]")
+        lines.append(f"- p-value: {_format_metric(pval)}")
+        sig = bootstrap.get("is_significant", False)
+        lines.append(f"- Significant (p < 0.05): **{'Yes' if sig else 'No'}**")
+        lines.append(f"- n={bootstrap.get('n_observations', '?')}, "
+                     f"block_size={bootstrap.get('block_size', '?')}, "
+                     f"n_bootstrap={bootstrap.get('n_bootstrap', '?')}")
+        # Standalone metrics
+        t_met = bootstrap.get("treatment_metrics", {})
+        c_met = bootstrap.get("control_metrics", {})
+        if t_met or c_met:
+            lines.append("")
+            lines.append(f"| | {t_label} | {c_label} |")
+            lines.append("|---|---|---|")
+            for key in ("sharpe", "ret", "vol", "dd"):
+                lines.append(
+                    f"| {key} | {_format_metric(t_met.get(key))} "
+                    f"| {_format_metric(c_met.get(key))} |"
+                )
+        lines.append("")
+
     # Returns sample
     returns = context.get("returns")
     if returns is not None and isinstance(returns, pd.DataFrame) and len(returns) > 0:

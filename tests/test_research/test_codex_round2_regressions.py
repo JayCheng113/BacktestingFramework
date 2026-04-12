@@ -44,9 +44,10 @@ from ez.research.steps.report import ReportStep, default_template, _md_escape
 
 class TestP11ForbiddenSandboxImports:
     """Codex round-2 P1-1: user code must not be able to import
-    ez.agent.sandbox or its lock primitives, AND _reload_lock must be
-    reentrant so even if a future bug lets user code re-acquire it,
-    the same thread doesn't deadlock itself."""
+    ez.agent.sandbox or its internal functions.
+
+    V2.21: _reload_lock moved to closure, but sandbox module is still
+    forbidden to prevent access to _get_reload_lock and other internals."""
 
     def test_direct_import_blocked(self):
         from ez.agent.sandbox import check_syntax
@@ -89,16 +90,11 @@ class TestP11ForbiddenSandboxImports:
     def test_reload_lock_basic_acquire_release(self):
         """Lock can be acquired + released without exception.
 
-        Codex round-4 P1-A: this test was previously called
-        ``test_reload_lock_is_reentrant`` and verified RLock semantics
-        (3-deep nested ``with`` blocks). Round-4 reverted RLock → Lock
-        because RLock made the user-code attack silent (count poisoning)
-        instead of loud (immediate hang). The new contract is "Lock,
-        not reentrant" — see ``test_reload_lock_is_NOT_rlock_after_round4``
-        below for the explicit invariant test.
+        V2.21: lock moved to closure, accessed via _get_reload_lock().
         """
-        from ez.agent.sandbox import _reload_lock
-        with _reload_lock:
+        from ez.agent.sandbox import _get_reload_lock
+        lock = _get_reload_lock()
+        with lock:
             pass  # acquire + release without nesting
 
 
@@ -436,18 +432,21 @@ class TestP31ReportEscape:
 
 class TestP1AAttributeChainAttack:
     """Codex round-4 P1-A: `import ez` is legal but
-    `ez.agent.sandbox._reload_lock` is an attribute traversal that
+    ``ez.agent.sandbox.<anything>`` is an attribute traversal that
     reaches into a forbidden module. The round-3 ImportFrom check did
     not catch this — only the new AST attribute-chain reconstruction
     in check_syntax does.
+
+    V2.21: _reload_lock moved to closure, but the forbidden-module check
+    still blocks any attribute access on ez.agent.sandbox.
     """
 
     def test_attribute_chain_via_root_import_blocked(self):
         from ez.agent.sandbox import check_syntax
         for code in [
-            "import ez\nx = ez.agent.sandbox._reload_lock",
-            "import ez\nez.agent.sandbox._reload_lock.acquire()",
-            "import ez.agent\nx = ez.agent.sandbox._reload_lock",
+            "import ez\nx = ez.agent.sandbox._get_reload_lock",
+            "import ez\nez.agent.sandbox._get_reload_lock()",
+            "import ez.agent\nx = ez.agent.sandbox._get_reload_lock",
             "import ez.agent\nsb = ez.agent.sandbox",  # attribute chain to module itself
         ]:
             errs = check_syntax(code)
@@ -478,26 +477,31 @@ class TestP1AAttributeChainAttack:
     def test_reload_lock_is_NOT_rlock_after_round4(self):
         """Round-4 reverted RLock back to Lock so user-code lock attacks
         manifest as immediate hangs (loud) instead of silent persistent
-        holds (count poisoning under RLock)."""
-        from ez.agent.sandbox import _reload_lock
-        # `Lock()` returns an instance whose type repr is "<class '_thread.lock'>"
-        # `RLock()` returns "<class '_thread.RLock'>" — the easy way to test
-        # is to check that `_reload_lock` is NOT acquirable a second time
-        # from the same thread. (RLock would silently allow it.)
-        assert _reload_lock.acquire(blocking=False)
+        holds (count poisoning under RLock).
+
+        V2.21: lock is now closure-captured via _get_reload_lock().
+        """
+        from ez.agent.sandbox import _get_reload_lock
+        lock = _get_reload_lock()
+        assert lock.acquire(blocking=False)
         try:
-            # Second non-blocking acquire from same thread:
-            #   Lock → returns False (correctly indicates already held)
-            #   RLock → returns True (would BUMP count, leading to silent hold)
-            second = _reload_lock.acquire(blocking=False)
+            second = lock.acquire(blocking=False)
             if second:
-                _reload_lock.release()
+                lock.release()
             assert not second, (
-                "P1-A regression: _reload_lock is an RLock, not a Lock. "
+                "P1-A regression: reload lock is an RLock, not a Lock. "
                 "RLock allows silent persistent holds via reentrance."
             )
         finally:
-            _reload_lock.release()
+            lock.release()
+
+    def test_reload_lock_not_module_attr(self):
+        """V2.21: _reload_lock should NOT exist as a module attribute."""
+        import ez.agent.sandbox as sandbox_mod
+        assert not hasattr(sandbox_mod, "_reload_lock"), (
+            "V2.21 regression: _reload_lock should be closure-captured, "
+            "not a module-level attribute."
+        )
 
 
 # ------------------------------------------------------------
@@ -636,9 +640,9 @@ class TestRound5P1AliasBypass:
     """Codex round-5 P1: the round-4 attribute-chain check only handled
     chains rooted at a literal Name with NO binding analysis. User code
     can bind a forbidden module to a different local name and bypass:
-      - `import ez as z; z.agent.sandbox._reload_lock`
-      - `from ez import agent as a; a.sandbox._reload_lock`
-      - `import ez; z = ez; z.agent.sandbox._reload_lock`
+      - `import ez as z; z.agent.sandbox._get_reload_lock`
+      - `from ez import agent as a; a.sandbox._get_reload_lock`
+      - `import ez; z = ez; z.agent.sandbox._get_reload_lock`
       - `(z := ez).agent.sandbox`
 
     Round-5 fix: build a name binding table during AST walk and resolve
@@ -647,7 +651,7 @@ class TestRound5P1AliasBypass:
 
     def test_import_as_alias_blocked(self):
         from ez.agent.sandbox import check_syntax
-        code = "import ez as z\nx = z.agent.sandbox._reload_lock"
+        code = "import ez as z\nx = z.agent.sandbox._get_reload_lock"
         errs = check_syntax(code)
         assert errs, "P1 alias bypass: `import ez as z; z.agent.sandbox` not blocked"
         assert any("ez.agent.sandbox" in e for e in errs), (
@@ -656,14 +660,14 @@ class TestRound5P1AliasBypass:
 
     def test_from_import_as_alias_blocked(self):
         from ez.agent.sandbox import check_syntax
-        code = "from ez import agent as a\nx = a.sandbox._reload_lock"
+        code = "from ez import agent as a\nx = a.sandbox._get_reload_lock"
         errs = check_syntax(code)
         assert errs, "P1 alias bypass: `from ez import agent as a; a.sandbox` not blocked"
         assert any("ez.agent.sandbox" in e for e in errs)
 
     def test_simple_assign_rebinding_blocked(self):
         from ez.agent.sandbox import check_syntax
-        code = "import ez\nz = ez\nx = z.agent.sandbox._reload_lock"
+        code = "import ez\nz = ez\nx = z.agent.sandbox._get_reload_lock"
         errs = check_syntax(code)
         assert errs, "P1 rebinding bypass: `z = ez; z.agent.sandbox` not blocked"
         assert any("ez.agent.sandbox" in e for e in errs)
@@ -671,14 +675,14 @@ class TestRound5P1AliasBypass:
     def test_walrus_namedexpr_bypass_blocked(self):
         """`(x := ez).agent.sandbox` — walrus operator binds AND yields."""
         from ez.agent.sandbox import check_syntax
-        code = "import ez\n(x := ez)\nlock = x.agent.sandbox._reload_lock"
+        code = "import ez\n(x := ez)\nlock = x.agent.sandbox._get_reload_lock"
         errs = check_syntax(code)
         assert errs, "P1 walrus bypass: `(x := ez); x.agent.sandbox` not blocked"
 
     def test_attribute_assign_rebinding_blocked(self):
-        """`a = ez.agent; a.sandbox._reload_lock` — chain rebind."""
+        """`a = ez.agent; a.sandbox._get_reload_lock` — chain rebind."""
         from ez.agent.sandbox import check_syntax
-        code = "import ez\na = ez.agent\nlock = a.sandbox._reload_lock"
+        code = "import ez\na = ez.agent\nlock = a.sandbox._get_reload_lock"
         errs = check_syntax(code)
         assert errs, "P1: `a = ez.agent; a.sandbox` not blocked"
 
