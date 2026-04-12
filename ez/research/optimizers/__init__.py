@@ -14,6 +14,7 @@ without going through the pipeline framework.
 """
 from .base import OptimalWeights, Objective
 from .objectives import MaxSharpe, MaxCalmar, MaxSortino, MinCVaR
+from .epsilon_constraint import EpsilonConstraint
 
 __all__ = [
     "OptimalWeights",
@@ -22,4 +23,5 @@ __all__ = [
     "MaxCalmar",
     "MaxSortino",
     "MinCVaR",
+    "EpsilonConstraint",
 ]
