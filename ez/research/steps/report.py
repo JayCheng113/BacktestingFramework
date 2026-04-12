@@ -18,6 +18,17 @@ from ..pipeline import ResearchStep
 from ..context import PipelineContext
 
 
+def _md_escape(s) -> str:
+    """Escape characters that break a markdown table cell.
+
+    Codex round-3 P3-1: pipe and newline both terminate or split a
+    markdown table cell. A strategy label like ``"A|B"`` or a string
+    metric like ``"line1\\nline2"`` would corrupt the table layout.
+    """
+    text = str(s)
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
 def _format_metric(value) -> str:
     """Format a single metric value for the table."""
     if value is None:
@@ -28,7 +39,7 @@ def _format_metric(value) -> str:
         if abs(value) >= 1000:
             return f"{value:,.0f}"
         return f"{value:.4f}"
-    return str(value)
+    return _md_escape(value)
 
 
 def default_template(context: PipelineContext) -> str:
@@ -81,7 +92,7 @@ def default_template(context: PipelineContext) -> str:
         lines.append(header)
         lines.append(sep)
         for label in sorted(metrics.keys()):
-            row = [label] + [_format_metric(metrics[label].get(k)) for k in ordered_keys]
+            row = [_md_escape(label)] + [_format_metric(metrics[label].get(k)) for k in ordered_keys]
             lines.append("| " + " | ".join(row) + " |")
         lines.append("")
 
@@ -91,7 +102,7 @@ def default_template(context: PipelineContext) -> str:
         lines.append("## Returns Sample (last 5 dates)")
         lines.append("")
         sample = returns.tail(5)
-        cols = list(sample.columns)
+        cols = [_md_escape(c) for c in sample.columns]
         header = "| Date | " + " | ".join(cols) + " |"
         sep = "|" + "|".join(["---"] * (len(cols) + 1)) + "|"
         lines.append(header)
@@ -109,9 +120,9 @@ def default_template(context: PipelineContext) -> str:
         lines.append("| # | Step | Status | Duration (ms) | Wrote |")
         lines.append("|---|---|---|---|---|")
         for i, rec in enumerate(context.history, 1):
-            written = ", ".join(rec.written_keys) if rec.written_keys else "—"
+            written = ", ".join(_md_escape(k) for k in rec.written_keys) if rec.written_keys else "—"
             lines.append(
-                f"| {i} | {rec.step_name} | {rec.status} | {rec.duration_ms:.1f} | {written} |"
+                f"| {i} | {_md_escape(rec.step_name)} | {rec.status} | {rec.duration_ms:.1f} | {written} |"
             )
         lines.append("")
 

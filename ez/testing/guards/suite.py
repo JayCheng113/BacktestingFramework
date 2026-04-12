@@ -123,10 +123,11 @@ def _unique_probe_module_name(stem: str) -> str:
     guard run; ``drop_probe_module`` restores it via reverse walk over
     ``_registry_by_key`` (last-write-wins semantics).
 
-    Codex round-2 finding S7 (deferred to V2.19.1): the displacement
-    still emits a "Factor name collision" warning log line. Future fix
-    would suppress the warning when ``cls.__module__`` starts with
-    ``_guard_probe.``.
+    Codex round-2 finding S7: the name-keyed displacement is silent now —
+    ``Factor.__init_subclass__`` (and the CrossSectionalFactor /
+    PortfolioStrategy equivalents) check ``cls.__module__.startswith
+    ("_guard_probe.")`` and skip the collision warning. The displacement
+    still happens; the audit log noise does not.
     """
     global _PROBE_COUNTER
     with _PROBE_LOCK:

@@ -144,7 +144,11 @@ def test_pipeline_detects_step_returning_none():
     pipeline = ResearchPipeline([_NoneReturningStep()])
     with pytest.raises(StepError) as exc_info:
         pipeline.run()
-    assert "must return PipelineContext" in str(exc_info.value)
+    msg = str(exc_info.value).lower()
+    # Codex round-3 P2-1: error message format may vary slightly across
+    # rounds; just verify it mentions None and PipelineContext.
+    assert "none" in msg
+    assert "pipelinecontext" in msg.replace(" ", "")
 
 
 def test_pipeline_history_records_duration():

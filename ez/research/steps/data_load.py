@@ -34,28 +34,54 @@ class DataLoadStep(ResearchStep):
         symbols: Iterable[str] | None = None,
         start_date: str | date | None = None,
         end_date: str | date | None = None,
-        market: str = "cn_stock",
-        period: str = "daily",
+        market: str | None = None,
+        period: str | None = None,
     ):
+        # Codex round-3 P2-4: reject single string symbols. `list("AAA")`
+        # produces `['A', 'A', 'A']` silently — a very common confusing
+        # mistake. Force the user to wrap in a list explicitly.
+        if isinstance(symbols, str):
+            raise TypeError(
+                f"DataLoadStep symbols must be a list of str, not a single string. "
+                f"Did you mean [{symbols!r}]?"
+            )
         self.symbols = list(symbols) if symbols is not None else None
         self.start_date = start_date
         self.end_date = end_date
+        # Codex round-3 P2-3: use None as the "not explicitly set" sentinel.
+        # The previous defaults `market="cn_stock"` and `period="daily"`
+        # collided with users who explicitly want to pin those values
+        # against a context.config that holds something else — the explicit
+        # constructor arg was silently overridden because the value matched
+        # the default.
         self.market = market
         self.period = period
 
     def _resolve(self, context: PipelineContext) -> tuple[list[str], date, date, str, str]:
-        """Resolve constructor args + context.config defaults."""
+        """Resolve constructor args + context.config defaults.
+
+        Constructor args win when explicitly set (i.e. not None for
+        market/period after the round-3 sentinel fix). Symbols/dates
+        fall back to context.config when the constructor arg is None.
+        """
         symbols = self.symbols if self.symbols is not None else context.config.get("symbols")
         if not symbols:
             raise ValueError(
                 "DataLoadStep requires symbols (constructor arg or context.config['symbols'])"
             )
+        # Reject string symbols from context.config too — same pitfall.
+        if isinstance(symbols, str):
+            raise TypeError(
+                f"DataLoadStep symbols must be a list of str, not a single string. "
+                f"context.config['symbols'] = {symbols!r}"
+            )
         start = self.start_date or context.config.get("start_date")
         end = self.end_date or context.config.get("end_date")
         if start is None or end is None:
             raise ValueError("DataLoadStep requires start_date and end_date")
-        market = self.market if self.market != "cn_stock" else context.config.get("market", "cn_stock")
-        period = self.period if self.period != "daily" else context.config.get("period", "daily")
+        # None sentinel: only fall back to config when constructor was None.
+        market = self.market if self.market is not None else context.config.get("market", "cn_stock")
+        period = self.period if self.period is not None else context.config.get("period", "daily")
         return list(symbols), self._to_date(start), self._to_date(end), market, period
 
     @staticmethod
@@ -78,6 +104,12 @@ class DataLoadStep(ResearchStep):
         return fetch_kline_df(symbol, market, period, start, end)
 
     def run(self, context: PipelineContext) -> PipelineContext:
+        # Codex round-3 P2-5: clear ANY stale skipped artifact from a
+        # previous run BEFORE doing work. Otherwise a clean rerun would
+        # leave the previous run's warning in the context, and ReportStep
+        # would render it as if it belonged to the current run.
+        context.artifacts.pop("data_load_skipped", None)
+
         symbols, start, end, market, period = self._resolve(context)
         universe_data: dict[str, pd.DataFrame] = {}
         skipped: list[tuple[str, str]] = []

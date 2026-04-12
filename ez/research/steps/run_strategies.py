@@ -59,6 +59,10 @@ class RunStrategiesStep(ResearchStep):
         return result.daily_returns, dict(result.metrics), result.equity_curve
 
     def run(self, context: PipelineContext) -> PipelineContext:
+        # Codex round-3 P2-5: clear stale skipped artifact from any
+        # prior run before doing work.
+        context.artifacts.pop("run_strategies_skipped", None)
+
         ud = context.require("universe_data")
         returns_dict: dict[str, pd.Series] = {}
         metrics_dict: dict[str, dict] = {}

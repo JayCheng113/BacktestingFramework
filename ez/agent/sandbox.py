@@ -181,6 +181,22 @@ _FORBIDDEN_MODULES = frozenset({
     "webbrowser", "antigravity", "turtle",
 })
 
+# Full module paths user code MUST NOT import (codex round-3 P1-1).
+# The above _FORBIDDEN_MODULES check only looks at the ROOT segment
+# (`name.split(".")[0]`), so `from ez.agent.sandbox import _reload_lock`
+# slips through because root="ez" is not forbidden. These are checked
+# as either exact matches or prefix matches with a trailing dot.
+_FORBIDDEN_FULL_MODULES = frozenset({
+    # Sandbox itself — direct access to _reload_lock would let user code
+    # deadlock the guard framework or recursively trigger save flows.
+    "ez.agent.sandbox",
+    # Guard framework internals — user code in a guard probe must not
+    # bypass the guard suite or pollute its mock data.
+    "ez.testing.guards",
+    # Routes that wrap the sandbox — same attack surface.
+    "ez.api.routes.code",
+})
+
 # Template for new strategies
 _STRATEGY_TEMPLATE = '''"""User strategy: {class_name}"""
 from __future__ import annotations
@@ -397,18 +413,43 @@ def check_syntax(code: str) -> list[str]:
         errors.append(f"Syntax error at line {e.lineno}: {e.msg}")
         return errors
 
+    def _is_forbidden(name: str) -> bool:
+        """Return True if the module path matches a forbidden root or
+        forbidden full path. Codex round-3 P1-1 — the root-only check
+        missed `ez.agent.sandbox` because root="ez" is fine."""
+        if not name:
+            return False
+        root = name.split(".")[0]
+        if root in _FORBIDDEN_MODULES:
+            return True
+        for forbidden_full in _FORBIDDEN_FULL_MODULES:
+            if name == forbidden_full or name.startswith(forbidden_full + "."):
+                return True
+        return False
+
     for node in ast.walk(tree):
         # Forbidden import statements
         if isinstance(node, ast.Import):
             for alias in node.names:
-                root = alias.name.split(".")[0]
-                if root in _FORBIDDEN_MODULES:
+                if _is_forbidden(alias.name):
                     errors.append(f"Forbidden import: {alias.name} (line {node.lineno})")
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                root = node.module.split(".")[0]
-                if root in _FORBIDDEN_MODULES:
+                if _is_forbidden(node.module):
                     errors.append(f"Forbidden import: {node.module} (line {node.lineno})")
+                else:
+                    # `from ez.agent import sandbox` has node.module="ez.agent"
+                    # which is NOT forbidden on its own; we must also check
+                    # each imported name as if it were a submodule of node.module.
+                    # Codex round-3 P1-1 follow-up.
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        full = f"{node.module}.{alias.name}"
+                        if _is_forbidden(full):
+                            errors.append(
+                                f"Forbidden import: {full} (line {node.lineno})"
+                            )
 
         # Forbidden builtin calls: __import__(), eval(), exec(), open(), etc.
         elif isinstance(node, ast.Call):
@@ -580,7 +621,13 @@ def save_and_validate_strategy(
     }
 
 
-_reload_lock = threading.Lock()
+# V2.19.0 codex round-3 P1-1 follow-up: use RLock so that even if a
+# user code path manages to re-acquire the lock (e.g., a future refactor
+# that adds a sandbox-internal call inside _run_guards), the same thread
+# won't deadlock itself. This is defense-in-depth — the primary fix is
+# the _FORBIDDEN_FULL_MODULES check in check_syntax, which prevents user
+# code from importing ez.agent.sandbox at all.
+_reload_lock = threading.RLock()
 
 
 def _reload_user_strategy(filename: str) -> None:
