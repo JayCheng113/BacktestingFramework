@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.26 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.27 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -374,11 +374,26 @@ No version tag without review pass. No push without critical issues resolved.
     - 前端模拟: 7 个 contract tests 编码前端将发送的 request/response 格式, 防止 Phase 2 UI 对接时 schema drift
   - 2632 → 2685 tests (+53), 零 regression
 
-- **V2.22 Phase 2 (planned)**: 前端 ValidationPanel
-  - **位置**: 嵌入 `PortfolioRunContent` 结果展示区, 替换现有 "前推验证" 按钮功能
-  - **组件**: 综合裁决 banner (pass/warn/fail 交通灯 + 中文 summary) + WF 区 (IS vs OOS Sharpe 柱状图 + OOS 拼接曲线 + degradation 色标 + 折展开) + 显著性区 (Bootstrap CI 区间条 + p-value badge + DSR) + 年度区 (per-year Sharpe 柱状图) + 对比区 (基线 run dropdown, 选后显示双组指标表 + CI + 显著性判断) + 报告导出 (前端 markdown 拼接)
-  - **API**: 调 `/api/validation/validate` (已在 Phase 1 完成)
-  - **约 1000-1500 LOC 前端代码**
+- **V2.22 Phase 2 (done)**: 前端 ValidationPanel
+  - **位置**: 嵌入 `PortfolioRunContent` 结果展示区 (wfResult 块之后), `result && result.run_id` 时自动渲染
+  - **组件** (`web/src/components/ValidationPanel.tsx`, ~600 LOC):
+    - VerdictBanner: pass/warn/fail 徽章 + 中文 summary + per-check ✓/⚠/✗ hover 徽章
+    - WalkForwardSection: 4 指标卡 (IS Sharpe/OOS Sharpe/降解率/过拟合分数) + IS vs OOS 柱状图 (ECharts)
+    - SignificanceSection: 4 指标卡 (观察 Sharpe/p-value/DSR/MinBTL) + 自定义 div-based CI 区间条 (带 0 线 + 观察值标记, 绿色=不含零/琥珀=含零) + DSR warning 显示
+    - AnnualSection: per-year Sharpe 柱状图 (正绿/弱黄/负红) + 盈利年份比例/最好最差年份摘要
+  - **新类型** (`web/src/types/index.ts`): 11 个新 interface — ValidationRequest/ValidationResult/VerdictCheck/VerdictResult/SignificanceResult/DeflatedResult/MinBtlResult/AnnualResult/AnnualYear/WalkForwardAggregate/ComparisonResult
+  - **新 API client**: `runValidation(data) → POST /validation/validate` 已 typed
+  - **共享 rating helpers** (`shared/metricRatings.ts`): rateDegradation/rateOverfit/ratePValue/rateDsr/rateMinBtl 带 ⚠ SOURCE OF TRUTH 注释指向 `ez/research/verdict.py`, 防止前后端 threshold drift
+  - **Review round 修复**:
+    - C1: CIBar 显示下限 0.1→0.5 + CI 宽度分量, 避免窄 CI 塌缩到 1% 宽度
+    - C2: 盈利年份数本地 `filter(ret>0)` 计算, 替代后端 `round(ratio*n)` 不一致
+    - I1+S6: rating helpers 移到 shared, 文档化 threshold 来源
+    - I2: `useEffect([runId])` runId 变化清 result + invalidate token
+    - I3: AxiosError.response.data.detail 提取, 404/422 显示后端 message
+    - I4: 提交前 input precheck (n_bootstrap / block_size)
+    - I5: 动态 loading 提示 "预计 ~N 秒" 按 n_bootstrap 缩放
+  - **Phase 2.1 延后**: 配对对比 (基线 run dropdown + 双组表), 报告导出 (前端 markdown 拼接)
+  - **构建**: tsc -b + vite build 零错误, bundle 2006 KB (gzip 606 KB)
 
 - **V2.22 遗留 (Phase 1 review 延后项)**:
   - C2: DSR 的 `(1 - γ_euler) * 2·log N` expected-max 公式是近似, 更精确应用 scipy.stats.norm.ppf + Gumbel 分布 (当前是标准 de Prado 近似, 可接受)
