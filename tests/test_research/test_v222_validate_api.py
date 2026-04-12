@@ -53,8 +53,6 @@ def mock_store(monkeypatch, sample_run_data):
         }
 
     class MockStore:
-        def __init__(self):
-            pass
         def get_run(self, run_id: str):
             if run_id == "nonexistent":
                 return None
@@ -62,9 +60,10 @@ def mock_store(monkeypatch, sample_run_data):
                 return make_run(run_id, multiplier=0.5)  # weaker baseline
             return make_run(run_id)
 
-    monkeypatch.setattr(
-        "ez.portfolio.portfolio_store.PortfolioStore", MockStore
-    )
+    # V2.23 I1: validation.py now uses routes.portfolio._get_store()
+    # singleton. Inject the mock directly.
+    from ez.api.routes import portfolio as portfolio_routes
+    monkeypatch.setattr(portfolio_routes, "_portfolio_store", MockStore())
     return MockStore
 
 

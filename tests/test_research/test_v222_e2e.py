@@ -14,21 +14,17 @@ import duckdb
 
 @pytest.fixture
 def in_memory_db(monkeypatch):
-    """Create an in-memory DuckDB and patch PortfolioStore to use it."""
+    """Create an in-memory DuckDB and inject it as the PortfolioStore singleton.
+
+    V2.23 I1 fix: validation.py now reuses routes.portfolio._get_store()
+    singleton, so we inject our in-memory store directly.
+    """
     conn = duckdb.connect(":memory:")
     from ez.portfolio.portfolio_store import PortfolioStore
+    from ez.api.routes import portfolio as portfolio_routes
 
-    # Monkey-patch PortfolioStore() constructor (0 args) used by validation.py
-    # to return an instance backed by our in-memory DB.
-    real_init = PortfolioStore.__init__
-
-    def patched_init(self, conn_arg=None):
-        if conn_arg is None:
-            real_init(self, conn)
-        else:
-            real_init(self, conn_arg)
-
-    monkeypatch.setattr(PortfolioStore, "__init__", patched_init)
+    store = PortfolioStore(conn)
+    monkeypatch.setattr(portfolio_routes, "_portfolio_store", store)
     return conn
 
 

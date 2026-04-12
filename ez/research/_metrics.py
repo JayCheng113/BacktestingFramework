@@ -284,30 +284,46 @@ def minimum_backtest_length(
     return float(years_basic)
 
 
-def annual_breakdown(returns: pd.Series) -> dict[str, Any]:
+def annual_breakdown(
+    returns: pd.Series,
+    min_days: int = 5,
+) -> dict[str, Any]:
     """Split a daily-returns Series by calendar year and compute per-year metrics.
+
+    Parameters
+    ----------
+    returns : pd.Series
+        Daily returns with DatetimeIndex.
+    min_days : int, default 5
+        Minimum days required for a year to be included. Short partial
+        years (e.g. backtest ending mid-January) are dropped.
 
     Returns a dict with:
         per_year : list[dict] — per-year {year, sharpe, ret, mdd, n_days}
         worst_year : int | None — year with lowest Sharpe
         best_year : int | None — year with highest Sharpe
-        profitable_ratio : float — fraction of years with positive return
-        consistency_score : float — min(0, per-year Sharpe) count / total years
+        profitable_ratio : float — fraction of years with POSITIVE RETURN
+            (year_return > 0)
+        consistency_score : float — fraction of years with POSITIVE SHARPE
+            (year_sharpe > 0) — distinct from profitable_ratio: a year
+            with positive return but sharpe <= 0 (high volatility eating
+            the return) counts toward profitable_ratio but NOT consistency
     """
+    empty = {
+        "per_year": [],
+        "worst_year": None,
+        "best_year": None,
+        "profitable_ratio": 0.0,
+        "consistency_score": 0.0,
+    }
     clean = returns.dropna()
     if len(clean) == 0 or not isinstance(clean.index, pd.DatetimeIndex):
-        return {
-            "per_year": [],
-            "worst_year": None,
-            "best_year": None,
-            "profitable_ratio": 0.0,
-            "consistency_score": 0.0,
-        }
+        return empty
 
     per_year: list[dict[str, Any]] = []
     grouped = clean.groupby(clean.index.year)
     for year, group in grouped:
-        if len(group) < 5:
+        if len(group) < min_days:
             continue  # skip tiny partial years
         metrics = compute_basic_metrics(group)
         if metrics is None:
@@ -321,23 +337,18 @@ def annual_breakdown(returns: pd.Series) -> dict[str, Any]:
         })
 
     if not per_year:
-        return {
-            "per_year": [],
-            "worst_year": None,
-            "best_year": None,
-            "profitable_ratio": 0.0,
-            "consistency_score": 0.0,
-        }
+        return empty
 
     sharpes = [y["sharpe"] for y in per_year]
     worst_idx = int(np.argmin(sharpes))
     best_idx = int(np.argmax(sharpes))
     n_profitable = sum(1 for y in per_year if y["ret"] > 0)
+    n_positive_sharpe = sum(1 for s in sharpes if s > 0)
 
     return {
         "per_year": per_year,
         "worst_year": per_year[worst_idx]["year"],
         "best_year": per_year[best_idx]["year"],
         "profitable_ratio": n_profitable / len(per_year),
-        "consistency_score": sum(1 for s in sharpes if s > 0) / len(sharpes),
+        "consistency_score": n_positive_sharpe / len(sharpes),
     }

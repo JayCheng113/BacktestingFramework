@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.27 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.28 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -395,12 +395,17 @@ No version tag without review pass. No push without critical issues resolved.
   - **Phase 2.1 延后**: 配对对比 (基线 run dropdown + 双组表), 报告导出 (前端 markdown 拼接)
   - **构建**: tsc -b + vite build 零错误, bundle 2006 KB (gzip 606 KB)
 
-- **V2.22 遗留 (Phase 1 review 延后项)**:
-  - C2: DSR 的 `(1 - γ_euler) * 2·log N` expected-max 公式是近似, 更精确应用 scipy.stats.norm.ppf + Gumbel 分布 (当前是标准 de Prado 近似, 可接受)
-  - I1: `validation.py` 每次请求 `PortfolioStore()` 新建连接, 未来应 reuse `ez.api.deps` 的 singleton
-  - I3: `annual_breakdown` min_days=5 阈值硬编码 (可参数化)
-  - I6: `n_trials` 由 client 传入, 存在信任边界问题 (类似 V2.15 `wf_metrics` bug). V2.14 `/search` 应把 n_trials 存进 portfolio_runs 让 `/validate` 读回
-  - S2-S5: 小优化 (block bootstrap 向量化, verdict emoji 抽字段, profitable_ratio vs consistency_score 语义区分)
+- **V2.23**: 遗留 bug 清理 (V2.22 Phase 1 review 延后项 + AI chat cancel)
+  - **I1 ✅**: `validation.py` 改用 `routes.portfolio._get_store()` singleton (原每请求新建 PortfolioStore 连接)
+  - **I3 ✅**: `annual_breakdown(returns, min_days=5)` 参数化, 不再硬编码阈值
+  - **S4 ✅**: `Verdict` 新增 `badge_color` ("green"/"amber"/"red") + `badge_emoji` 独立字段, summary 不再嵌入 emoji (前端自由控制渲染)
+  - **S5 ✅**: `profitable_ratio` (ret>0 年占比) 与 `consistency_score` (sharpe>0 年占比) 语义文档化 — 高波动吃掉正收益的年份计入 profitable 但不计入 consistency
+  - **AI 助手 SSE 中断 ✅**: `ChatPanel.tsx` 添加 `AbortController`, streaming 中显示 "停止" 按钮替代 "发送", 点击触发 `controller.abort()` → FastAPI StreamingResponse 自动取消 async generator. Abort 后显示 "(已中断)" 消息
+  - **剩余真 · 延后**:
+    - C2 (DSR expected-max 近似公式): 当前是标准 de Prado 近似, 可接受
+    - I6 (n_trials 信任边界): 需 `/search` endpoint 把 n_trials 存进 portfolio_runs 让 /validate 读回, 涉及 schema 变更
+    - S2 (block bootstrap 向量化): 性能优化, 当前 n_bootstrap=10000 在 ~5s 内完成, 非优先
+  - 2685 tests passing, 零 regression
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
@@ -463,23 +468,30 @@ No version tag without review pass. No push without critical issues resolved.
 - 配对交易空腿、市场中性 — A 股不可行，推迟到 V3.x 有期货基础设施后考虑
 
 ## Known Limitations (后续版本跟进)
-- 研究任务不支持进程恢复 (crash recovery)
-- 研究任务串行 (同时只跑 1 个)
-- 数据源链扁平去重而非按市场独立路由
-- C++ 加速路径持 GIL (并发场景受限)
-- LLM 调用计数近似 (chat_sync 内部多轮不精确计入，已文档化为估计值)
-- Tencent provider close=adj_close (qfq当raw, 涨跌停判断不精确; Tushare/AKShare优先所以影响低)
-- multi_select 参数搜索只搜单因子组合 (设计限制, 不是多因子组合空间)
-- AKShare raw fetch 失败时 close=adj_close (同Tencent问题, 有warning log; V2.16 加 1 次重试降低瞬时错误概率)
-- 约束风险平价近似 (行业约束在SLSQP内处理, 但约束可能导致偏离纯等风险贡献, inverse-vol fallback兜底)
-- AI助手SSE流式输出无法前端强制中断 (需后端cancel机制, 当前只能等输出完成)
-- **MLAlpha whitelist 覆盖 9 个 estimator** (V2.14 扩展) — 7 sklearn (Ridge/Lasso/LR/EN/DT/RF/GBR) + LGBMRegressor + XGBRegressor. 其中 Ridge/RF/GBR/LGBM/XGB 有 deepcopy + e2e backtest 测试, Lasso/LR/EN/DT 有 deepcopy 测试. **Classifier (LGBMClassifier/XGBClassifier) 未列入** — 需要先定义分类契约 (predict 输出语义 + TopNRotation 兼容性). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task.
-- **MLAlpha `feature_warmup_days` 默认 0** — 用户的 `feature_fn` 若含 `rolling(N)` / `pct_change(N)` 等有 NaN head 的操作, 必须显式设置 `feature_warmup_days=N`, 否则训练 panel 的有效行数可能 < `train_window`. Runtime shortfall detection 在行数 < `train_window × 0.9` 时发一次性 warning, 但不 raise. `TopNRotation.lookback_days` 有 +20 buffer 作为未声明用户的 safety net, 但大 N (>20) 仍会 shortfall.
-- ~~**MLAlpha V1 不支持 LightGBM/XGBoost**~~ — ✅ **已关闭** (V2.14 B4: LGBMRegressor + XGBRegressor 加入白名单, GPU 拦截, `[ml-extra]` optional group. Classifier 待定义分类契约)
-- **模拟盘 strategy.state 不持久化** — PaperTradingEngine 进程重启后策略内部状态 (如 MLAlpha 已训练的模型) 丢失. resume_all() 从 DB 恢复 holdings/equity 但不恢复 strategy.state. 有状态策略首个 rebalance 从零训练. 需要 strategy state serialization 协议 (V3.x).
-- **模拟盘数据时效性** — tick 执行时依赖 DataProviderChain 返回当日数据. 如果数据源尚未更新 (收盘后延迟), 可能获取到前一日数据导致信号错误. 建议收盘后 1-2 小时再触发 tick.
-- **模拟盘停止不清仓** — 停止部署不执行自动清仓操作. 对模拟盘无实际影响 (不产生真实委托), 但权益曲线末端的持仓不会被平掉, 期末收益指标可能高估或低估.
-- **Scheduler 单进程** — 无多 worker 支持, tick() 串行处理所有部署. 大量部署 (>50) 时可能在交易日窗口内处理不完.
+
+### 架构级 (V3.x 再考虑)
+- **研究任务不支持进程恢复 (crash recovery)** — 需 task state 序列化 + DB 持久化中间状态. V3.x 重新设计研究引擎时处理
+- **研究任务串行 (同时只跑 1 个)** — 设计选择 (asyncio.Lock 保护资源隔离), 非 bug. 并发需要资源池 (LLM rate limit + Store 事务隔离)
+- **模拟盘 strategy.state 不持久化** — PaperTradingEngine 进程重启后策略内部状态 (如 MLAlpha 已训练的模型) 丢失. resume_all() 从 DB 恢复 holdings/equity 但不恢复 strategy.state. 需要 strategy state serialization 协议 (V3.x)
+- **Scheduler 单进程** — 无多 worker, tick() 串行处理所有部署. 大量部署 (>50) 时可能在交易日窗口内处理不完. 需要分布式 scheduler
+- **C++ 加速路径持 GIL** — 需 C++ 端释放 GIL 才能真正并发加速, 当前单线程效果
+- **数据源链扁平去重** — 设计选择, 非 bug. 按市场独立路由需要 provider 声明支持的市场集 + 链查分 (未来 refactor)
+
+### 设计选择 (不修)
+- **LLM 调用计数近似** — chat_sync 内部多轮不精确计入, 文档化为估计值
+- **模拟盘数据时效性** — 收盘后数据源延迟, 建议收盘后 1-2 小时再触发 tick (文档提示)
+- **约束风险平价近似** — 行业约束 SLSQP 内处理, 可能偏离纯等风险贡献, 有 inverse-vol fallback 兜底
+- **AKShare / Tencent raw close 回退 adj_close** — 外部 API 限制, V2.16 加 1 次重试. Tushare 优先所以影响低
+
+### 已关闭 (历史, 保留以备查)
+- ~~**AI助手SSE流式输出无法前端强制中断**~~ — ✅ **已关闭** (V2.23: ChatPanel AbortController + "停止" 按钮, FastAPI StreamingResponse 原生支持 async cancellation)
+- ~~**multi_select 参数搜索只搜单因子组合**~~ — ✅ **已关闭** (V2.14 B2: 组合搜索 checkbox + 2^N-1 power-set, 64 上限)
+- ~~**MLAlpha V1 不支持 LightGBM/XGBoost**~~ — ✅ **已关闭** (V2.14 B4: LGBMRegressor + XGBRegressor 白名单, GPU 拦截)
+- ~~**模拟盘停止不清仓**~~ — ✅ **已关闭** (V2.16: stop_deployment `liquidate=True` 选项触发 execute_portfolio_trades 平仓所有持仓, API `/stop?liquidate=true`)
+
+### MLAlpha 约束 (contract, 非 bug)
+- **MLAlpha whitelist 9 个 estimator** (V2.14 扩展) — 7 sklearn (Ridge/Lasso/LR/EN/DT/RF/GBR) + LGBMRegressor + XGBRegressor. Classifier (LGBMClassifier/XGBClassifier) 未列入, 需先定义分类契约 (predict 输出语义 + TopNRotation 兼容性). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task
+- **MLAlpha `feature_warmup_days` 默认 0** — 用户的 `feature_fn` 若含 `rolling(N)` / `pct_change(N)`, 必须显式设置 `feature_warmup_days=N`. Runtime shortfall detection 在行数 < `train_window × 0.9` 时发一次性 warning 但不 raise
 
 ## V2.12.2 指标公式语义变更 (⚠ 非 backward compat)
 V2.12.2 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest/engine.py`

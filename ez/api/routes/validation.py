@@ -81,9 +81,14 @@ def _run_to_returns(run: dict[str, Any]) -> pd.Series:
 
 
 def _load_run_returns(run_id: str) -> tuple[dict[str, Any], pd.Series]:
-    """Load a run and its daily returns. Raises HTTPException on failure."""
-    from ez.portfolio.portfolio_store import PortfolioStore
-    store = PortfolioStore()
+    """Load a run and its daily returns. Raises HTTPException on failure.
+
+    V2.23 I1 fix: reuse PortfolioStore singleton from routes.portfolio
+    instead of constructing a new store (with new DuckDB connection)
+    per request.
+    """
+    from ez.api.routes.portfolio import _get_store
+    store = _get_store()
     run = store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")

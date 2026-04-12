@@ -82,6 +82,7 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
   const [activeId, setActiveId] = useState<string>(() => localStorage.getItem(ACTIVE_KEY) || '')
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const abortControllerRef = useRef<AbortController | null>(null)  // V2.23: support SSE cancel
   const aiCreatedFileRef = useRef(false)  // Distinguishes AI-created file from user-clicked file
   const [llmStatus, setLlmStatus] = useState<{ available: boolean; provider?: string; model?: string } | null>(null)
   const [showList, setShowList] = useState(false)
@@ -237,11 +238,17 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
       ))
     }
 
+    // V2.23: AbortController enables user-initiated cancel. Backend SSE
+    // generator is cancelled when client disconnects (FastAPI StreamingResponse
+    // handles this via asyncio.CancelledError).
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     try {
       const res = await fetch('/api/chat/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: apiMessages, editor_code: editorCode }),
+        signal: controller.signal,
       })
 
       if (!res.ok) {
@@ -380,11 +387,21 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
         }
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      updateMsgs(prev => [...prev, { role: 'assistant', content: `网络错误: ${msg}` }])
+      // V2.23: if the user cancelled the stream, don't show a scary error
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        updateMsgs(prev => [...prev, { role: 'assistant', content: '(已中断)' }])
+      } else {
+        const msg = e instanceof Error ? e.message : String(e)
+        updateMsgs(prev => [...prev, { role: 'assistant', content: `网络错误: ${msg}` }])
+      }
     } finally {
       setStreaming(false)
+      abortControllerRef.current = null
     }
+  }
+
+  const cancelStream = () => {
+    abortControllerRef.current?.abort()
   }
 
   return (
@@ -503,13 +520,24 @@ export default function ChatPanel({ editorCode = '', onCodeUpdate, fileKey }: Pr
             className="flex-1 text-xs px-3 py-2 rounded"
             style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
           />
-          <button
-            onClick={sendMessage}
-            disabled={streaming || !input.trim() || !llmStatus?.available}
-            className="text-xs px-3 py-2 rounded"
-            style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: streaming || !input.trim() ? 0.5 : 1 }}>
-            发送
-          </button>
+          {streaming ? (
+            // V2.23: SSE cancel button visible during streaming
+            <button
+              onClick={cancelStream}
+              className="text-xs px-3 py-2 rounded"
+              style={{ backgroundColor: '#ef4444', color: '#fff' }}
+              title="中断生成">
+              停止
+            </button>
+          ) : (
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || !llmStatus?.available}
+              className="text-xs px-3 py-2 rounded"
+              style={{ backgroundColor: 'var(--color-accent)', color: '#fff', opacity: !input.trim() ? 0.5 : 1 }}>
+              发送
+            </button>
+          )}
         </div>
       </div>
     </div>

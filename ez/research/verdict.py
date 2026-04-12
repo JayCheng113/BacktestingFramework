@@ -60,6 +60,8 @@ class Verdict:
     total: int
     checks: list[CheckResult] = field(default_factory=list)
     summary: str = ""
+    badge_color: str = "green"             # S4: semantic color field
+    badge_emoji: str = "🟢"                # optional emoji, frontend can ignore
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +80,8 @@ class Verdict:
                 for c in self.checks
             ],
             "summary": self.summary,
+            "badge_color": self.badge_color,
+            "badge_emoji": self.badge_emoji,
         }
 
 
@@ -265,29 +269,33 @@ def compute_verdict(
 
     if failed > 0:
         result = "fail"
+        color = "red"
         emoji = "🔴"
     elif warned > 0:
         result = "warn"
+        color = "amber"
         emoji = "🟡"
     else:
         result = "pass"
+        color = "green"
         emoji = "🟢"
 
+    # S4: summary is plain text (no emoji). Frontend renders badge separately.
     if result == "pass":
         summary = (
-            f"{emoji} 策略通过 {passed}/{total} 项检验, 无警告. "
+            f"策略通过 {passed}/{total} 项检验, 无警告. "
             f"建议推进到模拟盘阶段."
         )
     elif result == "warn":
         warn_names = [c.name for c in checks if c.status == "warn"]
         summary = (
-            f"{emoji} 策略通过主要检验 ({passed}/{total}), 但有 {warned} 项警告: "
+            f"策略通过主要检验 ({passed}/{total}), 但有 {warned} 项警告: "
             f"{', '.join(warn_names)}. 建议复核后谨慎推进."
         )
     else:
         fail_names = [c.name for c in checks if c.status == "fail"]
         summary = (
-            f"{emoji} 策略未通过 {failed} 项关键检验: {', '.join(fail_names)}. "
+            f"策略未通过 {failed} 项关键检验: {', '.join(fail_names)}. "
             f"不建议部署, 需重新设计."
         )
 
@@ -299,4 +307,6 @@ def compute_verdict(
         total=total,
         checks=checks,
         summary=summary,
+        badge_color=color,
+        badge_emoji=emoji,
     )
