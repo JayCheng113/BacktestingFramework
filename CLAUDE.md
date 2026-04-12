@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.28 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.29 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -392,8 +392,21 @@ No version tag without review pass. No push without critical issues resolved.
     - I3: AxiosError.response.data.detail 提取, 404/422 显示后端 message
     - I4: 提交前 input precheck (n_bootstrap / block_size)
     - I5: 动态 loading 提示 "预计 ~N 秒" 按 n_bootstrap 缩放
-  - **Phase 2.1 延后**: 配对对比 (基线 run dropdown + 双组表), 报告导出 (前端 markdown 拼接)
+  - **Phase 2.1 延后**: 配对对比 (基线 run dropdown + 双组表), 报告导出 (前端 markdown 拼接) — 后续交付见下
   - **构建**: tsc -b + vite build 零错误, bundle 2006 KB (gzip 606 KB)
+
+- **V2.22 Phase 2.1 (done)**: 配对对比 + 报告导出
+  - **baseline 选择器**: 顶部控制区下拉 "对比基线", 调 `listPortfolioRuns()` 加载 50 条, 过滤掉当前 runId, 显示 `{strategy_name} · {YYYY-MM-DD} · Sharpe X.XX`. 选中后调 `/validate` 带 `baseline_run_id`, 激活后端已有的配对块 bootstrap
+  - **ComparisonSection** (`ValidationPanel.tsx`): 4 指标卡 (Sharpe 差值/p-value/CI 是否含 0/观察数) + CIBar 复用 + 双组指标对比表 (sharpe/ret/vol/dd 四行, 当前/基线/差值三列, 差值着色) + "显著优于基线" badge + error 字段优雅降级
+  - **ReportExportBar**: `generateMarkdown(result)` 纯函数产生完整 markdown 报告 (verdict + 检验明细表 + significance + WF + annual + comparison), 底部 "复制报告" (clipboard) + "下载 .md" (Blob+anchor, 文件名 `validation-{safeId}-{date}.md`)
+  - **Review round 修复**:
+    - I1: useEffect([baselineId]) 清 stale result, 避免切换 baseline 不重跑时看到上一次对比数据
+    - I2: `mdSafe()` helper 对所有用户控制字符串 (run_id/baseline_run_id/control_run_id) 转义反引号/竖线/换行, 防止 markdown 注入
+    - S1: listPortfolioRuns 失败 console.warn 可调试
+    - S7: 下载文件名 run_id 部分 `/[^a-zA-Z0-9_-]/` → `_` sanitize
+  - **零后端改动** — 完全复用 Phase 1 的 `/api/validation/validate` comparison 字段
+  - **V2.22 设计 100% 交付**: 原计划的 6 个区全部实现 (verdict / WF / 显著性 / 年度 / 配对对比 / 报告导出)
+  - **构建**: tsc -b + vite build 零错误, bundle 2015 KB (+10 KB)
 
 - **V2.23**: 遗留 bug 清理 (V2.22 Phase 1 review 延后项 + AI chat cancel)
   - **I1 ✅**: `validation.py` 改用 `routes.portfolio._get_store()` singleton (原每请求新建 PortfolioStore 连接)
