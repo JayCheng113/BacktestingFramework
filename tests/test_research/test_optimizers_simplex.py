@@ -98,7 +98,7 @@ class TestSingleObjective:
     def test_max_sharpe_returns_one_result(self):
         opt = SimplexMultiObjectiveOptimizer(
             objectives=[MaxSharpe()],
-            max_iter=50,  # speed up tests
+            max_iter=200,  # speed up tests
         )
         rets = _make_returns_3asset()
         results = opt.optimize(rets)
@@ -130,7 +130,7 @@ class TestSingleObjective:
         )
 
     def test_is_metrics_populated_on_converged(self):
-        opt = SimplexMultiObjectiveOptimizer(objectives=[MaxSharpe()], max_iter=50)
+        opt = SimplexMultiObjectiveOptimizer(objectives=[MaxSharpe()], max_iter=200)
         rets = _make_returns_3asset()
         result = opt.optimize(rets)[0]
         assert result.is_feasible
@@ -139,7 +139,7 @@ class TestSingleObjective:
         assert "calmar" in result.is_metrics
 
     def test_weights_dict_keys_match_columns(self):
-        opt = SimplexMultiObjectiveOptimizer(objectives=[MaxSharpe()], max_iter=50)
+        opt = SimplexMultiObjectiveOptimizer(objectives=[MaxSharpe()], max_iter=200)
         rets = _make_returns_3asset()
         result = opt.optimize(rets)[0]
         assert set(result.weights.keys()) == set(rets.columns)
@@ -153,7 +153,7 @@ class TestMultiObjective:
     def test_4_objectives_returns_4_results(self):
         opt = SimplexMultiObjectiveOptimizer(
             objectives=[MaxSharpe(), MaxCalmar(), MaxSortino(), MinCVaR()],
-            max_iter=50,
+            max_iter=200,
         )
         rets = _make_returns_3asset()
         results = opt.optimize(rets)
@@ -164,7 +164,7 @@ class TestMultiObjective:
 
     def test_results_in_objectives_order(self):
         objs = [MaxSortino(), MaxSharpe(), MaxCalmar()]
-        opt = SimplexMultiObjectiveOptimizer(objectives=objs, max_iter=50)
+        opt = SimplexMultiObjectiveOptimizer(objectives=objs, max_iter=200)
         results = opt.optimize(_make_returns_3asset())
         assert [r.objective_name for r in results] == [
             "Max Sortino", "Max Sharpe", "Max Calmar",
@@ -203,7 +203,7 @@ class TestEpsilonConstraintIntegration:
             objectives=[
                 EpsilonConstraint("min_mdd", "ret", ">=", "100*baseline_ret"),
             ],
-            max_iter=50,
+            max_iter=200,
         )
         rets = _make_returns_3asset()
         from ez.research._metrics import compute_basic_metrics

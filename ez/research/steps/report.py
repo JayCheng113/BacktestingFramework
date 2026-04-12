@@ -100,6 +100,50 @@ def default_template(context: PipelineContext) -> str:
             lines.append("| " + " | ".join(row) + " |")
         lines.append("")
 
+    # Nested OOS results (V2.20.1)
+    nested_oos = context.get("nested_oos_results")
+    if nested_oos and isinstance(nested_oos, dict):
+        candidates = nested_oos.get("candidates", [])
+        if candidates:
+            lines.append("## Nested OOS Results")
+            lines.append("")
+            is_w = nested_oos.get("is_window", ("?", "?"))
+            oos_w = nested_oos.get("oos_window", ("?", "?"))
+            lines.append(f"IS window: `{is_w[0]}` → `{is_w[1]}`, "
+                         f"OOS window: `{oos_w[0]}` → `{oos_w[1]}`")
+            lines.append("")
+            # Candidates table: objective | status | IS sharpe | IS ret | OOS sharpe | OOS ret | OOS MDD
+            lines.append("| Objective | Status | IS Sharpe | IS Ret | OOS Sharpe | OOS Ret | OOS MDD |")
+            lines.append("|---|---|---|---|---|---|---|")
+            for c in candidates:
+                obj = _md_escape(c.get("objective", "?"))
+                status = _md_escape(c.get("status", "?"))
+                is_m = c.get("is_metrics", {})
+                oos_m = c.get("oos_metrics", {})
+                lines.append(
+                    f"| {obj} | {status} "
+                    f"| {_format_metric(is_m.get('sharpe'))} "
+                    f"| {_format_metric(is_m.get('ret'))} "
+                    f"| {_format_metric(oos_m.get('sharpe'))} "
+                    f"| {_format_metric(oos_m.get('ret'))} "
+                    f"| {_format_metric(oos_m.get('dd'))} |"
+                )
+            # Baseline row
+            bl_oos = nested_oos.get("baseline_oos")
+            bl_is = nested_oos.get("baseline_is")
+            if bl_oos or bl_is:
+                bl_i = bl_is or {}
+                bl_o = bl_oos or {}
+                lines.append(
+                    f"| **(Baseline)** | — "
+                    f"| {_format_metric(bl_i.get('sharpe'))} "
+                    f"| {_format_metric(bl_i.get('ret'))} "
+                    f"| {_format_metric(bl_o.get('sharpe'))} "
+                    f"| {_format_metric(bl_o.get('ret'))} "
+                    f"| {_format_metric(bl_o.get('dd'))} |"
+                )
+            lines.append("")
+
     # Returns sample
     returns = context.get("returns")
     if returns is not None and isinstance(returns, pd.DataFrame) and len(returns) > 0:

@@ -36,7 +36,7 @@ def _ctx(returns=None):
 def _optimizer(**kwargs):
     return SimplexMultiObjectiveOptimizer(
         objectives=[MaxSharpe()],
-        max_iter=30,  # small for speed
+        max_iter=200,  # small for speed
         **kwargs,
     )
 
@@ -133,7 +133,7 @@ class TestHappyPath:
     def test_multi_objective_returns_all_candidates(self):
         opt = SimplexMultiObjectiveOptimizer(
             objectives=[MaxSharpe(), MaxCalmar()],
-            max_iter=30,
+            max_iter=200,
         )
         step = NestedOOSStep(
             is_window=("2023-01-01", "2023-12-31"),
@@ -221,7 +221,7 @@ class TestBaseline:
             objectives=[
                 EpsilonConstraint("min_mdd", "ret", ">=", "0.5*baseline_ret"),
             ],
-            max_iter=30,
+            max_iter=200,
         )
         step = NestedOOSStep(
             is_window=("2023-01-01", "2023-12-31"),

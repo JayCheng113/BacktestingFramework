@@ -186,6 +186,23 @@ _FORBIDDEN_MODULES = frozenset({
 # (`name.split(".")[0]`), so `from ez.agent.sandbox import _reload_lock`
 # slips through because root="ez" is not forbidden. These are checked
 # as either exact matches or prefix matches with a trailing dot.
+# KNOWN LIMITATION (codex round-6): the binding table + attribute chain
+# check covers explicit imports, aliases (`import ez as z`), simple
+# rebindings (`z = ez`), and walrus (`(z := ez)`). However, it CANNOT
+# track dynamic rebindings like `z = [ez][0]`, `z = ident(ez)`,
+# `for z in [ez]: pass`, or `z = getattr(ez, 'agent')`. These bypass
+# the static check and let user code reach `_reload_lock`.
+#
+# Mitigation: `_reload_lock` is a `threading.Lock()` (not RLock), so
+# any successful user-code acquire inside `_run_guards` immediately
+# deadlocks the current save request (loud failure, easy to detect).
+# The only attack outcome is a DoS on the save flow, not silent state
+# corruption or data theft.
+#
+# The definitive fix is to move `_reload_lock` out of the module
+# namespace entirely (e.g., into a closure-captured variable or
+# separate process-level synchronization), so user code cannot access
+# it regardless of binding tricks. This is a V2.21+ architectural task.
 _FORBIDDEN_FULL_MODULES = frozenset({
     # Sandbox itself — direct access to _reload_lock would let user code
     # deadlock the guard framework or recursively trigger save flows.

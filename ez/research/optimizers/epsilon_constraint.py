@@ -53,11 +53,12 @@ _CONSTRAINT_METRICS = frozenset({
 _OPS = frozenset({">=", "<=", ">", "<", "=="})
 
 
-def _safe_eval(expr: Union[str, float, int], baseline: Optional[dict[str, float]]) -> float:
+def _safe_eval(expr: Union[str, float, int, Callable], baseline: Optional[dict[str, float]]) -> float:
     """Safely evaluate a constraint value expression.
 
     Accepts:
       - int / float (returned as float)
+      - callable (passed baseline dict, returns float) — V2.20.1 codex round-6 P2
       - string with literal numbers, * /, parentheses, and references
         to ``baseline_<metric>``
 
@@ -66,8 +67,19 @@ def _safe_eval(expr: Union[str, float, int], baseline: Optional[dict[str, float]
     """
     if isinstance(expr, (int, float)):
         return float(expr)
+    if callable(expr) and not isinstance(expr, str):
+        # Codex round-6 P2: callable constraint value support.
+        # Design draft said "support both string DSL and callable".
+        if baseline is None:
+            raise ValueError("Callable constraint value requires baseline_metrics")
+        result = expr(baseline)
+        if not isinstance(result, (int, float)):
+            raise TypeError(
+                f"Callable constraint value must return a number, got {type(result).__name__}"
+            )
+        return float(result)
     if not isinstance(expr, str):
-        raise TypeError(f"Constraint value must be number or str, got {type(expr).__name__}")
+        raise TypeError(f"Constraint value must be number, str, or callable, got {type(expr).__name__}")
 
     expr = expr.strip()
     if not expr:
@@ -205,6 +217,21 @@ class EpsilonConstraint(Objective):
             except ValueError as e:
                 raise ValueError(
                     f"EpsilonConstraint constraint_value {constraint_value!r} "
+                    f"failed validation: {e}"
+                ) from e
+        elif callable(constraint_value):
+            # Codex round-6 P2: validate callable at construction time
+            # by calling it with a stub baseline. If it crashes, fail fast.
+            stub = {k: 0.0 for k in _ALLOWED_BASELINE_KEYS}
+            try:
+                result = constraint_value(stub)
+                if not isinstance(result, (int, float)):
+                    raise TypeError(
+                        f"Callable must return a number, got {type(result).__name__}"
+                    )
+            except (TypeError, KeyError, ValueError) as e:
+                raise ValueError(
+                    f"EpsilonConstraint callable constraint_value "
                     f"failed validation: {e}"
                 ) from e
 

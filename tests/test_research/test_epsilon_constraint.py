@@ -108,7 +108,7 @@ class TestSafeEval:
             _safe_eval('"hello"', None)
 
     def test_wrong_type_raises(self):
-        with pytest.raises(TypeError, match="must be number or str"):
+        with pytest.raises(TypeError, match="must be number"):
             _safe_eval([1, 2], None)
 
 

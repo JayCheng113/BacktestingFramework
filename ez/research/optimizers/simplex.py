@@ -112,9 +112,12 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
             )
 
         labels = list(returns.columns)
-        # We optimize over the first n-1 weights; the n-th is computed
-        # as max(1 - sum, 0).
-        bounds = [(0.0, 1.0)] * (n - 1)
+        # Codex round-6 P1: optimize over ALL N weights in [0, 1].
+        # The simplex constraint sum(w) <= 1 is enforced inside the
+        # objective function, not by reducing dimensionality. This
+        # means cash (= 1 - sum(w)) is a genuine part of the search
+        # space — the optimizer CAN return an all-cash solution.
+        bounds = [(0.0, 1.0)] * n
 
         # Drop NaN rows and convert to numpy for inner-loop performance
         clean_returns = returns.dropna()
@@ -125,17 +128,25 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
         returns_arr = clean_returns.values  # shape (n_days, n_assets)
         index = clean_returns.index
 
-        def _portfolio_returns(w_partial: np.ndarray) -> pd.Series:
-            """Build the daily portfolio return Series for partial weights."""
-            wf = max(1.0 - float(sum(w_partial)), 0.0)
-            full_w = np.append(np.asarray(w_partial, dtype=float), wf)
-            port = (returns_arr * full_w).sum(axis=1)
+        def _portfolio_returns(weights_all: np.ndarray) -> pd.Series:
+            """Build the daily portfolio return Series from ALL N weights.
+
+            Codex round-6 P1: the previous implementation optimized
+            over N-1 weights and computed the N-th as 1-sum(others),
+            which forced sum==1.0 and made the last asset a special
+            residual. Cash (sum < 1) was never reachable.
+
+            Now we optimize over ALL N weights in [0, 1], and the
+            simplex constraint sum <= 1 is enforced in _is_feasible.
+            Cash = 1 - sum(w), and the cash return is 0 (no interest).
+            """
+            port = (returns_arr * weights_all).sum(axis=1)
             return pd.Series(port, index=index)
 
-        def _is_feasible(w_partial: np.ndarray) -> bool:
-            if any(wi < -1e-9 for wi in w_partial):
+        def _is_feasible(w: np.ndarray) -> bool:
+            if any(wi < -1e-9 for wi in w):
                 return False
-            if sum(w_partial) > 1.0 + 1e-9:
+            if sum(w) > 1.0 + 1e-9:
                 return False
             return True
 
@@ -148,8 +159,6 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
                 try:
                     return _obj.evaluate(port, baseline_metrics)
                 except Exception:
-                    # Defensive: never let an objective bug crash the
-                    # whole optimizer. Treat as infeasible.
                     return math.inf
 
             try:
@@ -170,8 +179,11 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
                 ))
                 continue
 
+            # Codex round-6 P2: check res.success to distinguish
+            # converged / max_iter / infeasible. The previous code
+            # only checked res.fun >= 1e9, so max_iter was mis-tagged
+            # as "converged".
             if res.fun >= 1e9 or not math.isfinite(res.fun):
-                # No feasible solution found
                 results.append(OptimalWeights(
                     objective_name=obj.name,
                     weights={label: 0.0 for label in labels},
@@ -180,19 +192,20 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
                 ))
                 continue
 
-            w_partial = list(res.x)
-            wf = max(1.0 - sum(w_partial), 0.0)
-            weights_dict = dict(zip(labels, w_partial + [wf]))
+            if not res.success:
+                status = "max_iter" if "iteration" in str(res.message).lower() else "infeasible"
+            else:
+                status = "converged"
 
-            # Compute IS metrics for the converged weights
-            port = _portfolio_returns(np.asarray(w_partial))
+            weights_dict = dict(zip(labels, [float(wi) for wi in res.x]))
+            port = _portfolio_returns(np.asarray(res.x))
             is_metrics = compute_basic_metrics(port) or {}
 
             results.append(OptimalWeights(
                 objective_name=obj.name,
                 weights=weights_dict,
                 is_metrics=is_metrics,
-                optimizer_status="converged",
+                optimizer_status=status,
             ))
 
         return results
