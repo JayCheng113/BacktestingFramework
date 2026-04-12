@@ -201,3 +201,106 @@ export interface DiagnosticsResult {
   verdict: 'healthy' | 'mild_overfit' | 'severe_overfit' | 'unstable' | 'insufficient_data'
   warnings: string[]
 }
+
+
+// V2.22 — Unified OOS Validation
+export interface ValidationRequest {
+  run_id: string
+  baseline_run_id?: string | null
+  n_bootstrap?: number
+  block_size?: number
+  n_trials?: number
+  seed?: number
+}
+
+export interface SignificanceResult {
+  observed_sharpe: number
+  ci_lower: number
+  ci_upper: number
+  p_value: number
+  n_bootstrap: number
+  block_size: number
+}
+
+export interface DeflatedResult {
+  sharpe: number
+  deflated_sharpe: number
+  expected_max_sr: number
+  skew: number
+  kurt: number
+  excess_kurt?: number
+  warning?: string
+}
+
+export interface MinBtlResult {
+  actual_years: number
+  min_btl_years: number | null
+}
+
+export interface AnnualYear {
+  year: number
+  sharpe: number
+  ret: number
+  mdd: number
+  n_days: number
+}
+
+export interface AnnualResult {
+  per_year: AnnualYear[]
+  worst_year: number | null
+  best_year: number | null
+  profitable_ratio: number
+  consistency_score: number
+}
+
+export interface WalkForwardAggregate {
+  degradation?: number
+  oos_sharpe?: number
+  avg_is_sharpe?: number
+  overfitting_score?: number
+  [key: string]: unknown
+}
+
+export interface ComparisonResult {
+  treatment_run_id: string
+  control_run_id: string
+  sharpe_diff: number
+  ci_lower: number
+  ci_upper: number
+  p_value: number
+  is_significant: boolean
+  ci_excludes_zero: boolean
+  treatment_metrics: Record<string, number>
+  control_metrics: Record<string, number>
+  n_observations: number
+  error?: string
+}
+
+export interface VerdictCheck {
+  name: string
+  status: 'pass' | 'warn' | 'fail'
+  reason: string
+  value: unknown
+}
+
+export interface VerdictResult {
+  result: 'pass' | 'warn' | 'fail'
+  passed: number
+  warned: number
+  failed: number
+  total: number
+  checks: VerdictCheck[]
+  summary: string
+}
+
+export interface ValidationResult {
+  run_id: string
+  baseline_run_id: string | null
+  significance: SignificanceResult
+  deflated: DeflatedResult | null
+  min_btl: MinBtlResult
+  annual: AnnualResult
+  walk_forward: WalkForwardAggregate | null
+  comparison: ComparisonResult | null
+  verdict: VerdictResult
+}

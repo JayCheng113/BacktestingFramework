@@ -10,6 +10,7 @@ import { deployToLive } from '../api/live'
 import EnsembleBuilder from './EnsembleBuilder'
 import type { EnsembleConfig } from './EnsembleBuilder'
 import { useToast } from './shared/Toast'
+import { ValidationPanel } from './ValidationPanel'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -1152,6 +1153,11 @@ export default function PortfolioRunContent(props: Props) {
           </div>
         )
       })()}
+
+      {/* V2.22: Unified OOS Validation Panel */}
+      {result && result.run_id && (
+        <ValidationPanel runId={result.run_id} />
+      )}
     </>
   )
 }

@@ -91,8 +91,17 @@ export const fundamentalDataQuality = (data: any) => api.post('/fundamental/qual
 export const listFundamentalFactors = () => api.get('/fundamental/factors')
 
 // ML Alpha Diagnostics (V2.13.2)
-import type { MLDiagnosticsRequest, DiagnosticsResult } from '../types'
+import type {
+  MLDiagnosticsRequest,
+  DiagnosticsResult,
+  ValidationRequest,
+  ValidationResult,
+} from '../types'
 export const mlAlphaDiagnostics = (data: MLDiagnosticsRequest) =>
   api.post<DiagnosticsResult>('/portfolio/ml-alpha/diagnostics', data)
+
+// V2.22 — Unified OOS Validation
+export const runValidation = (data: ValidationRequest) =>
+  api.post<ValidationResult>('/validation/validate', data)
 
 export default api
