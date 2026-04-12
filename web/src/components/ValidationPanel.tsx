@@ -13,11 +13,13 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { AxiosError } from 'axios'
-import { runValidation } from '../api'
+import { runValidation, listPortfolioRuns } from '../api'
 import type {
   ValidationResult,
   VerdictCheck,
   AnnualYear,
+  HistoryRun,
+  ComparisonResult,
 } from '../types'
 import { CHART } from './shared/chartTheme'
 import { useToast } from './shared/Toast'
@@ -52,6 +54,8 @@ export function ValidationPanel({ runId }: Props) {
   const [result, setResult] = useState<ValidationResult | null>(null)
   const [nBootstrap, setNBootstrap] = useState(2000)
   const [blockSize, setBlockSize] = useState(21)
+  const [baselineId, setBaselineId] = useState('')
+  const [runList, setRunList] = useState<HistoryRun[]>([])
   const tokenRef = useRef(0)
 
   // I2: clear stale result and invalidate in-flight request when run switches
@@ -59,7 +63,18 @@ export function ValidationPanel({ runId }: Props) {
     tokenRef.current += 1
     setResult(null)
     setLoading(false)
+    setBaselineId('')  // Phase 2.1: clear baseline selection on run change
   }, [runId])
+
+  // Phase 2.1: load available runs for baseline dropdown
+  useEffect(() => {
+    listPortfolioRuns(50, 0)
+      .then(r => setRunList(r.data as HistoryRun[]))
+      .catch(() => {
+        // Silently fail — baseline dropdown will just be empty.
+        // User can still run validation without comparison.
+      })
+  }, [])
 
   const handleRun = async () => {
     if (!runId) return
@@ -78,6 +93,7 @@ export function ValidationPanel({ runId }: Props) {
     try {
       const resp = await runValidation({
         run_id: runId,
+        baseline_run_id: baselineId || undefined,
         n_bootstrap: nBootstrap,
         block_size: blockSize,
       })
@@ -116,11 +132,45 @@ export function ValidationPanel({ runId }: Props) {
         alignItems: 'center',
         justifyContent: 'space-between',
         marginBottom: 12,
+        flexWrap: 'wrap',
+        gap: 10,
       }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>
           策略综合验证
         </h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: CHART.textSecondary }}>
+            对比基线
+            <select
+              value={baselineId}
+              onChange={(e) => setBaselineId(e.target.value)}
+              disabled={loading}
+              style={{
+                marginLeft: 6,
+                padding: '2px 6px',
+                backgroundColor: CHART.bg,
+                color: CHART.text,
+                border: `1px solid ${CHART.border}`,
+                borderRadius: 4,
+                maxWidth: 260,
+              }}
+              title="选择另一个 run 作为对比基线, 可配对 bootstrap 检验 Sharpe 差值显著性"
+            >
+              <option value="">(无对比)</option>
+              {runList
+                .filter((r) => r.run_id !== runId)
+                .map((r) => {
+                  const sharpe = r.metrics?.sharpe_ratio
+                  const sharpeStr = typeof sharpe === 'number' ? sharpe.toFixed(2) : '—'
+                  const date = r.created_at ? r.created_at.slice(0, 10) : ''
+                  return (
+                    <option key={r.run_id} value={r.run_id}>
+                      {r.strategy_name} · {date} · Sharpe {sharpeStr}
+                    </option>
+                  )
+                })}
+            </select>
+          </label>
           <label style={{ fontSize: 12, color: CHART.textSecondary }}>
             Bootstrap 次数
             <input
@@ -209,9 +259,13 @@ function ValidationResultView({ result }: { result: ValidationResult }) {
         deflated={result.deflated}
         minBtl={result.min_btl}
       />
+      {result.comparison && (
+        <ComparisonSection comparison={result.comparison} />
+      )}
       {result.annual.per_year.length > 0 && (
         <AnnualSection annual={result.annual} />
       )}
+      <ReportExportBar result={result} />
     </div>
   )
 }
@@ -609,6 +663,283 @@ function AnnualSection({ annual }: { annual: ValidationResult['annual'] }) {
         }}
       />
     </Section>
+  )
+}
+
+// ============================================================
+// Phase 2.1: Paired comparison section
+// ============================================================
+
+function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
+  if (comparison.error) {
+    return (
+      <Section title="配对对比 (vs 基线)">
+        <div style={{
+          padding: 10,
+          fontSize: 13,
+          color: CHART.error,
+          backgroundColor: CHART.bg,
+          borderRadius: 4,
+        }}>
+          对比失败: {comparison.error}
+        </div>
+      </Section>
+    )
+  }
+  const ciExcludesZero = comparison.ci_excludes_zero
+  const sig = comparison.is_significant
+  return (
+    <Section title="配对对比 (vs 基线)">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+        <MetricCard
+          label="Sharpe 差值"
+          value={comparison.sharpe_diff}
+          fmt="num"
+          rating={sig ? (comparison.sharpe_diff > 0 ? 'pass' : 'fail') : 'warn'}
+        />
+        <MetricCard
+          label="p-value"
+          value={comparison.p_value}
+          fmt="num"
+          rating={sig ? 'pass' : 'warn'}
+        />
+        <MetricCard
+          label="CI 是否含 0"
+          value={ciExcludesZero ? '不含 0' : '含 0'}
+          fmt="str"
+          rating={ciExcludesZero ? 'pass' : 'fail'}
+        />
+        <MetricCard
+          label="观察数"
+          value={comparison.n_observations}
+          fmt="str"
+        />
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 12,
+          color: CHART.textSecondary,
+          marginBottom: 6,
+        }}>
+          <span>Sharpe 差值 95% CI</span>
+          <span style={{ color: sig ? CHART.success : CHART.warn }}>
+            {sig ? '显著优于基线 ✓' : '差异不显著'}
+          </span>
+        </div>
+        <CIBar
+          lower={comparison.ci_lower}
+          upper={comparison.ci_upper}
+          observed={comparison.sharpe_diff}
+        />
+      </div>
+
+      {/* Side-by-side metrics table */}
+      <div style={{ marginTop: 18 }}>
+        <table style={{
+          width: '100%',
+          fontSize: 12,
+          borderCollapse: 'collapse',
+        }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${CHART.border}` }}>
+              <th style={{ textAlign: 'left', padding: 6, color: CHART.textSecondary }}>指标</th>
+              <th style={{ textAlign: 'right', padding: 6, color: CHART.text }}>当前</th>
+              <th style={{ textAlign: 'right', padding: 6, color: CHART.textSecondary }}>基线</th>
+              <th style={{ textAlign: 'right', padding: 6, color: CHART.textSecondary }}>差值</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(['sharpe', 'ret', 'vol', 'dd'] as const).map((key) => {
+              const t = comparison.treatment_metrics[key]
+              const c = comparison.control_metrics[key]
+              const d = typeof t === 'number' && typeof c === 'number' ? t - c : null
+              const fmt = (v: number | undefined) =>
+                typeof v === 'number' ? v.toFixed(3) : '—'
+              const label = {
+                sharpe: 'Sharpe',
+                ret: '年化收益',
+                vol: '年化波动',
+                dd: '最大回撤',
+              }[key]
+              return (
+                <tr key={key} style={{ borderBottom: `1px solid ${CHART.border}` }}>
+                  <td style={{ padding: 6 }}>{label}</td>
+                  <td style={{ padding: 6, textAlign: 'right', color: CHART.text }}>{fmt(t)}</td>
+                  <td style={{ padding: 6, textAlign: 'right', color: CHART.textSecondary }}>{fmt(c)}</td>
+                  <td style={{
+                    padding: 6,
+                    textAlign: 'right',
+                    color: d === null ? CHART.textSecondary : d > 0 ? CHART.success : CHART.error,
+                  }}>
+                    {d === null ? '—' : (d > 0 ? '+' : '') + d.toFixed(3)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  )
+}
+
+// ============================================================
+// Phase 2.1: Report export (markdown generation)
+// ============================================================
+
+function generateMarkdown(result: ValidationResult): string {
+  const lines: string[] = []
+  const now = new Date().toISOString()
+  lines.push(`# 验证报告`, '')
+  lines.push(`- 主策略 run: \`${result.run_id}\``)
+  if (result.baseline_run_id) {
+    lines.push(`- 对比基线 run: \`${result.baseline_run_id}\``)
+  }
+  lines.push(`- 生成时间: ${now}`, '')
+
+  // Verdict
+  const v = result.verdict
+  lines.push(`## 综合裁决: ${VERDICT_LABEL[v.result]}`, '')
+  lines.push(`${v.summary}`, '')
+  lines.push(`- 通过: ${v.passed}/${v.total}`)
+  lines.push(`- 警告: ${v.warned}`)
+  lines.push(`- 不通过: ${v.failed}`, '')
+  lines.push('### 检验明细', '')
+  lines.push('| 检验项 | 状态 | 原因 |')
+  lines.push('|---|---|---|')
+  for (const c of v.checks) {
+    const statusText =
+      c.status === 'pass' ? '✓ 通过' :
+      c.status === 'warn' ? '⚠ 警告' :
+      '✗ 不通过'
+    const reason = c.reason.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+    lines.push(`| ${c.name} | ${statusText} | ${reason} |`)
+  }
+  lines.push('')
+
+  // Significance
+  const s = result.significance
+  lines.push(`## 统计显著性`, '')
+  lines.push(`- 观察 Sharpe: **${s.observed_sharpe.toFixed(3)}**`)
+  lines.push(`- Bootstrap 95% CI: [${s.ci_lower.toFixed(3)}, ${s.ci_upper.toFixed(3)}]`)
+  lines.push(`- p-value: ${s.p_value.toFixed(4)}`)
+  if (result.deflated) {
+    lines.push(`- Deflated Sharpe: ${result.deflated.deflated_sharpe.toFixed(3)}`)
+    lines.push(`- 偏度: ${result.deflated.skew.toFixed(3)}, 超额峰度: ${(result.deflated.excess_kurt ?? 0).toFixed(3)}`)
+  }
+  if (result.min_btl.min_btl_years !== null) {
+    lines.push(`- 最小回测长度: 实际 ${result.min_btl.actual_years.toFixed(1)} 年 / 需要 ${result.min_btl.min_btl_years.toFixed(1)} 年`)
+  }
+  lines.push('')
+
+  // Walk-Forward
+  if (result.walk_forward) {
+    const wf = result.walk_forward
+    lines.push(`## Walk-Forward`, '')
+    if (typeof wf.avg_is_sharpe === 'number') lines.push(`- IS Sharpe 均值: ${wf.avg_is_sharpe.toFixed(3)}`)
+    if (typeof wf.oos_sharpe === 'number') lines.push(`- OOS Sharpe: ${wf.oos_sharpe.toFixed(3)}`)
+    if (typeof wf.degradation === 'number') lines.push(`- 降解率: ${(wf.degradation * 100).toFixed(1)}%`)
+    if (typeof wf.overfitting_score === 'number') lines.push(`- 过拟合分数: ${wf.overfitting_score.toFixed(3)}`)
+    lines.push('')
+  }
+
+  // Annual
+  if (result.annual.per_year.length > 0) {
+    lines.push(`## 年度稳定性`, '')
+    const a = result.annual
+    const nProfitable = a.per_year.filter((y) => y.ret > 0).length
+    lines.push(`- 盈利年份: ${nProfitable}/${a.per_year.length} (${((a.profitable_ratio) * 100).toFixed(0)}%)`)
+    lines.push(`- 正 Sharpe 年份 (consistency): ${(a.consistency_score * 100).toFixed(0)}%`)
+    if (a.best_year !== null) lines.push(`- 最好年份: ${a.best_year}`)
+    if (a.worst_year !== null) lines.push(`- 最差年份: ${a.worst_year}`)
+    lines.push('')
+    lines.push('| 年份 | Sharpe | 收益 | 最大回撤 | 天数 |')
+    lines.push('|---|---|---|---|---|')
+    for (const y of a.per_year) {
+      lines.push(`| ${y.year} | ${y.sharpe.toFixed(2)} | ${(y.ret * 100).toFixed(1)}% | ${(y.mdd * 100).toFixed(1)}% | ${y.n_days} |`)
+    }
+    lines.push('')
+  }
+
+  // Comparison
+  if (result.comparison && !result.comparison.error) {
+    const cmp = result.comparison
+    lines.push(`## 配对对比 (vs 基线 ${cmp.control_run_id})`, '')
+    lines.push(`- Sharpe 差值: ${cmp.sharpe_diff.toFixed(3)}`)
+    lines.push(`- 95% CI: [${cmp.ci_lower.toFixed(3)}, ${cmp.ci_upper.toFixed(3)}] ${cmp.ci_excludes_zero ? '(不含 0)' : '(含 0)'}`)
+    lines.push(`- p-value: ${cmp.p_value.toFixed(4)} ${cmp.is_significant ? '(显著)' : '(不显著)'}`)
+    lines.push(`- 观察数: ${cmp.n_observations}`)
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
+
+function ReportExportBar({ result }: { result: ValidationResult }) {
+  const toast = useToast()
+  const handleCopy = async () => {
+    const md = generateMarkdown(result)
+    try {
+      await navigator.clipboard.writeText(md)
+      toast.showToast('success', '报告已复制到剪贴板')
+    } catch {
+      toast.showToast('error', '复制失败: 浏览器不支持剪贴板或权限被拒')
+    }
+  }
+  const handleDownload = () => {
+    const md = generateMarkdown(result)
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const dateStr = new Date().toISOString().slice(0, 10)
+    a.download = `validation-${result.run_id}-${dateStr}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast.showToast('success', '报告已下载')
+  }
+  return (
+    <div style={{
+      display: 'flex',
+      gap: 8,
+      justifyContent: 'flex-end',
+      paddingTop: 10,
+      borderTop: `1px solid ${CHART.border}`,
+    }}>
+      <button
+        onClick={handleCopy}
+        style={{
+          padding: '6px 14px',
+          backgroundColor: 'transparent',
+          color: CHART.text,
+          border: `1px solid ${CHART.border}`,
+          borderRadius: 4,
+          cursor: 'pointer',
+          fontSize: 13,
+        }}
+      >
+        复制报告
+      </button>
+      <button
+        onClick={handleDownload}
+        style={{
+          padding: '6px 14px',
+          backgroundColor: CHART.accent,
+          color: '#fff',
+          border: 'none',
+          borderRadius: 4,
+          cursor: 'pointer',
+          fontSize: 13,
+        }}
+      >
+        下载 .md
+      </button>
+    </div>
   )
 }
 
