@@ -22,8 +22,9 @@ Concrete steps in ``ez.research.steps``:
 - ``RunStrategiesStep`` — run several strategies, collect returns + metrics
 - ``ReportStep`` — render a markdown report from accumulated artifacts
 
-Status: experimental. The pipeline contract may change as more steps
-are added (V2.20.x will add NestedOOSStep, PairedBootstrapStep, etc).
+Status: P1-A complete (V2.20.0-V2.20.4). 7 steps implemented.
+V2.22 will add REST API endpoints + frontend integration (PortfolioPanel
+"组合优化" sub-tab) to expose pipeline results in the dashboard.
 """
 from .context import PipelineContext, StepRecord
 from .pipeline import ResearchPipeline, ResearchStep, StepError
