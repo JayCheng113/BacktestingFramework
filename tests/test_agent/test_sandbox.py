@@ -25,8 +25,12 @@ class TestSyntaxCheck:
     def test_forbidden_import_os(self):
         code = "import os\nprint(os.getcwd())"
         errors = check_syntax(code)
-        assert len(errors) == 1
-        assert "Forbidden import: os" in errors[0]
+        # V2.19.0 round-4 P1-A: stricter — both `import os` AND
+        # `os.getcwd` (attribute chain) are flagged. Previously only
+        # the import line produced an error.
+        assert len(errors) >= 1
+        assert any("Forbidden import: os" in e for e in errors)
+        assert any("os.getcwd" in e for e in errors)
 
     def test_forbidden_import_subprocess(self):
         code = "import subprocess\nsubprocess.run(['ls'])"

@@ -427,6 +427,30 @@ def check_syntax(code: str) -> list[str]:
                 return True
         return False
 
+    def _reconstruct_attribute_chain(node: ast.AST) -> str | None:
+        """Walk up an Attribute chain to reconstruct the dotted name.
+
+        Codex round-4 P1-A — `import ez` is legal, but
+        `ez.agent.sandbox._reload_lock` (attribute traversal from a
+        legal root import) reaches into a forbidden module via the
+        attribute syntax. We must detect such chains at AST level.
+
+        Returns the dotted string (e.g. "ez.agent.sandbox._reload_lock")
+        if the chain is rooted at a Name (a simple variable). Returns
+        None for chains that start from a Call result (like
+        `get_ez().agent.sandbox`) — those are too dynamic to analyze
+        statically and would require runtime defense.
+        """
+        parts: list[str] = []
+        cur: ast.AST = node
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+            return ".".join(reversed(parts))
+        return None
+
     for node in ast.walk(tree):
         # Forbidden import statements
         if isinstance(node, ast.Import):
@@ -469,6 +493,16 @@ def check_syntax(code: str) -> list[str]:
             attr = node.attr
             if attr.startswith("__") and attr.endswith("__") and attr not in _SAFE_DUNDERS:
                 errors.append(f"Forbidden dunder access: .{attr} (line {node.lineno})")
+            # Codex round-4 P1-A: block attribute chains that traverse into
+            # a forbidden full module. `import ez` followed by
+            # `ez.agent.sandbox._reload_lock` would otherwise bypass the
+            # ImportFrom check entirely.
+            chain = _reconstruct_attribute_chain(node)
+            if chain and _is_forbidden(chain):
+                errors.append(
+                    f"Forbidden attribute chain: {chain} (line {node.lineno}). "
+                    f"Cannot reach forbidden modules via attribute traversal."
+                )
 
         # Block __builtins__ name access (dict-style bypass)
         elif isinstance(node, ast.Name):
@@ -621,13 +655,28 @@ def save_and_validate_strategy(
     }
 
 
-# V2.19.0 codex round-3 P1-1 follow-up: use RLock so that even if a
-# user code path manages to re-acquire the lock (e.g., a future refactor
-# that adds a sandbox-internal call inside _run_guards), the same thread
-# won't deadlock itself. This is defense-in-depth — the primary fix is
-# the _FORBIDDEN_FULL_MODULES check in check_syntax, which prevents user
-# code from importing ez.agent.sandbox at all.
-_reload_lock = threading.RLock()
+# Reverted from RLock to Lock in codex round-4 (P1-A finding).
+#
+# History:
+#   V2.19.0 round-3 (S4): wrapped _run_guards in _reload_lock for
+#       thread-safety against concurrent registry access.
+#   V2.19.0 round-3 P1-1 (codex round-3): user code can `from ez.agent
+#       import sandbox` and acquire _reload_lock from inside its module
+#       body — fixed by adding _FORBIDDEN_FULL_MODULES.
+#   V2.19.0 round-3 P1-1 follow-up: switched to RLock as defense-in-depth
+#       in case the import check missed something.
+#   V2.19.0 round-4 P1-A (this commit): the RLock change was MORE harmful
+#       than helpful. Lock would immediately deadlock the current save
+#       (loud, easy to detect via worker hang). RLock allows user code
+#       in the same thread to silently bump the count 1→2; on `with`
+#       exit the count goes 2→1 and the lock remains permanently held.
+#       Subsequent saves from other threads then deadlock with no
+#       traceback pointing at the attacker. Reverting to Lock makes the
+#       attack symptom IMMEDIATELY VISIBLE again, and the new attribute-
+#       chain check below now catches the previously-overlooked attack
+#       vectors at AST time so the lock should never actually be reached
+#       by user code.
+_reload_lock = threading.Lock()
 
 
 def _reload_user_strategy(filename: str) -> None:

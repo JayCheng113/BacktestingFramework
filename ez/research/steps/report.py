@@ -127,6 +127,9 @@ def default_template(context: PipelineContext) -> str:
         lines.append("")
 
     # Skipped items (data load + run strategies)
+    # Codex round-4 P3-A: escape `reason` strings — exception messages
+    # routinely contain newlines (full tracebacks) which would split a
+    # bullet list item visually and corrupt downstream sections.
     skipped_data = context.get("data_load_skipped")
     skipped_runs = context.get("run_strategies_skipped")
     if skipped_data or skipped_runs:
@@ -135,12 +138,12 @@ def default_template(context: PipelineContext) -> str:
         if skipped_data:
             lines.append("**Data load skipped**:")
             for sym, reason in skipped_data:
-                lines.append(f"- `{sym}`: {reason}")
+                lines.append(f"- `{_md_escape(sym)}`: {_md_escape(reason)}")
             lines.append("")
         if skipped_runs:
             lines.append("**Strategy runs skipped**:")
             for label, reason in skipped_runs:
-                lines.append(f"- `{label}`: {reason}")
+                lines.append(f"- `{_md_escape(label)}`: {_md_escape(reason)}")
             lines.append("")
 
     return "\n".join(lines)

@@ -75,16 +75,19 @@ class ResearchPipeline:
 
     Example
     -------
+    >>> from ez.strategy.builtin.ma_cross import MACrossStrategy
     >>> pipeline = ResearchPipeline([
     ...     DataLoadStep(
-    ...         symbols=["SPY"],
+    ...         symbols=["000001.SZ"],
     ...         start_date="2020-01-01",
     ...         end_date="2024-12-31",
     ...     ),
-    ...     RunStrategiesStep(strategies={"SPY": BuyHoldSingle("SPY")}),
+    ...     RunStrategiesStep(
+    ...         strategies={"000001.SZ": MACrossStrategy(short_period=5, long_period=20)},
+    ...     ),
     ...     ReportStep(),
     ... ])
-    >>> ctx = pipeline.run(PipelineContext(config={"market": "us_stock"}))
+    >>> ctx = pipeline.run()
     >>> print(ctx.artifacts["report"])
     """
 
@@ -136,6 +139,7 @@ class ResearchPipeline:
             prev_ctx = ctx
             t0 = time.perf_counter()
             started = datetime.now()
+            pre_keys: set[str] = set()
             try:
                 pre_keys = set(prev_ctx.artifacts.keys())
                 returned = step.run(prev_ctx)
@@ -168,6 +172,17 @@ class ResearchPipeline:
                 # steps always show up in history, even when the failure
                 # was a bad return type or a pre-existing StepError raised
                 # from inside the step.
+                #
+                # Codex round-4 P3-B: include partial_written keys so a
+                # debugger can see what the step DID write before failing.
+                # Otherwise the failure record's written_keys is always ()
+                # even when the step mutated artifacts mid-execution.
+                try:
+                    partial_written = tuple(
+                        sorted(set(prev_ctx.artifacts.keys()) - pre_keys)
+                    )
+                except Exception:
+                    partial_written = ()
                 prev_ctx.history.append(StepRecord(
                     step_name=step.name,
                     started_at=started,
@@ -175,6 +190,7 @@ class ResearchPipeline:
                     duration_ms=(time.perf_counter() - t0) * 1000,
                     status="failed",
                     error=f"{type(e).__name__}: {e}",
+                    written_keys=partial_written,
                 ))
                 logger.error("Step '%s' failed: %s", step.name, e)
                 # If the inner exception is already a StepError (e.g. raised

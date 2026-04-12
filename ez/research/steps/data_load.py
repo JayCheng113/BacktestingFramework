@@ -37,13 +37,14 @@ class DataLoadStep(ResearchStep):
         market: str | None = None,
         period: str | None = None,
     ):
-        # Codex round-3 P2-4: reject single string symbols. `list("AAA")`
-        # produces `['A', 'A', 'A']` silently — a very common confusing
-        # mistake. Force the user to wrap in a list explicitly.
-        if isinstance(symbols, str):
+        # Codex round-3 P2-4 + round-4 P2-A: reject single string OR
+        # bytes/bytearray symbols. `list("AAA")` → ['A','A','A'] and
+        # `list(b"AAA")` → [65, 65, 65]. Both are silent footguns.
+        # Force the user to wrap in a list explicitly.
+        if isinstance(symbols, (str, bytes, bytearray)):
             raise TypeError(
-                f"DataLoadStep symbols must be a list of str, not a single string. "
-                f"Did you mean [{symbols!r}]?"
+                f"DataLoadStep symbols must be a list of str, not a single "
+                f"{type(symbols).__name__}. Did you mean [{symbols!r}]?"
             )
         self.symbols = list(symbols) if symbols is not None else None
         self.start_date = start_date
@@ -60,26 +61,29 @@ class DataLoadStep(ResearchStep):
     def _resolve(self, context: PipelineContext) -> tuple[list[str], date, date, str, str]:
         """Resolve constructor args + context.config defaults.
 
-        Constructor args win when explicitly set (i.e. not None for
-        market/period after the round-3 sentinel fix). Symbols/dates
-        fall back to context.config when the constructor arg is None.
+        Constructor args win when explicitly set (i.e. not None) — falls
+        back to context.config when the constructor arg is None.
+        Codex round-4 P2-B: ALL four parameters (symbols/start/end/market/
+        period) now use the same `is not None` sentinel pattern, so an
+        explicit empty string or other falsy value is preserved instead
+        of being silently replaced.
         """
         symbols = self.symbols if self.symbols is not None else context.config.get("symbols")
         if not symbols:
             raise ValueError(
                 "DataLoadStep requires symbols (constructor arg or context.config['symbols'])"
             )
-        # Reject string symbols from context.config too — same pitfall.
-        if isinstance(symbols, str):
+        # Reject string / bytes symbols from context.config too — same
+        # pitfall as the constructor check above.
+        if isinstance(symbols, (str, bytes, bytearray)):
             raise TypeError(
-                f"DataLoadStep symbols must be a list of str, not a single string. "
-                f"context.config['symbols'] = {symbols!r}"
+                f"DataLoadStep symbols must be a list of str, not a single "
+                f"{type(symbols).__name__}. context.config['symbols'] = {symbols!r}"
             )
-        start = self.start_date or context.config.get("start_date")
-        end = self.end_date or context.config.get("end_date")
+        start = self.start_date if self.start_date is not None else context.config.get("start_date")
+        end = self.end_date if self.end_date is not None else context.config.get("end_date")
         if start is None or end is None:
             raise ValueError("DataLoadStep requires start_date and end_date")
-        # None sentinel: only fall back to config when constructor was None.
         market = self.market if self.market is not None else context.config.get("market", "cn_stock")
         period = self.period if self.period is not None else context.config.get("period", "daily")
         return list(symbols), self._to_date(start), self._to_date(end), market, period

@@ -1,7 +1,10 @@
-"""Codex round-2 regression tests for V2.19.0 round 3 + V2.20.0 P1-A MVP.
+"""Codex round-3 + round-4 regression tests for V2.19.0 + V2.20.0.
 
-Each test maps to a finding from the codex external review:
-  - P1-1: _run_guards deadlock surface (RLock + forbidden imports)
+Each test maps to a finding from the codex external review (round-3
+fixes are tagged with codex_review_1, round-4 with codex_review_2):
+
+Round-3 (codex external review of V2.19.0 r3 + V2.20.0 P1-A MVP):
+  - P1-1: _run_guards deadlock surface (forbidden imports, RLock→Lock)
   - P1-2: ResearchPipeline.run robust to bad step return
   - P2-1: None-return / explicit StepError still records history
   - P2-2: StepError carries the partial PipelineContext
@@ -10,6 +13,15 @@ Each test maps to a finding from the codex external review:
   - P2-5: stale skipped artifacts are cleared on rerun
   - P2-6: ResearchPipeline.run(reset=True) clears prior context state
   - P3-1: ReportStep escapes pipe and newline in markdown table cells
+
+Round-4 (Claude reviewer audit of round-3 fixes):
+  - P1-A: attribute chain attack (ez.agent.sandbox._reload_lock via
+          legal `import ez`) — adds AST chain reconstruction + reverts
+          RLock to Lock so attacks fail loud, not silent
+  - P2-A: DataLoadStep symbols also rejects bytes/bytearray
+  - P2-B: DataLoadStep start_date/end_date use is-not-None (consistent)
+  - P3-A: ReportStep Warnings section escapes reason newlines
+  - P3-B: failed StepRecord.written_keys captures partial mutation
 
 If any of these fails in the future, codex's findings have regressed.
 """
@@ -74,14 +86,20 @@ class TestP11ForbiddenSandboxImports:
             errs = check_syntax(code)
             assert not errs, f"P1-1 regression: {code!r} should be allowed, got {errs}"
 
-    def test_reload_lock_is_reentrant(self):
-        """RLock allows the same thread to acquire multiple times."""
+    def test_reload_lock_basic_acquire_release(self):
+        """Lock can be acquired + released without exception.
+
+        Codex round-4 P1-A: this test was previously called
+        ``test_reload_lock_is_reentrant`` and verified RLock semantics
+        (3-deep nested ``with`` blocks). Round-4 reverted RLock → Lock
+        because RLock made the user-code attack silent (count poisoning)
+        instead of loud (immediate hang). The new contract is "Lock,
+        not reentrant" — see ``test_reload_lock_is_NOT_rlock_after_round4``
+        below for the explicit invariant test.
+        """
         from ez.agent.sandbox import _reload_lock
-        # If this is a Lock (not RLock), the second acquire deadlocks the test.
         with _reload_lock:
-            with _reload_lock:
-                with _reload_lock:
-                    pass
+            pass  # acquire + release without nesting
 
 
 # ============================================================
@@ -406,3 +424,200 @@ class TestP31ReportEscape:
         md = default_template(ctx)
         assert "weird\\|name" in md
         assert "a\\|b" in md
+
+
+# ============================================================
+# ROUND 4 — additional findings from Claude reviewer audit of round-3
+# ============================================================
+
+# ------------------------------------------------------------
+# P1-A: attribute chain attack on sandbox
+# ------------------------------------------------------------
+
+class TestP1AAttributeChainAttack:
+    """Codex round-4 P1-A: `import ez` is legal but
+    `ez.agent.sandbox._reload_lock` is an attribute traversal that
+    reaches into a forbidden module. The round-3 ImportFrom check did
+    not catch this — only the new AST attribute-chain reconstruction
+    in check_syntax does.
+    """
+
+    def test_attribute_chain_via_root_import_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        for code in [
+            "import ez\nx = ez.agent.sandbox._reload_lock",
+            "import ez\nez.agent.sandbox._reload_lock.acquire()",
+            "import ez.agent\nx = ez.agent.sandbox._reload_lock",
+            "import ez.agent\nsb = ez.agent.sandbox",  # attribute chain to module itself
+        ]:
+            errs = check_syntax(code)
+            assert errs, f"P1-A regression: {code!r} should be blocked"
+            assert any("attribute chain" in e.lower() or "forbidden" in e.lower() for e in errs)
+
+    def test_attribute_chain_to_guards_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        for code in [
+            "import ez\nx = ez.testing.guards.suite.GuardSuite",
+            "import ez.testing\ny = ez.testing.guards.suite",
+        ]:
+            errs = check_syntax(code)
+            assert errs, f"P1-A regression: {code!r} should be blocked"
+
+    def test_legitimate_attribute_chains_still_allowed(self):
+        from ez.agent.sandbox import check_syntax
+        # ez.factor.base.Factor is a legitimate attribute chain
+        # (ez.factor.base is NOT in _FORBIDDEN_FULL_MODULES).
+        for code in [
+            "import ez\nfrom ez.factor.base import Factor",  # mixed import + attribute
+            "import pandas as pd\ndf = pd.DataFrame()",
+            "import numpy as np\nx = np.zeros(10)",
+        ]:
+            errs = check_syntax(code)
+            assert not errs, f"P1-A regression: {code!r} blocked but should be allowed: {errs}"
+
+    def test_reload_lock_is_NOT_rlock_after_round4(self):
+        """Round-4 reverted RLock back to Lock so user-code lock attacks
+        manifest as immediate hangs (loud) instead of silent persistent
+        holds (count poisoning under RLock)."""
+        from ez.agent.sandbox import _reload_lock
+        # `Lock()` returns an instance whose type repr is "<class '_thread.lock'>"
+        # `RLock()` returns "<class '_thread.RLock'>" — the easy way to test
+        # is to check that `_reload_lock` is NOT acquirable a second time
+        # from the same thread. (RLock would silently allow it.)
+        assert _reload_lock.acquire(blocking=False)
+        try:
+            # Second non-blocking acquire from same thread:
+            #   Lock → returns False (correctly indicates already held)
+            #   RLock → returns True (would BUMP count, leading to silent hold)
+            second = _reload_lock.acquire(blocking=False)
+            if second:
+                _reload_lock.release()
+            assert not second, (
+                "P1-A regression: _reload_lock is an RLock, not a Lock. "
+                "RLock allows silent persistent holds via reentrance."
+            )
+        finally:
+            _reload_lock.release()
+
+
+# ------------------------------------------------------------
+# P2-A: bytes/bytearray symbols rejected
+# ------------------------------------------------------------
+
+class TestP2ABytesSymbols:
+    def test_bytes_symbols_rejected(self):
+        with pytest.raises(TypeError, match="must be a list of str"):
+            DataLoadStep(symbols=b"AAA", start_date="2024-01-01", end_date="2024-12-31")
+
+    def test_bytearray_symbols_rejected(self):
+        with pytest.raises(TypeError, match="must be a list of str"):
+            DataLoadStep(
+                symbols=bytearray(b"AAA"),
+                start_date="2024-01-01",
+                end_date="2024-12-31",
+            )
+
+    def test_bytes_in_config_also_rejected(self):
+        step = DataLoadStep(start_date="2024-01-01", end_date="2024-12-31")
+        ctx = PipelineContext(config={"symbols": b"XYZ"})
+        with pytest.raises(TypeError, match="must be a list of str"):
+            step.run(ctx)
+
+
+# ------------------------------------------------------------
+# P2-B: start_date/end_date sentinel consistency
+# ------------------------------------------------------------
+
+class TestP2BDateSentinelConsistency:
+    @pytest.fixture
+    def captured_dates(self, monkeypatch):
+        captured = {}
+        def fake_fetch(self, sym, market, period, start, end):
+            captured.setdefault("calls", []).append({"start": start, "end": end})
+            idx = pd.date_range("2024-01-01", periods=10, freq="B")
+            return pd.DataFrame({
+                "open": np.zeros(10), "high": np.zeros(10), "low": np.zeros(10),
+                "close": np.arange(10, dtype=float),
+                "adj_close": np.arange(10, dtype=float),
+                "volume": np.zeros(10),
+            }, index=idx)
+        monkeypatch.setattr(DataLoadStep, "_fetch_one", fake_fetch)
+        return captured
+
+    def test_explicit_start_date_not_overridden_by_falsy_check(self, captured_dates):
+        """Ensure start_date uses `is not None`, not `or`. An explicit
+        date object is truthy so the old `or` worked, but the
+        consistency fix removes the asymmetry."""
+        from datetime import date as _date
+        step = DataLoadStep(
+            symbols=["X"],
+            start_date=_date(2020, 1, 1),
+            end_date=_date(2020, 12, 31),
+        )
+        # Inject a different date in config to verify it doesn't win
+        step.run(PipelineContext(config={
+            "start_date": "1900-01-01",
+            "end_date": "1999-12-31",
+        }))
+        from datetime import date
+        assert captured_dates["calls"][0]["start"] == date(2020, 1, 1)
+        assert captured_dates["calls"][0]["end"] == date(2020, 12, 31)
+
+
+# ------------------------------------------------------------
+# P3-A: Warnings section reason escape
+# ------------------------------------------------------------
+
+def test_p3a_warnings_section_escapes_newline_in_reason():
+    """A reason like 'KeyError\\n  full traceback' would otherwise
+    split the bullet item visually."""
+    ctx = PipelineContext(artifacts={
+        "data_load_skipped": [
+            ("BAD", "RuntimeError: line1\nline2\nline3"),
+        ],
+        "run_strategies_skipped": [
+            ("X|Y", "ValueError: bar|baz"),
+        ],
+    })
+    md = default_template(ctx)
+    # Newlines should be escaped to spaces
+    assert "line1 line2 line3" in md
+    # Pipe in label should be escaped
+    assert "X\\|Y" in md
+    # Pipe in reason should be escaped
+    assert "bar\\|baz" in md
+    # Bullet item should remain on a single line — count bullets in the
+    # Warnings section
+    warnings_section = md.split("## Warnings")[-1]
+    bullet_lines = [l for l in warnings_section.split("\n") if l.startswith("- `")]
+    assert len(bullet_lines) == 2, f"Expected 2 bullets, got {len(bullet_lines)}: {bullet_lines}"
+
+
+# ------------------------------------------------------------
+# P3-B: failure path written_keys captures partial mutation
+# ------------------------------------------------------------
+
+class _PartialMutationStep(ResearchStep):
+    """Writes one artifact then crashes. Verifies that history records
+    the partial mutation in written_keys."""
+    name = "partial_mutation"
+    def run(self, context):
+        context.artifacts["partial_a"] = "first"
+        context.artifacts["partial_b"] = "second"
+        raise RuntimeError("crash after partial mutation")
+
+
+def test_p3b_failure_history_records_partial_written_keys():
+    pipeline = ResearchPipeline([_PartialMutationStep()])
+    with pytest.raises(StepError) as exc_info:
+        pipeline.run()
+    history = exc_info.value.context.history
+    assert len(history) == 1
+    rec = history[0]
+    assert rec.status == "failed"
+    # Codex round-4 P3-B: written_keys should NOT be empty even on failure
+    assert "partial_a" in rec.written_keys
+    assert "partial_b" in rec.written_keys
+    # Partial state is also visible in artifacts
+    assert exc_info.value.context.artifacts.get("partial_a") == "first"
+    assert exc_info.value.context.artifacts.get("partial_b") == "second"
