@@ -41,6 +41,49 @@ class TestDeflatedSharpe:
         assert r1["deflated_sharpe"] >= r100["deflated_sharpe"]
         assert r100["expected_max_sr"] > r1["expected_max_sr"]
 
+    def test_expected_max_sr_pins_gumbel_formula(self):
+        """Pin Bailey & de Prado (2014) Eq. 10 numerical value.
+
+        This guards against silent regression to a wrong formula.
+        The V2.23.1 I1 review fix corrected `sqrt((1-γ)·2·log N)`
+        (≈ 0.636 for N=100) to the full Gumbel form (≈ 2.15).
+        Monotonicity-only tests would pass under BOTH formulas, so
+        we pin the actual numerical value here.
+        """
+        from scipy.stats import norm
+        from math import e as math_e
+        rng = np.random.default_rng(42)
+        rets = pd.Series(rng.normal(0.0008, 0.01, 500))
+        r100 = deflated_sharpe_ratio(rets, n_trials=100)
+        gamma = 0.5772156649
+        expected = (
+            (1 - gamma) * norm.ppf(1 - 1 / 100)
+            + gamma * norm.ppf(1 - 1 / (100 * math_e))
+        )
+        # sr_benchmark=0 default → expected_max_sr = expected adjustment.
+        # Tolerance 1e-6 would fail under the old (wrong) formula by ~1.5.
+        assert r100 is not None
+        assert abs(r100["expected_max_sr"] - expected) < 1e-6, (
+            f"Expected max SR = {r100['expected_max_sr']:.4f}, "
+            f"should be {expected:.4f} per Bailey & de Prado Eq. 10"
+        )
+
+    def test_expected_max_sr_nontrivial_at_n_100(self):
+        """At N=100 the Gumbel adjustment should be ~2.15, not ~0.64.
+
+        Canary: if someone reverts to `sqrt((1-γ)·2·log N)`, this fires.
+        """
+        rng = np.random.default_rng(42)
+        rets = pd.Series(rng.normal(0.0008, 0.01, 500))
+        r = deflated_sharpe_ratio(rets, n_trials=100)
+        assert r is not None
+        # Old wrong formula gave ~0.636; correct formula gives ~2.15.
+        # Any value < 1.5 indicates a regression.
+        assert r["expected_max_sr"] > 1.5, (
+            f"expected_max_sr={r['expected_max_sr']:.3f} suspiciously low "
+            f"— check for DSR formula regression"
+        )
+
     def test_high_kurtosis_reduces_dsr(self):
         """Heavy-tailed returns should get lower DSR than normal returns
         at the same Sharpe."""

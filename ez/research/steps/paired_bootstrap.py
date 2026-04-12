@@ -63,7 +63,9 @@ def sample_block_indices(
     Parameters
     ----------
     n : int
-        Desired length of the resampled series.
+        Desired length of the resampled series. **Precondition: n >= block_size.**
+        Callers must validate this before invoking — violations raise
+        ``ValueError`` from ``rng.integers(0, n - block_size + 1)``.
     block_size : int
         Length of each block. ``n_blocks = ceil(n / block_size)``
         blocks are drawn with replacement.

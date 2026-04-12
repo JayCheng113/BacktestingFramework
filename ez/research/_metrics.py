@@ -16,12 +16,17 @@ sharpe/sortino with ``ddof=1``), so V2.19.0/V2.20.0 metric semantics
 flow through unchanged. Only the input/output shapes are different.
 """
 from __future__ import annotations
+from math import e as math_e, erf
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 from ez.backtest.metrics import MetricsCalculator
+
+# Euler-Mascheroni constant (used in DSR Gumbel formula)
+_GAMMA_EULER = 0.5772156649
 
 # Module-level singleton — MetricsCalculator is stateless beyond
 # (risk_free_rate, trading_days), so a single instance is fine for
@@ -188,25 +193,22 @@ def deflated_sharpe_ratio(
     # Expected max Sharpe under null (Bailey & de Prado 2014 Eq. 10):
     #   E[max SR_N] ≈ (1-γ)·Φ⁻¹(1 - 1/N) + γ·Φ⁻¹(1 - 1/(N·e))
     # where γ = 0.5772 is Euler-Mascheroni. This is the Gumbel-based
-    # expected maximum of N iid standard normal samples.
+    # expected maximum of N iid standard normal samples, interpreted
+    # here in (annualized) SR units per the Bailey-de Prado derivation.
     # Review I1 fix: prior version used `sqrt((1-γ)·2·log N)` which was
     # neither the full formula nor the standard `sqrt(2 log N)` approx,
     # and was inconsistent with `minimum_backtest_length` below.
     if n_trials > 1:
-        from math import e as math_e
-        from scipy.stats import norm
-        gamma_euler = 0.5772156649
-        # All daily-scale (SR units); annualize at the end via sqrt(252).
-        max_sr_daily_null = (
-            (1 - gamma_euler) * float(norm.ppf(1 - 1 / n_trials))
-            + gamma_euler * float(norm.ppf(1 - 1 / (n_trials * math_e)))
+        gumbel_adjustment = (
+            (1 - _GAMMA_EULER) * float(norm.ppf(1 - 1 / n_trials))
+            + _GAMMA_EULER * float(norm.ppf(1 - 1 / (n_trials * math_e)))
         )
-        # sr_benchmark is annualized — convert to daily before adding.
-        expected_max_daily = sr_benchmark / np.sqrt(252) + max_sr_daily_null / np.sqrt(252)
     else:
-        expected_max_daily = sr_benchmark / np.sqrt(252)
+        gumbel_adjustment = 0.0
 
-    expected_max_annual = expected_max_daily * np.sqrt(252)
+    # All in annualized SR units
+    expected_max_annual = sr_benchmark + gumbel_adjustment
+    expected_max_daily = expected_max_annual / np.sqrt(252)
 
     # DSR denominator (Bailey & de Prado 2014 Eq. 9):
     #   √(1 - skew × SR + (γ₄ / 4) × SR²)   where γ₄ = excess kurtosis
@@ -227,7 +229,6 @@ def deflated_sharpe_ratio(
     z = (sharpe_daily - expected_max_daily) * np.sqrt(n - 1) / np.sqrt(denom_sq)
 
     # Standard normal CDF
-    from math import erf
     dsr = 0.5 * (1 + erf(z / np.sqrt(2)))
 
     return {
@@ -277,7 +278,6 @@ def minimum_backtest_length(
         return None
 
     # One-sided critical value
-    from scipy.stats import norm
     z_alpha = float(norm.ppf(1 - alpha))
 
     # Basic MinBTL (no multiple-testing)
