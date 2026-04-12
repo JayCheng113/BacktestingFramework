@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.20 | Tests: 2391 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.21 | Tests: 2554 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -294,15 +294,34 @@ No version tag without review pass. No push without critical issues resolved.
   - **Lazy import**: DataLoadStep 和 RunStrategiesStep 内部 lazy import `ez.backtest.engine` / `ez.api.deps`, 让 `ez.research` 在轻量环境可被 import
   - **Pipeline audit**: `_run_guards` 自动 snapshot artifact diff 计算 written_keys, StepRecord 包含 duration_ms / status / error / written_keys
   - **测试**: 48 unit + integration tests (13 pipeline + 12 data_load + 8 run_strategies + 11 report + 4 e2e). 所有 test strategy/factor 用 **duck typing** (不继承 `Strategy`/`Factor`), 避免污染 global registry — 否则 `test_strategy_contract.py` 会自动 discover 测试用的 `_RaisingStrategy` 并 crash. Engine 接受的是 duck-typed object, 不做 isinstance check.
-  - **后续 V2.20.x 计划**:
-    - NestedOOSStep (IS 优化 → OOS 验证, 替代 phase_o_nested_oos.py 的 411 行)
-    - PairedBlockBootstrapStep (replace phase_q_paired_bootstrap)
-    - WalkForwardStep / RollingWalkForwardStep (replace phase_p)
-    - Optimizer ABC + MultiObjectiveSimplexOptimizer (replace phase_m/n 的差分进化, 解锁 Sharpe / Calmar / Sortino / epsilon-constraint 多目标)
-    - RunPortfolioStrategiesStep (cross_factor + portfolio_strategy 支持)
-    - jinja2-based ReportStep (升级模板能力, 支持 chart embed)
-    - CacheStep / artifact serialization (中间结果落盘加速 re-run)
   - 2343 → 2391 tests (+48: 13+12+8+11+4)
+
+- **V2.20.1**: ez.research — Optimizer ABC + NestedOOSStep (P1-A 延伸)
+  - **动机**: V2.20.0 只是框架骨架,没有真正的 research step。V2.20.1 加了 optimizer 层 + NestedOOSStep,替代 validation/phase_o_nested_oos.py 的 411 行 (~25 行 pipeline declaration)
+  - **新模块 `ez/research/optimizers/`**: Optimizer ABC, Objective ABC, OptimalWeights frozen dataclass
+    - **5 内置 objectives**: `MaxSharpe` / `MaxCalmar` / `MaxSortino` / `MinCVaR(alpha)` / `EpsilonConstraint(objective, metric, op, value)`
+    - `EpsilonConstraint` 支持 string DSL (`"0.9*baseline_ret"`) 和 callable (`lambda b: 0.9 * b["ret"]`), 底层用 custom AST visitor safe-eval (只允许 float/int/baseline_* + * / 运算)
+    - **`SimplexMultiObjectiveOptimizer`**: scipy.differential_evolution wrapper, **stick-breaking (Dirichlet) 参数化** — 在 `[0,1]^N` 无约束空间优化映射回 simplex (`w_k = x_k * (1-sum(w_1..w_{k-1}))`), 100% feasible 初始化对任意 N. Cash = 1-sum(w). 优化 N 个 objectives, 返回 `list[OptimalWeights]`
+    - `res.success` 三态: converged / max_iter / infeasible. `is_feasible` 接受 converged + max_iter
+  - **新 `ez/research/_metrics.py`**: `compute_basic_metrics(returns)` + `compute_cvar(returns, alpha)` — thin wrapper around `ez.backtest.metrics.MetricsCalculator`, 返回 short-key dict (`ret`/`sharpe`/`sortino`/`vol`/`dd`/`mdd_abs`/`calmar`)
+  - **新 `ez/research/steps/nested_oos.py`**: `NestedOOSStep` — IS slice → optimize → OOS validate → baseline compare. 接受 optimizer + `baseline_weights` + `baseline_label`. anti-overlap 验证, stale artifact 自动清理. 输出 `artifacts['nested_oos_results']` (candidates + baseline_is + baseline_oos)
+  - **`RunStrategiesStep` 增强**: `label_map` 参数解耦 label 和 symbol (`{"A": "EtfRotateCombo_proxy"}`)
+  - **`ReportStep` 增强**: 渲染 `nested_oos_results` candidates table (Objective / Status / IS Sharpe / IS Ret / OOS Sharpe / OOS Ret / OOS MDD + baseline row)
+  - **`ResearchPipeline` 增强**: `run(reset=True)` 清理复用 context; failure 路径 `StepRecord.written_keys` 记录 partial mutation; `StepError.context` 携带 partial state (只 backfill 不 clobber nested)
+  - **9 轮 review 加固** (Claude reviewer ×5 + codex external ×4):
+    - V2.19.0 guard framework: C1 in-place mutation 两层防御, LookaheadGuard 3-run + 7-probe + 5-run preflight, drop_probe_module dual-dict last-write-wins restore, _run_guards _reload_lock thread safety
+    - Sandbox security: `_FORBIDDEN_FULL_MODULES` + AST `ImportFrom` submodule check + AST attribute chain reconstruction + **name binding table** (Import/ImportFrom/Assign/NamedExpr 跟踪 alias/rebinding/walrus). **Known limitation**: dynamic binding (`[ez][0]`, `ident(ez)`, `for z in [ez]`) 不可 static 覆盖, Lock (not RLock) 让攻击 loud, V2.21 architectural fix (closure-capture lock) 待做
+    - DataLoadStep: `None` sentinel (不是 `"cn_stock"` 默认值), `isinstance(symbols, (str, bytes, bytearray))` 拒绝, `is not None` 统一 5 参数
+    - Pipeline: `isinstance(returned, PipelineContext)` 严格验证, `prev_ctx` fallback on bad return, `partial_written` in failure path
+    - Report: `_md_escape()` 对 `|`/`\n`/backtick 统一 escape (tables + warnings + config + audit)
+    - Optimizer: stick-breaking 替代 N-dim direct (1/N! feasibility → 100%), `res.success` 三态, callable EpsilonConstraint + non-zero stub validation
+  - **后续 V2.20.x 计划**:
+    - RunPortfolioStep (用 `run_portfolio_backtest` 跑 EtfRotateCombo 等 portfolio strategies, 解锁 phase_o 完整 acceptance test)
+    - PairedBlockBootstrapStep (replace phase_q)
+    - WalkForwardStep / RollingWalkForwardStep (replace phase_p)
+    - jinja2-based ReportStep (升级模板能力)
+    - V2.21: sandbox `_reload_lock` 移出 module scope (彻底解决 dynamic alias bypass)
+  - 2391 → 2554 tests (+163: 20 _metrics + 22 objectives + 38 epsilon + 18 simplex + 2 label_map + 18 nested_oos + 12 round-5 + 10 round-4 + 23 round-3)
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
