@@ -70,11 +70,19 @@ export function ValidationPanel({ runId }: Props) {
   useEffect(() => {
     listPortfolioRuns(50, 0)
       .then(r => setRunList(r.data as HistoryRun[]))
-      .catch(() => {
-        // Silently fail — baseline dropdown will just be empty.
+      .catch((e) => {
+        // S-1: Log for debugging — dropdown will be empty.
         // User can still run validation without comparison.
+        console.warn('ValidationPanel: listPortfolioRuns failed', e)
       })
   }, [])
+
+  // I-1: clear stale result when user changes baseline without re-running.
+  // Prevents ComparisonSection from showing data from a previous baseline.
+  useEffect(() => {
+    setResult(null)
+    tokenRef.current += 1
+  }, [baselineId])
 
   const handleRun = async () => {
     if (!runId) return
@@ -790,13 +798,23 @@ function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
 // Phase 2.1: Report export (markdown generation)
 // ============================================================
 
+/**
+ * I-2: Escape user-controlled strings before interpolating into markdown.
+ * Strips backticks (inline-code break), pipes (table break), and newlines
+ * (section break). Keeps all other unicode intact.
+ */
+function mdSafe(s: string | null | undefined): string {
+  if (!s) return ''
+  return String(s).replace(/[`|\r\n]/g, '_')
+}
+
 function generateMarkdown(result: ValidationResult): string {
   const lines: string[] = []
   const now = new Date().toISOString()
   lines.push(`# 验证报告`, '')
-  lines.push(`- 主策略 run: \`${result.run_id}\``)
+  lines.push(`- 主策略 run: \`${mdSafe(result.run_id)}\``)
   if (result.baseline_run_id) {
-    lines.push(`- 对比基线 run: \`${result.baseline_run_id}\``)
+    lines.push(`- 对比基线 run: \`${mdSafe(result.baseline_run_id)}\``)
   }
   lines.push(`- 生成时间: ${now}`, '')
 
@@ -867,7 +885,7 @@ function generateMarkdown(result: ValidationResult): string {
   // Comparison
   if (result.comparison && !result.comparison.error) {
     const cmp = result.comparison
-    lines.push(`## 配对对比 (vs 基线 ${cmp.control_run_id})`, '')
+    lines.push(`## 配对对比 (vs 基线 \`${mdSafe(cmp.control_run_id)}\`)`, '')
     lines.push(`- Sharpe 差值: ${cmp.sharpe_diff.toFixed(3)}`)
     lines.push(`- 95% CI: [${cmp.ci_lower.toFixed(3)}, ${cmp.ci_upper.toFixed(3)}] ${cmp.ci_excludes_zero ? '(不含 0)' : '(含 0)'}`)
     lines.push(`- p-value: ${cmp.p_value.toFixed(4)} ${cmp.is_significant ? '(显著)' : '(不显著)'}`)
@@ -896,7 +914,9 @@ function ReportExportBar({ result }: { result: ValidationResult }) {
     const a = document.createElement('a')
     a.href = url
     const dateStr = new Date().toISOString().slice(0, 10)
-    a.download = `validation-${result.run_id}-${dateStr}.md`
+    // S-7: sanitize run_id for filename (/ or special chars → _)
+    const safeId = result.run_id.replace(/[^a-zA-Z0-9_-]/g, '_')
+    a.download = `validation-${safeId}-${dateStr}.md`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
