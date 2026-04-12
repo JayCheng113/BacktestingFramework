@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.27 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.28 | Tests: 2698 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -419,6 +419,19 @@ No version tag without review pass. No push without critical issues resolved.
     - I6 (n_trials 信任边界): 需 `/search` endpoint 把 n_trials 存进 portfolio_runs 让 /validate 读回, 涉及 schema 变更
     - S2 (block bootstrap 向量化): 性能优化, 当前 n_bootstrap=10000 在 ~5s 内完成, 非优先
   - 2685 tests passing, 零 regression
+
+- **V2.23.2 (done)**: 外部 review (codex) — 2 Critical + 7 Important 修复
+  - **Critical 1 sandbox AST dynamic-alias bypass**: V2.21 closure fix 对 `_get_reload_lock()` 直接调用路径无效. 修复: 引入 `_DYNAMIC_UNSAFE` sentinel 标记来自 Call/Subscript/List/For/comprehension 等动态 RHS 的 binding. 新增 `_dynamic_chain_reaches_forbidden` 检查 dynamic-rooted 链的 suffix 是否可能到达 `_FORBIDDEN_FULL_MODULES`. For 和 comprehension target 现在作为动态绑定跟踪. 6 新攻击测试 (subscript/call/for/comprehension/arithmetic FP/benign-call FP)
+  - **Critical 2 n_trials UX drift**: 前端从不发送 n_trials → DSR/MinBTL 始终按 n_trials=1 计算, 静默禁用多重检验惩罚 (同一 run DSR 0.95 vs 0.0003). 修复: ValidationPanel 加"搜索数"输入, n_trials=1 时显示警告 banner
+  - **Important 3 seed validation**: `Field(ge=0)` 防止 `np.random.default_rng(-1)` 500
+  - **Important 4 MinBTL/DSR coherence**: MinBTL 从 `sqrt(2 log N)` 改用和 DSR 相同的 Gumbel expected-max-SR (Bailey & de Prado 2014 Eq. 10), 消除两函数的 null 不一致
+  - **Important 5 WF degradation 估计量不一致**: IS 从"折 Sharpe 简单平均"改为"拼接 IS returns 算 Sharpe" (和 OOS 一致), 避免按折数平均权重不等长
+  - **Important 6 tz-naive merge crash**: `normalize_returns_index/_frame` helpers, `tz_localize(None)` before join, prevent `Cannot join tz-naive with tz-aware DatetimeIndex`
+  - **Important 7 ComparisonSection 符号错**: `显著优于基线 ✓` 无论 sharpe_diff 正负都显示. 改为 positive/negative/non-significant 三分支
+  - **Important 8 comparison 不一致 unhappy path**: 改为 discriminated union (`status: "success" | "error"`), insufficient overlap 和 exception 都返回显式 error payload. TS 类型改为 union
+  - **Important 9 scope-aware bindings**: For/comprehension target + with-as target 纳入 binding table
+  - 2685 → 2698 tests (+13)
+  - **真 · 延后** (需架构改动): I3 n_trials 信任边界 (需 portfolio_runs schema + /search 集成), S5 前端单测 (V2.24+), S6 annual 阈值粗粒度 (小年数下容易 flip)
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
