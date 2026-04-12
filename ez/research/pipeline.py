@@ -195,11 +195,20 @@ class ResearchPipeline:
                 logger.error("Step '%s' failed: %s", step.name, e)
                 # If the inner exception is already a StepError (e.g. raised
                 # explicitly inside the step), preserve its original cause
-                # rather than double-wrapping. Either way, attach the partial
-                # context so callers can inspect history without pre-creating
-                # a context.
+                # AND its original context — only backfill our prev_ctx when
+                # the inner StepError didn't already capture one.
+                #
+                # Codex round-5 P2-2: previously this assigned `e.context =
+                # prev_ctx` unconditionally, clobbering any inner-pipeline
+                # context that the nested step already attached. For
+                # composite steps (e.g. a future NestedOOSStep that
+                # internally runs a sub-pipeline), this would surface the
+                # OUTER step's context with the INNER step's name — a
+                # consistency bug that makes debugging composite failures
+                # nearly impossible.
                 if isinstance(e, StepError):
-                    e.context = prev_ctx
+                    if e.context is None:
+                        e.context = prev_ctx
                     raise
                 raise StepError(step.name, e, context=prev_ctx) from e
         return ctx

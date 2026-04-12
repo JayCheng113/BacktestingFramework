@@ -435,21 +435,146 @@ def check_syntax(code: str) -> list[str]:
         legal root import) reaches into a forbidden module via the
         attribute syntax. We must detect such chains at AST level.
 
+        Codex round-5 P1 follow-up — also unwrap NamedExpr (walrus
+        operator) so `(z := ez).agent.sandbox` reconstructs as
+        ``ez.agent.sandbox`` instead of returning None.
+
         Returns the dotted string (e.g. "ez.agent.sandbox._reload_lock")
-        if the chain is rooted at a Name (a simple variable). Returns
-        None for chains that start from a Call result (like
-        `get_ez().agent.sandbox`) — those are too dynamic to analyze
-        statically and would require runtime defense.
+        if the chain is rooted at a Name (or NamedExpr wrapping a Name).
+        Returns None for chains rooted at a Call result, Subscript, etc.
+        — those are too dynamic to analyze statically.
         """
         parts: list[str] = []
         cur: ast.AST = node
         while isinstance(cur, ast.Attribute):
             parts.append(cur.attr)
             cur = cur.value
+        # Unwrap walrus: `(z := ez).agent` has NamedExpr at the root.
+        # Use the .value of the NamedExpr (the right-hand side of := )
+        # which is the actual module reference.
+        if isinstance(cur, ast.NamedExpr):
+            cur = cur.value
         if isinstance(cur, ast.Name):
             parts.append(cur.id)
             return ".".join(reversed(parts))
         return None
+
+    # ─── Codex round-5 P1 + P2-1: build a name binding table ───────
+    #
+    # Pre-pass to track which names refer to which module paths. This
+    # lets the attribute-chain check resolve aliases and rebindings:
+    #
+    #   import ez as z; z.agent.sandbox._reload_lock
+    #     → z bound to "ez", chain "z.agent.sandbox._reload_lock"
+    #       resolved to "ez.agent.sandbox._reload_lock" → forbidden
+    #
+    #   sys = MyClass(); sys.mean()
+    #     → sys bound to None (locally rebound to non-module value)
+    #       chain "sys.mean" skipped (not a module access)
+    #
+    # Mapping value semantics:
+    #   str = the module path the name refers to (e.g. "ez.agent.sandbox")
+    #   None = locally rebound to a non-module value (skip the check)
+    #   missing from dict = unbound (treat root as-is for check)
+    name_bindings: dict[str, str | None] = {}
+
+    def _resolve_value_to_module(value: ast.AST) -> str | None | object:
+        """Try to resolve the right-hand side of an assignment to a
+        module path string. Returns:
+          - a str module path if resolvable
+          - None if it's clearly a local rebinding to non-module value
+          - the sentinel object _UNKNOWN if we can't tell
+        """
+        if isinstance(value, ast.Name):
+            src = value.id
+            if src in name_bindings:
+                return name_bindings[src]
+            return _UNKNOWN
+        if isinstance(value, ast.Attribute):
+            chain = _reconstruct_attribute_chain(value)
+            if chain is None:
+                return _UNKNOWN
+            parts = chain.split(".")
+            if parts[0] in name_bindings:
+                base = name_bindings[parts[0]]
+                if base is None:
+                    return None
+                if isinstance(base, str) and len(parts) > 1:
+                    return base + "." + ".".join(parts[1:])
+                return base
+            return _UNKNOWN
+        # Function call, container, literal, etc. — local rebinding
+        return None
+
+    _UNKNOWN = object()
+
+    # Pass 1: collect bindings from Import / ImportFrom / Assign / NamedExpr.
+    # We walk in document order so later assignments can shadow earlier ones.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    # `import ez.agent as a` → a bound to "ez.agent"
+                    name_bindings[alias.asname] = alias.name
+                else:
+                    # `import ez.agent` binds the TOP-LEVEL name "ez"
+                    # (Python semantics — the parent package is what's
+                    # bound in scope, not the dotted child).
+                    top = alias.name.split(".")[0]
+                    name_bindings[top] = top
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    name_bindings[local] = f"{node.module}.{alias.name}"
+        elif isinstance(node, ast.Assign):
+            # `target = source` — track simple Name = Name | Attribute
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                target_name = node.targets[0].id
+                resolved = _resolve_value_to_module(node.value)
+                if resolved is _UNKNOWN:
+                    # Don't pollute table with unknowns; leave the name
+                    # absent so the as-is chain check applies. If the
+                    # target was previously bound to a known module, we
+                    # mark it None to prevent stale resolution.
+                    if target_name in name_bindings:
+                        name_bindings[target_name] = None
+                else:
+                    name_bindings[target_name] = resolved
+        elif isinstance(node, ast.NamedExpr):
+            # `(z := value)` walrus operator binds z too.
+            if isinstance(node.target, ast.Name):
+                target_name = node.target.id
+                resolved = _resolve_value_to_module(node.value)
+                if resolved is _UNKNOWN:
+                    if target_name in name_bindings:
+                        name_bindings[target_name] = None
+                else:
+                    name_bindings[target_name] = resolved
+
+    def _resolve_chain_with_bindings(chain: str) -> str | None:
+        """Substitute the chain root with its binding if present.
+
+        Returns:
+          - resolved module path string if the chain root maps to a module
+          - None if the chain root is locally rebound to a non-module
+            (i.e., the chain is not a real module access — skip the check)
+          - the original chain if the root is unbound
+        """
+        if not chain:
+            return chain
+        parts = chain.split(".")
+        root = parts[0]
+        if root in name_bindings:
+            bound = name_bindings[root]
+            if bound is None:
+                return None  # local rebinding to non-module
+            if len(parts) > 1:
+                return bound + "." + ".".join(parts[1:])
+            return bound
+        return chain
 
     for node in ast.walk(tree):
         # Forbidden import statements
@@ -479,13 +604,26 @@ def check_syntax(code: str) -> list[str]:
         elif isinstance(node, ast.Call):
             func = node.func
             name = ""
+            attr_call_skip = False
             if isinstance(func, ast.Name):
                 name = func.id
             elif isinstance(func, ast.Attribute):
                 name = func.attr
+                # Codex round-5 P2-1 follow-up: don't flag `.run()` /
+                # `.system()` etc. when the receiver is locally rebound
+                # to a non-module value. Without this, `subprocess =
+                # MyClass(); subprocess.run()` is wrongly blocked even
+                # though the user clearly meant their own class.
+                if name in _FORBIDDEN_ATTR_CALLS:
+                    chain = _reconstruct_attribute_chain(func)
+                    if chain:
+                        resolved = _resolve_chain_with_bindings(chain)
+                        if resolved is None:
+                            # Receiver locally rebound — skip the check.
+                            attr_call_skip = True
             if name in _FORBIDDEN_BUILTINS:
                 errors.append(f"Forbidden call: {name}() (line {node.lineno})")
-            if name in _FORBIDDEN_ATTR_CALLS:
+            if name in _FORBIDDEN_ATTR_CALLS and not attr_call_skip:
                 errors.append(f"Forbidden call: .{name}() (line {node.lineno})")
 
         # Block dangerous dunder attribute access (e.g. __subclasses__, __bases__)
@@ -494,15 +632,34 @@ def check_syntax(code: str) -> list[str]:
             if attr.startswith("__") and attr.endswith("__") and attr not in _SAFE_DUNDERS:
                 errors.append(f"Forbidden dunder access: .{attr} (line {node.lineno})")
             # Codex round-4 P1-A: block attribute chains that traverse into
-            # a forbidden full module. `import ez` followed by
-            # `ez.agent.sandbox._reload_lock` would otherwise bypass the
-            # ImportFrom check entirely.
+            # a forbidden full module.
+            #
+            # Codex round-5 P1: resolve the chain root through the binding
+            # table so `import ez as z; z.agent.sandbox._reload_lock`
+            # gets caught (the "z" root is bound to "ez", so the resolved
+            # chain is "ez.agent.sandbox._reload_lock" which is forbidden).
+            #
+            # Codex round-5 P2-1: skip the check entirely if the root is
+            # locally rebound to a non-module value (e.g. `sys = MyClass();
+            # sys.mean()` should NOT be flagged as accessing the sys module).
             chain = _reconstruct_attribute_chain(node)
-            if chain and _is_forbidden(chain):
-                errors.append(
-                    f"Forbidden attribute chain: {chain} (line {node.lineno}). "
-                    f"Cannot reach forbidden modules via attribute traversal."
-                )
+            if chain:
+                resolved = _resolve_chain_with_bindings(chain)
+                if resolved is None:
+                    # Locally rebound — not a module access at all.
+                    pass
+                elif _is_forbidden(resolved):
+                    if resolved != chain:
+                        errors.append(
+                            f"Forbidden attribute chain: {chain} → {resolved} "
+                            f"(line {node.lineno}). Cannot reach forbidden "
+                            f"modules via attribute traversal (alias resolved)."
+                        )
+                    else:
+                        errors.append(
+                            f"Forbidden attribute chain: {chain} (line {node.lineno}). "
+                            f"Cannot reach forbidden modules via attribute traversal."
+                        )
 
         # Block __builtins__ name access (dict-style bypass)
         elif isinstance(node, ast.Name):

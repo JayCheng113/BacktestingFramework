@@ -63,10 +63,10 @@ class DataLoadStep(ResearchStep):
 
         Constructor args win when explicitly set (i.e. not None) — falls
         back to context.config when the constructor arg is None.
-        Codex round-4 P2-B: ALL four parameters (symbols/start/end/market/
-        period) now use the same `is not None` sentinel pattern, so an
-        explicit empty string or other falsy value is preserved instead
-        of being silently replaced.
+        Codex round-4 P2-B / round-5 P3-1: all FIVE parameters (symbols,
+        start_date, end_date, market, period) now use the same
+        `is not None` sentinel pattern, so an explicit empty string or
+        other falsy value is preserved instead of being silently replaced.
         """
         symbols = self.symbols if self.symbols is not None else context.config.get("symbols")
         if not symbols:

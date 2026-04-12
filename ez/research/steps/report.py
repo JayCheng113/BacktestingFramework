@@ -60,6 +60,8 @@ def default_template(context: PipelineContext) -> str:
     lines.append("")
 
     # Configuration summary
+    # Codex round-5 P3-2: escape backticks/newlines in values so a
+    # config value containing ` or \n doesn't break the inline code span.
     if context.config:
         lines.append("## Configuration")
         lines.append("")
@@ -67,7 +69,9 @@ def default_template(context: PipelineContext) -> str:
             if key == "title":
                 continue
             val = context.config[key]
-            lines.append(f"- **{key}**: `{val}`")
+            val_str = str(val).replace("\\", "\\\\").replace("`", "\\`").replace("\n", " ").replace("\r", " ")
+            key_str = _md_escape(key)
+            lines.append(f"- **{key_str}**: `{val_str}`")
         lines.append("")
 
     # Metrics table

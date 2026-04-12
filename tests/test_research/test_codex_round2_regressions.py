@@ -621,3 +621,183 @@ def test_p3b_failure_history_records_partial_written_keys():
     # Partial state is also visible in artifacts
     assert exc_info.value.context.artifacts.get("partial_a") == "first"
     assert exc_info.value.context.artifacts.get("partial_b") == "second"
+
+
+# ============================================================
+# ROUND 5 — codex external review of round-4 fixes
+# ============================================================
+
+# ------------------------------------------------------------
+# P1: alias / rebinding / walrus / NamedExpr bypass of forbidden
+#     attribute chain (the round-4 P1-A fix was incomplete)
+# ------------------------------------------------------------
+
+class TestRound5P1AliasBypass:
+    """Codex round-5 P1: the round-4 attribute-chain check only handled
+    chains rooted at a literal Name with NO binding analysis. User code
+    can bind a forbidden module to a different local name and bypass:
+      - `import ez as z; z.agent.sandbox._reload_lock`
+      - `from ez import agent as a; a.sandbox._reload_lock`
+      - `import ez; z = ez; z.agent.sandbox._reload_lock`
+      - `(z := ez).agent.sandbox`
+
+    Round-5 fix: build a name binding table during AST walk and resolve
+    the chain root through it before checking against forbidden modules.
+    """
+
+    def test_import_as_alias_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = "import ez as z\nx = z.agent.sandbox._reload_lock"
+        errs = check_syntax(code)
+        assert errs, "P1 alias bypass: `import ez as z; z.agent.sandbox` not blocked"
+        assert any("ez.agent.sandbox" in e for e in errs), (
+            f"Expected resolved chain to mention ez.agent.sandbox, got: {errs}"
+        )
+
+    def test_from_import_as_alias_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = "from ez import agent as a\nx = a.sandbox._reload_lock"
+        errs = check_syntax(code)
+        assert errs, "P1 alias bypass: `from ez import agent as a; a.sandbox` not blocked"
+        assert any("ez.agent.sandbox" in e for e in errs)
+
+    def test_simple_assign_rebinding_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = "import ez\nz = ez\nx = z.agent.sandbox._reload_lock"
+        errs = check_syntax(code)
+        assert errs, "P1 rebinding bypass: `z = ez; z.agent.sandbox` not blocked"
+        assert any("ez.agent.sandbox" in e for e in errs)
+
+    def test_walrus_namedexpr_bypass_blocked(self):
+        """`(x := ez).agent.sandbox` — walrus operator binds AND yields."""
+        from ez.agent.sandbox import check_syntax
+        code = "import ez\n(x := ez)\nlock = x.agent.sandbox._reload_lock"
+        errs = check_syntax(code)
+        assert errs, "P1 walrus bypass: `(x := ez); x.agent.sandbox` not blocked"
+
+    def test_attribute_assign_rebinding_blocked(self):
+        """`a = ez.agent; a.sandbox._reload_lock` — chain rebind."""
+        from ez.agent.sandbox import check_syntax
+        code = "import ez\na = ez.agent\nlock = a.sandbox._reload_lock"
+        errs = check_syntax(code)
+        assert errs, "P1: `a = ez.agent; a.sandbox` not blocked"
+
+    def test_aliased_imports_not_to_forbidden_still_allowed(self):
+        """User can rename non-forbidden ez submodules without trouble."""
+        from ez.agent.sandbox import check_syntax
+        for code in [
+            "from ez.factor.builtin.technical import RSI as MyRSI",
+            "from ez.strategy.base import Strategy as Base",
+            "import ez.factor.base as factors",
+        ]:
+            errs = check_syntax(code)
+            assert not errs, f"Round-5 P1 false positive: {code!r} → {errs}"
+
+
+# ------------------------------------------------------------
+# P2-1: false positive on local rebinding of forbidden module names
+# ------------------------------------------------------------
+
+class TestRound5P21FalsePositiveOnLocalRebinding:
+    """Codex round-5 P2-1: round-4's attribute chain check treated any
+    chain whose ROOT segment matched _FORBIDDEN_MODULES as forbidden,
+    even if the user had locally rebound that name. So `sys = MyClass();
+    sys.mean()` was wrongly blocked. Round-5 fix uses the binding table
+    — when the root is locally rebound, skip the check.
+    """
+
+    def test_sys_rebound_locally_allowed(self):
+        from ez.agent.sandbox import check_syntax
+        code = "sys = object()\nx = sys.mean"
+        errs = check_syntax(code)
+        assert not errs, f"P2-1: locally rebound sys wrongly blocked: {errs}"
+
+    def test_os_rebound_locally_allowed(self):
+        from ez.agent.sandbox import check_syntax
+        code = "os = list()\nx = os.path"
+        errs = check_syntax(code)
+        assert not errs, f"P2-1: locally rebound os wrongly blocked: {errs}"
+
+    def test_subprocess_rebound_locally_allowed(self):
+        """Even .run() / .system() which are in _FORBIDDEN_ATTR_CALLS
+        should be allowed when the receiver is a local rebinding."""
+        from ez.agent.sandbox import check_syntax
+        code = "subprocess = object()\nsubprocess.run()"
+        errs = check_syntax(code)
+        assert not errs, f"P2-1: subprocess.run() on local rebind wrongly blocked: {errs}"
+
+    def test_real_forbidden_imports_still_blocked(self):
+        """Make sure the false-positive fix didn't open the real attack."""
+        from ez.agent.sandbox import check_syntax
+        for code in [
+            "import sys\nsys.exit()",
+            "import os\nos.system('rm -rf /')",
+            "import subprocess\nsubprocess.run(['ls'])",
+        ]:
+            errs = check_syntax(code)
+            assert errs, f"Round-5 regressed real forbidden import: {code!r}"
+
+
+# ------------------------------------------------------------
+# P2-2: nested StepError context preservation
+# ------------------------------------------------------------
+
+class _InnerFailingStep(ResearchStep):
+    name = "inner_failing"
+    def run(self, context):
+        context.artifacts["inner_marker"] = "set_before_fail"
+        raise ValueError("inner failure")
+
+
+class _CompositeStep(ResearchStep):
+    """A composite step that runs an inner pipeline and propagates its
+    StepError. Mimics what NestedOOSStep / WalkForwardStep will do."""
+    name = "composite"
+    def run(self, context):
+        inner_pipeline = ResearchPipeline([_InnerFailingStep()])
+        try:
+            inner_pipeline.run(context)
+        except StepError:
+            # Re-raise as-is to test that the outer pipeline preserves
+            # the inner StepError's context (not clobbers it).
+            raise
+
+
+def test_round5_p22_nested_step_error_preserves_inner_context():
+    """Codex round-5 P2-2: when a composite step raises a StepError
+    that already carries an inner context, the outer pipeline must
+    NOT clobber it with its own prev_ctx."""
+    pipeline = ResearchPipeline([_CompositeStep()])
+    with pytest.raises(StepError) as exc_info:
+        pipeline.run()
+    err = exc_info.value
+    # The inner StepError's step_name and original cause must propagate
+    assert err.step_name == "inner_failing"
+    assert isinstance(err.original, ValueError)
+    assert "inner failure" in str(err.original)
+    # The inner context (with the inner_marker) must be preserved,
+    # NOT replaced by the outer step's pre-state context
+    assert err.context is not None
+    assert err.context.artifacts.get("inner_marker") == "set_before_fail"
+
+
+# ------------------------------------------------------------
+# P3-2: configuration section escapes backticks and newlines
+# ------------------------------------------------------------
+
+def test_round5_p32_config_value_escapes_backtick_and_newline():
+    from ez.research.steps.report import default_template
+    ctx = PipelineContext(config={
+        "title": "P3-2 test",
+        "weird_value": "a`b`c",
+        "multiline": "line1\nline2",
+    })
+    md = default_template(ctx)
+    # Backticks in value should be escaped so they don't terminate the code span
+    assert "a\\`b\\`c" in md
+    # Newlines collapsed to spaces
+    assert "line1 line2" in md
+    # Configuration section structure intact
+    assert "## Configuration" in md
+    assert "**weird_value**" in md
+    assert "**multiline**" in md
