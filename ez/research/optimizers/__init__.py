@@ -12,16 +12,19 @@ The optimizer layer is independent of ``ez.research.steps`` and can be
 used standalone (e.g. in a Jupyter notebook to explore weight space)
 without going through the pipeline framework.
 """
-from .base import OptimalWeights, Objective
+from .base import OptimalWeights, Objective, Optimizer
 from .objectives import MaxSharpe, MaxCalmar, MaxSortino, MinCVaR
 from .epsilon_constraint import EpsilonConstraint
+from .simplex import SimplexMultiObjectiveOptimizer
 
 __all__ = [
     "OptimalWeights",
     "Objective",
+    "Optimizer",
     "MaxSharpe",
     "MaxCalmar",
     "MaxSortino",
     "MinCVaR",
     "EpsilonConstraint",
+    "SimplexMultiObjectiveOptimizer",
 ]

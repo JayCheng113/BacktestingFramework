@@ -73,3 +73,25 @@ class Objective(ABC):
     ) -> float:
         """Lower is better. Return float('inf') for infeasible solutions."""
         raise NotImplementedError
+
+
+class Optimizer(ABC):
+    """Base class for portfolio weight optimizers.
+
+    Subclasses implement ``optimize(returns, baseline_metrics) →
+    list[OptimalWeights]``. Multi-objective is the default contract:
+    one optimizer wraps multiple objectives and returns one result
+    per objective.
+
+    The optimizer DOES NOT slice the returns DataFrame — the caller
+    (typically a NestedOOSStep or WalkForwardStep) is responsible
+    for handing in just the IS window.
+    """
+
+    @abstractmethod
+    def optimize(
+        self,
+        returns: pd.DataFrame,
+        baseline_metrics: Optional[dict[str, float]] = None,
+    ) -> list["OptimalWeights"]:
+        raise NotImplementedError
