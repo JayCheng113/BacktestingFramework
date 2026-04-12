@@ -136,10 +136,49 @@ class TestMinBTL:
         assert mb_100 > mb_1
 
     def test_very_low_sharpe_with_many_trials_is_none(self):
-        """Sharpe < sqrt(2*log(N)) can't be significant."""
-        # sqrt(2*log(1000000)) ≈ 5.26
+        """Sharpe < Gumbel expected-max can't be significant."""
         result = minimum_backtest_length(0.1, n_trials=1_000_000)
         assert result is None
+
+    def test_coherence_with_dsr_gumbel_benchmark(self):
+        """V2.23.2 Important 4: MinBTL uses the same Gumbel expected-max-SR
+        benchmark as DSR. A Sharpe beating Gumbel should give a finite
+        number; one below should return None. They must agree.
+        """
+        from ez.research._metrics import (
+            _GAMMA_EULER, minimum_backtest_length as mbl,
+        )
+        from scipy.stats import norm
+        from math import e as math_e
+        # Compute the Gumbel threshold directly
+        n = 100
+        gumbel = (
+            (1 - _GAMMA_EULER) * norm.ppf(1 - 1/n)
+            + _GAMMA_EULER * norm.ppf(1 - 1/(n * math_e))
+        )
+        # Sharpe just above Gumbel → finite MinBTL (close to 0 effective SR
+        # means lots of years, but not None)
+        above = gumbel + 0.5
+        assert mbl(above, n_trials=n) is not None
+        # Sharpe just below Gumbel → None (can't be significant)
+        below = gumbel - 0.01
+        assert mbl(below, n_trials=n) is None
+
+    def test_gumbel_benchmark_matches_dsr(self):
+        """Coherence: MinBTL and DSR use the SAME benchmark. If DSR's
+        expected_max_sr equals X, MinBTL rejects Sharpe < X.
+        """
+        import pandas as pd
+        rng = np.random.default_rng(42)
+        rets = pd.Series(rng.normal(0.0008, 0.01, 500))
+        dsr = deflated_sharpe_ratio(rets, n_trials=100)
+        assert dsr is not None
+        expected_max = dsr["expected_max_sr"]
+        # MinBTL for Sharpe right at expected_max should give None
+        # (or an effectively infinite value); for Sharpe well above it,
+        # finite. This establishes coherence between the two functions.
+        assert minimum_backtest_length(expected_max * 0.99, n_trials=100) is None
+        assert minimum_backtest_length(expected_max * 2.0, n_trials=100) is not None
 
 
 # ============================================================

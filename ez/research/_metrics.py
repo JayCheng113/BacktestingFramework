@@ -34,6 +34,38 @@ _GAMMA_EULER = 0.5772156649
 _calculator = MetricsCalculator()
 
 
+def normalize_returns_index(series: pd.Series) -> pd.Series:
+    """Normalize a returns Series' DatetimeIndex to tz-naive.
+
+    Research-pipeline convention (V2.23.2): all Series sharing
+    ``artifacts['returns']`` must use tz-naive DatetimeIndex so outer-join
+    merges don't raise ``TypeError: Cannot join tz-naive with tz-aware``.
+    Apply this before any step writes to ``artifacts['returns']``.
+
+    Uses ``tz_localize(None)`` to drop timezone info while preserving
+    wall-clock time (appropriate for daily bars where the calendar date
+    is the meaningful coordinate).
+    """
+    if not isinstance(series, pd.Series):
+        return series
+    idx = series.index
+    if isinstance(idx, pd.DatetimeIndex) and idx.tz is not None:
+        series = series.copy()
+        series.index = idx.tz_localize(None)
+    return series
+
+
+def normalize_returns_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """DataFrame version of normalize_returns_index."""
+    if not isinstance(df, pd.DataFrame):
+        return df
+    idx = df.index
+    if isinstance(idx, pd.DatetimeIndex) and idx.tz is not None:
+        df = df.copy()
+        df.index = idx.tz_localize(None)
+    return df
+
+
 def compute_basic_metrics(returns: pd.Series) -> Optional[dict[str, float]]:
     """Convert a daily-returns Series to a short-key metrics dict.
 
@@ -246,53 +278,65 @@ def minimum_backtest_length(
     alpha: float = 0.05,
     n_trials: int = 1,
 ) -> Optional[float]:
-    """Minimum Backtest Length (de Prado).
+    """Minimum Backtest Length (de Prado) — search-adjusted.
 
-    Minimum years of data needed for an observed Sharpe to be
-    statistically significant at confidence level (1 - alpha), given
-    n_trials has been searched.
+    Returns minimum years of data needed for the observed Sharpe to be
+    statistically significant at (1 - alpha) confidence, against the
+    **same expected-max-SR benchmark as DSR** (Gumbel-based, Bailey &
+    de Prado 2014). This ensures MinBTL and DSR use the same null, so
+    a Sharpe that fails MinBTL also gets low DSR and vice versa.
 
-    Formula (simplified, assumes normal returns):
-        MinBTL ≈ (z_alpha / SR)² × (1 + adj_for_trials) / trading_days
+    V2.23.2 Important 4 fix: previous version used `sqrt(2 log N)` as
+    an independent Bonferroni-like threshold, which was NOT coherent
+    with DSR's Gumbel expected-max. For n_trials=100 the old formula
+    returned None for Sharpe=2.0/2.5/3.0 while the Gumbel benchmark
+    only needs ~2.15 to pass, producing a disagreement.
 
-    where adj_for_trials accounts for multiple-testing:
-        SR_threshold = SR × √(1 - (1-γ) + γ×√(2 log n_trials) / SR)
-
-    For n_trials=1, MinBTL ≈ (z_alpha / SR)² years (simplified).
+    Formula:
+        SR_null = sr_benchmark + Gumbel_expected_max(n_trials)
+        effective_SR = SR - SR_null
+        if effective_SR <= 0: return None  # cannot be significant
+        MinBTL = (z_alpha / effective_SR)² years
 
     Parameters
     ----------
     sharpe : float
         Annualized Sharpe ratio (observed).
     alpha : float
-        Significance level (default 0.05 → 95% confidence).
+        Significance level (default 0.05 → 95% confidence, one-sided).
     n_trials : int
-        Number of strategies tested.
+        Number of strategies/parameter combinations searched.
 
     Returns
     -------
-    Minimum backtest length in years. None if sharpe <= 0 (no valid
-    MinBTL for unprofitable strategies).
+    Minimum backtest length in years, or None if:
+      - sharpe <= 0 (unprofitable), OR
+      - n_trials > 1 and observed Sharpe doesn't beat the Gumbel
+        expected-max-SR threshold (search-adjusted minimum).
+
+    Callers should distinguish `None` (cannot be significant regardless
+    of length) from a finite number (needs that many years of data).
     """
     if sharpe <= 0:
         return None
 
-    # One-sided critical value
-    z_alpha = float(norm.ppf(1 - alpha))
-
-    # Basic MinBTL (no multiple-testing)
-    years_basic = (z_alpha / sharpe) ** 2
-
+    # Expected max SR under null (coherent with DSR formula)
     if n_trials > 1:
-        # Adjust for multiple testing (Bonferroni-like):
-        # require SR > √(2 log N) under null
-        multiple_adj = np.sqrt(2 * np.log(n_trials))
-        if sharpe <= multiple_adj:
-            return None  # not enough evidence regardless of length
-        # Conservative adjustment
-        return float(years_basic * (1 + multiple_adj / sharpe))
+        gumbel_adj = (
+            (1 - _GAMMA_EULER) * float(norm.ppf(1 - 1 / n_trials))
+            + _GAMMA_EULER * float(norm.ppf(1 - 1 / (n_trials * math_e)))
+        )
+    else:
+        gumbel_adj = 0.0
 
-    return float(years_basic)
+    effective_sr = sharpe - gumbel_adj
+    if effective_sr <= 0:
+        # Observed Sharpe doesn't beat expected max under null
+        return None
+
+    z_alpha = float(norm.ppf(1 - alpha))
+    years = (z_alpha / effective_sr) ** 2
+    return float(years)
 
 
 def annual_breakdown(

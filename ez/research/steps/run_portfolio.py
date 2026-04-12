@@ -278,10 +278,15 @@ class RunPortfolioStep(ResearchStep):
         )
         daily_returns = equity_series.pct_change().iloc[1:]
         daily_returns.name = self.label
+        # V2.23.2 Important 6: normalize tz to prevent join crash when
+        # other steps contribute tz-aware indexes.
+        from .._metrics import normalize_returns_index, normalize_returns_frame
+        daily_returns = normalize_returns_index(daily_returns)
 
         # Merge into existing artifacts (outer join if returns already exists)
         existing_returns = context.artifacts.get("returns")
         if existing_returns is not None and isinstance(existing_returns, pd.DataFrame):
+            existing_returns = normalize_returns_frame(existing_returns)
             if self.label in existing_returns.columns:
                 logger.warning(
                     "RunPortfolioStep: label '%s' already exists in returns — "

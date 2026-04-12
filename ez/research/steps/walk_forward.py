@@ -140,7 +140,7 @@ class WalkForwardStep(ResearchStep):
         boundaries = self._compute_fold_boundaries(n_rows)
         folds_results = []
         all_oos_returns = []
-        all_is_sharpes = []
+        all_is_returns = []  # V2.23.2 Important 5: IS return series per successful fold
         succeeded_fold_indices: set[int] = set()  # I3 review fix
 
         for fold_idx, (start, train_end, end) in enumerate(boundaries):
@@ -190,8 +190,13 @@ class WalkForwardStep(ResearchStep):
                 default=None,
             )
             if best_cand:
-                is_sharpe = best_cand.is_metrics.get("sharpe", 0.0)
-                all_is_sharpes.append(is_sharpe)
+                # V2.23.2 Important 5: collect IS return series (not per-fold
+                # Sharpe scalar) so we can aggregate IS Sharpe the same way
+                # as OOS — from concatenated curve. Previously degradation
+                # mixed estimators (IS = mean of per-fold Sharpes, OOS =
+                # from concatenated curve), which weighted folds unequally.
+                is_port = self._weighted_returns(is_data, best_cand.weights)
+                all_is_returns.append(is_port)
                 # Use best candidate's weights for OOS aggregation
                 oos_port = self._weighted_returns(oos_data, best_cand.weights)
                 all_oos_returns.append(oos_port)
@@ -240,17 +245,23 @@ class WalkForwardStep(ResearchStep):
                 aggregate["oos_vol"] = combined_metrics["vol"]
                 aggregate["oos_mdd"] = combined_metrics["dd"]
 
-            # IS average sharpe (for degradation computation)
-            if all_is_sharpes:
-                avg_is_sharpe = float(np.mean(all_is_sharpes))
-                aggregate["avg_is_sharpe"] = avg_is_sharpe
-                oos_sharpe = aggregate.get("oos_sharpe", 0.0)
-                if abs(avg_is_sharpe) > 1e-10:
-                    aggregate["degradation"] = (
-                        (avg_is_sharpe - oos_sharpe) / abs(avg_is_sharpe)
-                    )
-                else:
-                    aggregate["degradation"] = 0.0
+            # V2.23.2 Important 5: aggregate IS Sharpe from concatenated
+            # IS returns (matches OOS aggregation method, comparable metrics)
+            if all_is_returns:
+                combined_is = pd.concat(all_is_returns)
+                is_metrics_agg = compute_basic_metrics(combined_is.dropna())
+                if is_metrics_agg:
+                    is_sharpe_agg = is_metrics_agg["sharpe"]
+                    aggregate["is_sharpe"] = is_sharpe_agg
+                    # Keep `avg_is_sharpe` as backward-compat alias for UI
+                    aggregate["avg_is_sharpe"] = is_sharpe_agg
+                    oos_sharpe = aggregate.get("oos_sharpe", 0.0)
+                    if abs(is_sharpe_agg) > 1e-10:
+                        aggregate["degradation"] = (
+                            (is_sharpe_agg - oos_sharpe) / abs(is_sharpe_agg)
+                        )
+                    else:
+                        aggregate["degradation"] = 0.0
 
         # Baseline aggregate: concatenate OOS returns and recompute.
         # I3 review fix: only include folds where the optimizer succeeded,

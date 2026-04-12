@@ -445,6 +445,38 @@ def check_syntax(code: str) -> list[str]:
                 return True
         return False
 
+    def _dynamic_chain_reaches_forbidden(suffix: str) -> bool:
+        """V2.23.2 Critical 1: For dynamic-rooted chains (user did
+        something like `z = [ez][0]`), check if the attribute-suffix
+        could reach a forbidden full module by treating the root as
+        any permissive prefix.
+
+        We check: does ``<any_prefix>.<suffix>`` ever match a forbidden
+        full module? Practically: the suffix ends with a segment that
+        is a suffix of some forbidden full path.
+
+        Examples (with _FORBIDDEN_FULL_MODULES = {"ez.agent.sandbox", ...}):
+            suffix="agent.sandbox"   → matches (could be ez.agent.sandbox)
+            suffix="agent.sandbox.X" → matches
+            suffix="sandbox"         → matches (could be ez.agent.sandbox)
+            suffix="foo.bar"         → does not match
+        """
+        if not suffix:
+            return False
+        for forbidden_full in _FORBIDDEN_FULL_MODULES:
+            forbidden_parts = forbidden_full.split(".")
+            suffix_parts = suffix.split(".")
+            # Check if suffix is any suffix of forbidden_full, OR
+            # starts with any suffix of forbidden_full (i.e., traverses
+            # into / past the forbidden module).
+            for i in range(len(forbidden_parts)):
+                fb_suffix = forbidden_parts[i:]
+                # Check if suffix_parts starts with fb_suffix
+                if len(suffix_parts) >= len(fb_suffix) and \
+                        suffix_parts[:len(fb_suffix)] == fb_suffix:
+                    return True
+        return False
+
     def _reconstruct_attribute_chain(node: ast.AST) -> str | None:
         """Walk up an Attribute chain to reconstruct the dotted name.
 
@@ -492,16 +524,29 @@ def check_syntax(code: str) -> list[str]:
     #
     # Mapping value semantics:
     #   str = the module path the name refers to (e.g. "ez.agent.sandbox")
-    #   None = locally rebound to a non-module value (skip the check)
+    #   None = locally rebound to a known non-module value (skip the check)
+    #   _DYNAMIC_UNSAFE sentinel = bound via dynamic expression (Call,
+    #       Subscript, ForFor, comprehension, etc.) whose value cannot be
+    #       statically resolved. V2.23.2 Critical 1 fix: previously we
+    #       marked these as None (safe) which let attackers bypass the
+    #       check via `z = [ez][0]; z.agent.sandbox.X`. Now we mark them
+    #       as "dynamic" and treat chains rooted at such names as
+    #       potentially reaching any forbidden module.
     #   missing from dict = unbound (treat root as-is for check)
-    name_bindings: dict[str, str | None] = {}
+    name_bindings: dict[str, "str | None | object"] = {}
+
+    _UNKNOWN = object()
+    _DYNAMIC_UNSAFE = object()  # V2.23.2 Critical 1: dynamic binding, could be forbidden
 
     def _resolve_value_to_module(value: ast.AST) -> str | None | object:
         """Try to resolve the right-hand side of an assignment to a
         module path string. Returns:
           - a str module path if resolvable
-          - None if it's clearly a local rebinding to non-module value
-          - the sentinel object _UNKNOWN if we can't tell
+          - None if it's a simple literal (Constant) — safe local
+          - _DYNAMIC_UNSAFE if it's a Call/Subscript/container/
+            comprehension/etc. whose value we can't statically determine
+            and which COULD reference a forbidden module
+          - _UNKNOWN if we can't tell (treat as pass-through for now)
         """
         if isinstance(value, ast.Name):
             src = value.id
@@ -511,20 +556,27 @@ def check_syntax(code: str) -> list[str]:
         if isinstance(value, ast.Attribute):
             chain = _reconstruct_attribute_chain(value)
             if chain is None:
-                return _UNKNOWN
+                return _DYNAMIC_UNSAFE  # chain root itself is dynamic
             parts = chain.split(".")
             if parts[0] in name_bindings:
                 base = name_bindings[parts[0]]
                 if base is None:
                     return None
+                if base is _DYNAMIC_UNSAFE:
+                    return _DYNAMIC_UNSAFE
                 if isinstance(base, str) and len(parts) > 1:
                     return base + "." + ".".join(parts[1:])
                 return base
             return _UNKNOWN
-        # Function call, container, literal, etc. — local rebinding
-        return None
-
-    _UNKNOWN = object()
+        if isinstance(value, ast.Constant):
+            # Literal value — safe non-module
+            return None
+        # V2.23.2 Critical 1: Call / Subscript / List / Dict / Tuple /
+        # GeneratorExp / ListComp / SetComp / DictComp / IfExp /
+        # BoolOp / BinOp / UnaryOp etc. → dynamic, could wrap forbidden
+        # module. Previously these all returned None (safe), which was
+        # the bypass vector (`[ez][0]`, `ident(ez)`, etc.).
+        return _DYNAMIC_UNSAFE
 
     # Pass 1: collect bindings from Import / ImportFrom / Assign / NamedExpr.
     # We walk in document order so later assignments can shadow earlier ones.
@@ -553,10 +605,6 @@ def check_syntax(code: str) -> list[str]:
                 target_name = node.targets[0].id
                 resolved = _resolve_value_to_module(node.value)
                 if resolved is _UNKNOWN:
-                    # Don't pollute table with unknowns; leave the name
-                    # absent so the as-is chain check applies. If the
-                    # target was previously bound to a known module, we
-                    # mark it None to prevent stale resolution.
                     if target_name in name_bindings:
                         name_bindings[target_name] = None
                 else:
@@ -571,6 +619,32 @@ def check_syntax(code: str) -> list[str]:
                         name_bindings[target_name] = None
                 else:
                     name_bindings[target_name] = resolved
+        elif isinstance(node, ast.For):
+            # V2.23.2 Critical 1: `for z in [ez]: ...` binds z to
+            # something drawn from an iterable. We can't statically
+            # determine what; mark as dynamic-unsafe so chains rooted
+            # at z get conservatively checked.
+            if isinstance(node.target, ast.Name):
+                target_name = node.target.id
+                # Special case: `for z in [single_name]` where single_name
+                # is itself a known safe value → could propagate, but
+                # we conservatively mark dynamic since users writing
+                # `for z in [ez]` are almost certainly attempting bypass.
+                name_bindings[target_name] = _DYNAMIC_UNSAFE
+        elif isinstance(node, ast.withitem):
+            # `with ... as x` — context manager result, usually a file
+            # or lock. Mark as None (safe local); user code doing
+            # `with ez as z: z.agent.sandbox` would still fail because
+            # `ez` as a context manager is absurd at import time.
+            if node.optional_vars is not None and isinstance(node.optional_vars, ast.Name):
+                target_name = node.optional_vars.id
+                name_bindings[target_name] = None
+        elif isinstance(node, ast.comprehension):
+            # List/set/dict/generator comprehension target. Conservative.
+            if isinstance(node.target, ast.Name):
+                name_bindings[node.target.id] = _DYNAMIC_UNSAFE
+
+    _DYNAMIC_CHAIN_MARKER = "__DYNAMIC_UNSAFE__"
 
     def _resolve_chain_with_bindings(chain: str) -> str | None:
         """Substitute the chain root with its binding if present.
@@ -579,6 +653,9 @@ def check_syntax(code: str) -> list[str]:
           - resolved module path string if the chain root maps to a module
           - None if the chain root is locally rebound to a non-module
             (i.e., the chain is not a real module access — skip the check)
+          - _DYNAMIC_CHAIN_MARKER + ".<suffix>" if the root is bound
+            via a dynamic expression (V2.23.2 Critical 1). Downstream
+            code MUST treat this as potentially forbidden.
           - the original chain if the root is unbound
         """
         if not chain:
@@ -589,6 +666,11 @@ def check_syntax(code: str) -> list[str]:
             bound = name_bindings[root]
             if bound is None:
                 return None  # local rebinding to non-module
+            if bound is _DYNAMIC_UNSAFE:
+                # Dynamic root — preserve suffix for sensitive-suffix check
+                return _DYNAMIC_CHAIN_MARKER + (
+                    "." + ".".join(parts[1:]) if len(parts) > 1 else ""
+                )
             if len(parts) > 1:
                 return bound + "." + ".".join(parts[1:])
             return bound
@@ -639,6 +721,15 @@ def check_syntax(code: str) -> list[str]:
                         if resolved is None:
                             # Receiver locally rebound — skip the check.
                             attr_call_skip = True
+                        elif resolved.startswith(_DYNAMIC_CHAIN_MARKER):
+                            # V2.23.2: receiver dynamically bound (e.g.
+                            # `subprocess = MyClass(); subprocess.run()`).
+                            # The Attribute-chain visitor catches
+                            # module-path traversal; here we only need
+                            # to block direct forbidden-method calls
+                            # when the receiver is provably a forbidden
+                            # module. Dynamic = not provable → skip.
+                            attr_call_skip = True
             if name in _FORBIDDEN_BUILTINS:
                 errors.append(f"Forbidden call: {name}() (line {node.lineno})")
             if name in _FORBIDDEN_ATTR_CALLS and not attr_call_skip:
@@ -666,6 +757,21 @@ def check_syntax(code: str) -> list[str]:
                 if resolved is None:
                     # Locally rebound — not a module access at all.
                     pass
+                elif resolved.startswith(_DYNAMIC_CHAIN_MARKER):
+                    # V2.23.2 Critical 1: root bound via dynamic expression
+                    # (Call/Subscript/loop target etc.). If the suffix matches
+                    # a forbidden-module path pattern, reject conservatively.
+                    suffix = resolved[len(_DYNAMIC_CHAIN_MARKER):].lstrip(".")
+                    # Any suffix that ends with or traverses a forbidden
+                    # full module path is rejected. Example: suffix
+                    # "agent.sandbox.X" with `z = [ez][0]; z.agent.sandbox.X`
+                    # → suffix traverses `ez.agent.sandbox`.
+                    if _dynamic_chain_reaches_forbidden(suffix):
+                        errors.append(
+                            f"Forbidden attribute chain: {chain} (line {node.lineno}). "
+                            f"Root is bound via a dynamic expression; suffix "
+                            f"'{suffix}' could reach a forbidden module."
+                        )
                 elif _is_forbidden(resolved):
                     if resolved != chain:
                         errors.append(

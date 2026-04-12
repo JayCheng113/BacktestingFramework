@@ -52,7 +52,7 @@ class ValidationRequest(BaseModel):
     n_trials: int = Field(
         default=1, ge=1, description="搜过多少策略 (DSR/MinBTL 多重检验调整)"
     )
-    seed: int = Field(default=42)
+    seed: int = Field(default=42, ge=0, description="np.random.default_rng 要求非负")
 
 
 def _run_to_returns(run: dict[str, Any]) -> pd.Series:
@@ -224,7 +224,10 @@ def validate(req: ValidationRequest) -> dict[str, Any]:
     # 5. WF aggregate (from stored wf_metrics if available)
     wf = _extract_wf_from_run(main_run)
 
-    # 6. Paired comparison (optional)
+    # 6. Paired comparison (optional).
+    # V2.23.2 Important 8: discriminated union — always return a comparison
+    # object when baseline_run_id is provided (success OR error), never
+    # silently drop. Frontend uses `status` field to pick render path.
     comparison: dict[str, Any] | None = None
     if req.baseline_run_id:
         try:
@@ -234,7 +237,17 @@ def validate(req: ValidationRequest) -> dict[str, Any]:
                 "treatment": main_returns,
                 "control": baseline_returns,
             }).dropna()
-            if len(combined) >= req.block_size * 2:
+            if len(combined) < req.block_size * 2:
+                comparison = {
+                    "status": "error",
+                    "treatment_run_id": req.run_id,
+                    "control_run_id": req.baseline_run_id,
+                    "error": (
+                        f"配对数据不足: 对齐后仅 {len(combined)} 行 "
+                        f"(需要 >= block_size × 2 = {req.block_size * 2})"
+                    ),
+                }
+            else:
                 cmp_result = paired_block_bootstrap(
                     returns_a=combined["treatment"].values,
                     returns_b=combined["control"].values,
@@ -245,6 +258,7 @@ def validate(req: ValidationRequest) -> dict[str, Any]:
                 treatment_metrics = compute_basic_metrics(combined["treatment"]) or {}
                 control_metrics = compute_basic_metrics(combined["control"]) or {}
                 comparison = {
+                    "status": "success",
                     "treatment_run_id": req.run_id,
                     "control_run_id": req.baseline_run_id,
                     "sharpe_diff": cmp_result["observed"],
@@ -263,7 +277,12 @@ def validate(req: ValidationRequest) -> dict[str, Any]:
             raise
         except Exception as e:
             logger.warning("Paired comparison failed: %s", e)
-            comparison = {"error": str(e)}
+            comparison = {
+                "status": "error",
+                "treatment_run_id": req.run_id,
+                "control_run_id": req.baseline_run_id,
+                "error": str(e),
+            }
 
     # 7. Verdict
     verdict = compute_verdict(

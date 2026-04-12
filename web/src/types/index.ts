@@ -261,7 +261,14 @@ export interface WalkForwardAggregate {
   [key: string]: unknown
 }
 
-export interface ComparisonResult {
+/**
+ * V2.23.2: Discriminated union for comparison results.
+ * Backend always returns a comparison object when baseline_run_id is
+ * provided — either a success payload OR an explicit error. Frontend
+ * picks the render path via `status`.
+ */
+export interface ComparisonSuccess {
+  status: 'success'
   treatment_run_id: string
   control_run_id: string
   sharpe_diff: number
@@ -273,8 +280,16 @@ export interface ComparisonResult {
   treatment_metrics: Record<string, number>
   control_metrics: Record<string, number>
   n_observations: number
-  error?: string
 }
+
+export interface ComparisonError {
+  status: 'error'
+  treatment_run_id: string
+  control_run_id: string
+  error: string
+}
+
+export type ComparisonResult = ComparisonSuccess | ComparisonError
 
 export interface VerdictCheck {
   name: string

@@ -54,6 +54,7 @@ export function ValidationPanel({ runId }: Props) {
   const [result, setResult] = useState<ValidationResult | null>(null)
   const [nBootstrap, setNBootstrap] = useState(2000)
   const [blockSize, setBlockSize] = useState(21)
+  const [nTrials, setNTrials] = useState(1)  // V2.23.2 Critical 2: search count
   const [baselineId, setBaselineId] = useState('')
   const [runList, setRunList] = useState<HistoryRun[]>([])
   const tokenRef = useRef(0)
@@ -106,6 +107,7 @@ export function ValidationPanel({ runId }: Props) {
         baseline_run_id: baselineId || undefined,
         n_bootstrap: nBootstrap,
         block_size: blockSize,
+        n_trials: nTrials,
       })
       if (tokenRef.current !== token) return  // superseded
       setResult(resp.data)
@@ -222,6 +224,29 @@ export function ValidationPanel({ runId }: Props) {
               disabled={loading}
             />
           </label>
+          <label
+            style={{ fontSize: 12, color: CHART.textSecondary }}
+            title="搜过的策略/参数组合数. 影响 DSR 和 MinBTL 的多重检验惩罚. 1=未搜索, 100=搜了100组. 越大越保守."
+          >
+            搜索数
+            <input
+              type="number"
+              min={1}
+              max={100000}
+              value={nTrials}
+              onChange={(e) => setNTrials(Number(e.target.value))}
+              style={{
+                width: 60,
+                marginLeft: 6,
+                padding: '2px 6px',
+                backgroundColor: CHART.bg,
+                color: CHART.text,
+                border: `1px solid ${CHART.border}`,
+                borderRadius: 4,
+              }}
+              disabled={loading}
+            />
+          </label>
           <button
             onClick={handleRun}
             disabled={loading || !runId}
@@ -254,7 +279,26 @@ export function ValidationPanel({ runId }: Props) {
         </div>
       )}
 
-      {result && <ValidationResultView result={result} />}
+      {result && (
+        <>
+          {nTrials === 1 && (
+            <div style={{
+              marginBottom: 12,
+              padding: 10,
+              fontSize: 12,
+              color: CHART.warn,
+              backgroundColor: CHART.bg,
+              border: `1px solid ${CHART.warn}`,
+              borderRadius: 4,
+            }}>
+              ⚠ 当前裁决假设只搜索了 1 个策略 (n_trials=1). 若实际做过参数/策略搜索,
+              请将 "搜索数" 设为搜索过的组合数, 以激活 DSR / MinBTL 的多重检验惩罚.
+              否则裁决可能过于乐观.
+            </div>
+          )}
+          <ValidationResultView result={result} />
+        </>
+      )}
     </div>
   )
 }
@@ -681,7 +725,7 @@ function AnnualSection({ annual }: { annual: ValidationResult['annual'] }) {
 // ============================================================
 
 function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
-  if (comparison.error) {
+  if (comparison.status === 'error') {
     return (
       <Section title="配对对比 (vs 基线)">
         <div style={{
@@ -698,6 +742,16 @@ function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
   }
   const ciExcludesZero = comparison.ci_excludes_zero
   const sig = comparison.is_significant
+  // V2.23.2 Important 7: headline must branch on sign, not just significance
+  const diffPositive = comparison.sharpe_diff > 0
+  const headlineText =
+    !sig ? '差异不显著' :
+    diffPositive ? '显著优于基线 ✓' :
+    '显著差于基线 ✗'
+  const headlineColor =
+    !sig ? CHART.warn :
+    diffPositive ? CHART.success :
+    CHART.error
   return (
     <Section title="配对对比 (vs 基线)">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
@@ -735,8 +789,8 @@ function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
           marginBottom: 6,
         }}>
           <span>Sharpe 差值 95% CI</span>
-          <span style={{ color: sig ? CHART.success : CHART.warn }}>
-            {sig ? '显著优于基线 ✓' : '差异不显著'}
+          <span style={{ color: headlineColor }}>
+            {headlineText}
           </span>
         </div>
         <CIBar
@@ -885,13 +939,21 @@ function generateMarkdown(result: ValidationResult): string {
   }
 
   // Comparison
-  if (result.comparison && !result.comparison.error) {
+  if (result.comparison) {
     const cmp = result.comparison
     lines.push(`## 配对对比 (vs 基线 \`${mdSafe(cmp.control_run_id)}\`)`, '')
-    lines.push(`- Sharpe 差值: ${cmp.sharpe_diff.toFixed(3)}`)
-    lines.push(`- 95% CI: [${cmp.ci_lower.toFixed(3)}, ${cmp.ci_upper.toFixed(3)}] ${cmp.ci_excludes_zero ? '(不含 0)' : '(含 0)'}`)
-    lines.push(`- p-value: ${cmp.p_value.toFixed(4)} ${cmp.is_significant ? '(显著)' : '(不显著)'}`)
-    lines.push(`- 观察数: ${cmp.n_observations}`)
+    if (cmp.status === 'error') {
+      lines.push(`- 状态: 失败 — ${mdSafe(cmp.error)}`)
+    } else {
+      const diffPositive = cmp.sharpe_diff > 0
+      const verdict = !cmp.is_significant
+        ? '差异不显著'
+        : diffPositive ? '显著优于基线' : '显著差于基线'
+      lines.push(`- Sharpe 差值: ${cmp.sharpe_diff.toFixed(3)}`)
+      lines.push(`- 95% CI: [${cmp.ci_lower.toFixed(3)}, ${cmp.ci_upper.toFixed(3)}] ${cmp.ci_excludes_zero ? '(不含 0)' : '(含 0)'}`)
+      lines.push(`- p-value: ${cmp.p_value.toFixed(4)} (${verdict})`)
+      lines.push(`- 观察数: ${cmp.n_observations}`)
+    }
     lines.push('')
   }
 

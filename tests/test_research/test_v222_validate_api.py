@@ -158,6 +158,35 @@ class TestValidateEndpoint:
         })
         assert resp.status_code == 422
 
+    def test_negative_seed_rejected(self, client, mock_store):
+        """V2.23.2 Important 3: seed must be ge=0 (np.random.default_rng raises on <0)."""
+        resp = client.post("/api/validation/validate", json={
+            "run_id": "test_run",
+            "n_bootstrap": 200,
+            "seed": -1,
+        })
+        assert resp.status_code == 422
+
+    def test_comparison_always_returns_status_field(self, client, mock_store):
+        """V2.23.2 Important 8: backend always returns comparison object
+        with discriminated-union status when baseline_run_id provided.
+        Never silently drop."""
+        resp = client.post("/api/validation/validate", json={
+            "run_id": "test_run",
+            "baseline_run_id": "baseline_run",
+            "n_bootstrap": 200,
+            "block_size": 21,
+        })
+        assert resp.status_code == 200
+        cmp = resp.json()["comparison"]
+        assert cmp is not None
+        assert cmp["status"] in ("success", "error"), (
+            f"comparison must have status field, got: {cmp.keys()}"
+        )
+        # treatment/control run_ids always present (error or success)
+        assert cmp["treatment_run_id"] == "test_run"
+        assert cmp["control_run_id"] == "baseline_run"
+
     def test_n_trials_affects_deflated_sharpe(self, client, mock_store):
         # Single trial
         r1 = client.post("/api/validation/validate", json={

@@ -103,8 +103,12 @@ class RunStrategiesStep(ResearchStep):
 
         # Align all returns to a common date index, merge with existing
         returns_df = pd.DataFrame(returns_dict)
+        # V2.23.2 Important 6: normalize tz to prevent join crash
+        from .._metrics import normalize_returns_frame
+        returns_df = normalize_returns_frame(returns_df)
         existing_returns = context.artifacts.get("returns")
         if existing_returns is not None and isinstance(existing_returns, pd.DataFrame):
+            existing_returns = normalize_returns_frame(existing_returns)
             # I2 review fix: drop duplicate columns before join to avoid
             # pandas suffixing (Alpha_x / Alpha_y) which breaks downstream.
             overlap = set(returns_df.columns) & set(existing_returns.columns)
