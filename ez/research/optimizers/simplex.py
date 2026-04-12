@@ -5,17 +5,29 @@ The simplex constraint is:
   - All weights >= 0 (long-only A-share)
   - sum(weights) <= 1.0 (residual is implicit cash)
 
-For an N-asset portfolio, we optimize over N-1 free weights and compute
-the N-th as ``max(1 - sum(others), 0)``. The bounds for differential_evolution
-are ``[(0, 1)] * (N-1)``, but the simplex constraint is enforced inside the
-objective function (returning inf for any infeasible point).
+Parameterization (Claude reviewer round-6 C1 fix):
+  We optimize over N unconstrained variables ``x ∈ [0, 1]^N`` and map
+  them to the simplex via **stick-breaking** (incomplete Beta CDF):
+
+    w_1 = x_1
+    w_k = x_k * (1 - sum(w_1..w_{k-1}))   for k = 2..N
+    cash = 1 - sum(w_1..w_N)
+
+  Every point in ``[0,1]^N`` maps to a valid simplex point (sum <= 1,
+  all >= 0), so the initial DE population is 100% feasible regardless
+  of N. The previous ``[0,1]^N`` direct approach had feasibility rate
+  ``1/N!`` which collapsed for N >= 8 (Claude reviewer verified N=10
+  returned fun=inf with 200 iterations).
+
+  Cash (sum < 1) is naturally reachable: when any ``x_k < 1``, some
+  "remaining capacity" is left, which becomes implicit cash earning
+  0% daily return.
 
 Multi-objective: one ``optimize()`` call iterates over the optimizer's
-``objectives`` list and runs differential_evolution per objective. Returns
-``list[OptimalWeights]``, one per objective.
+``objectives`` list and runs differential_evolution per objective.
 
-Reference: ``validation/phase_o_nested_oos.py::optimize_on_window`` is the
-hand-rolled equivalent that this class replaces.
+Reference: ``validation/phase_o_nested_oos.py::optimize_on_window`` is
+the hand-rolled equivalent that this class replaces.
 """
 from __future__ import annotations
 import math
@@ -112,11 +124,11 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
             )
 
         labels = list(returns.columns)
-        # Codex round-6 P1: optimize over ALL N weights in [0, 1].
-        # The simplex constraint sum(w) <= 1 is enforced inside the
-        # objective function, not by reducing dimensionality. This
-        # means cash (= 1 - sum(w)) is a genuine part of the search
-        # space — the optimizer CAN return an all-cash solution.
+        # Claude reviewer round-6 C1: stick-breaking parameterization.
+        # Optimize over x ∈ [0,1]^N, map to simplex weights via:
+        #   w_1 = x_1
+        #   w_k = x_k * (1 - sum(w_1..w_{k-1}))
+        # Every point in [0,1]^N is 100% feasible. Cash = 1 - sum(w).
         bounds = [(0.0, 1.0)] * n
 
         # Drop NaN rows and convert to numpy for inner-loop performance
@@ -128,34 +140,31 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
         returns_arr = clean_returns.values  # shape (n_days, n_assets)
         index = clean_returns.index
 
-        def _portfolio_returns(weights_all: np.ndarray) -> pd.Series:
-            """Build the daily portfolio return Series from ALL N weights.
+        def _stick_breaking(x: np.ndarray) -> np.ndarray:
+            """Map x ∈ [0,1]^N to simplex weights via stick-breaking.
 
-            Codex round-6 P1: the previous implementation optimized
-            over N-1 weights and computed the N-th as 1-sum(others),
-            which forced sum==1.0 and made the last asset a special
-            residual. Cash (sum < 1) was never reachable.
+            w_1 = x_1
+            w_k = x_k * (1 - sum(w_1..w_{k-1}))
 
-            Now we optimize over ALL N weights in [0, 1], and the
-            simplex constraint sum <= 1 is enforced in _is_feasible.
-            Cash = 1 - sum(w), and the cash return is 0 (no interest).
+            Guarantees: all w_k >= 0, sum(w) <= 1. Cash = 1 - sum(w).
             """
-            port = (returns_arr * weights_all).sum(axis=1)
-            return pd.Series(port, index=index)
+            w = np.zeros(n)
+            remaining = 1.0
+            for k in range(n):
+                w[k] = x[k] * remaining
+                remaining -= w[k]
+            return w
 
-        def _is_feasible(w: np.ndarray) -> bool:
-            if any(wi < -1e-9 for wi in w):
-                return False
-            if sum(w) > 1.0 + 1e-9:
-                return False
-            return True
+        def _portfolio_returns(x: np.ndarray) -> pd.Series:
+            """Map x to simplex weights, compute portfolio return."""
+            w = _stick_breaking(x)
+            port = (returns_arr * w).sum(axis=1)
+            return pd.Series(port, index=index)
 
         results: list[OptimalWeights] = []
         for obj in self.objectives:
-            def _fun(w, _obj=obj):
-                if not _is_feasible(w):
-                    return math.inf
-                port = _portfolio_returns(w)
+            def _fun(x, _obj=obj):
+                port = _portfolio_returns(x)
                 try:
                     return _obj.evaluate(port, baseline_metrics)
                 except Exception:
@@ -197,7 +206,8 @@ class SimplexMultiObjectiveOptimizer(Optimizer):
             else:
                 status = "converged"
 
-            weights_dict = dict(zip(labels, [float(wi) for wi in res.x]))
+            simplex_w = _stick_breaking(np.asarray(res.x))
+            weights_dict = dict(zip(labels, [float(wi) for wi in simplex_w]))
             port = _portfolio_returns(np.asarray(res.x))
             is_metrics = compute_basic_metrics(port) or {}
 

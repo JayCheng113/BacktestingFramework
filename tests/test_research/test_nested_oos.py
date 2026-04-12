@@ -36,7 +36,7 @@ def _ctx(returns=None):
 def _optimizer(**kwargs):
     return SimplexMultiObjectiveOptimizer(
         objectives=[MaxSharpe()],
-        max_iter=200,  # small for speed
+        max_iter=200,  # matches phase_o convention
         **kwargs,
     )
 

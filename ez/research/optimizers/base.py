@@ -40,7 +40,16 @@ class OptimalWeights:
 
     @property
     def is_feasible(self) -> bool:
-        return self.optimizer_status == "converged"
+        """True if the optimizer found a usable solution.
+
+        Both "converged" and "max_iter" results have real weights
+        (sum <= 1, all >= 0) and a finite objective value — the only
+        difference is whether DE formally converged to the tolerance.
+        Treating max_iter as infeasible would discard near-optimal
+        solutions in high-dimensional spaces where 200 iterations
+        aren't always enough.
+        """
+        return self.optimizer_status in ("converged", "max_iter")
 
 
 class Objective(ABC):

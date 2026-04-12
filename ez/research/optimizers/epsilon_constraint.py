@@ -184,7 +184,7 @@ class EpsilonConstraint(Objective):
         objective: str,
         constraint_metric: str,
         constraint_op: str,
-        constraint_value: Union[str, float, int],
+        constraint_value: Union[str, float, int, Callable],
     ):
         if objective not in _OBJECTIVE_FNS:
             raise ValueError(
@@ -220,16 +220,18 @@ class EpsilonConstraint(Objective):
                     f"failed validation: {e}"
                 ) from e
         elif callable(constraint_value):
-            # Codex round-6 P2: validate callable at construction time
-            # by calling it with a stub baseline. If it crashes, fail fast.
-            stub = {k: 0.0 for k in _ALLOWED_BASELINE_KEYS}
+            # Codex round-6 P2: validate callable at construction time.
+            # Claude reviewer round-6 I4: use non-zero stub (1.0) to
+            # avoid 0.0/0.0 = NaN or integer division by zero in
+            # callables that divide baseline metrics.
+            stub = {k: 1.0 for k in _ALLOWED_BASELINE_KEYS}
             try:
                 result = constraint_value(stub)
                 if not isinstance(result, (int, float)):
                     raise TypeError(
                         f"Callable must return a number, got {type(result).__name__}"
                     )
-            except (TypeError, KeyError, ValueError) as e:
+            except (TypeError, KeyError, ValueError, ZeroDivisionError) as e:
                 raise ValueError(
                     f"EpsilonConstraint callable constraint_value "
                     f"failed validation: {e}"
