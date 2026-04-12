@@ -10,8 +10,9 @@
  *
  * Deferred to Phase 2.1: paired comparison (baseline selector), report export.
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
+import { AxiosError } from 'axios'
 import { runValidation } from '../api'
 import type {
   ValidationResult,
@@ -20,6 +21,14 @@ import type {
 } from '../types'
 import { CHART } from './shared/chartTheme'
 import { useToast } from './shared/Toast'
+import {
+  rateDegradation,
+  rateOverfit,
+  ratePValue,
+  rateDsr,
+  rateMinBtl,
+  type ValidationStatus,
+} from './shared/metricRatings'
 
 interface Props {
   runId: string
@@ -45,8 +54,24 @@ export function ValidationPanel({ runId }: Props) {
   const [blockSize, setBlockSize] = useState(21)
   const tokenRef = useRef(0)
 
+  // I2: clear stale result and invalidate in-flight request when run switches
+  useEffect(() => {
+    tokenRef.current += 1
+    setResult(null)
+    setLoading(false)
+  }, [runId])
+
   const handleRun = async () => {
     if (!runId) return
+    // I4: input precheck (browser min/max only enforced on submit, not keystroke)
+    if (nBootstrap < 100 || nBootstrap > 10000) {
+      toast.showToast('warning', 'Bootstrap 次数需在 100-10000 之间')
+      return
+    }
+    if (blockSize < 1 || blockSize > 252) {
+      toast.showToast('warning', '块大小需在 1-252 之间')
+      return
+    }
     const token = ++tokenRef.current
     setLoading(true)
     setResult(null)
@@ -61,12 +86,22 @@ export function ValidationPanel({ runId }: Props) {
       toast.showToast('success', `验证完成: ${VERDICT_LABEL[resp.data.verdict.result]}`)
     } catch (e: unknown) {
       if (tokenRef.current !== token) return
-      const msg = e instanceof Error ? e.message : '验证失败'
-      toast.showToast('error', typeof msg === 'string' ? msg : '验证失败')
+      // I3: extract backend detail from Axios error (422/404 responses)
+      let msg = '验证失败'
+      if (e instanceof AxiosError && e.response?.data?.detail) {
+        const detail = e.response.data.detail
+        msg = typeof detail === 'string' ? detail : JSON.stringify(detail)
+      } else if (e instanceof Error) {
+        msg = e.message
+      }
+      toast.showToast('error', msg)
     } finally {
       if (tokenRef.current === token) setLoading(false)
     }
   }
+
+  // I5: dynamic duration hint scaled to n_bootstrap (~2000 iters/sec on typical data)
+  const estimatedSeconds = Math.max(1, Math.ceil(nBootstrap / 2000))
 
   return (
     <div style={{
@@ -155,7 +190,7 @@ export function ValidationPanel({ runId }: Props) {
 
       {loading && (
         <div style={{ textAlign: 'center', padding: 24, color: CHART.textSecondary }}>
-          正在运行 bootstrap 重采样 ({nBootstrap} 次) · 块大小 {blockSize} ...
+          正在运行 bootstrap 重采样 ({nBootstrap} 次) · 块大小 {blockSize} · 预计 ~{estimatedSeconds} 秒 ...
         </div>
       )}
 
@@ -414,7 +449,14 @@ function CIBar({
   upper: number
   observed: number
 }) {
-  const range = Math.max(Math.abs(lower), Math.abs(upper), Math.abs(observed), 0.1) * 1.2
+  // C1: widen floor so narrow CIs near zero remain visible. The CI width
+  // itself contributes so tight CIs (e.g. 0.001..0.003) don't collapse to
+  // 1% of the bar. Minimum range of 0.5 ensures typical Sharpe values render.
+  const ciWidth = Math.abs(upper - lower)
+  const range = Math.max(
+    Math.abs(lower), Math.abs(upper), Math.abs(observed),
+    ciWidth * 2, 0.5,
+  ) * 1.2
   const scale = (v: number) => ((v + range) / (2 * range)) * 100
   const zeroPct = scale(0)
   const lowerPct = scale(lower)
@@ -500,8 +542,10 @@ function AnnualSection({ annual }: { annual: ValidationResult['annual'] }) {
   const data = annual.per_year
   const years = data.map((y) => String(y.year))
   const sharpes = data.map((y) => y.sharpe)
-  const profitableRatio = annual.profitable_ratio
   const n = data.length
+  // C2: compute count locally to avoid round(ratio * n) inconsistency
+  const nProfitable = data.filter((y) => y.ret > 0).length
+  const profitablePct = n > 0 ? (nProfitable / n) * 100 : 0
 
   return (
     <Section title="年度稳定性">
@@ -514,7 +558,7 @@ function AnnualSection({ annual }: { annual: ValidationResult['annual'] }) {
       }}>
         <span>
           盈利年份: <strong style={{ color: CHART.text }}>
-            {Math.round(profitableRatio * n)}/{n} ({(profitableRatio * 100).toFixed(0)}%)
+            {nProfitable}/{n} ({profitablePct.toFixed(0)}%)
           </strong>
         </span>
         {annual.best_year !== null && (
@@ -591,7 +635,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-type Rating = 'pass' | 'warn' | 'fail' | undefined
 
 function MetricCard({
   label,
@@ -602,7 +645,7 @@ function MetricCard({
   label: string
   value: number | string | undefined | null
   fmt: 'num' | 'pct' | 'str'
-  rating?: Rating
+  rating?: ValidationStatus
 }) {
   let display: string
   if (value === undefined || value === null) {
@@ -636,41 +679,3 @@ function MetricCard({
   )
 }
 
-// ============================================================
-// Metric rating helpers (align with backend verdict thresholds)
-// ============================================================
-
-function rateDegradation(v: number | undefined): Rating {
-  if (v === undefined) return undefined
-  if (v > 0.70) return 'fail'
-  if (v > 0.40) return 'warn'
-  return 'pass'
-}
-
-function rateOverfit(v: number | undefined): Rating {
-  if (v === undefined) return undefined
-  if (v > 0.60) return 'fail'
-  if (v > 0.30) return 'warn'
-  return 'pass'
-}
-
-function ratePValue(v: number | undefined): Rating {
-  if (v === undefined) return undefined
-  if (v > 0.10) return 'fail'
-  if (v > 0.05) return 'warn'
-  return 'pass'
-}
-
-function rateDsr(v: number | undefined): Rating {
-  if (v === undefined) return undefined
-  if (v < 0.30) return 'fail'
-  if (v < 0.50) return 'warn'
-  return 'pass'
-}
-
-function rateMinBtl(actual: number, required: number | null): Rating {
-  if (required === null) return undefined
-  if (actual >= required) return 'pass'
-  if (actual >= required * 0.7) return 'warn'
-  return 'fail'
-}
