@@ -30,7 +30,7 @@ from ez.research._metrics import (
     minimum_backtest_length,
     annual_breakdown,
 )
-from ez.research.steps.paired_bootstrap import paired_block_bootstrap
+from ez.research.steps.paired_bootstrap import paired_block_bootstrap, sample_block_indices
 from ez.research.verdict import VerdictThresholds, compute_verdict
 
 router = APIRouter()
@@ -122,14 +122,10 @@ def _compute_bootstrap_on_single(
     std = float(np.std(arr, ddof=1))
     observed_sharpe = (mean / std * np.sqrt(252)) if std > 1e-12 else 0.0
 
-    # Block bootstrap distribution of Sharpe
-    n_blocks = (n + block_size - 1) // block_size
+    # Block bootstrap distribution of Sharpe (S3: use shared helper)
     boot_sharpes = np.empty(n_bootstrap)
     for i in range(n_bootstrap):
-        block_starts = rng.integers(0, n - block_size + 1, size=n_blocks)
-        idx = np.concatenate([
-            np.arange(s, min(s + block_size, n)) for s in block_starts
-        ])[:n]
+        idx = sample_block_indices(n, block_size, rng)
         resample = arr[idx]
         m = float(np.mean(resample))
         s = float(np.std(resample, ddof=1))

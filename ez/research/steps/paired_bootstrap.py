@@ -48,6 +48,40 @@ def _sharpe_from_returns(returns: np.ndarray) -> float:
     return m / s * np.sqrt(252)
 
 
+def sample_block_indices(
+    n: int,
+    block_size: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample one block-bootstrap index array of length n.
+
+    Public helper (no leading underscore) so `ez/api/routes/validation.py`
+    and any future block-bootstrap code can share the same
+    implementation. Guarantees preservation of local autocorrelation
+    within each block while randomizing block positions.
+
+    Parameters
+    ----------
+    n : int
+        Desired length of the resampled series.
+    block_size : int
+        Length of each block. ``n_blocks = ceil(n / block_size)``
+        blocks are drawn with replacement.
+    rng : np.random.Generator
+        Random number generator (typically ``np.random.default_rng(seed)``).
+
+    Returns
+    -------
+    np.ndarray of shape (n,) — indices into the original series.
+    """
+    n_blocks = (n + block_size - 1) // block_size  # ceiling division
+    block_starts = rng.integers(0, n - block_size + 1, size=n_blocks)
+    idx = np.concatenate([
+        np.arange(s, min(s + block_size, n)) for s in block_starts
+    ])[:n]  # trim to original length
+    return idx
+
+
 def paired_block_bootstrap(
     returns_a: np.ndarray,
     returns_b: np.ndarray,
@@ -99,18 +133,10 @@ def paired_block_bootstrap(
     obs_b = _sharpe_from_returns(returns_b)
     observed = obs_a - obs_b
 
-    # Number of blocks needed to cover the data
-    n_blocks = (n + block_size - 1) // block_size  # ceiling division
-
-    # Bootstrap
+    # Bootstrap — SAME block indices for both series preserves pairing
     boot_stats = np.empty(n_bootstrap)
     for i in range(n_bootstrap):
-        # Sample block start indices with replacement
-        block_starts = rng.integers(0, n - block_size + 1, size=n_blocks)
-        # Build bootstrap sample using SAME block indices for both series
-        idx = np.concatenate([
-            np.arange(s, min(s + block_size, n)) for s in block_starts
-        ])[:n]  # trim to original length
+        idx = sample_block_indices(n, block_size, rng)
         boot_a = returns_a[idx]
         boot_b = returns_b[idx]
         boot_stats[i] = _sharpe_from_returns(boot_a) - _sharpe_from_returns(boot_b)
