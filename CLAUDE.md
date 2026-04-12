@@ -358,23 +358,20 @@ No version tag without review pass. No push without critical issues resolved.
   - **CLAUDE.md Known limitation 关闭**: "dynamic binding bypass" 不再适用
   - 2631 → 2632 tests (+1: `test_reload_lock_not_module_attr` 防 regression)
 
-- **V2.22 (planned)**: 组合优化看板 — ez.research 前端化
-  - **动机**: 量化团队以看板为主, 不写 notebook/脚本. ez.research 后端能力 (NestedOOS/WalkForward/Bootstrap) 目前只能通过 Python API 使用, 需要前端入口
-  - **核心设计 (第一性原理)**: 不重复组合回测已有能力. 用户先在组合回测 tab 跑各个 sleeve (每个 sleeve 是一个 portfolio run), 然后进"组合优化" tab 勾选已有 run → 后端从 portfolio_runs 读 equity curve → 转 daily returns → 调 ez.research steps. 零数据加载/回测重复
-  - **位置**: PortfolioPanel 第 4 个 sub-tab "组合优化"
-  - **用户流程**: 勾选 2-5 个已有 run → 设 IS/OOS + objectives + baseline → 优化 → 可选 WF 验证 → 可选 bootstrap 显著性 → 导出报告
-  - **后端 API** (3 个新端点, `ez/api/routes/research.py`):
-    - `POST /api/research/optimize` — 从 portfolio_runs 读 returns → NestedOOS 权重优化. 输入: run_ids + labels + is/oos_window + objectives + baseline_weights
-    - `POST /api/research/walk-forward` — 从 portfolio_runs 读 returns → WalkForwardStep. 输入: run_ids + labels + n_splits + train_ratio + objectives + baseline_weights
-    - `POST /api/research/bootstrap` — 从 portfolio_runs 读 returns → PairedBlockBootstrapStep. 输入: run_ids + labels + treatment/control_weights + n_bootstrap + block_size
-  - **前端组件** (PortfolioPanel 内 sub-tab):
-    - Run 选择器: 从历史列表勾选 2-5 个 run, 自动标签 (策略名 → label)
-    - 优化配置面板: objectives 多选 (MaxSharpe/MaxCalmar/MaxSortino/MinCVaR) + baseline 权重 + IS/OOS 日期
-    - NestedOOS 结果表: candidates per-objective (权重/IS Sharpe/OOS Sharpe/MDD/status) + baseline 行
-    - WF 验证面板: 折数/训练比例 input + IS vs OOS Sharpe 柱状图 (ECharts) + OOS 拼接曲线 + degradation 色标 + 折详情展开
-    - Bootstrap 显著性面板: Sharpe 差值 + 95% CI 区间条 + p-value badge + 双组指标对比表
-    - 报告导出: 前端 markdown 拼接 (不需后端 API) + 复制/下载按钮
-  - **不做**: Pipeline builder UI (YAGNI), 独立顶层 tab (导航膨胀), 后端报告 API (前端自己拼更灵活)
+- **V2.22 (planned)**: 统一 OOS 验证面板 — 散落的验证能力集中化
+  - **动机**: 量化团队以看板为主. OOS 验证 (WF/Bootstrap/Monte Carlo/配对对比) 目前散布在 3 个模块 (ez/backtest, ez/portfolio, ez/research), 前端入口也分散在不同 tab. 用户跑完回测后应在同一个面板看到所有验证结果
+  - **问题诊断**: 现有 3 套 WF + 2 套 significance + 1 套 paired bootstrap 各自实现折分割/指标计算/聚合/显著性. 共同部分应抽取为共享层
+  - **后端重构**: `ez/research/validation.py` 共享验证引擎, 包含 `run_validation_suite(returns, config) → ValidationResult`. 内含 walk_forward + bootstrap_ci + monte_carlo_significance + paired_comparison + verdict. 已有 ez/backtest/significance + ez/portfolio/walk_forward::portfolio_significance 改为调用共享层 (保持旧 API 向后兼容)
+  - **后端 API** (1 个综合端点, `ez/api/routes/research.py`):
+    - `POST /api/research/validate` — 输入: run_ids + labels + baseline (可选) + config (wf/bootstrap/mc/objectives). 后端从 portfolio_runs 读 equity curve → 转 daily returns → run_validation_suite. 输出: walk_forward + bootstrap + monte_carlo + comparison + verdict + reasons
+  - **前端位置**: 嵌入 PortfolioRunContent 结果展示区 (不是新 sub-tab, 而是回测结果的一部分)
+  - **前端组件** (嵌入 PortfolioRunContent):
+    - "运行验证" 按钮: 一键跑全部 OOS 检验
+    - Walk-Forward 区域: IS vs OOS Sharpe 柱状图 (ECharts) + OOS 拼接曲线 + degradation 色标 + 折详情展开
+    - 显著性区域: Bootstrap CI 区间条 + Monte Carlo p-value + 综合裁决 badge (pass/warn/fail)
+    - 对比区域 (如果选了 baseline run): Sharpe 差值 + CI + 双组指标对比表
+    - 报告导出: 前端 markdown 拼接 + 复制/下载
+  - **不做**: Pipeline builder UI (YAGNI), 独立顶层 tab (嵌入回测结果更自然), 独立组合优化 tab (验证面板覆盖了核心需求)
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
