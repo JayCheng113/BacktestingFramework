@@ -134,6 +134,7 @@ class WalkForwardStep(ResearchStep):
         folds_results = []
         all_oos_returns = []
         all_is_sharpes = []
+        succeeded_fold_indices: set[int] = set()  # I3 review fix
 
         for fold_idx, (start, train_end, end) in enumerate(boundaries):
             is_data = clean_returns.iloc[start:train_end]
@@ -187,6 +188,7 @@ class WalkForwardStep(ResearchStep):
                 # Use best candidate's weights for OOS aggregation
                 oos_port = self._weighted_returns(oos_data, best_cand.weights)
                 all_oos_returns.append(oos_port)
+                succeeded_fold_indices.add(fold_idx)  # I3: track for baseline parity
 
             # Baseline per fold
             baseline_is = None
@@ -243,12 +245,14 @@ class WalkForwardStep(ResearchStep):
                 else:
                     aggregate["degradation"] = 0.0
 
-        # Baseline aggregate: concatenate OOS returns and recompute
-        # (same methodology as optimized path — NOT per-fold Sharpe averaging)
+        # Baseline aggregate: concatenate OOS returns and recompute.
+        # I3 review fix: only include folds where the optimizer succeeded,
+        # so baseline and optimized cover the exact same time windows.
         if self.baseline_weights and all_oos_returns:
             bl_oos_parts = []
-            boundaries_used = self._compute_fold_boundaries(n_rows)
-            for fold_idx, (start, train_end, end) in enumerate(boundaries_used):
+            for fold_idx, (start, train_end, end) in enumerate(boundaries):
+                if fold_idx not in succeeded_fold_indices:
+                    continue  # skip folds where optimizer failed
                 oos_data = clean_returns.iloc[train_end:end]
                 if len(oos_data) >= 2:
                     bl_port = self._weighted_returns(oos_data, self.baseline_weights)

@@ -869,9 +869,14 @@ def _make_lock_accessor():
     ``sandbox.__dict__`` and cannot be accessed via
     ``getattr(sandbox, '_reload_lock')`` or any attribute traversal.
     The only way to get the lock is to call ``_get_reload_lock()``,
-    which is itself a module-level function but its ``__closure__``
-    cells are not inspectable by the AST-checked user code (the
-    ``inspect`` and ``types`` modules are both forbidden imports).
+    which is itself a module-level function. Its ``__closure__``
+    cells are technically accessible from Python via
+    ``_get_reload_lock.__closure__[0].cell_contents``, but this
+    requires ``__closure__`` dunder access which is independently
+    blocked by the AST forbidden-dunder check. Three defense layers:
+    (1) ``ez.agent.sandbox`` is a forbidden module import,
+    (2) ``__closure__`` dunder access is blocked by AST,
+    (3) the lock is not a module-level attribute.
     """
     lock = threading.Lock()
 

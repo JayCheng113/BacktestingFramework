@@ -13,12 +13,16 @@ V2.20.0 MVP scope: single-stock strategies only. Portfolio strategies
 will be handled by a separate ``RunPortfolioStep`` in V2.20.x.
 """
 from __future__ import annotations
+
+import logging
 from typing import Any
 
 import pandas as pd
 
 from ..pipeline import ResearchStep
 from ..context import PipelineContext
+
+logger = logging.getLogger(__name__)
 
 
 class RunStrategiesStep(ResearchStep):
@@ -101,6 +105,16 @@ class RunStrategiesStep(ResearchStep):
         returns_df = pd.DataFrame(returns_dict)
         existing_returns = context.artifacts.get("returns")
         if existing_returns is not None and isinstance(existing_returns, pd.DataFrame):
+            # I2 review fix: drop duplicate columns before join to avoid
+            # pandas suffixing (Alpha_x / Alpha_y) which breaks downstream.
+            overlap = set(returns_df.columns) & set(existing_returns.columns)
+            if overlap:
+                logger.warning(
+                    "RunStrategiesStep: labels %s already exist in returns — "
+                    "overwriting. Use distinct labels to avoid data loss.",
+                    sorted(overlap),
+                )
+                existing_returns = existing_returns.drop(columns=list(overlap))
             context.artifacts["returns"] = existing_returns.join(returns_df, how="outer")
         else:
             context.artifacts["returns"] = returns_df
