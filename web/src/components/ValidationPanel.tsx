@@ -71,11 +71,13 @@ export function ValidationPanel({ runId }: Props) {
     listPortfolioRuns(50, 0)
       .then(r => setRunList(r.data as HistoryRun[]))
       .catch((e) => {
-        // S-1: Log for debugging — dropdown will be empty.
-        // User can still run validation without comparison.
+        // V2.23 review I4: V2.16.1 "silent catch 清零" principle —
+        // notify user why baseline dropdown is empty. Validation still
+        // works without comparison.
         console.warn('ValidationPanel: listPortfolioRuns failed', e)
+        toast.showToast('warning', '无法加载基线列表, 仍可进行单策略验证')
       })
-  }, [])
+  }, [toast])
 
   // I-1: clear stale result when user changes baseline without re-running.
   // Prevents ComparisonSection from showing data from a previous baseline.

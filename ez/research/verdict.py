@@ -36,7 +36,10 @@ class VerdictThresholds:
     min_deflated_sharpe_fail: float = 0.30
 
     # Sample size
-    require_min_btl_pass: bool = True      # fail if backtest < MinBTL
+    # S7 rename: this flag controls whether the MinBTL check is INCLUDED
+    # at all (not whether passing is required — passing vs warning is
+    # determined by threshold logic below).
+    include_min_btl_check: bool = True
 
     # Annual stability
     min_profitable_ratio: float = 0.60     # warn if <0.60, fail if <0.40
@@ -225,7 +228,7 @@ def compute_verdict(
 
     # 6. Minimum backtest length — skip when Sharpe ≤ 0 (redundant with
     # other checks that already fail for unprofitable strategies).
-    if min_btl_result is not None and t.require_min_btl_pass:
+    if min_btl_result is not None and t.include_min_btl_check:
         actual = min_btl_result.get("actual_years", 0)
         required = min_btl_result.get("min_btl_years")
         if required is None:

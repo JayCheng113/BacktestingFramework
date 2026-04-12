@@ -185,13 +185,24 @@ def deflated_sharpe_ratio(
     kurt = float(np.mean(centered**4) / std**4) if std > 0 else 3.0
     excess_kurt = kurt - 3.0
 
-    # Expected max Sharpe under null (Bonferroni approx via sqrt(2 log N))
-    # For n_trials=1, reduces to sr_benchmark.
+    # Expected max Sharpe under null (Bailey & de Prado 2014 Eq. 10):
+    #   E[max SR_N] ≈ (1-γ)·Φ⁻¹(1 - 1/N) + γ·Φ⁻¹(1 - 1/(N·e))
+    # where γ = 0.5772 is Euler-Mascheroni. This is the Gumbel-based
+    # expected maximum of N iid standard normal samples.
+    # Review I1 fix: prior version used `sqrt((1-γ)·2·log N)` which was
+    # neither the full formula nor the standard `sqrt(2 log N)` approx,
+    # and was inconsistent with `minimum_backtest_length` below.
     if n_trials > 1:
+        from math import e as math_e
+        from scipy.stats import norm
         gamma_euler = 0.5772156649
-        expected_max_daily = sr_benchmark / np.sqrt(252) + np.sqrt(
-            (1 - gamma_euler) * (2 * np.log(n_trials))
-        ) / np.sqrt(252)
+        # All daily-scale (SR units); annualize at the end via sqrt(252).
+        max_sr_daily_null = (
+            (1 - gamma_euler) * float(norm.ppf(1 - 1 / n_trials))
+            + gamma_euler * float(norm.ppf(1 - 1 / (n_trials * math_e)))
+        )
+        # sr_benchmark is annualized — convert to daily before adding.
+        expected_max_daily = sr_benchmark / np.sqrt(252) + max_sr_daily_null / np.sqrt(252)
     else:
         expected_max_daily = sr_benchmark / np.sqrt(252)
 

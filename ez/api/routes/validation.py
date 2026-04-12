@@ -138,8 +138,18 @@ def _compute_bootstrap_on_single(
     ci_lower = float(np.percentile(boot_sharpes, 2.5))
     ci_upper = float(np.percentile(boot_sharpes, 97.5))
 
-    # Monte Carlo p-value (two-sided, centered under H0: true Sharpe = 0).
-    # "How often, under H0, would we see |SR| >= observed by chance?"
+    # Two-sided bootstrap hypothesis test for H0: true Sharpe = 0.
+    # Classical construction (Efron & Tibshirani 1993, Ch 15):
+    #     p̂ = #{|boot_stat - mean(boot_stats)| >= |observed - null_value|} / B
+    # For null_value=0:
+    #     p̂ = #{|boot_stat - mean(boot_stats)| >= |observed|} / B
+    # The centering simulates the null: under H0, the sampling distribution
+    # would be centered at 0, and we ask how often a sample as extreme as
+    # the observed statistic would arise by chance.
+    # Note: this is the pivot-style bootstrap test, not the "center the
+    # data and resample" variant — they are asymptotically equivalent for
+    # statistics of the mean, and the pivot version is simpler to implement
+    # correctly with block bootstrap (preserving autocorrelation).
     # Two-sided is more conservative than one-sided for a "Sharpe > 0"
     # test — effectively requires p_one_sided <= 0.025 at alpha=0.05.
     centered = boot_sharpes - np.mean(boot_sharpes)
