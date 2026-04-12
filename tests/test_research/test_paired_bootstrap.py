@@ -322,3 +322,84 @@ class TestStatisticalProperties:
         # Large blocks should generally produce wider CIs
         # (not guaranteed for every seed, but very likely)
         assert width_large > width_small * 0.8  # relaxed check
+
+
+# ============================================================
+# Review round fixes: S1, S3, S4
+# ============================================================
+
+class TestReviewSuggestions:
+    def test_s1_store_distribution_opt_in(self):
+        """S1: store_distribution=True stores the bootstrap distribution."""
+        returns = _make_returns(200, 2)
+        ctx = _make_context(returns)
+        step = PairedBlockBootstrapStep(
+            treatment_weights={"A": 0.6, "B": 0.4},
+            control_weights={"A": 0.5, "B": 0.5},
+            n_bootstrap=500,
+            block_size=10,
+            store_distribution=True,
+        )
+        out = step.run(ctx)
+        br = out.artifacts["bootstrap_results"]
+        assert "distribution" in br
+        assert isinstance(br["distribution"], list)  # JSON-safe
+        assert len(br["distribution"]) == 500
+
+    def test_s1_no_distribution_by_default(self):
+        """S1: distribution NOT stored by default."""
+        returns = _make_returns(200, 2)
+        ctx = _make_context(returns)
+        step = PairedBlockBootstrapStep(
+            treatment_weights={"A": 0.6, "B": 0.4},
+            control_weights={"A": 0.5, "B": 0.5},
+            n_bootstrap=200,
+            block_size=10,
+        )
+        out = step.run(ctx)
+        assert "distribution" not in out.artifacts["bootstrap_results"]
+
+    def test_s3_mixed_origin_returns_merge_cleanly(self):
+        """S3: returns from different sources (portfolio vs single-stock)
+        should merge cleanly via outer join despite different index origins."""
+        import pandas as pd
+        from datetime import date as d
+        from ez.research.steps.run_portfolio import RunPortfolioStep
+
+        # Simulate portfolio returns: DatetimeIndex from date objects
+        port_dates = pd.DatetimeIndex([d(2024, 1, i) for i in range(2, 20)])
+        port_rets = pd.DataFrame(
+            {"Alpha": np.random.default_rng(1).normal(0, 0.01, len(port_dates))},
+            index=port_dates,
+        )
+        # Simulate single-stock returns: DatetimeIndex from pd.Timestamp
+        stock_dates = pd.date_range("2024-01-01", periods=25, freq="B")
+        stock_rets = pd.DataFrame(
+            {"Bond": np.random.default_rng(2).normal(0, 0.005, len(stock_dates))},
+            index=stock_dates,
+        )
+        # Outer join should work without dtype errors
+        merged = port_rets.join(stock_rets, how="outer")
+        assert "Alpha" in merged.columns
+        assert "Bond" in merged.columns
+        # No suffixed columns
+        assert "Alpha_x" not in merged.columns
+        assert "Bond_x" not in merged.columns
+
+    def test_s4_nan_warning_on_high_nan_column(self, caplog):
+        """S4: >50% NaN in a weighted column triggers warning."""
+        import logging
+        returns = _make_returns(200, 2)
+        # Make column A mostly NaN
+        returns.iloc[:150, 0] = np.nan  # 75% NaN
+        ctx = _make_context(returns)
+        step = PairedBlockBootstrapStep(
+            treatment_weights={"A": 0.5, "B": 0.5},
+            control_weights={"A": 0.5, "B": 0.5},
+            n_bootstrap=200,
+            block_size=10,
+        )
+        with caplog.at_level(logging.WARNING):
+            step.run(ctx)
+        assert "NaN" in caplog.text
+        assert "75%" in caplog.text or "distort" in caplog.text

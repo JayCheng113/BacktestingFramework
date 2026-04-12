@@ -108,7 +108,14 @@ class WalkForwardStep(ResearchStep):
         port = pd.Series(0.0, index=returns.index)
         for label, w in weights.items():
             if label in returns.columns:
-                port = port + returns[label].fillna(0.0) * w
+                col = returns[label]
+                nan_frac = col.isna().mean()
+                if nan_frac > 0.5:
+                    logger.warning(
+                        "WalkForwardStep: column '%s' has %.0f%% NaN "
+                        "(fillna(0) may distort results)", label, nan_frac * 100,
+                    )
+                port = port + col.fillna(0.0) * w
         return port
 
     def run(self, context: PipelineContext) -> PipelineContext:

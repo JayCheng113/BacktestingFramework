@@ -167,6 +167,7 @@ class PairedBlockBootstrapStep(ResearchStep):
         block_size: int = 21,
         seed: int = 42,
         window: tuple[str, str] | None = None,
+        store_distribution: bool = False,
     ):
         """
         Parameters
@@ -186,6 +187,10 @@ class PairedBlockBootstrapStep(ResearchStep):
         window : (start, end), optional
             Date window to slice returns before bootstrapping.
             If None, uses the full returns DataFrame.
+        store_distribution : bool
+            If True, store the full bootstrap distribution array in
+            ``bootstrap_results['distribution']`` (for histograms / diagnostics).
+            Default False to save memory.
         """
         if not treatment_weights:
             raise ValueError("treatment_weights must not be empty")
@@ -204,6 +209,7 @@ class PairedBlockBootstrapStep(ResearchStep):
         self.block_size = block_size
         self.seed = seed
         self.window = window
+        self.store_distribution = store_distribution
 
     def _weighted_returns(
         self, returns: pd.DataFrame, weights: dict[str, float]
@@ -211,7 +217,14 @@ class PairedBlockBootstrapStep(ResearchStep):
         port = pd.Series(0.0, index=returns.index)
         for label, w in weights.items():
             if label in returns.columns:
-                port = port + returns[label].fillna(0.0) * w
+                col = returns[label]
+                nan_frac = col.isna().mean()
+                if nan_frac > 0.5:
+                    logger.warning(
+                        "PairedBlockBootstrapStep: column '%s' has %.0f%% NaN "
+                        "(fillna(0) may distort results)", label, nan_frac * 100,
+                    )
+                port = port + col.fillna(0.0) * w
         return port
 
     def _slice(self, returns: pd.DataFrame) -> pd.DataFrame:
@@ -295,4 +308,8 @@ class PairedBlockBootstrapStep(ResearchStep):
                 else self.window
             ),
         }
+        if self.store_distribution:
+            context.artifacts["bootstrap_results"]["distribution"] = (
+                result["distribution"].tolist()  # JSON-safe list
+            )
         return context
