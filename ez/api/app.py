@@ -118,7 +118,7 @@ async def ez_error_handler(request: Request, exc: EzTradingError):
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-from ez.api.routes import market_data, backtest, factors, experiments, candidates, code, chat, settings, research, portfolio, fundamental, live  # noqa: E402
+from ez.api.routes import market_data, backtest, factors, experiments, candidates, code, chat, settings, research, portfolio, fundamental, live, validation  # noqa: E402
 app.include_router(market_data.router, prefix="/api/market-data", tags=["market-data"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
 app.include_router(factors.router, prefix="/api/factors", tags=["factors"])
@@ -131,6 +131,7 @@ app.include_router(research.router, prefix="/api/research", tags=["research"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(fundamental.router, prefix="/api/fundamental", tags=["fundamental"])
 app.include_router(live.router, prefix="/api/live", tags=["live"])
+app.include_router(validation.router, prefix="/api/research", tags=["validation"])
 
 
 @app.get("/api/health")

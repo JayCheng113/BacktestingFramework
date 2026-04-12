@@ -16,7 +16,7 @@ sharpe/sortino with ``ddof=1``), so V2.19.0/V2.20.0 metric semantics
 flow through unchanged. Only the input/output shapes are different.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -118,3 +118,220 @@ def compute_cvar(returns: pd.Series, alpha: float = 0.05) -> Optional[float]:
     if len(tail) == 0:
         return float(threshold)
     return float(tail.mean())
+
+
+def deflated_sharpe_ratio(
+    returns: pd.Series,
+    n_trials: int = 1,
+    sr_benchmark: float = 0.0,
+) -> Optional[dict[str, float]]:
+    """Deflated Sharpe Ratio (de Prado, 2014).
+
+    Adjusts observed Sharpe for:
+    1. Number of trials tested (multiple testing penalty)
+    2. Non-normality (skewness and kurtosis)
+    3. Sample size
+
+    Returns the probability that the true Sharpe exceeds `sr_benchmark`.
+    A DSR close to 1.0 means the strategy is very likely to have genuine
+    alpha; close to 0.5 means the observed Sharpe is likely lucky noise.
+
+    Formula:
+        DSR = Φ( (SR - SR_0) × √(n-1) /
+                 √(1 - skew × SR + (kurt - 1) / 4 × SR²) )
+
+    where SR_0 = sr_benchmark + expected max SR under null with n_trials.
+    If n_trials > 1, we apply a Bonferroni-like adjustment:
+        SR_0 ≈ sr_benchmark + √(2 × log(n_trials))
+
+    Parameters
+    ----------
+    returns : pd.Series
+        Daily returns.
+    n_trials : int
+        Number of strategies / parameter combinations tested. 1 = no
+        multiple-testing adjustment.
+    sr_benchmark : float
+        Null-hypothesis Sharpe (typically 0.0 for "alpha > 0" test).
+
+    Returns
+    -------
+    dict with keys:
+        sharpe : float — observed annualized Sharpe
+        deflated_sharpe : float — DSR probability (0 to 1)
+        expected_max_sr : float — SR_0 threshold adjusted for n_trials
+        skew, kurt : float — daily return moments
+    None if insufficient data.
+    """
+    arr = returns.dropna().to_numpy()
+    n = len(arr)
+    if n < 30:
+        return None
+
+    mean = float(np.mean(arr))
+    std = float(np.std(arr, ddof=1))
+    if std < 1e-12:
+        return None
+
+    # Daily Sharpe → annualized
+    sharpe_daily = mean / std
+    sharpe_annual = sharpe_daily * np.sqrt(252)
+
+    # Higher moments (on daily returns)
+    centered = arr - mean
+    skew = float(np.mean(centered**3) / std**3) if std > 0 else 0.0
+    # Kurtosis (non-excess, normal = 3)
+    kurt = float(np.mean(centered**4) / std**4) if std > 0 else 3.0
+
+    # Expected max Sharpe under null (Bonferroni approx via sqrt(2 log N))
+    # For n_trials=1, reduces to sr_benchmark.
+    if n_trials > 1:
+        gamma_euler = 0.5772156649
+        expected_max_daily = sr_benchmark / np.sqrt(252) + np.sqrt(
+            (1 - gamma_euler) * (2 * np.log(n_trials))
+        ) / np.sqrt(252)
+    else:
+        expected_max_daily = sr_benchmark / np.sqrt(252)
+
+    expected_max_annual = expected_max_daily * np.sqrt(252)
+
+    # DSR denominator
+    denom_sq = 1.0 - skew * sharpe_daily + ((kurt - 1) / 4.0) * sharpe_daily**2
+    if denom_sq <= 0:
+        # Pathological moments — denominator undefined
+        return {
+            "sharpe": sharpe_annual,
+            "deflated_sharpe": 0.0,
+            "expected_max_sr": expected_max_annual,
+            "skew": skew,
+            "kurt": kurt,
+        }
+
+    # Daily-frame test statistic
+    z = (sharpe_daily - expected_max_daily) * np.sqrt(n - 1) / np.sqrt(denom_sq)
+
+    # Standard normal CDF
+    from math import erf
+    dsr = 0.5 * (1 + erf(z / np.sqrt(2)))
+
+    return {
+        "sharpe": float(sharpe_annual),
+        "deflated_sharpe": float(dsr),
+        "expected_max_sr": float(expected_max_annual),
+        "skew": float(skew),
+        "kurt": float(kurt),
+    }
+
+
+def minimum_backtest_length(
+    sharpe: float,
+    alpha: float = 0.05,
+    n_trials: int = 1,
+) -> Optional[float]:
+    """Minimum Backtest Length (de Prado).
+
+    Minimum years of data needed for an observed Sharpe to be
+    statistically significant at confidence level (1 - alpha), given
+    n_trials has been searched.
+
+    Formula (simplified, assumes normal returns):
+        MinBTL ≈ (z_alpha / SR)² × (1 + adj_for_trials) / trading_days
+
+    where adj_for_trials accounts for multiple-testing:
+        SR_threshold = SR × √(1 - (1-γ) + γ×√(2 log n_trials) / SR)
+
+    For n_trials=1, MinBTL ≈ (z_alpha / SR)² years (simplified).
+
+    Parameters
+    ----------
+    sharpe : float
+        Annualized Sharpe ratio (observed).
+    alpha : float
+        Significance level (default 0.05 → 95% confidence).
+    n_trials : int
+        Number of strategies tested.
+
+    Returns
+    -------
+    Minimum backtest length in years. None if sharpe <= 0 (no valid
+    MinBTL for unprofitable strategies).
+    """
+    if sharpe <= 0:
+        return None
+
+    # One-sided critical value
+    from scipy.stats import norm
+    z_alpha = float(norm.ppf(1 - alpha))
+
+    # Basic MinBTL (no multiple-testing)
+    years_basic = (z_alpha / sharpe) ** 2
+
+    if n_trials > 1:
+        # Adjust for multiple testing (Bonferroni-like):
+        # require SR > √(2 log N) under null
+        multiple_adj = np.sqrt(2 * np.log(n_trials))
+        if sharpe <= multiple_adj:
+            return None  # not enough evidence regardless of length
+        # Conservative adjustment
+        return float(years_basic * (1 + multiple_adj / sharpe))
+
+    return float(years_basic)
+
+
+def annual_breakdown(returns: pd.Series) -> dict[str, Any]:
+    """Split a daily-returns Series by calendar year and compute per-year metrics.
+
+    Returns a dict with:
+        per_year : list[dict] — per-year {year, sharpe, ret, mdd, n_days}
+        worst_year : int | None — year with lowest Sharpe
+        best_year : int | None — year with highest Sharpe
+        profitable_ratio : float — fraction of years with positive return
+        consistency_score : float — min(0, per-year Sharpe) count / total years
+    """
+    clean = returns.dropna()
+    if len(clean) == 0 or not isinstance(clean.index, pd.DatetimeIndex):
+        return {
+            "per_year": [],
+            "worst_year": None,
+            "best_year": None,
+            "profitable_ratio": 0.0,
+            "consistency_score": 0.0,
+        }
+
+    per_year: list[dict[str, Any]] = []
+    grouped = clean.groupby(clean.index.year)
+    for year, group in grouped:
+        if len(group) < 5:
+            continue  # skip tiny partial years
+        metrics = compute_basic_metrics(group)
+        if metrics is None:
+            continue
+        per_year.append({
+            "year": int(year),
+            "sharpe": metrics["sharpe"],
+            "ret": metrics["ret"],
+            "mdd": metrics["dd"],
+            "n_days": len(group),
+        })
+
+    if not per_year:
+        return {
+            "per_year": [],
+            "worst_year": None,
+            "best_year": None,
+            "profitable_ratio": 0.0,
+            "consistency_score": 0.0,
+        }
+
+    sharpes = [y["sharpe"] for y in per_year]
+    worst_idx = int(np.argmin(sharpes))
+    best_idx = int(np.argmax(sharpes))
+    n_profitable = sum(1 for y in per_year if y["ret"] > 0)
+
+    return {
+        "per_year": per_year,
+        "worst_year": per_year[worst_idx]["year"],
+        "best_year": per_year[best_idx]["year"],
+        "profitable_ratio": n_profitable / len(per_year),
+        "consistency_score": sum(1 for s in sharpes if s > 0) / len(sharpes),
+    }
