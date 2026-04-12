@@ -182,6 +182,44 @@ def test_raises_when_universe_data_missing():
 # Pipeline integration
 # ============================================================
 
+def test_label_map_maps_label_to_different_symbol():
+    """V2.20.1 label_map: label != symbol."""
+    ctx = _make_context({
+        "SYM_X": _make_df("2024-01-01", 100, seed=1),
+        "SYM_Y": _make_df("2024-01-01", 100, seed=2),
+    })
+    step = RunStrategiesStep(
+        strategies={
+            "Alpha": _BuyHoldStrategy(),  # label = "Alpha"
+            "Bond": _BuyHoldStrategy(),   # label = "Bond"
+        },
+        label_map={
+            "Alpha": "SYM_X",  # map to actual symbol
+            "Bond": "SYM_Y",
+        },
+    )
+    out = step.run(ctx)
+    returns_df = out.artifacts["returns"]
+    # Columns should be the LABELS, not the symbols
+    assert set(returns_df.columns) == {"Alpha", "Bond"}
+    # Metrics keyed by labels too
+    assert "Alpha" in out.artifacts["metrics"]
+    assert "Bond" in out.artifacts["metrics"]
+
+
+def test_label_map_missing_symbol_skips():
+    """label_map maps to a symbol not in universe_data → skip with message."""
+    ctx = _make_context({"SYM_X": _make_df("2024-01-01", 100)})
+    step = RunStrategiesStep(
+        strategies={"A": _BuyHoldStrategy(), "B": _BuyHoldStrategy()},
+        label_map={"A": "SYM_X", "B": "MISSING_SYM"},
+    )
+    out = step.run(ctx)
+    assert set(out.artifacts["returns"].columns) == {"A"}
+    skipped = out.artifacts["run_strategies_skipped"]
+    assert any(label == "B" and "MISSING_SYM" in reason for label, reason in skipped)
+
+
 def test_pipeline_chains_data_load_and_run_strategies(monkeypatch):
     """End-to-end via pipeline: monkey-patched data load → real strategy run."""
     from ez.research.steps.data_load import DataLoadStep

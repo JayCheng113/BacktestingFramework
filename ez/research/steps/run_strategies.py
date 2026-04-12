@@ -29,23 +29,30 @@ class RunStrategiesStep(ResearchStep):
         self,
         strategies: dict[str, Any],
         initial_capital: float = 1_000_000.0,
+        label_map: dict[str, str] | None = None,
     ):
         """
         Parameters
         ----------
         strategies : dict[label → Strategy instance]
-            The label is the column name in the resulting returns frame
-            AND the symbol key into ``universe_data``. If you want a
-            different label than the symbol, set the strategy's symbol
-            internally and use a custom label here — but in that case
-            also pass ``symbol_for_label`` mapping (V2.20.x).
+            The label is the column name in the resulting returns frame.
         initial_capital : float
             Per-strategy starting capital. Default 1e6.
+        label_map : dict[label → symbol], optional
+            V2.20.1 P3-2 follow-up: maps each label to the
+            ``universe_data`` symbol key. When not provided, the label
+            IS the symbol key (V2.20.0 behavior).
+
+            Example: ``label_map={"A": "EtfRotateCombo", "E": "511010.SH", "F": "518880.SH"}``
+            makes the output returns DataFrame have columns
+            ``["A", "E", "F"]`` while fetching data from symbols
+            ``["EtfRotateCombo", "511010.SH", "518880.SH"]``.
         """
         if not strategies:
             raise ValueError("RunStrategiesStep requires at least one strategy")
         self.strategies = dict(strategies)
         self.initial_capital = float(initial_capital)
+        self.label_map = dict(label_map) if label_map else None
 
     def _run_one(self, df: pd.DataFrame, strategy) -> tuple[pd.Series, dict, pd.Series]:
         """Run a single backtest. Returns (daily_returns, metrics, equity_curve).
@@ -70,11 +77,13 @@ class RunStrategiesStep(ResearchStep):
         skipped: list[tuple[str, str]] = []
 
         for label, strategy in self.strategies.items():
-            if label not in ud:
-                skipped.append((label, f"symbol '{label}' not in universe_data"))
+            # V2.20.1: label_map allows label != symbol
+            symbol = (self.label_map.get(label, label) if self.label_map else label)
+            if symbol not in ud:
+                skipped.append((label, f"symbol '{symbol}' not in universe_data"))
                 continue
             try:
-                rets, metrics, equity = self._run_one(ud[label], strategy)
+                rets, metrics, equity = self._run_one(ud[symbol], strategy)
             except Exception as e:
                 skipped.append((label, f"{type(e).__name__}: {e}"))
                 continue
