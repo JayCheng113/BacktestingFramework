@@ -131,7 +131,7 @@ app.include_router(research.router, prefix="/api/research", tags=["research"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(fundamental.router, prefix="/api/fundamental", tags=["fundamental"])
 app.include_router(live.router, prefix="/api/live", tags=["live"])
-app.include_router(validation.router, prefix="/api/research", tags=["validation"])
+app.include_router(validation.router, prefix="/api/validation", tags=["validation"])
 
 
 @app.get("/api/health")

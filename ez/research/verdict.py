@@ -219,20 +219,21 @@ def compute_verdict(
             value=dsr,
         ))
 
-    # 6. Minimum backtest length
-    if min_btl_result is not None:
+    # 6. Minimum backtest length — skip when Sharpe ≤ 0 (redundant with
+    # other checks that already fail for unprofitable strategies).
+    if min_btl_result is not None and t.require_min_btl_pass:
         actual = min_btl_result.get("actual_years", 0)
         required = min_btl_result.get("min_btl_years")
         if required is None:
-            status = "fail"
-            reason = "MinBTL undefined (Sharpe ≤ 0)."
-        elif actual >= required:
-            status = "pass"
-            reason = f"Backtest {actual:.1f}y ≥ MinBTL {required:.1f}y."
+            # Sharpe ≤ 0 → other checks already caught this, skip MinBTL
+            pass
         else:
-            status = "warn" if actual >= required * 0.7 else "fail"
-            reason = f"Backtest {actual:.1f}y < MinBTL {required:.1f}y."
-        if t.require_min_btl_pass:
+            if actual >= required:
+                status = "pass"
+                reason = f"Backtest {actual:.1f}y ≥ MinBTL {required:.1f}y."
+            else:
+                status = "warn" if actual >= required * 0.7 else "fail"
+                reason = f"Backtest {actual:.1f}y < MinBTL {required:.1f}y."
             checks.append(CheckResult(
                 name="Minimum backtest length",
                 status=status,

@@ -180,8 +180,10 @@ def deflated_sharpe_ratio(
     # Higher moments (on daily returns)
     centered = arr - mean
     skew = float(np.mean(centered**3) / std**3) if std > 0 else 0.0
-    # Kurtosis (non-excess, normal = 3)
+    # Kurtosis (non-excess, normal = 3). For DSR we need EXCESS kurtosis
+    # (γ₄ = kurt - 3) per Bailey & de Prado (2014) Eq. 9.
     kurt = float(np.mean(centered**4) / std**4) if std > 0 else 3.0
+    excess_kurt = kurt - 3.0
 
     # Expected max Sharpe under null (Bonferroni approx via sqrt(2 log N))
     # For n_trials=1, reduces to sr_benchmark.
@@ -195,8 +197,9 @@ def deflated_sharpe_ratio(
 
     expected_max_annual = expected_max_daily * np.sqrt(252)
 
-    # DSR denominator
-    denom_sq = 1.0 - skew * sharpe_daily + ((kurt - 1) / 4.0) * sharpe_daily**2
+    # DSR denominator (Bailey & de Prado 2014 Eq. 9):
+    #   √(1 - skew × SR + (γ₄ / 4) × SR²)   where γ₄ = excess kurtosis
+    denom_sq = 1.0 - skew * sharpe_daily + (excess_kurt / 4.0) * sharpe_daily**2
     if denom_sq <= 0:
         # Pathological moments — denominator undefined
         return {
@@ -205,6 +208,8 @@ def deflated_sharpe_ratio(
             "expected_max_sr": expected_max_annual,
             "skew": skew,
             "kurt": kurt,
+            "excess_kurt": excess_kurt,
+            "warning": "DSR undefined: denominator non-positive due to extreme moments",
         }
 
     # Daily-frame test statistic
@@ -220,6 +225,7 @@ def deflated_sharpe_ratio(
         "expected_max_sr": float(expected_max_annual),
         "skew": float(skew),
         "kurt": float(kurt),
+        "excess_kurt": float(excess_kurt),
     }
 
 

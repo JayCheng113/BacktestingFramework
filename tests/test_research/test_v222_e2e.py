@@ -1,7 +1,7 @@
 """End-to-end tests for V2.22 validation flow.
 
 Uses REAL PortfolioStore (in-memory DuckDB) to verify the full path:
-  save portfolio run → POST /api/research/validate → full verdict
+  save portfolio run → POST /api/validation/validate → full verdict
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ class TestE2EValidationFlow:
         run_data = _build_run_data("e2e_profitable", seed=42, mean=0.0008)
         store.save_run(run_data)
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "e2e_profitable",
             "n_bootstrap": 500,
             "block_size": 21,
@@ -106,7 +106,7 @@ class TestE2EValidationFlow:
         # Control: weaker strategy
         store.save_run(_build_run_data("e2e_control", seed=2, mean=0.0003))
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "e2e_treatment",
             "baseline_run_id": "e2e_control",
             "n_bootstrap": 500,
@@ -129,7 +129,7 @@ class TestE2EValidationFlow:
         run_data = _build_run_data("e2e_losing", seed=123, mean=-0.0005)
         store.save_run(run_data)
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "e2e_losing",
             "n_bootstrap": 500,
             "block_size": 21,
@@ -157,7 +157,7 @@ class TestE2EValidationFlow:
         }
         store.update_wf_metrics("e2e_with_wf", wf_data)
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "e2e_with_wf",
             "n_bootstrap": 500,
         })
@@ -184,7 +184,7 @@ class TestE2EFrontendSimulation:
         store.save_run(_build_run_data("fe_sim_1", seed=42))
 
         # Minimum possible request
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "fe_sim_1",
         })
         assert resp.status_code == 200
@@ -195,7 +195,7 @@ class TestE2EFrontendSimulation:
         store = PortfolioStore(in_memory_db)
         store.save_run(_build_run_data("fe_sim_2", seed=42))
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "fe_sim_2",
             "n_bootstrap": 200,
         })
@@ -220,7 +220,7 @@ class TestE2EFrontendSimulation:
         store = PortfolioStore(in_memory_db)
         store.save_run(_build_run_data("fe_sim_3", seed=42))
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "fe_sim_3",
             "n_bootstrap": 200,
         })
@@ -249,7 +249,7 @@ class TestE2EFrontendSimulation:
         store = PortfolioStore(in_memory_db)
         store.save_run(_build_run_data("fe_sim_4", seed=42, n_days=1200))
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "fe_sim_4",
             "n_bootstrap": 200,
         })
@@ -279,7 +279,7 @@ class TestE2EFrontendSimulation:
         store.save_run(_build_run_data("fe_baseline", seed=2, mean=0.0003))
 
         # User selects baseline and clicks validate
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "fe_main",
             "baseline_run_id": "fe_baseline",
             "n_bootstrap": 300,
@@ -301,7 +301,7 @@ class TestE2EFrontendSimulation:
 
     def test_error_response_shape(self, in_memory_db, client):
         """Frontend shows toast on 404/422. Verify error shape."""
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "nonexistent_run",
             "n_bootstrap": 200,
         })
@@ -316,7 +316,7 @@ class TestE2EFrontendSimulation:
         store = PortfolioStore(in_memory_db)
         store.save_run(_build_run_data("fe_json", seed=42))
 
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "fe_json",
             "baseline_run_id": None,
             "n_bootstrap": 200,

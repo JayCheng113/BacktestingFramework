@@ -1,4 +1,4 @@
-"""Tests for V2.22 /api/research/validate endpoint.
+"""Tests for V2.22 /api/validation/validate endpoint.
 
 Uses TestClient + in-memory portfolio_runs mocking.
 """
@@ -70,7 +70,7 @@ def mock_store(monkeypatch, sample_run_data):
 
 class TestValidateEndpoint:
     def test_happy_path(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "test_run_001",
             "n_bootstrap": 200,
             "block_size": 21,
@@ -85,7 +85,7 @@ class TestValidateEndpoint:
         assert "verdict" in data
 
     def test_404_for_missing_run(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "nonexistent",
             "n_bootstrap": 200,
             "block_size": 21,
@@ -93,7 +93,7 @@ class TestValidateEndpoint:
         assert resp.status_code == 404
 
     def test_significance_structure(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "test_run_002",
             "n_bootstrap": 200,
         })
@@ -106,7 +106,7 @@ class TestValidateEndpoint:
         assert 0 <= sig["p_value"] <= 1
 
     def test_verdict_structure(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "test_run_003",
             "n_bootstrap": 200,
         })
@@ -118,7 +118,7 @@ class TestValidateEndpoint:
         assert isinstance(v["checks"], list)
 
     def test_comparison_when_baseline_provided(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "test_run_004",
             "baseline_run_id": "baseline_run",
             "n_bootstrap": 200,
@@ -135,7 +135,7 @@ class TestValidateEndpoint:
         assert "control_metrics" in cmp
 
     def test_comparison_none_when_no_baseline(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "test_run_005",
             "n_bootstrap": 200,
         })
@@ -143,7 +143,7 @@ class TestValidateEndpoint:
         assert resp.json()["comparison"] is None
 
     def test_annual_breakdown_populated(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "test_run_006",
             "n_bootstrap": 200,
         })
@@ -153,7 +153,7 @@ class TestValidateEndpoint:
         assert len(data["annual"]["per_year"]) >= 3
 
     def test_invalid_n_bootstrap(self, client, mock_store):
-        resp = client.post("/api/research/validate", json={
+        resp = client.post("/api/validation/validate", json={
             "run_id": "x",
             "n_bootstrap": 50,  # below ge=100
         })
@@ -161,13 +161,13 @@ class TestValidateEndpoint:
 
     def test_n_trials_affects_deflated_sharpe(self, client, mock_store):
         # Single trial
-        r1 = client.post("/api/research/validate", json={
+        r1 = client.post("/api/validation/validate", json={
             "run_id": "test_run_007",
             "n_bootstrap": 200,
             "n_trials": 1,
         })
         # Many trials
-        r100 = client.post("/api/research/validate", json={
+        r100 = client.post("/api/validation/validate", json={
             "run_id": "test_run_007",  # same run
             "n_bootstrap": 200,
             "n_trials": 100,

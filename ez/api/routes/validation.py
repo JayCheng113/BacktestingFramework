@@ -1,6 +1,6 @@
 """V2.22: Unified OOS Validation API.
 
-Single endpoint `POST /api/research/validate` that runs the full
+Single endpoint `POST /api/validation/validate` that runs the full
 validation suite on a portfolio run (or pair of runs for comparison):
   - Walk-Forward (rolling N-fold weight optimization)
   - Paired Block Bootstrap CI
@@ -38,9 +38,14 @@ logger = logging.getLogger(__name__)
 
 
 class ValidationRequest(BaseModel):
-    run_id: str = Field(description="主策略 portfolio_runs.run_id")
+    run_id: str = Field(
+        description="主策略 portfolio_runs.run_id",
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+    )
     baseline_run_id: str | None = Field(
-        default=None, description="可选: 对比基线 run_id"
+        default=None,
+        description="可选: 对比基线 run_id",
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
     )
     n_bootstrap: int = Field(default=2000, ge=100, le=10000)
     block_size: int = Field(default=21, ge=1, le=252)
@@ -128,7 +133,10 @@ def _compute_bootstrap_on_single(
     ci_lower = float(np.percentile(boot_sharpes, 2.5))
     ci_upper = float(np.percentile(boot_sharpes, 97.5))
 
-    # Monte Carlo p-value (centered under H0: Sharpe=0)
+    # Monte Carlo p-value (two-sided, centered under H0: true Sharpe = 0).
+    # "How often, under H0, would we see |SR| >= observed by chance?"
+    # Two-sided is more conservative than one-sided for a "Sharpe > 0"
+    # test — effectively requires p_one_sided <= 0.025 at alpha=0.05.
     centered = boot_sharpes - np.mean(boot_sharpes)
     if abs(observed_sharpe) < 1e-12:
         p_value = 1.0

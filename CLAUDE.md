@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.25 | Tests: 2632 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.26 | Tests: 2685 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -358,20 +358,34 @@ No version tag without review pass. No push without critical issues resolved.
   - **CLAUDE.md Known limitation 关闭**: "dynamic binding bypass" 不再适用
   - 2631 → 2632 tests (+1: `test_reload_lock_not_module_attr` 防 regression)
 
-- **V2.22 (planned)**: 统一 OOS 验证面板 — 散落的验证能力集中化
-  - **动机**: 量化团队以看板为主. OOS 验证 (WF/Bootstrap/Monte Carlo/配对对比) 目前散布在 3 个模块 (ez/backtest, ez/portfolio, ez/research), 前端入口也分散在不同 tab. 用户跑完回测后应在同一个面板看到所有验证结果
-  - **问题诊断**: 现有 3 套 WF + 2 套 significance + 1 套 paired bootstrap 各自实现折分割/指标计算/聚合/显著性. 共同部分应抽取为共享层
-  - **后端重构**: `ez/research/validation.py` 共享验证引擎, 包含 `run_validation_suite(returns, config) → ValidationResult`. 内含 walk_forward + bootstrap_ci + monte_carlo_significance + paired_comparison + verdict. 已有 ez/backtest/significance + ez/portfolio/walk_forward::portfolio_significance 改为调用共享层 (保持旧 API 向后兼容)
-  - **后端 API** (1 个综合端点, `ez/api/routes/research.py`):
-    - `POST /api/research/validate` — 输入: run_ids + labels + baseline (可选) + config (wf/bootstrap/mc/objectives). 后端从 portfolio_runs 读 equity curve → 转 daily returns → run_validation_suite. 输出: walk_forward + bootstrap + monte_carlo + comparison + verdict + reasons
-  - **前端位置**: 嵌入 PortfolioRunContent 结果展示区 (不是新 sub-tab, 而是回测结果的一部分)
-  - **前端组件** (嵌入 PortfolioRunContent):
-    - "运行验证" 按钮: 一键跑全部 OOS 检验
-    - Walk-Forward 区域: IS vs OOS Sharpe 柱状图 (ECharts) + OOS 拼接曲线 + degradation 色标 + 折详情展开
-    - 显著性区域: Bootstrap CI 区间条 + Monte Carlo p-value + 综合裁决 badge (pass/warn/fail)
-    - 对比区域 (如果选了 baseline run): Sharpe 差值 + CI + 双组指标对比表
-    - 报告导出: 前端 markdown 拼接 + 复制/下载
-  - **不做**: Pipeline builder UI (YAGNI), 独立顶层 tab (嵌入回测结果更自然), 独立组合优化 tab (验证面板覆盖了核心需求)
+- **V2.22 Phase 1 (done)**: 统一 OOS 验证 — 后端 + API
+  - **新 `ez/research/_metrics.py` 扩展**: `deflated_sharpe_ratio()` (de Prado DSR, 带 skew/excess kurt 调整 + Bonferroni 多重检验), `minimum_backtest_length()` (MinBTL 年数公式), `annual_breakdown()` (每年 Sharpe/Return/MDD + best/worst/profitable_ratio)
+  - **新 `ez/research/verdict.py`**: `VerdictThresholds` 可配置阈值 + `compute_verdict()` 规则引擎. 7 项检验 (WF degradation / overfit / CI 不含零 / p-value / DSR / MinBTL / 年度稳定性) → pass/warn/fail 综合裁决 + 中文 summary
+  - **新 `ez/api/routes/validation.py`**: `POST /api/validation/validate` 端点, 输入 `{run_id, baseline_run_id?, n_bootstrap, block_size, n_trials, seed}`. 从 portfolio_runs 读 equity_curve → 转 daily returns → 运行: 单序列块 bootstrap (CI + Monte Carlo p-value), DSR, MinBTL, annual breakdown, 可选配对 bootstrap (vs baseline_run_id), 综合裁决. 返回 JSON-safe 结构 (7 个顶层 panel)
+  - **Review round 修复**:
+    - C1: DSR 峰度公式修正 (`kurt - 1` → `kurt - 3`, 非 excess 转 excess)
+    - I2: run_id 加 `Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")` 输入校验
+    - I4: DSR 病态 denom 返回 `warning` 字段 + `excess_kurt` 诊断字段
+    - I5: Sharpe ≤ 0 时跳过 MinBTL 检查 (已被其他检验覆盖, 避免冗余 failed 计数)
+    - S1: URL prefix `/api/research/` → `/api/validation/` (避免和自治研究 agent 命名冲突)
+    - C3: Monte Carlo p-value two-sided 行为文档化
+  - **测试**: 53 tests (16 _metrics + 12 verdict + 14 API mock + 11 e2e+前端模拟)
+    - e2e: 真实 PortfolioStore (in-memory DuckDB) + save_run → validate 完整链路
+    - 前端模拟: 7 个 contract tests 编码前端将发送的 request/response 格式, 防止 Phase 2 UI 对接时 schema drift
+  - 2632 → 2685 tests (+53), 零 regression
+
+- **V2.22 Phase 2 (planned)**: 前端 ValidationPanel
+  - **位置**: 嵌入 `PortfolioRunContent` 结果展示区, 替换现有 "前推验证" 按钮功能
+  - **组件**: 综合裁决 banner (pass/warn/fail 交通灯 + 中文 summary) + WF 区 (IS vs OOS Sharpe 柱状图 + OOS 拼接曲线 + degradation 色标 + 折展开) + 显著性区 (Bootstrap CI 区间条 + p-value badge + DSR) + 年度区 (per-year Sharpe 柱状图) + 对比区 (基线 run dropdown, 选后显示双组指标表 + CI + 显著性判断) + 报告导出 (前端 markdown 拼接)
+  - **API**: 调 `/api/validation/validate` (已在 Phase 1 完成)
+  - **约 1000-1500 LOC 前端代码**
+
+- **V2.22 遗留 (Phase 1 review 延后项)**:
+  - C2: DSR 的 `(1 - γ_euler) * 2·log N` expected-max 公式是近似, 更精确应用 scipy.stats.norm.ppf + Gumbel 分布 (当前是标准 de Prado 近似, 可接受)
+  - I1: `validation.py` 每次请求 `PortfolioStore()` 新建连接, 未来应 reuse `ez.api.deps` 的 singleton
+  - I3: `annual_breakdown` min_days=5 阈值硬编码 (可参数化)
+  - I6: `n_trials` 由 client 传入, 存在信任边界问题 (类似 V2.15 `wf_metrics` bug). V2.14 `/search` 应把 n_trials 存进 portfolio_runs 让 `/validate` 读回
+  - S2-S5: 小优化 (block bootstrap 向量化, verdict emoji 抽字段, profitable_ratio vs consistency_score 语义区分)
 
 - **V2.19.0**: ez.testing.guards — 代码守卫框架 (save-time 验证层)
   - **动机 (第一性原理)**: 量化代码错误是静默致命的 — v1 Dynamic EF lookahead bug (Sharpe 虚高 ~0.4), MLAlpha `timedelta(days=N)` purge 跨周末泄漏, Block Bootstrap 循环包裹不可达, 都是靠 codex 多轮 review 才发现. 每类都是可以用小型专属测试自动检测的 bug class
