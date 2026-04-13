@@ -56,6 +56,10 @@ class PaperTradingEngine:
         self.risk_events: list[dict] = []
         self._last_prices: dict[str, float] = {}  # cache for mark-to-market on data gaps
         self._rebalance_dates_cache: set[date] | None = None
+        # V2.17 round 8: data sanity dedup — avoid spamming the same
+        # warning every hour when a data anomaly persists for days.
+        # Key: (symbol, check_kind) — dropped when the condition clears.
+        self._sanity_warned: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------------
     # Main entry point — called by Scheduler once per trading day
@@ -252,6 +256,75 @@ class PaperTradingEngine:
             position_value += shares * p
         return self.cash + position_value
 
+    # ------------------------------------------------------------------
+    # V2.17 round 8: data sanity guard
+    # ------------------------------------------------------------------
+
+    # Thresholds for anomaly detection — tuned for A-share ETFs where
+    # "normal" daily moves are < 10% (涨跌停) and ex-dividend days on
+    # stock ETFs typically stay within 5% of adjusted.
+    _RAW_SPIKE_PCT = 0.15        # raw close daily change > 15% = anomaly
+    _ADJ_RAW_DIVERGENCE = 0.15   # adj spike without matching raw move
+    _ADJ_RAW_TOLERANCE = 0.05    # raw move < 5% = "not a real price change"
+
+    def _sanity_check_fresh_bars(self, symbol: str, df: "pd.DataFrame") -> list[str]:
+        """Runtime data quality check on the most recent 2 bars.
+
+        Designed to catch V2.18.1-class silent data errors at tick time
+        rather than at parquet rebuild time:
+
+        1. Raw close daily change > 15%: likely suspension+resumption,
+           cash dividend, data source error, or stock split with missing
+           adj_factor. Any of these warrants operator attention.
+        2. adj_close jumps but raw close doesn't: exact pattern of the
+           V2.18.1 Tushare fund_adj anomalies (stored adj_factor spiked
+           to 1.0 for a day, then back to correct value). If this still
+           occurs in live data, we want to know immediately — it causes
+           phantom equity moves.
+
+        Returns list of human-readable warnings. Empty if data looks OK.
+        Dedup is handled by the caller (`_sanity_warned` set).
+        """
+        import math
+        if len(df) < 2:
+            return []
+        prev = df.iloc[-2]
+        curr = df.iloc[-1]
+        prev_raw = float(prev.get("close", float("nan")))
+        curr_raw = float(curr.get("close", float("nan")))
+        prev_adj = float(prev.get("adj_close", float("nan")))
+        curr_adj = float(curr.get("adj_close", float("nan")))
+        warnings: list[str] = []
+
+        # Check 1: raw close single-day spike > 15%
+        if math.isfinite(prev_raw) and math.isfinite(curr_raw) and prev_raw > 0:
+            raw_change = (curr_raw - prev_raw) / prev_raw
+            if abs(raw_change) > self._RAW_SPIKE_PCT:
+                warnings.append(
+                    f"{symbol}: raw close 单日变动 {raw_change:+.1%} "
+                    f"({prev_raw:.3f} → {curr_raw:.3f}). 可能原因: 除权分红、"
+                    f"停牌复牌、数据源异常. 建议核对真实行情."
+                )
+
+        # Check 2: adj spike without matching raw move (V2.18.1 pattern)
+        if (
+            math.isfinite(prev_adj) and math.isfinite(curr_adj)
+            and math.isfinite(prev_raw) and math.isfinite(curr_raw)
+            and prev_adj > 0 and prev_raw > 0
+        ):
+            adj_change = (curr_adj - prev_adj) / prev_adj
+            raw_change = (curr_raw - prev_raw) / prev_raw
+            if (
+                abs(adj_change) > self._ADJ_RAW_DIVERGENCE
+                and abs(raw_change) < self._ADJ_RAW_TOLERANCE
+            ):
+                warnings.append(
+                    f"{symbol}: adj_close 跳变 {adj_change:+.1%} 但 raw "
+                    f"close 仅变 {raw_change:+.1%} — V2.18.1 类型的 "
+                    f"adj_factor 异常 pattern. 建议检查数据源 adj_factor."
+                )
+        return warnings
+
     def _fetch_latest(self, today: date) -> dict[str, pd.DataFrame]:
         """Fetch lookback window of daily bars for each symbol in spec."""
         natural_days = int(self.strategy.lookback_days * 1.5) + 30
@@ -281,6 +354,18 @@ class PaperTradingEngine:
                 data[sym] = df
             except Exception:
                 logger.warning("Failed to fetch data for %s", sym, exc_info=True)
+        # V2.17 round 8: runtime data sanity check on freshly fetched bars.
+        # Catches V2.18.1-class silent anomalies (adj_factor spikes,
+        # suspect daily moves) that would otherwise flow through to the
+        # strategy and produce phantom signals.
+        for sym, df in data.items():
+            for msg in self._sanity_check_fresh_bars(sym, df):
+                kind = msg.split(":", 1)[0] if ":" in msg else "data_anomaly"
+                key = (sym, kind)
+                if key in self._sanity_warned:
+                    continue
+                self._sanity_warned.add(key)
+                logger.warning("[数据异常] %s", msg)
         return data
 
     def _get_latest_prices(self, data: dict[str, pd.DataFrame]) -> dict[str, float]:
