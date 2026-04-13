@@ -504,6 +504,15 @@ No version tag without review pass. No push without critical issues resolved.
   - **CORE 文件警示**: `ez/backtest/engine.py` 在 CORE_FILES 列表 (CLAUDE.md "DO NOT MODIFY without proposal"). 本修复是正确性 bug, 不改公开 API, 非分红数据零行为差异. 按 V2.18.1 先例处理 (portfolio engine 同类修复也未走提案流程).
   - 2756 → 2759 backend tests (+3)
 
+- **V2.16.2 round 3 (done)**: API 层交易规则市场 gating — 双向陷阱修复
+  - **审查方法**: 系统对比 3 个引擎 (单股 / 组合 / 模拟盘) 的 7 条交易规则 (印花税 / T+1 / 整手 / 涨跌停 / 最低佣金 / 买卖佣金 / 滑点). 各引擎内部逻辑一致, 但 **API 层 default-fill 有两个反向陷阱**
+  - **陷阱 A - 组合 API**: `PortfolioRunRequest` 的 `lot_size=100` + `limit_pct=0.10` 默认硬编码 A 股规则. 非 CN 市场调用 (省略这两个字段) → **美股回测按 100 股整手 + 10% 涨跌停执行**. 仅 `stamp_tax_rate` V2.13.2 已 gated.
+  - **陷阱 B - 单股 API**: `BacktestRequest` 的 `stamp_tax_rate=0` + `lot_size=0` + `limit_pct=0` 默认, 完全不套 MarketRulesMatcher wrapper. CN 市场调用 (省略字段) → **A 股回测零印花税 + 无整手 + 无涨跌停**, P&L 系统性虚高
+  - **根源**: 前端通过 `BacktestSettings.tsx::getDefaultSettings(market)` 传市场匹配默认值, 但任何 **外部调用者** (脚本 / AI 工具 / 测试 fixture / 自动化) 依赖 Pydantic default-fill → 沉默陷阱
+  - **修复** (`ez/api/routes/portfolio.py:287-300`, `ez/api/routes/backtest.py:72-95`): 新增 `@model_validator(mode="after")`, 用 `model_fields_set` 区分"用户显式传值" vs "Pydantic 填默认". 非 CN 市场清零组合的 lot/limit; CN 市场自动补齐单股的 stamp/lot/limit. 显式覆盖永远胜出.
+  - **7 regression tests** (`tests/test_api/test_market_rule_gates.py`): 单股 CN auto-apply / 单股 US 保持 0 / CN 显式零保留 / 组合 US 清零 lot+limit / 组合 CN 保 A 股默认 / 组合 US 显式 lot 覆盖 / 组合 HK 非 CN 默认. **Mutation verified**: revert gate 后 3/7 测试炸 (CN 单股全 0, 组合 US/HK lot=100 + limit=0.10)
+  - 2759 → 2766 backend tests (+7)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422

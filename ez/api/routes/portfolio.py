@@ -293,6 +293,23 @@ class PortfolioCommonConfig(BaseModel):
     slippage_rate: float = Field(default=0.001, ge=0)
     lot_size: int = Field(default=100, ge=1)
     limit_pct: float = Field(default=0.10, ge=0, le=0.30)
+
+    @model_validator(mode="after")
+    def _gate_lot_and_limit_by_market(self):
+        """V2.16.2 round 3: lot_size / limit_pct are A-share specific.
+        Default 100/0.10 silently applied to non-CN markets via API
+        default-fill (Pydantic fills missing fields from Field default).
+        A US backtest with all defaults would round to 100-share lots
+        and reject moves > 10% — diverging from real US market rules.
+        Use `model_fields_set` to distinguish explicit override from
+        default fill (same pattern as stamp_tax)."""
+        market = getattr(self, "market", "cn_stock")
+        if market != "cn_stock":
+            if "lot_size" not in self.model_fields_set:
+                self.lot_size = 1
+            if "limit_pct" not in self.model_fields_set:
+                self.limit_pct = 0.0
+        return self
     benchmark_symbol: str = ""
 
     # Optimizer (V2.12)

@@ -5,7 +5,7 @@ from datetime import date
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
@@ -69,6 +69,30 @@ class BacktestRequest(BaseModel):
     stamp_tax_rate: float = Field(default=0.0, ge=0, description="Sell-side stamp tax (A-share: 0.0005)")
     lot_size: int = Field(default=0, ge=0, description="Lot size (A-share: 100, 0=disabled)")
     limit_pct: float = Field(default=0.0, ge=0, le=0.3, description="Limit up/down pct (A-share: 0.10, 0=disabled)")
+
+    @model_validator(mode="after")
+    def _apply_market_defaults(self):
+        """V2.16.2 round 3: auto-fill A-share rules for cn_stock when the
+        caller did not explicitly set them. Prior behaviour: defaults
+        are 0/0/0 regardless of market, so an external script / AI
+        client running a CN backtest without specifying these silently
+        skipped stamp tax, lot rounding, and limit checks — systematically
+        inflating P&L.
+
+        Use `model_fields_set` to distinguish "user passed 0" (intentional
+        disable) from "Pydantic filled default" (caller didn't specify).
+
+        Frontend always sends full cost settings via BacktestSettings.tsx
+        `getDefaultSettings(market)`, so this affects only backend-direct
+        callers (scripts, AI tools, tests)."""
+        if self.market == "cn_stock":
+            if "stamp_tax_rate" not in self.model_fields_set:
+                self.stamp_tax_rate = 0.0005
+            if "lot_size" not in self.model_fields_set:
+                self.lot_size = 100
+            if "limit_pct" not in self.model_fields_set:
+                self.limit_pct = 0.10
+        return self
 
 
 class WalkForwardRequest(BacktestRequest):
