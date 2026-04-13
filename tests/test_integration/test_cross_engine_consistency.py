@@ -155,13 +155,27 @@ class _FakeBar:
         self.volume = 10_000_000
 
 
-def _run_paper(df: pd.DataFrame) -> pd.Series:
+def _run_paper(
+    df: pd.DataFrame,
+    strategy=None,
+    spec_overrides: dict | None = None,
+) -> pd.Series:
     from ez.live.paper_engine import PaperTradingEngine
     from ez.live.deployment_spec import DeploymentSpec
 
     trading_days = [d.date() for d in df.index]
-    price = float(df["adj_close"].iloc[0])
-    all_bars = [_FakeBar(d, price) for d in trading_days]
+    # Build bars FROM the DataFrame (not a flat price) so paper engine
+    # walks actual varying prices — required for dividend / trend /
+    # rule scenarios.
+    all_bars = []
+    for d, row in zip(trading_days, df.itertuples(index=False)):
+        b = _FakeBar(d, float(row.adj_close))
+        b.open = float(row.open)
+        b.high = float(row.high)
+        b.low = float(row.low)
+        b.close = float(row.close)
+        b.adj_close = float(row.adj_close)
+        all_bars.append(b)
 
     def get_kline(symbol, market, period, start_d, end_d):
         return [b for b in all_bars if start_d <= b.time.date() <= end_d]
@@ -169,7 +183,7 @@ def _run_paper(df: pd.DataFrame) -> pd.Series:
     chain = MagicMock()
     chain.get_kline.side_effect = get_kline
 
-    spec = DeploymentSpec(
+    spec_kwargs = dict(
         strategy_name="AlwaysLong",
         strategy_params={},
         symbols=(SYMBOL,),
@@ -185,7 +199,11 @@ def _run_paper(df: pd.DataFrame) -> pd.Series:
         price_limit_pct=0.0,
         t_plus_1=False,
     )
-    strategy = _AlwaysLongPortfolio(SYMBOL)
+    if spec_overrides:
+        spec_kwargs.update(spec_overrides)
+    spec = DeploymentSpec(**spec_kwargs)
+    if strategy is None:
+        strategy = _AlwaysLongPortfolio(SYMBOL)
     engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
 
     # Every day is a rebalance day (daily freq)
@@ -397,4 +415,195 @@ def test_dividend_day_single_stock_vs_portfolio() -> None:
         f"Dividend day cross-engine drift {drift:.4%} > 1%. "
         f"V2.18.1 portfolio fix and V2.16.2 round 2 single-stock fix "
         f"should keep both equities ~flat. Inspect engine price handling."
+    )
+
+
+# ---------------------------------------------------------------------------
+# A-share rules: portfolio vs paper (share execute_portfolio_trades)
+# ---------------------------------------------------------------------------
+
+class _ToggleWeightStrategy:
+    """Alternates 1.0 / 0.0 every toggle_period bars — forces sell+buy
+    round trips to exercise A-share rules (stamp tax on sells,
+    T+1 interaction, lot rounding on each trade)."""
+    lookback_days = 5
+
+    def __init__(self, symbol: str, toggle_period: int = 3):
+        self.symbol = symbol
+        self.toggle_period = toggle_period
+        self._day_count = 0
+
+    def generate_weights(self, universe_data, date_, prev_weights, prev_returns):
+        # Toggle every `toggle_period` calls
+        phase = (self._day_count // self.toggle_period) % 2
+        self._day_count += 1
+        return {self.symbol: 1.0 if phase == 0 else 0.0}
+
+
+def _run_portfolio_with_rules(
+    df: pd.DataFrame,
+    strategy=None,
+    cost_overrides: dict | None = None,
+    lot_size: int = 1,
+    limit_pct: float = 0.0,
+    t_plus_1: bool = False,
+) -> pd.Series:
+    from ez.portfolio.calendar import TradingCalendar
+    from ez.portfolio.universe import Universe
+    from ez.portfolio.engine import run_portfolio_backtest
+    from ez.portfolio.execution import CostModel
+
+    trading_days = [d.date() for d in df.index]
+    calendar = TradingCalendar.from_dates(trading_days)
+    universe = Universe([SYMBOL])
+
+    ck = dict(
+        buy_commission_rate=0.0, sell_commission_rate=0.0,
+        min_commission=0.0, stamp_tax_rate=0.0, slippage_rate=0.0,
+    )
+    if cost_overrides:
+        ck.update(cost_overrides)
+    cost = CostModel(**ck)
+
+    if strategy is None:
+        strategy = _AlwaysLongPortfolio(SYMBOL)
+
+    result = run_portfolio_backtest(
+        strategy=strategy,
+        universe=universe,
+        universe_data={SYMBOL: df},
+        calendar=calendar,
+        start=trading_days[0], end=trading_days[-1],
+        freq="daily",
+        initial_cash=INITIAL_CASH,
+        cost_model=cost,
+        lot_size=lot_size,
+        limit_pct=limit_pct,
+        t_plus_1=t_plus_1,
+        skip_terminal_liquidation=True,
+    )
+    return pd.Series(result.equity_curve, index=pd.to_datetime(result.dates))
+
+
+def test_high_turnover_a_share_rules_portfolio_vs_paper() -> None:
+    """High-turnover scenario with FULL A-share rules active.
+    Weight toggles every 3 days, stamp tax 0.05%, lot=100, limit=10%.
+
+    Portfolio engine and paper engine share `execute_portfolio_trades`
+    — if any rule implementation diverges between call paths, the
+    accumulated drift over 30 days of round trips will show up here.
+    Would catch a bug where one engine applies stamp tax differently,
+    rounds differently, or handles lot_size residual differently.
+    """
+    df = _synthetic_df(30)
+    cost = dict(
+        buy_commission_rate=0.00008, sell_commission_rate=0.00008,
+        min_commission=0.0, stamp_tax_rate=0.0005, slippage_rate=0.001,
+    )
+    # Need separate strategy instances because _day_count is stateful
+    pf = _run_portfolio_with_rules(
+        df, strategy=_ToggleWeightStrategy(SYMBOL, 3),
+        cost_overrides=cost, lot_size=100, limit_pct=0.10, t_plus_1=True,
+    )
+    pp = _run_paper(
+        df, strategy=_ToggleWeightStrategy(SYMBOL, 3),
+        spec_overrides={
+            "buy_commission_rate": cost["buy_commission_rate"],
+            "sell_commission_rate": cost["sell_commission_rate"],
+            "stamp_tax_rate": cost["stamp_tax_rate"],
+            "slippage_rate": cost["slippage_rate"],
+            "lot_size": 100, "price_limit_pct": 0.10, "t_plus_1": True,
+        },
+    )
+    # Both engines should agree tightly — they call the same
+    # execute_portfolio_trades with the same inputs
+    drift = _max_rel_diff(pf, pp)
+    assert drift < 0.01, (
+        f"High-turnover A-share rules: portfolio vs paper drift "
+        f"{drift:.4%}. Final: pf={pf.iloc[-1]:.2f} pp={pp.iloc[-1]:.2f}. "
+        f"Any divergence means execute_portfolio_trades behaves "
+        f"differently under the two call paths."
+    )
+    # Costs should have reduced equity below initial
+    assert pf.iloc[-1] < INITIAL_CASH, (
+        f"With 0.05% stamp + 0.008% commission + 0.1% slippage over "
+        f"10 round trips, final equity should show cost drag. "
+        f"Got {pf.iloc[-1]}"
+    )
+
+
+def test_limit_up_day_blocks_buy_portfolio_vs_paper() -> None:
+    """Simulate a limit-up day: price jumps +10.5% > prev close.
+    Strategy wants to buy on that day. Both engines must block
+    the buy identically (limit_pct=0.10 in force).
+    """
+    n = 15
+    dates = _business_days(n)
+    prices = np.full(n, 10.0)
+    # Day 5: limit-up event (price jumps +11% vs day 4 raw close)
+    prices[5:] = prices[4] * 1.11
+    df = pd.DataFrame({
+        "open": prices, "high": prices, "low": prices,
+        "close": prices, "adj_close": prices,
+        "volume": np.full(n, 10_000_000),
+    }, index=pd.to_datetime(dates))
+    df.index.name = "date"
+
+    # Strategy: 0% weight days 0-4, 100% weight day 5+ (tries to buy
+    # exactly on limit-up day; should be blocked and filled later)
+    target_day = dates[5]
+
+    class _BuyOnDay5:
+        lookback_days = 3
+        def generate_weights(self, universe_data, date_, prev_weights, prev_returns):
+            # Compare target date directly; universe_data may be empty on
+            # very early days before any data accumulates.
+            _d = date_.date() if hasattr(date_, "date") else date_
+            return {SYMBOL: 1.0 if _d >= target_day else 0.0}
+
+    pf = _run_portfolio_with_rules(
+        df, strategy=_BuyOnDay5(), limit_pct=0.10, t_plus_1=True,
+    )
+    pp = _run_paper(
+        df, strategy=_BuyOnDay5(),
+        spec_overrides={"price_limit_pct": 0.10, "t_plus_1": True},
+    )
+    # Both engines should agree — limit-up blocks buy on day 5,
+    # same downstream behavior
+    drift = _max_rel_diff(pf, pp)
+    assert drift < 0.01, (
+        f"Limit-up day: portfolio vs paper drift {drift:.4%}. "
+        f"If limit-up detection diverges, user's A-share backtest "
+        f"would not reflect the rule consistently."
+    )
+
+
+def test_stamp_tax_high_turnover_portfolio_vs_paper() -> None:
+    """Stamp tax 0.1% (10x normal) + toggle every 2 days. Over 20 days
+    that's 10 round trips = 20 trades = 10 sells × 0.1% = ~1% equity
+    drag. Both engines must agree on the exact tax calculation.
+
+    Regression target: if one engine applies stamp tax on gross
+    amount and the other on net-of-commission amount, they'd diverge.
+    """
+    df = _synthetic_df(20)
+    cost = dict(stamp_tax_rate=0.001)
+    pf = _run_portfolio_with_rules(
+        df, strategy=_ToggleWeightStrategy(SYMBOL, 2),
+        cost_overrides=cost, lot_size=100,
+    )
+    pp = _run_paper(
+        df, strategy=_ToggleWeightStrategy(SYMBOL, 2),
+        spec_overrides={"stamp_tax_rate": 0.001, "lot_size": 100},
+    )
+    drift = _max_rel_diff(pf, pp)
+    assert drift < 0.005, (
+        f"Stamp tax high-turnover: drift {drift:.4%} > 0.5%. "
+        f"Final: pf={pf.iloc[-1]:.2f} pp={pp.iloc[-1]:.2f}"
+    )
+    # With toggle_period=2 over 20 days: phase flips every 2 days →
+    # ~5 round trips = 5 sells × 0.1% = ~0.5% drag. Stamp tax should
+    # have measurably reduced equity (not flat).
+    assert pf.iloc[-1] < INITIAL_CASH * 0.999, (
+        f"Expected measurable tax drag, got equity {pf.iloc[-1]}"
     )

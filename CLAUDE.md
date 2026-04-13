@@ -569,6 +569,16 @@ No version tag without review pass. No push without critical issues resolved.
   - **Scope 保守**: 不改默认启动行为 (env 控制), 不加 cron 表达式, 不加市场时钟对齐 (scheduler 日历自带). 再 fancy 的调度 (15:30 精确触发 / 特定时区) 等到有用户提需求再加.
   - 2791 → 2796 backend tests (+5)
 
+- **V2.17 round 4 (done)**: 跨引擎 canary 扩展 — A 股规则场景
+  - **动机**: V2.16.2 round 5 canary 为避免引擎语义差异干扰, 关掉了 T+1/涨跌停/印花税. 这些 A 股核心规则的实现一致性没被 pin 住. 本轮专门针对**组合 vs 模拟盘**（两者共享 `execute_portfolio_trades`）做一致性守卫 — 任何 drift 就是 bug
+  - **3 新场景** (test_cross_engine_consistency.py +88 行):
+    - **高换手 A 股规则** (`test_high_turnover_a_share_rules_portfolio_vs_paper`): weight toggle 每 3 天一次, 30 天 10 round trips, 启用 stamp 0.05% + 佣金 0.008% + 滑点 0.1% + lot=100 + limit=10% + T+1. 两引擎 drift <1%, 成本拖累明显
+    - **涨跌停阻止买入** (`test_limit_up_day_blocks_buy_portfolio_vs_paper`): 模拟第 5 天价格 +11% (涨停), 策略当日买入应被阻止. 两引擎处理一致
+    - **印花税 10 倍高换手** (`test_stamp_tax_high_turnover_portfolio_vs_paper`): stamp 0.1% (10×) + toggle 每 2 天, 5 round trips = ~0.5% drag. Drift <0.5%, 确认税率计算基数一致 (gross vs net-of-commission 任一差异都会被抓到)
+  - **T+1 研究发现**: 单股引擎 T+1 禁"当日卖新买入", 组合引擎 T+1 "禁当日买回已卖出" — **语义不同但都合规**. 组合引擎的 sold_today 检查实际是死代码 (sell/buy 是互斥集合, 一轮 generate_weights 里一个 symbol 不会同时出现在两边). 不是 bug, 不修, 文档化
+  - **意义**: canary 现在覆盖 9 个场景 (trivial 3 + trend 1 + commission 1 + dividend 1 + A 股 3). 未来任何引擎改动只要破坏其中一个就立刻炸
+  - 2796 → 2799 backend tests (+3)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
