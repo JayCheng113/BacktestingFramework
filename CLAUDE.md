@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.29 | Tests: 2738 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.30 | Tests: 2738 backend + 59 frontend passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -433,7 +433,19 @@ No version tag without review pass. No push without critical issues resolved.
     - S11: tz-aware regression test (防 `normalize_returns_index` 回退)
     - S13: `StepError` context 在 500 响应里保留 step_name + partial artifacts
   - **类型**: 11 个新 TS interface (OptimizeWeightsRequest, OptimizerCandidate, NestedOOSResults, WalkForwardFold, WalkForwardResults, OptimizeWeightsResponse 等)
-  - **Round 2 codex 修复** (2 Critical + 4 Important):
+  - **V2.25-Fe (done)**: 前端测试基础设施 — 0 → 59 tests
+  - **动机**: 项目实际是 dashboard-first (非 backend-first), 8000+ LOC 前端 0 测试是系统性风险. 3 轮 review 累积提到. 本 session 4 个 UI-only bug 都是 review 才抓到 (comparison sign branch, useEffect stale, discriminated union, markdown injection)
+  - **基础设施**: `vitest 4.1.4` + `@testing-library/react 16` + `jsdom 29` + coverage (v8). `vitest.config.ts` + `src/test/setup.ts` (jest-dom matchers / cleanup / ResizeObserver polyfill). npm scripts `test` / `test:watch` / `test:coverage`
+  - **测试** (4 files, 59 tests):
+    - `smoke.test.ts` (3): 基础设施验证
+    - `metricRatings.test.ts` (25): 纯函数 rateIc/rateIcir/rateDegradation/rateOverfit/ratePValue/rateDsr/rateMinBtl, 阈值 pin 到 `ez/research/verdict.py::VerdictThresholds`
+    - `ValidationPanel.test.tsx` (11): 空状态 / 裁决颜色 / n_trials 警告 / comparison 正负符号分支 / discriminated union / 基线 dropdown 过滤 / 输入校验
+    - `SleeveOptimizationPanel.test.tsx` (20): 4 步引导 / sleeve toggle / objective 多选 min=1 / mode 切换 / 基线现金余量 / 响应 discriminated union narrowing / listPortfolioRuns 失败 toast
+  - **类型对齐**: `VerdictResult` 加 `badge_color` / `badge_emoji` (后端 V2.23.2 已有, TS 类型之前漏)
+  - **Known Limitation 关闭**: "前端单测 (session 累积 gap)" 标记 ✅
+  - 2738 + 59 tests. tsc + vite build 零错误. Version 0.2.29 → 0.2.30
+
+- **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
     - I4: objectives min_length=1 + uniqueness (空数组 500 → 422)
@@ -543,7 +555,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **MLAlpha `feature_warmup_days` 默认 0** — 用户的 `feature_fn` 若含 `rolling(N)` / `pct_change(N)`, 必须显式设置 `feature_warmup_days=N`. Runtime shortfall detection 在行数 < `train_window × 0.9` 时发一次性 warning 但不 raise
 
 ### V2.24 session 延后 (V2.25+ 跟进)
-- **前端单测 (session 累积 gap)** — ValidationPanel 1400+ LOC, SleeveOptimizationPanel 700+ LOC, CodeEditor 等大组件无 vitest/React Testing Library 单测. 3 次 code review 都提到. 后端 contract test 只能 pin API shape, 无法捕获 CIBar 渲染/discriminated union 分支/markdown 报告生成等 UI 逻辑回归. 建议 V2.25+ 引入最小 vitest 配置 + smoke test
+- ~~**前端单测 (session 累积 gap)**~~ — ✅ **已关闭** (V2.25-Fe: vitest + RTL + jsdom 基础设施, 59 tests 覆盖 ValidationPanel / SleeveOptimizationPanel / 共享 rating helpers. CodeEditor 等旧组件仍无测试, 待后续迭代)
 - **n_trials 信任边界** — V2.23.2 Critical 2 UI 已暴露 "搜索数" 输入, 但 client 可以任意传. 正确做法是 /search 端点在 portfolio_runs 里持久化 n_trials_searched, /validate 从 DB 读回. 需 schema 变更 + /search 集成 (V2.25+)
 - **Sleeve 上限 10 (V2.24)** — 对 index enhancement (20-50 只成分股) 不够. 超出需要 hierarchical optimizer 或 regularized SLSQP (V3.x)
 - **Private sibling import** (`validation.py` → `routes.portfolio._get_store`) — layering smell 非 bug. 共享 store accessor 应移到 `ez.api.deps` (V2.25 small refactor)
