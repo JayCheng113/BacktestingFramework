@@ -104,4 +104,9 @@ export const mlAlphaDiagnostics = (data: MLDiagnosticsRequest) =>
 export const runValidation = (data: ValidationRequest) =>
   api.post<ValidationResult>('/validation/validate', data)
 
+// V2.24 — Multi-sleeve weight optimization
+import type { OptimizeWeightsRequest, OptimizeWeightsResponse } from '../types'
+export const optimizeWeights = (data: OptimizeWeightsRequest) =>
+  api.post<OptimizeWeightsResponse>('/validation/optimize-weights', data)
+
 export default api

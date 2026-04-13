@@ -7,6 +7,7 @@ import type { EnsembleConfig } from './EnsembleBuilder'
 import PortfolioRunContent from './PortfolioRunContent'
 import PortfolioFactorContent from './PortfolioFactorContent'
 import PortfolioHistoryContent from './PortfolioHistoryContent'
+import { SleeveOptimizationPanel } from './SleeveOptimizationPanel'
 import { useToast } from './shared/Toast'
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -139,7 +140,7 @@ export default function PortfolioPanel() {
   const [wfTrainRatio, setWfTrainRatio] = useState(0.7)
   const [result, setResult] = useState<PortfolioRunResult | null>(null)
   const [history, setHistory] = useState<HistoryRun[]>([])
-  const [tab, setTab] = useState<'run' | 'factor-research' | 'history'>('run')
+  const [tab, setTab] = useState<'run' | 'factor-research' | 'history' | 'sleeve-opt'>('run')
   // Factor research state
   const [evalFactors, setEvalFactors] = useState<string[]>(['momentum_rank_20'])
   const [neutralize, setNeutralize] = useState(false)
@@ -883,6 +884,7 @@ export default function PortfolioPanel() {
         <button onClick={() => setTab('run')} className={`px-4 py-1.5 rounded text-sm ${tab === 'run' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'run' ? inputStyle : {}}>组合回测</button>
         <button onClick={() => setTab('factor-research')} className={`px-4 py-1.5 rounded text-sm ${tab === 'factor-research' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'factor-research' ? inputStyle : {}}>选股因子研究</button>
         <button onClick={() => setTab('history')} className={`px-4 py-1.5 rounded text-sm ${tab === 'history' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'history' ? inputStyle : {}}>历史记录 ({history.length})</button>
+        <button onClick={() => setTab('sleeve-opt')} className={`px-4 py-1.5 rounded text-sm ${tab === 'sleeve-opt' ? 'bg-blue-600 text-white' : ''}`} style={tab !== 'sleeve-opt' ? inputStyle : {}}>组合优化</button>
       </div>
 
       {tab === 'run' && (
@@ -962,6 +964,8 @@ export default function PortfolioPanel() {
           handleDeleteRun={handleDeleteRun}
         />
       )}
+
+      {tab === 'sleeve-opt' && <SleeveOptimizationPanel />}
     </div>
   )
 }

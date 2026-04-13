@@ -36,16 +36,31 @@ interface Props {
   runId: string
 }
 
+// V2.23.2 UX 修: 用品牌蓝色做"通过"避免和 A 股"绿跌"冲突,
+// 整体色系更安静, 只在警告/不通过时才用强色.
 const VERDICT_COLOR: Record<'pass' | 'warn' | 'fail', string> = {
-  pass: CHART.success,
-  warn: CHART.warn,
-  fail: CHART.error,
+  pass: '#3b82f6',   // blue-500 — 安静的"通过", 不是 A-股绿
+  warn: '#f59e0b',   // amber
+  fail: '#ef4444',   // red
+}
+
+// 次要色: 用于 metric 卡片的柔和着色 (透明度降低)
+const VERDICT_TINT: Record<'pass' | 'warn' | 'fail', string> = {
+  pass: 'rgba(59,130,246,0.12)',
+  warn: 'rgba(245,158,11,0.12)',
+  fail: 'rgba(239,68,68,0.12)',
 }
 
 const VERDICT_LABEL: Record<'pass' | 'warn' | 'fail', string> = {
   pass: '通过',
   warn: '警告',
   fail: '不通过',
+}
+
+const VERDICT_ICON: Record<'pass' | 'warn' | 'fail', string> = {
+  pass: '✓',
+  warn: '!',
+  fail: '✕',
 }
 
 export function ValidationPanel({ runId }: Props) {
@@ -134,11 +149,40 @@ export function ValidationPanel({ runId }: Props) {
   return (
     <div style={{
       marginTop: 24,
-      padding: 16,
+      padding: 18,
       border: `1px solid ${CHART.border}`,
       borderRadius: 8,
       backgroundColor: CHART.bgSecondary,
     }}>
+      {/* Header with title + subtitle 说明做什么 */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 600, margin: 0, color: CHART.text }}>
+            策略综合验证
+          </h3>
+          <span style={{
+            fontSize: 10,
+            padding: '2px 6px',
+            backgroundColor: 'rgba(59,130,246,0.15)',
+            color: '#60a5fa',
+            border: '1px solid rgba(59,130,246,0.3)',
+            borderRadius: 3,
+            fontWeight: 500,
+          }}>
+            OOS 检验
+          </span>
+        </div>
+        <p style={{
+          fontSize: 12,
+          color: CHART.textSecondary,
+          margin: '4px 0 0 0',
+          lineHeight: 1.5,
+        }}>
+          综合 Bootstrap 置信区间 · 去偏差 Sharpe (DSR) · 最小回测长度 (MinBTL) · 年度稳定性 · 可选基线对比,
+          给出 <strong style={{ color: CHART.text }}>是否值得部署</strong> 的综合裁决。
+        </p>
+      </div>
+
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -146,10 +190,12 @@ export function ValidationPanel({ runId }: Props) {
         marginBottom: 12,
         flexWrap: 'wrap',
         gap: 10,
+        paddingBottom: 12,
+        borderBottom: `1px solid ${CHART.border}`,
       }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>
-          策略综合验证
-        </h3>
+        <span style={{ fontSize: 12, color: CHART.textSecondary, fontWeight: 500 }}>
+          配置参数 →
+        </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <label style={{ fontSize: 12, color: CHART.textSecondary }}>
             对比基线
@@ -266,16 +312,86 @@ export function ValidationPanel({ runId }: Props) {
       </div>
 
       {!result && !loading && (
-        <div style={{ fontSize: 13, color: CHART.textSecondary, padding: '12px 0' }}>
-          点击"运行验证"执行完整 OOS 检验: Bootstrap CI, Monte Carlo 显著性,
-          Deflated Sharpe, 最小回测长度, 年度稳定性 + 综合裁决.
-          {'\n'}如果已运行过前推验证 (Walk-Forward), 结果会包含过拟合度与降解率分析.
+        <div style={{
+          padding: '20px 16px',
+          textAlign: 'center',
+          color: CHART.textSecondary,
+        }}>
+          <div style={{
+            fontSize: 13,
+            lineHeight: 1.8,
+            marginBottom: 16,
+          }}>
+            <div style={{ marginBottom: 4, fontWeight: 500, color: CHART.text }}>
+              这个面板回答一个问题: <span style={{ color: '#60a5fa' }}>"这个策略能不能部署到模拟盘?"</span>
+            </div>
+            <div style={{ fontSize: 12 }}>
+              点击右上角 <span style={{
+                color: '#60a5fa',
+                fontWeight: 500,
+                padding: '1px 6px',
+                border: '1px solid #60a5fa',
+                borderRadius: 3,
+              }}>运行验证</span> 启动 OOS 检验流程。
+            </div>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 10,
+            textAlign: 'left',
+            fontSize: 11,
+            maxWidth: 760,
+            margin: '0 auto',
+          }}>
+            {[
+              { step: '01', title: '统计显著性', desc: 'Bootstrap CI + p-value 判断是否非运气' },
+              { step: '02', title: '去偏差 Sharpe', desc: '用 DSR 扣除多重检验带来的虚高' },
+              { step: '03', title: '年度稳定性', desc: '按年分解, 检查是否依赖某个 regime' },
+              { step: '04', title: '配对对比 (可选)', desc: '选基线 run 算 Sharpe 差值 CI' },
+            ].map((item) => (
+              <div key={item.step} style={{
+                padding: 10,
+                backgroundColor: CHART.bg,
+                border: `1px solid ${CHART.border}`,
+                borderRadius: 6,
+              }}>
+                <div style={{ color: '#60a5fa', fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>
+                  STEP {item.step}
+                </div>
+                <div style={{ color: CHART.text, fontWeight: 500, margin: '3px 0' }}>
+                  {item.title}
+                </div>
+                <div style={{ color: CHART.textSecondary, lineHeight: 1.4 }}>
+                  {item.desc}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {loading && (
-        <div style={{ textAlign: 'center', padding: 24, color: CHART.textSecondary }}>
-          正在运行 bootstrap 重采样 ({nBootstrap} 次) · 块大小 {blockSize} · 预计 ~{estimatedSeconds} 秒 ...
+        <div style={{ textAlign: 'center', padding: 30 }}>
+          <div style={{
+            display: 'inline-block',
+            padding: '8px 16px',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            border: '1px solid rgba(59,130,246,0.3)',
+            borderRadius: 4,
+            color: '#60a5fa',
+            fontSize: 13,
+            fontWeight: 500,
+          }}>
+            ⟳ 运行 Bootstrap 重采样...
+          </div>
+          <div style={{
+            fontSize: 11,
+            color: CHART.textSecondary,
+            marginTop: 8,
+          }}>
+            {nBootstrap} 次 · 块大小 {blockSize} · 预计 ~{estimatedSeconds} 秒
+          </div>
         </div>
       )}
 
@@ -326,34 +442,72 @@ function ValidationResultView({ result }: { result: ValidationResult }) {
 
 function VerdictBanner({ verdict }: { verdict: ValidationResult['verdict'] }) {
   const color = VERDICT_COLOR[verdict.result]
+  const tint = VERDICT_TINT[verdict.result]
   return (
     <div style={{
-      padding: 14,
+      padding: 16,
+      backgroundColor: tint,
+      border: `1px solid ${color}`,
       borderLeft: `4px solid ${color}`,
-      backgroundColor: CHART.bg,
-      borderRadius: 4,
+      borderRadius: 6,
     }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
-        <span style={{
-          padding: '4px 12px',
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+        {/* 大号图标圆圈 */}
+        <div style={{
+          width: 40,
+          height: 40,
+          borderRadius: '50%',
           backgroundColor: color,
           color: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 20,
           fontWeight: 700,
-          fontSize: 14,
-          borderRadius: 4,
+          flexShrink: 0,
         }}>
-          综合裁决: {VERDICT_LABEL[verdict.result]}
-        </span>
-        <span style={{ fontSize: 13, color: CHART.textSecondary }}>
-          通过 {verdict.passed}/{verdict.total} · 警告 {verdict.warned} · 不通过 {verdict.failed}
-        </span>
+          {VERDICT_ICON[verdict.result]}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{
+            fontSize: 11,
+            color: CHART.textSecondary,
+            letterSpacing: 1,
+            marginBottom: 2,
+          }}>
+            综合裁决
+          </div>
+          <div style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color,
+          }}>
+            {VERDICT_LABEL[verdict.result]}
+            <span style={{
+              fontSize: 12,
+              fontWeight: 400,
+              color: CHART.textSecondary,
+              marginLeft: 10,
+            }}>
+              {verdict.passed}/{verdict.total} 项通过
+              {verdict.warned > 0 && ` · ${verdict.warned} 项警告`}
+              {verdict.failed > 0 && ` · ${verdict.failed} 项不通过`}
+            </span>
+          </div>
+        </div>
       </div>
-      <div style={{ fontSize: 13, color: CHART.text, lineHeight: 1.5 }}>
+      <div style={{
+        fontSize: 13,
+        color: CHART.text,
+        lineHeight: 1.6,
+        paddingLeft: 54,
+      }}>
         {verdict.summary}
       </div>
       {verdict.checks.length > 0 && (
         <div style={{
-          marginTop: 10,
+          marginTop: 12,
+          paddingLeft: 54,
           display: 'flex',
           flexWrap: 'wrap',
           gap: 6,
@@ -369,21 +523,37 @@ function VerdictBanner({ verdict }: { verdict: ValidationResult['verdict'] }) {
 
 function CheckBadge({ check }: { check: VerdictCheck }) {
   const color = VERDICT_COLOR[check.status]
-  const icon = check.status === 'pass' ? '✓' : check.status === 'warn' ? '⚠' : '✗'
   return (
     <div
       title={check.reason}
       style={{
-        padding: '3px 8px',
+        padding: '3px 9px',
         fontSize: 11,
-        backgroundColor: CHART.bgSecondary,
-        border: `1px solid ${color}`,
+        backgroundColor: CHART.bg,
+        border: `1px solid ${CHART.border}`,
         borderRadius: 3,
-        color: CHART.text,
+        color: CHART.textSecondary,
         cursor: 'help',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
       }}
     >
-      <span style={{ color, marginRight: 4 }}>{icon}</span>
+      <span style={{
+        width: 14,
+        height: 14,
+        borderRadius: '50%',
+        backgroundColor: color,
+        color: '#fff',
+        fontSize: 9,
+        fontWeight: 700,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        lineHeight: 1,
+      }}>
+        {VERDICT_ICON[check.status]}
+      </span>
       {check.name}
     </div>
   )
@@ -402,7 +572,7 @@ function WalkForwardSection({
   const overfit = typeof wf.overfitting_score === 'number' ? wf.overfitting_score : undefined
 
   return (
-    <Section title="Walk-Forward 验证">
+    <Section title="Walk-Forward 验证" subtitle="— 样本外是否坍塌">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         <MetricCard label="IS Sharpe (均)" value={avgIsSharpe} fmt="num" />
         <MetricCard label="OOS Sharpe" value={oosSharpe} fmt="num" />
@@ -480,7 +650,7 @@ function SignificanceSection({
     significance.ci_lower > 0 || significance.ci_upper < 0
 
   return (
-    <Section title="统计显著性">
+    <Section title="统计显著性" subtitle="— 是不是运气">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         <MetricCard
           label="观察 Sharpe"
@@ -656,7 +826,7 @@ function AnnualSection({ annual }: { annual: ValidationResult['annual'] }) {
   const profitablePct = n > 0 ? (nProfitable / n) * 100 : 0
 
   return (
-    <Section title="年度稳定性">
+    <Section title="年度稳定性" subtitle="— 是否依赖某年 regime">
       <div style={{
         display: 'flex',
         gap: 20,
@@ -727,7 +897,7 @@ function AnnualSection({ annual }: { annual: ValidationResult['annual'] }) {
 function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
   if (comparison.status === 'error') {
     return (
-      <Section title="配对对比 (vs 基线)">
+      <Section title="配对对比" subtitle="— 比基线 run 真的更好吗">
         <div style={{
           padding: 10,
           fontSize: 13,
@@ -753,7 +923,7 @@ function ComparisonSection({ comparison }: { comparison: ComparisonResult }) {
     diffPositive ? CHART.success :
     CHART.error
   return (
-    <Section title="配对对比 (vs 基线)">
+    <Section title="配对对比" subtitle="— 比基线 run 真的更好吗">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         <MetricCard
           label="Sharpe 差值"
@@ -1031,20 +1201,39 @@ function ReportExportBar({ result }: { result: ValidationResult }) {
 // Shared UI primitives
 // ============================================================
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  children: React.ReactNode
+}) {
   return (
     <div>
-      <h4 style={{
-        fontSize: 14,
-        fontWeight: 600,
-        color: CHART.text,
+      <div style={{
         borderBottom: `1px solid ${CHART.border}`,
         paddingBottom: 6,
         marginBottom: 10,
-        marginTop: 0,
       }}>
-        {title}
-      </h4>
+        <h4 style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: CHART.text,
+          margin: 0,
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+        }}>
+          {title}
+          {subtitle && (
+            <span style={{ fontSize: 11, fontWeight: 400, color: CHART.textSecondary }}>
+              {subtitle}
+            </span>
+          )}
+        </h4>
+      </div>
       {children}
     </div>
   )
@@ -1072,22 +1261,53 @@ function MetricCard({
   } else {
     display = value.toFixed(3)
   }
-  const color = rating ? VERDICT_COLOR[rating] : CHART.text
+  // UX 修: 默认值文字 = 主色 (不着色); 仅 warn/fail 染色, pass 用小徽标不染色.
+  // 这样大量 pass 指标时不会满屏都是颜色.
+  const valueColor = rating === 'warn' || rating === 'fail'
+    ? VERDICT_COLOR[rating]
+    : CHART.text
+  const showBadge = rating !== undefined
+  const borderColor = rating === 'warn' || rating === 'fail'
+    ? VERDICT_COLOR[rating]
+    : CHART.border
   return (
     <div style={{
       padding: 10,
       backgroundColor: CHART.bg,
-      border: `1px solid ${CHART.border}`,
+      border: `1px solid ${borderColor}`,
+      borderLeft: rating
+        ? `3px solid ${VERDICT_COLOR[rating]}`
+        : `1px solid ${CHART.border}`,
       borderRadius: 4,
     }}>
       <div style={{
         fontSize: 11,
         color: CHART.textSecondary,
         marginBottom: 4,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
       }}>
-        {label}
+        <span>{label}</span>
+        {showBadge && (
+          <span style={{
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            backgroundColor: VERDICT_COLOR[rating!],
+            color: '#fff',
+            fontSize: 8,
+            fontWeight: 700,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            lineHeight: 1,
+          }}>
+            {VERDICT_ICON[rating!]}
+          </span>
+        )}
       </div>
-      <div style={{ fontSize: 16, fontWeight: 600, color }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: valueColor }}>
         {display}
       </div>
     </div>

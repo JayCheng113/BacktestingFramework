@@ -319,3 +319,76 @@ export interface ValidationResult {
   comparison: ComparisonResult | null
   verdict: VerdictResult
 }
+
+
+// V2.24: Multi-sleeve weight optimization
+export type OptimizeMode = 'nested' | 'walk_forward'
+
+export type ObjectiveName = 'MaxSharpe' | 'MaxCalmar' | 'MaxSortino' | 'MinCVaR'
+
+export interface OptimizeWeightsRequest {
+  run_ids: string[]
+  labels?: string[] | null
+  mode: OptimizeMode
+  is_window?: [string, string] | null
+  oos_window?: [string, string] | null
+  n_splits?: number
+  train_ratio?: number
+  objectives: ObjectiveName[]
+  baseline_weights?: Record<string, number> | null
+  cvar_alpha?: number
+  seed?: number
+  max_iter?: number
+}
+
+export interface OptimizerCandidate {
+  objective: string
+  weights: Record<string, number>
+  is_metrics: Record<string, number>
+  oos_metrics: Record<string, number>
+  status: 'converged' | 'max_iter' | 'infeasible'
+}
+
+export interface NestedOOSResults {
+  is_window: [string, string]
+  oos_window: [string, string]
+  candidates: OptimizerCandidate[]
+  baseline_is: Record<string, number> | null
+  baseline_oos: Record<string, number> | null
+}
+
+export interface WalkForwardFold {
+  fold: number
+  is_window: [string, string]
+  oos_window: [string, string]
+  candidates: OptimizerCandidate[]
+  baseline_is: Record<string, number> | null
+  baseline_oos: Record<string, number> | null
+}
+
+export interface WalkForwardResults {
+  n_splits: number
+  train_ratio: number
+  n_folds_completed: number
+  folds: WalkForwardFold[]
+  aggregate: {
+    oos_sharpe?: number
+    oos_return?: number
+    oos_vol?: number
+    oos_mdd?: number
+    avg_is_sharpe?: number
+    is_sharpe?: number
+    degradation?: number
+    baseline_oos_sharpe?: number
+    baseline_oos_return?: number
+  }
+}
+
+export interface OptimizeWeightsResponse {
+  mode: OptimizeMode
+  labels: string[]
+  n_observations: number
+  date_range: [string, string]
+  nested_oos_results?: NestedOOSResults | null
+  walk_forward_results?: WalkForwardResults | null
+}
