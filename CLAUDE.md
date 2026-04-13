@@ -445,6 +445,22 @@ No version tag without review pass. No push without critical issues resolved.
   - **Known Limitation 关闭**: "前端单测 (session 累积 gap)" 标记 ✅
   - 2738 + 59 tests. tsc + vite build 零错误. Version 0.2.29 → 0.2.30
 
+- **V2.25-Fe Phase 2 + 2b (done)**: ChatPanel + CodeEditor 针对性回归测试 (59 → 73 tests)
+  - **动机**: 用户明确规则 — "不要为写测试而写测试，要真去思考边界条件和可能出错的内容". Phase 1 之后 ChatPanel/CodeEditor 两个高历史 bug 密度组件仍无 regression canary
+  - **Phase 2 (7 新, commit 4ab3b06)**:
+    - `ChatPanel.test.tsx`: localStorage 损坏恢复 (corrupted / partial JSON fallback / valid restore, 3) + send guards (empty + whitespace 不触发 fetch, 2) + V2.23 发送↔停止 toggle (1) + V2.23 AbortController abort signal 接线 (1)
+    - `CodeEditor.test.tsx`: V2.19.0 guard pass 渲染 (1) + V2.19.0 guard 从 422 错误响应 (detail.guard_result 必须 populate, 1) + V2.12.2 删除 kind 不匹配 (strategy/factor 同名 foo.py, 1) + 缺 guard_result 不崩 (1)
+    - Support: `setup.ts` scrollIntoView polyfill (jsdom gap)
+  - **Phase 2 review fix (commit 5977089)** — reviewer 抓出 2 个弱断言:
+    - V2.12.2 delete-kind 原测试查 "🗑" 按钮但实际 UI 是 "x"，总走 else fallback trivially pass. 改为真实找 "x" 按钮, 找不到 fail loudly
+    - V2.19.0 error-path 原断言 `/LookaheadGuard/` 会被 errors 字符串匹配到. 改为 `/\[BLOCK\]\s+LookaheadGuard/` — 该前缀只由 guardReport panel 渲染
+  - **Phase 2b (3 新, commit d07d034)** — reviewer gap closeout:
+    - ChatPanel targetId mid-stream (V2.12.2): retained `ReadableStreamDefaultController` 在 conv A 流式中切到 conv B，emit tool_result on A's stream, 断言 fileKey 绑到 A 而非 B
+    - CodeEditor committedFilename 实时改名: 升级 mock ChatPanel 暴露 `data-file-key` prop. 用户在 filename 输入框打 "renamed_v2.py" 期间, ChatPanel fileKey 必须仍是 `strategy:stable.py` (否则每次按键碎片化会话)
+    - CodeEditor 改名中删除: rename-in-flight + 删侧栏条目, 编辑器仍应清空 (identity 锚在 committedFilename, 非 live filename)
+  - **剩余 reviewer gaps (未做, 边际递减)**: aiCreatedFileRef 行为 (V2.12.1), CodeEditor auto-overwrite 重试 (V2.12.2). reviewer 自评为"机械", 优先级 < 新组件首次测试
+  - 2738 + 73 tests. tsc + vite build 零错误
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
