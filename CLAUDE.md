@@ -533,6 +533,20 @@ No version tag without review pass. No push without critical issues resolved.
   - **意义**: 本 session 4 个修复 (V2.16.2 market gate / 单股分红 / API gate / 数据 hash) 全部通过该 canary. 未来任何引擎分歧 (新 feature、refactor) 都会被立刻 catch
   - 2774 → 2780 backend tests (+6)
 
+- **V2.17 (done)**: 模拟盘 strategy.state 跨重启持久化 — 解锁 MLAlpha / Ensemble 真实部署
+  - **动机**: V2.15 paper trading 的 `_start_engine` 每次 fresh 构造 strategy (`_instantiate(spec)`), 进程重启丢失 MLAlpha sklearn 训练模型 / StrategyEnsemble ledger / 用户自定义 `self.*` 字段. 这是之前 Known Limitation 里标 "V3.x 再考虑" 的真 blocker (ML 模型重训练成本高)
+  - **设计**: pickle-based, 默认启用 + 优雅降级
+    - `deployment_snapshots` 加 `strategy_state BLOB` 列 + ALTER 迁移 (兼容现有 DB)
+    - `save_daily_snapshot(..., strategy_state: bytes | None = None)` 每日 tick 保存
+    - `get_latest_strategy_state(deployment_id)` 返回最新**非空** blob (跳过 pickle 失败的天)
+    - `Scheduler.tick`: `_pickle_strategy` 包裹 `pickle.dumps`, 失败 `_pickle_failure_warned.add(dep_id)` 只 warn 一次, 后续静默
+    - `Scheduler._start_engine`: 获取 blob → `_unpickle_strategy` → **class-name 匹配 guard** → 覆盖 fresh strategy. 任一步失败 silently fall back to 原始 V2.15 行为 (不持久化)
+  - **class-name guard**: 防止 spec 从 MLAlpha 改到 TopNRotation 后, DB 仍存 MLAlpha pickle 静默注入到 TopNRotation engine
+  - **9 regression tests** (`test_strategy_state_persistence.py`): store 往返 / 缺省 None / 多日取最新非空 / pickle 成功 / unpicklable lambda 一次性 warn / unpickle 坏 blob 回 None / stateful 恢复状态位精确 / class-name 不匹配拒绝 swap
+  - **影响**: MLAlpha / StrategyEnsemble 现在**真正可部署**. 用户策略只要 picklable (默认 Python 类都是) 自动受益. 不 picklable 的自定义类 (含 lambda / file handle) 仍 fallback 到 V2.15 行为, 不影响运行
+  - **安全**: pickle 只从自己 DB 读, 没有不可信数据源. 类路径变化 / Python 版本升级会 unpickle 失败 → 自动降级
+  - 2780 → 2789 backend tests (+9)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
@@ -621,7 +635,7 @@ No version tag without review pass. No push without critical issues resolved.
 ### 架构级 (V3.x 再考虑)
 - **研究任务不支持进程恢复 (crash recovery)** — 需 task state 序列化 + DB 持久化中间状态. V3.x 重新设计研究引擎时处理
 - **研究任务串行 (同时只跑 1 个)** — 设计选择 (asyncio.Lock 保护资源隔离), 非 bug. 并发需要资源池 (LLM rate limit + Store 事务隔离)
-- **模拟盘 strategy.state 不持久化** — PaperTradingEngine 进程重启后策略内部状态 (如 MLAlpha 已训练的模型) 丢失. resume_all() 从 DB 恢复 holdings/equity 但不恢复 strategy.state. 需要 strategy state serialization 协议 (V3.x)
+- ~~**模拟盘 strategy.state 不持久化**~~ — ✅ **已关闭** (V2.17: `deployment_snapshots.strategy_state` BLOB 列 + pickle 持久化 + `_start_engine` 恢复 + class-name 匹配 guard. MLAlpha sklearn 模型 / Ensemble ledger / 用户自定义 state 跨重启保留)
 - **Scheduler 单进程** — 无多 worker, tick() 串行处理所有部署. 大量部署 (>50) 时可能在交易日窗口内处理不完. 需要分布式 scheduler
 - **C++ 加速路径持 GIL** — 需 C++ 端释放 GIL 才能真正并发加速, 当前单线程效果
 - **数据源链扁平去重** — 设计选择, 非 bug. 按市场独立路由需要 provider 声明支持的市场集 + 链查分 (未来 refactor)

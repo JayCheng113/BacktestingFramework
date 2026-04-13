@@ -110,10 +110,18 @@ class DeploymentStore:
                     rebalanced      BOOLEAN DEFAULT FALSE,
                     execution_ms    DOUBLE,
                     error           TEXT,
+                    strategy_state  BLOB,
                     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (deployment_id, snapshot_date)
                 )
             """)
+            # V2.17 migration: add strategy_state column if missing (existing DBs)
+            try:
+                self._conn.execute(
+                    "ALTER TABLE deployment_snapshots ADD COLUMN strategy_state BLOB"
+                )
+            except Exception:
+                pass  # Column already exists — OK
 
     # -- Spec methods ------------------------------------------------------
 
@@ -252,8 +260,22 @@ class DeploymentStore:
 
     # -- Snapshot methods --------------------------------------------------
 
-    def save_daily_snapshot(self, deployment_id: str, snapshot_date: date, result: dict) -> None:
-        """Save one day's execution result. Also updates last_processed_date atomically."""
+    def save_daily_snapshot(
+        self,
+        deployment_id: str,
+        snapshot_date: date,
+        result: dict,
+        strategy_state: bytes | None = None,
+    ) -> None:
+        """Save one day's execution result. Also updates last_processed_date atomically.
+
+        V2.17: optional `strategy_state` bytes (pickle blob) persists the
+        strategy instance across process restarts. Enables MLAlpha to
+        keep its trained sklearn model, StrategyEnsemble to keep its
+        hypothetical-return ledger, and custom user strategies to
+        preserve `self.*` fields. Passing None keeps the column NULL
+        (graceful degrade if caller can't pickle).
+        """
         sanitized = _sanitize_nans(result)
         with self._lock:
             self._conn.begin()
@@ -261,8 +283,9 @@ class DeploymentStore:
                 self._conn.execute(
                     """INSERT OR REPLACE INTO deployment_snapshots
                        (deployment_id, snapshot_date, equity, cash, holdings, weights,
-                        prev_returns, trades, risk_events, rebalanced, execution_ms, error)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        prev_returns, trades, risk_events, rebalanced, execution_ms, error,
+                        strategy_state)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     [
                         deployment_id,
                         snapshot_date,
@@ -276,6 +299,7 @@ class DeploymentStore:
                         bool(sanitized.get("rebalanced", False)),
                         sanitized.get("execution_ms"),
                         sanitized.get("error"),
+                        strategy_state,
                     ],
                 )
                 # Update last_processed_date in the record
@@ -301,6 +325,27 @@ class DeploymentStore:
             if not row:
                 return None
             return self._row_to_snapshot(row)
+
+    def get_latest_strategy_state(self, deployment_id: str) -> bytes | None:
+        """V2.17: fetch the most recent non-null strategy pickle blob.
+
+        Used by Scheduler._start_engine to restore strategy internals
+        (trained ML models, ensemble ledgers, user-defined state)
+        across process restart. Returns None if no state was ever
+        saved (e.g., strategy was unpicklable, deployment pre-V2.17,
+        first-run before first tick).
+        """
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT strategy_state
+                   FROM deployment_snapshots
+                   WHERE deployment_id = ? AND strategy_state IS NOT NULL
+                   ORDER BY snapshot_date DESC LIMIT 1""",
+                [deployment_id],
+            ).fetchone()
+            if not row or row[0] is None:
+                return None
+            return bytes(row[0]) if not isinstance(row[0], bytes) else row[0]
 
     def get_all_snapshots(self, deployment_id: str) -> list[dict]:
         with self._lock:

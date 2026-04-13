@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pickle
 import time
 from datetime import date, datetime
 
@@ -24,6 +25,53 @@ from ez.portfolio.calendar import TradingCalendar
 logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_ERRORS = 3
+
+# V2.17 strategy-state persistence: per-deployment set of dep_ids for
+# which pickling has already failed once. Keeps logs quiet — we warn
+# on first failure, then silently skip on subsequent ticks.
+_pickle_failure_warned: set[str] = set()
+_unpickle_failure_warned: set[str] = set()
+
+
+def _pickle_strategy(strategy, deployment_id: str) -> bytes | None:
+    """Serialize a strategy instance via pickle.
+
+    Returns None if the strategy is unpicklable (file handle / DB conn
+    / lambda / C extension state). Logs once per deployment, then stays
+    quiet. Missing state falls back to the V2.15 behavior: engine
+    reconstructs a fresh strategy at restart (acceptable for stateless
+    strategies like TopNRotation; lossy for MLAlpha / Ensemble).
+    """
+    try:
+        return pickle.dumps(strategy)
+    except Exception as e:
+        if deployment_id not in _pickle_failure_warned:
+            _pickle_failure_warned.add(deployment_id)
+            logger.warning(
+                "Deployment %s: strategy (%s) is unpicklable — state will "
+                "NOT persist across restart. Error: %s. (Silenced on "
+                "subsequent ticks.) Implement __getstate__/__setstate__ "
+                "on the strategy to exclude unpicklable attrs.",
+                deployment_id, type(strategy).__name__, e,
+            )
+        return None
+
+
+def _unpickle_strategy(blob: bytes, deployment_id: str):
+    """Deserialize a strategy instance; return None on failure."""
+    try:
+        return pickle.loads(blob)
+    except Exception as e:
+        if deployment_id not in _unpickle_failure_warned:
+            _unpickle_failure_warned.add(deployment_id)
+            logger.warning(
+                "Deployment %s: failed to restore strategy from pickle — "
+                "falling back to fresh construction. Error: %s. This "
+                "happens if the strategy class was renamed/removed, or "
+                "pickle format changed between Python versions.",
+                deployment_id, e,
+            )
+        return None
 
 
 class Scheduler:
@@ -252,8 +300,16 @@ class Scheduler:
                     elapsed_ms = (time.monotonic() - t0) * 1000
                     result["execution_ms"] = elapsed_ms
 
-                    # 5. Save snapshot
-                    self.store.save_daily_snapshot(dep_id, business_date, result)
+                    # 5. Save snapshot + strategy pickle (V2.17)
+                    # Pickle the strategy so sklearn models / ensemble
+                    # ledgers / user state survive restart. Per-strategy
+                    # failures (unpicklable attrs) log once and fall back
+                    # to NULL — deployment still advances.
+                    state_blob = _pickle_strategy(engine.strategy, dep_id)
+                    self.store.save_daily_snapshot(
+                        dep_id, business_date, result,
+                        strategy_state=state_blob,
+                    )
                     self.store.reset_error_count(dep_id)
 
                     result["deployment_id"] = dep_id
@@ -340,6 +396,31 @@ class Scheduler:
                 )
 
         strategy, optimizer, risk_manager = self._instantiate(spec)
+
+        # V2.17: try to restore strategy internals from last pickled
+        # snapshot. If successful, the restored strategy replaces the
+        # fresh instance — MLAlpha keeps its trained model, Ensemble
+        # keeps its ledger. Failure (unpicklable, class rename, format
+        # drift) silently falls back to the fresh `strategy` above.
+        try:
+            pickle_blob = self.store.get_latest_strategy_state(deployment_id)
+        except Exception as e:
+            logger.warning(
+                "Deployment %s: get_latest_strategy_state failed (%s) — "
+                "using fresh strategy.", deployment_id, e,
+            )
+            pickle_blob = None
+        if pickle_blob:
+            restored = _unpickle_strategy(pickle_blob, deployment_id)
+            if restored is not None and type(restored).__name__ == type(strategy).__name__:
+                # Sanity-check class match before swapping; otherwise a
+                # spec.strategy_name change would silently drive the
+                # engine with an orphan strategy from a different class
+                strategy = restored
+                logger.info(
+                    "Deployment %s: restored strategy %s from pickle",
+                    deployment_id, type(strategy).__name__,
+                )
 
         engine = PaperTradingEngine(
             spec=spec,
