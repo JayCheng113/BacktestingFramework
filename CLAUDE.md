@@ -474,6 +474,20 @@ No version tag without review pass. No push without critical issues resolved.
   - **基础设施**: `vi.hoisted()` pattern 首次使用 (live.ts test), ECharts 全局 mock 避开 jsdom no-canvas 崩溃, 完整 live API 模块 mock 让每个测试独立控制响应
   - 2738 + 80 tests. tsc + vite build 零错误
 
+- **V2.16.2 (done)**: Paper trading 市场规则 silent bug 修复
+  - **动机**: 用户首席质疑 — 是否还存在 V2.18.1 分红 bug 那一类静默错误. 审查 `ez/live/paper_engine.py` + `ez/api/routes/live.py::_build_spec_from_run` 发现同等级别 bug
+  - **Bug 本质**: `/api/portfolio/run` 把 cost/market 规则字段**持久化到嵌套 `config._cost` bucket** (lot_size/limit_pct/stamp_tax_rate/buy_commission_rate/sell_commission_rate/slippage_rate/min_commission), 但部署时 `_build_spec_from_run` 从**顶层** `config.get(...)` 读 → 全部 miss → 硬编码 CN 默认值 (T+1=True, stamp_tax=0.05%, limit_pct=0.10, lot_size=100)
+  - **影响**: **每个非 A 股部署都被静默加上 A 股规则**. 部署美股策略 → T+1 挡同日买回 + 0.05% 印花税 + 10% 涨跌停 + 100 股整手. 模拟盘结果和回测系统性偏离, 用户无感知. 完全 V2.18.1-class 静默 bug.
+  - **修复** (`ez/api/routes/live.py:125-200`):
+    - 优先级读取: 嵌套 `config._cost[key]` → 顶层 `config[key]` (legacy/backward compat) → 市场网关默认值
+    - `is_cn = (market == "cn_stock")` 推导 `default_t_plus_1` / `default_stamp_tax` / `default_limit_pct` / `default_lot_size`, 非 CN 全部零/一
+    - optimizer/risk 同样从嵌套 `_optimizer` / `_risk` 读取
+  - **Regression test** (`tests/test_live/test_spec_from_run_market_gate.py`, 7 tests):
+    - CN run → CN rules ✓, US run → US rules ✓, HK run → non-CN rules ✓
+    - explicit override wins, legacy top-level 兼容, 空 config 用市场网关, JSON 字符串正确 parse
+    - **Mutation verified**: revert `_build_spec_from_run` 后 US 测试炸 (`spec.t_plus_1 is True` 不符合 US 语义)
+  - 2738 → 2745 tests (+7), live suite 171 passed
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422

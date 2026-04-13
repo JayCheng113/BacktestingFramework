@@ -123,7 +123,22 @@ def _get_portfolio_store():
 
 
 def _build_spec_from_run(run: dict) -> DeploymentSpec:
-    """Build a DeploymentSpec from a portfolio run dict."""
+    """Build a DeploymentSpec from a portfolio run dict.
+
+    V2.16.2 CRITICAL fix: /run persists cost/limit fields under nested
+    `config._cost` and optimizer/risk under `config._optimizer` / `_risk`
+    (see `routes/portfolio.py::run_config` construction). Prior version
+    of this function read them from top-level `config` keys, which
+    always missed -> every deployment silently fell back to hardcoded
+    CN-stock defaults (T+1 True, stamp_tax 0.05%, lot_size 100, limit
+    10%). US / HK deployments would enforce CN market rules on
+    execution, diverging from the backtest that produced the run.
+
+    Precedence per field:
+      1. Nested bucket (config._cost.lot_size, etc.)
+      2. Top-level (legacy/future path, or explicit override)
+      3. Market-gated default
+    """
     # Parse JSON string fields if needed
     config = run.get("config") or {}
     if isinstance(config, str):
@@ -140,24 +155,43 @@ def _build_spec_from_run(run: dict) -> DeploymentSpec:
     market = config.get("market", "cn_stock")
     freq = config.get("freq", "daily")
 
+    cost_cfg = config.get("_cost") or {}
+    opt_cfg = config.get("_optimizer") or {}
+    risk_cfg = config.get("_risk") or {}
+
+    def _field(bucket: dict, key: str, top_level_fallback, market_default):
+        """bucket[key] if present, else top-level config[key], else market-gated default."""
+        if key in bucket and bucket[key] is not None:
+            return bucket[key]
+        if key in config and config[key] is not None:
+            return config[key]
+        return top_level_fallback if top_level_fallback is not None else market_default
+
+    # Market-gated defaults — only A-shares get CN market rules.
+    is_cn = market == "cn_stock"
+    default_t_plus_1 = is_cn
+    default_stamp_tax = 0.0005 if is_cn else 0.0
+    default_limit_pct = 0.10 if is_cn else 0.0  # 0 = disabled (no limit check)
+    default_lot_size = 100 if is_cn else 1
+
     return DeploymentSpec(
         strategy_name=run.get("strategy_name", ""),
         strategy_params=params,
         symbols=tuple(symbols),
         market=market,
         freq=freq,
-        t_plus_1=config.get("t_plus_1", True),
-        price_limit_pct=config.get("price_limit_pct", 0.1),
-        lot_size=config.get("lot_size", 100),
-        buy_commission_rate=config.get("buy_commission_rate", 0.00008),
-        sell_commission_rate=config.get("sell_commission_rate", 0.00008),
-        stamp_tax_rate=config.get("stamp_tax_rate", 0.0005),
-        slippage_rate=config.get("slippage_rate", 0.001),
-        min_commission=config.get("min_commission", 0.0),
-        optimizer=config.get("optimizer", ""),
-        optimizer_params=config.get("optimizer_params"),
-        risk_control=config.get("risk_control", False),
-        risk_params=config.get("risk_params"),
+        t_plus_1=bool(_field(config, "t_plus_1", None, default_t_plus_1)),
+        price_limit_pct=float(_field(cost_cfg, "limit_pct", None, default_limit_pct)),
+        lot_size=int(_field(cost_cfg, "lot_size", None, default_lot_size)),
+        buy_commission_rate=float(_field(cost_cfg, "buy_commission_rate", None, 0.00008)),
+        sell_commission_rate=float(_field(cost_cfg, "sell_commission_rate", None, 0.00008)),
+        stamp_tax_rate=float(_field(cost_cfg, "stamp_tax_rate", None, default_stamp_tax)),
+        slippage_rate=float(_field(cost_cfg, "slippage_rate", None, 0.001)),
+        min_commission=float(_field(cost_cfg, "min_commission", None, 0.0)),
+        optimizer=str(_field(opt_cfg, "kind", None, "") or ""),
+        optimizer_params=opt_cfg or None,
+        risk_control=bool(_field(risk_cfg, "enabled", None, False)),
+        risk_params=risk_cfg or None,
         rebal_weekday=config.get("rebal_weekday"),
         initial_cash=float(run.get("initial_cash", 1_000_000.0)),
     )
