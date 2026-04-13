@@ -488,6 +488,13 @@ No version tag without review pass. No push without critical issues resolved.
     - **Mutation verified**: revert `_build_spec_from_run` 后 US 测试炸 (`spec.t_plus_1 is True` 不符合 US 语义)
   - 2738 → 2745 tests (+7), live suite 171 passed
 
+- **V2.16.2 post-release (done)**: Paper trading 后续静默 bug 扫查与修复
+  - **动机**: V2.16.2 fix 解决了 spec 构造 bug, 继续沿 paper trading 代码路径逐点审查, 发现 3 个次要但真实的问题
+  - **paper_engine adj_close NaN fallback** (`ez/live/paper_engine.py:261-291`): V2.18.1 backtest engine 有 `adj NaN → raw close fallback` 分支, paper engine 缺这个。NaN 进入 `prices` 会导致 `execute_portfolio_trades._lot_round(NaN)` raise ValueError 硬崩。修复: `_get_latest_prices` 按 adj→raw 优先级用 `math.isfinite` 过滤, `_get_raw_closes` / `_get_prev_raw_closes` 同步 guard. **8 tests** (`test_paper_engine_nan_fallback.py`)
+  - **Scheduler future-date guard** (`ez/live/scheduler.py:199-213`): `tick()` 接受用户提供的 business_date, 无 auto-tick 循环. 若用户误传未来日期, execute_day 会写进 `last_processed_date` → 锁死后续 tick until wall clock 追上. 修复: `tick()` 入口 raise ValueError 拒绝 `business_date > today`. **3 tests** (`test_scheduler_future_date_guard.py`)
+  - **历史 spec 漂移警告** (`ez/live/scheduler.py:_start_engine`): V2.16.2 之前创建的非 CN 部署 spec 已经存盘, 带错误的 CN 规则. spec_id 是 content hash 不能原地改. 修复: `_start_engine` 检测 `market != cn_stock but t_plus_1=True OR stamp_tax>0 OR limit>0 OR lot>1`, 发 loud warning 提示操作员重新部署
+  - 2745 → 2756 backend tests (+11), live suite 182 passed
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422

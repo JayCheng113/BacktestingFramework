@@ -259,27 +259,59 @@ class PaperTradingEngine:
         return data
 
     def _get_latest_prices(self, data: dict[str, pd.DataFrame]) -> dict[str, float]:
-        """Latest adj_close for each symbol."""
+        """Latest adj_close per symbol, falling back to raw close if adj is NaN.
+
+        V2.16.2: parity with `ez/portfolio/engine.py` V2.18.1 fix. If a bar
+        has adj_close=NaN (provider lag / fallback data source that skipped
+        adj computation), previously paper_engine would insert NaN into
+        `prices`, which later propagated into `execute_portfolio_trades`
+        and crashed `_lot_round(NaN)` with ValueError. Fallback chain:
+          1. adj_close if finite
+          2. raw close if finite (symbol omitted from prices otherwise —
+             execute_portfolio_trades's `sym not in prices` guard will
+             skip the trade)
+        `_mark_to_market` handles missing symbols via `_last_prices` cache.
+        """
+        import math
         prices: dict[str, float] = {}
         for sym, df in data.items():
-            if len(df) > 0:
-                prices[sym] = float(df["adj_close"].iloc[-1])
+            if len(df) == 0:
+                continue
+            adj = float(df["adj_close"].iloc[-1])
+            if math.isfinite(adj):
+                prices[sym] = adj
+                continue
+            raw = float(df["close"].iloc[-1])
+            if math.isfinite(raw):
+                prices[sym] = raw
+            # else: drop — downstream code will skip this symbol
         return prices
 
     def _get_raw_closes(self, data: dict[str, pd.DataFrame]) -> dict[str, float]:
-        """Latest raw close for each symbol (for limit up/down check)."""
+        """Latest raw close for each symbol (for limit up/down check).
+
+        NaN guarded: raw close used only for limit_pct compare; NaN would
+        poison the % change math. Skip the symbol instead.
+        """
+        import math
         result: dict[str, float] = {}
         for sym, df in data.items():
-            if len(df) > 0:
-                result[sym] = float(df["close"].iloc[-1])
+            if len(df) == 0:
+                continue
+            v = float(df["close"].iloc[-1])
+            if math.isfinite(v):
+                result[sym] = v
         return result
 
     def _get_prev_raw_closes(self, data: dict[str, pd.DataFrame]) -> dict[str, float]:
         """Previous day raw close for each symbol (for limit up/down check)."""
+        import math
         result: dict[str, float] = {}
         for sym, df in data.items():
             if len(df) >= 2:
-                result[sym] = float(df["close"].iloc[-2])
+                v = float(df["close"].iloc[-2])
+                if math.isfinite(v):
+                    result[sym] = v
         return result
 
     def _get_has_bar_today(

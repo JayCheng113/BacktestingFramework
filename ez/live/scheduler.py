@@ -198,7 +198,21 @@ class Scheduler:
 
     async def tick(self, business_date: date) -> list[dict]:
         """Daily execution. asyncio.Lock covers entire tick.
-        Per-deployment: check paused -> check calendar -> check idempotent -> execute -> save."""
+        Per-deployment: check paused -> check calendar -> check idempotent -> execute -> save.
+
+        V2.16.2 guard: business_date must not be in the future. A future
+        date would (a) fetch no fresh bars (live data unavailable), (b)
+        trivially succeed with "no trades", (c) advance `last_processed_date`
+        past today — permanently blocking correct ticks until the wall
+        clock catches up. Refuse with ValueError so the caller notices.
+        """
+        today = date.today()
+        if business_date > today:
+            raise ValueError(
+                f"business_date {business_date} is in the future "
+                f"(today={today}). Refuse to advance last_processed_date "
+                f"past real-world time; this would block subsequent ticks."
+            )
         results: list[dict] = []
         async with self._lock:
             # Snapshot engine keys to avoid mutation during iteration
@@ -296,6 +310,34 @@ class Scheduler:
         spec = self.store.get_spec(record.spec_id)
         if spec is None:
             raise ValueError(f"Spec {record.spec_id!r} not found for deployment {deployment_id!r}")
+
+        # V2.16.2: detect historical specs built by the buggy
+        # `_build_spec_from_run` (all fields from hardcoded CN defaults
+        # because nested `config._cost` was not read). These specs have
+        # market != "cn_stock" but carry A-share market rules, which
+        # paper engine will then mis-apply. Log a loud warning so the
+        # operator redeploys; we can't silently rewrite spec because
+        # spec_id is content-addressed (new rules -> new hash -> new row).
+        if spec.market != "cn_stock":
+            mismatches = []
+            if spec.t_plus_1:
+                mismatches.append("t_plus_1=True")
+            if spec.stamp_tax_rate > 0:
+                mismatches.append(f"stamp_tax_rate={spec.stamp_tax_rate}")
+            if spec.price_limit_pct > 0:
+                mismatches.append(f"price_limit_pct={spec.price_limit_pct}")
+            if spec.lot_size > 1:
+                mismatches.append(f"lot_size={spec.lot_size}")
+            if mismatches:
+                logger.warning(
+                    "Deployment %s (spec_id=%s, market=%s) carries A-share "
+                    "market rules (%s) — likely built by pre-V2.16.2 "
+                    "_build_spec_from_run. Paper trading will enforce these "
+                    "on a non-CN market, diverging from backtest. Redeploy "
+                    "from source run to rebuild the spec with correct rules.",
+                    deployment_id, record.spec_id, spec.market,
+                    ", ".join(mismatches),
+                )
 
         strategy, optimizer, risk_manager = self._instantiate(spec)
 
