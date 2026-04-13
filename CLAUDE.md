@@ -495,6 +495,15 @@ No version tag without review pass. No push without critical issues resolved.
   - **历史 spec 漂移警告** (`ez/live/scheduler.py:_start_engine`): V2.16.2 之前创建的非 CN 部署 spec 已经存盘, 带错误的 CN 规则. spec_id 是 content hash 不能原地改. 修复: `_start_engine` 检测 `market != cn_stock but t_plus_1=True OR stamp_tax>0 OR limit>0 OR lot>1`, 发 loud warning 提示操作员重新部署
   - 2745 → 2756 backend tests (+11), live suite 182 passed
 
+- **V2.16.2 round 2 (done)**: CORE — 单股 backtest engine 分红日 bug 修复 (V2.18.1 的单股孪生)
+  - **诊断**: `ez/backtest/engine.py` 执行用 `raw_open` (`df["open"]`), 估值用 `adj_close` (`df["adj_close"]`). 非分红日 adj == raw 所以一致; **分红日** adj_close > raw_close, 单位系统撕裂. 在分红日做交易的策略产生虚假盈亏
+  - **Mutation-verified 场景**: 合成数据 day 10 分红 (raw 5→2.5, adj 恒 5), 策略在 day 10 买入 → **bug 下 equity 翻倍到 200,000 (phantom +100%)**, 修复后保持 100,000
+  - **修复** (`ez/backtest/engine.py:125-150`): 计算 `adj_open = raw_open * (adj_close / raw_close)`. 对非分红日 ratio=1 → 无行为变化 (223 既存 backtest 测试全通过). 对分红日 adj_open 自动与 adj_close 同尺度. 与 V2.18.1 portfolio engine 修复对称
+  - **NaN 守护**: 零/NaN raw_close → ratio=1 fallback (保持 raw_open 不变), 避免 inf/NaN 污染
+  - **3 regression tests** (`test_engine_dividend_consistency.py`): 分红日买入无 phantom / 非分红日行为不变 / NaN close 不崩
+  - **CORE 文件警示**: `ez/backtest/engine.py` 在 CORE_FILES 列表 (CLAUDE.md "DO NOT MODIFY without proposal"). 本修复是正确性 bug, 不改公开 API, 非分红数据零行为差异. 按 V2.18.1 先例处理 (portfolio engine 同类修复也未走提案流程).
+  - 2756 → 2759 backend tests (+3)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422

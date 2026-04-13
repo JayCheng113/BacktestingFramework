@@ -127,9 +127,27 @@ class VectorizedBacktestEngine:
         signals: pd.Series,
         capital: float,
     ) -> tuple[pd.Series, list[TradeRecord], pd.Series]:
+        # V2.16.2: unit-consistent pricing (parity with V2.18.1 portfolio fix).
+        # Valuation uses adj_close; execution uses adj_open derived from
+        # open * (adj_close / close). Mixing raw open (execution) with
+        # adj close (valuation) was coherent on non-dividend days but
+        # produced phantom PnL on dividend days for trading strategies:
+        # buying 100 shares at raw_open=9, valuing at adj_close=10 ->
+        # +100 equity from nothing; symmetric under-count on sell days.
+        # adj_open ≈ open for non-dividend bars (adj_close == close),
+        # so this is a no-op for the vast majority of bars.
         prices = df["adj_close"].values
-        open_prices = df["open"].values if "open" in df.columns else prices
+        _raw_open = df["open"].values if "open" in df.columns else prices
         raw_close = df["close"].values if "close" in df.columns else prices
+        # Build adj_open = raw_open * (adj_close / raw_close), guarding
+        # zero/NaN raw close (keeps raw_open unchanged in that case).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            _ratio = np.where(
+                (raw_close > 0) & np.isfinite(raw_close) & np.isfinite(prices),
+                prices / np.where(raw_close > 0, raw_close, 1.0),
+                1.0,
+            )
+        open_prices = _raw_open * _ratio
         weights = signals.values
         n = len(prices)
 
