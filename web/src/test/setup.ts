@@ -30,3 +30,8 @@ class MockResizeObserver {
   disconnect() { /* noop */ }
 }
 ;(globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver = MockResizeObserver
+
+// scrollIntoView polyfill (ChatPanel uses it on new message)
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function () { /* noop */ }
+}
