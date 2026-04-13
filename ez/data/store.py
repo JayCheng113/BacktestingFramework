@@ -164,8 +164,21 @@ class DuckDBStore(DataStore):
     def _find_parquet_cache(self, market: str, period: str, end_date: date | None = None) -> str | None:
         """Return parquet path if file exists and date range is valid.
 
-        C4 date-range guard: if requested end_date exceeds manifest's
-        date_range.end + 7 days, skip parquet to prevent staleness loop.
+        V2.17 round 7: STRICT date-range guard. Previously a 7-day "grace
+        period" allowed parquet use when `end_date <= manifest_end + 7`.
+        That was wrong — parquet only contains bars up to `manifest_end`.
+        Requests for dates after `manifest_end` but within grace would
+        silently return TRUNCATED data, with no error and no fallback
+        to DB / provider fetch. Discovered during live deployment
+        verification: strategies got stale signals because the last 3-5
+        trading days were silently missing.
+
+        New semantics: if `end_date > manifest_end`, skip parquet and
+        let the caller walk the provider chain (DB → fetch) which
+        correctly stitches the missing days. Slightly slower but
+        complete. The V2.18 grace period is retained only in the
+        `_PARQUET_GRACE_DAYS` constant for any future use — no longer
+        active here.
         """
         if not self._cache_dir:
             return None
@@ -173,14 +186,14 @@ class DuckDBStore(DataStore):
         if not p.exists():
             return None
 
-        # Date-range guard (C4)
+        # Date-range guard (V2.17 round 7: strict)
         if end_date is not None:
             manifest = self._load_manifest()
             if manifest:
                 try:
                     manifest_end = date.fromisoformat(manifest["date_range"]["end"])
-                    if end_date > manifest_end + timedelta(days=self._PARQUET_GRACE_DAYS):
-                        return None  # Request exceeds parquet coverage
+                    if end_date > manifest_end:
+                        return None  # Truncation risk — go to DB/provider
                 except (KeyError, ValueError):
                     pass  # No valid date_range in manifest — allow parquet
 

@@ -765,3 +765,34 @@ class ARotateBondBlend(PortfolioStrategy):
         }
         blended[self.bond_symbol] = blended.get(self.bond_symbol, 0.0) + self.bond_weight
         return blended
+
+
+class DailyEqualWeightTest(PortfolioStrategy):
+    """V2.17 round 7 TEST ONLY — daily equal-weight hold, used to verify
+    live paper-trading logic end-to-end on any given trading day.
+
+    每天调仓 (freq="daily"), 对 `symbols` 列表等权持有. 第一次调仓买入;
+    后续 target_weights 相同 → engine weight-diff 阈值内, 不发单. 用于:
+      - 验证首日买入逻辑 (整手、T+1、印花税、滑点)
+      - 验证后续 mark-to-market 逻辑 (weights_history, equity 跟随价格)
+      - 手工核对交易明细 vs 真实成交成本
+
+    NOT for production. DeployGate 会通过但这策略没有 alpha.
+    """
+    lookback_days = 5  # 最小值, 加速 tick
+
+    def __init__(self, symbols: list[str] | None = None):
+        super().__init__()
+        self.symbols = list(symbols) if symbols else [
+            "510300.SH",  # 沪深 300
+            "511010.SH",  # 5Y 国债
+            "518880.SH",  # 黄金
+        ]
+
+    def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        # 只在有数据的标的里等权
+        valid = [s for s in self.symbols if s in universe_data and len(universe_data[s]) > 0]
+        if not valid:
+            return {}
+        w = 1.0 / len(valid)
+        return {s: w for s in valid}
