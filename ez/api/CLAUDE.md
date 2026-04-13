@@ -128,3 +128,9 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
   - **routes/code.py dual-dict cleanup**: 新增 `_get_all_registries_for_kind()` 返回 dict list, delete 路由 + `/refresh` endpoint 统一清理名字键 + 全键两个 dict, 避免 Factor/CrossSectionalFactor/PortfolioStrategy 的 `_registry_by_key` 在删除/刷新时泄漏 zombie 类.
 - V2.14: `_create_strategy` StrategyEnsemble 分支 (列表格式 sub_strategies, 递归子策略实例化), `/strategies` 追加 Ensemble 元信息 (is_ensemble: true), `ParamRangeRequest.values` 放宽为 `list[int|float|str|bool]`, candidates.py 搜索支持 bool/str 参数
 - V2.15: Paper trading 13 endpoints (routes/live.py): deploy/list/detail/approve/start/stop/pause/resume/tick/dashboard/snapshots/trades/stream. Lazy singleton pattern (DeploymentStore/Scheduler/Monitor). SSE stream for live updates. Scheduler resume_all() in app lifespan.
+- V2.16.2 — silent-bug fix batch covering API layer:
+  - **`_build_spec_from_run` 嵌套 bucket 读取** (routes/live.py:125-200): 优先级 `config._cost[key]` → top-level `config[key]` (legacy) → market-gated 默认. `is_cn` 推导 t_plus_1/stamp_tax/limit/lot 默认, 非 CN 全部归零. 修复每个非 CN 部署都被静默套 A 股规则的沉默 bug.
+  - **PortfolioRunRequest lot/limit 市场 gate** (routes/portfolio.py:287-310): `@model_validator(mode="after")` 用 `model_fields_set` 检测显式覆盖 vs default fill. 非 CN 市场 `lot_size`/`limit_pct` 自动归零 (原默认 100/0.10 硬编码 A 股规则泄漏到美股/港股).
+  - **BacktestRequest CN auto-apply** (routes/backtest.py:72-95): 单股 API 默认 stamp_tax=0 / lot=0 / limit=0, MarketRulesMatcher wrap 只在 >1/>0 时激活. CN 市场省略这些字段 → 零印花税 + 无整手 + 无涨跌停, P&L 虚高. 修复: CN 自动补齐 0.0005/100/0.10, 显式覆盖仍胜出.
+  - **Portfolio /run 数据复现性 hash** (routes/portfolio.py): `run_config` 新增 `_data_hash` 字段 (12 字符 SHA-256 prefix of parquet manifest), 用于检测 cache 重建后同 spec 结果漂移. `_get_current_data_hash()` helper 从 `get_store().get_data_hash()` 获取. Diagnostic 字段, 非 blocker.
+  - **Scheduler future-date guard** (routes/live.py:433-438 via scheduler.tick): user 传入未来 business_date 会 ValueError, 防止污染 `last_processed_date`.

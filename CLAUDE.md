@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.30 | Tests: 2738 backend + 59 frontend passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.31 | Tests: 2774 backend + 80 frontend passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine

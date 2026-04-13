@@ -86,6 +86,14 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 ## V2.16 — Platform Polish
 - **DocsPage API 参考**: Ch8 新增 13 个模拟盘 API 端点 (deploy/list/detail/approve/start/stop/pause/resume/tick/dashboard/snapshots/trades/stream), 含停止清仓参数说明
 
+## V2.25-Fe — 前端测试基础设施 + 针对性回归守卫
+(vitest 4.1.4 + @testing-library/react 16 + jsdom 29 + v8 coverage)
+- **Phase 1 (59 tests)**: smoke + metricRatings (25, pinned to `ez/research/verdict.py` thresholds) + ValidationPanel (11) + SleeveOptimizationPanel (20)
+- **Phase 2 (7 new, 66 total)**: `ChatPanel.test.tsx` — localStorage 损坏恢复 (3) + send guards (2) + V2.23 发送↔停止 toggle + V2.23 AbortController abort signal; `CodeEditor.test.tsx` — V2.19.0 guard pass 渲染 + V2.19.0 422 error-path guardReport + V2.12.2 删除 kind 不匹配 + 缺 guard_result 不崩. setup.ts scrollIntoView polyfill.
+- **Phase 2b (3 new, 73 total)**: ChatPanel targetId mid-stream (V2.12.2 retained ReadableStreamDefaultController 验证 fileKey 绑到 originating conv) + CodeEditor committedFilename 实时改名 (升级 mock ChatPanel 暴露 `data-file-key`) + 改名中删除清空编辑器.
+- **Phase 2/2b review 修复**: delete-kind 测试原找 `🗑` 但实际 UI 是 `x` → 改为真实找 `x` 按钮 + 找不到 fail loudly; V2.19.0 error-path 断言 `/LookaheadGuard/` 会被 errors 字符串匹配 → 改为 `/\[BLOCK\]\s+LookaheadGuard/` (只 guardReport panel 产生).
+- **Phase 3 (7 new, 80 total)**: `live.test.ts` — stopDeployment liquidate 参数字符串契约 (3, vi.hoisted() pattern); `PaperTradingPage.test.tsx` — V2.17 DeployGate 422 object→message string 提取 (2) + 模拟盘 holdings 字段漂移 defensive filter (2, ECharts mock 捕获 option prop 精确断言 series data).
+
 ## Running
 ```bash
 cd web && npm run dev  # http://localhost:3000

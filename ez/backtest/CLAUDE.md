@@ -39,3 +39,7 @@ Run vectorized backtests, compute metrics, validate via Walk-Forward, test stati
   - **metrics.py degenerate input 防护**: _nan_safe() helper + rolling_corr 常数窗口 fast-path (1e-12 tolerance), evaluator.py 全部输出点 sanitize
 - V2.12.2 post-release:
   - **walk_forward.py 尾部丢弃修复**: 原 `window_size = n // n_splits` 静默丢弃 `n % n_splits` 行 (n=510, k=7 丢 6 行). 改用整数区间 `i*n//n_splits .. (i+1)*n//n_splits`, 最后一折吸收余数. 校验用 `min_window = n // n_splits` 作为最小折的保守下界.
+- **V2.16.2 round 2 (CORE)**: 单股 engine 分红日 unit consistency 修复 — V2.18.1 的单股孪生.
+  - **Bug**: engine.py 执行用 raw_open (`df["open"]`) 但估值用 adj_close (`df["adj_close"]`). 非分红日 adj == raw 一致; **分红日** adj_close > raw_close, 在分红日交易的策略产生虚假盈亏 (mutation: day 10 raw 5→2.5, adj 恒 5, 当天买入 → equity 翻倍到 200k 虚假 +100%)
+  - **修复**: `adj_open = raw_open * (adj_close / raw_close)` numpy vectorized, NaN/零守护. 非分红日 ratio=1 → 无行为变化 (223 既存测试零差异). 分红日 adj_open 自动 scale 匹配 adj_close
+  - 3 regression tests (`test_engine_dividend_consistency.py`), mutation-verified.

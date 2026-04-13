@@ -727,6 +727,29 @@ OOS = Out-of-Sample (样本外) — 真正衡量预测能力
               <tr><td style={tds}>参数搜索阶段</td><td style={tds}>禁用 — 加速搜索，最终确认时再启用</td></tr>
             </tbody>
           </table>
+
+          <div style={h2s}>市场自动网关 (V2.16.2)</div>
+          <p style={ps}>
+            回测 API 现在根据 <code>market</code> 字段自动套用/关闭 A 股规则:
+          </p>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>市场</th><th style={ths}>印花税</th><th style={ths}>T+1</th><th style={ths}>整手</th><th style={ths}>涨跌停</th></tr></thead>
+            <tbody>
+              <tr><td style={tds}>cn_stock</td><td style={tds}>0.05%</td><td style={tds}>启用</td><td style={tds}>100</td><td style={tds}>10%</td></tr>
+              <tr><td style={tds}>us_stock / hk_stock 等</td><td style={tds}>0</td><td style={tds}>禁用</td><td style={tds}>1</td><td style={tds}>关闭</td></tr>
+            </tbody>
+          </table>
+          <div style={note}>
+            默认值会被用户显式传入的参数覆盖 (适用于成本反事实测试). 前端表单已经按市场填充正确默认值, 此网关主要保护外部脚本 / AI 工具 / 测试调用 — 避免忘记设置参数时 US 回测被默默套上 A 股规则 (或反之).
+          </div>
+
+          <div style={h2s}>分红日价格一致性 (V2.16.2 round 2)</div>
+          <p style={ps}>
+            回测引擎对分红日有特殊处理: 执行价用 <code>adj_open = raw_open × adj_close / raw_close</code>, 估值价用 <code>adj_close</code>. 在 ETF 现金分红日 (raw close 跳 -50%) 结果不再产生虚假盈亏.
+          </p>
+          <div style={note}>
+            这是 V2.18.1 分红修复在单股引擎的孪生修复. 非分红日两者比值=1, 行为无差异. 若你用自己的数据源且 <code>close == adj_close</code> (无复权), 本 fix 对你透明.
+          </div>
         </>}
 
         {/* ================================================================ */}

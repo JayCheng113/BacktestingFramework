@@ -38,8 +38,31 @@ Bridge between offline backtest research and forward-looking paper execution.
 - **Error escalation**: 3 consecutive errors -> automatic status="error" + engine removal (no infinite retry)
 
 ## Status
-V2.16 -- beta. Known limitations:
+V2.16.2 -- beta. Known limitations:
 - strategy.state not persisted across process restarts
 - Data freshness depends on provider update timing
 - ~~Stop does not trigger liquidation~~ -- V2.16: `liquidate=True` option added to stop_deployment
 - Single-process scheduler (no multi-worker)
+- Historical DeploymentSpecs (pre-V2.16.2) on non-CN markets may carry A-share
+  rules; `_start_engine` logs a warning so the operator can redeploy from source run
+
+## V2.16.2 — silent-bug fix batch
+Post-V2.15 audit found several V2.18.1-class silent bugs. Four commits:
+- **spec market rule gating** (`api/routes/live.py::_build_spec_from_run`): prior
+  version read cost/limit fields from top-level `config.get(...)` but `/run`
+  persists them under nested `config._cost` bucket → every deployment silently
+  fell back to hardcoded CN defaults. Non-CN deployment with default config → T+1
+  + 0.05% stamp tax + 10% limit + 100-share lot mis-applied. Fixed: read from
+  `_cost` bucket first, top-level second, market-gated default last.
+- **paper_engine NaN fallback** (`paper_engine.py::_get_latest_prices` and
+  `_get_raw_closes`): `float(df["adj_close"].iloc[-1])` inserted NaN into prices
+  dict when adj not yet populated, crashing `execute_portfolio_trades._lot_round(NaN)`
+  with ValueError. Parity with V2.18.1 backtest: adj→raw fallback + `math.isfinite`.
+- **Scheduler future-date guard** (`scheduler.py::tick`): user-supplied future
+  business_date would advance `last_processed_date` past wall clock, silently
+  blocking subsequent ticks. Refuse with ValueError.
+- **Historical spec warning** (`scheduler.py::_start_engine`): pre-fix specs have
+  A-share rules on non-CN markets; spec_id is content-hashed so can't silently
+  rewrite. Log loud warning advising redeploy.
+
+Regression: 171 → 182 tests (+11). All mutation-verified.
