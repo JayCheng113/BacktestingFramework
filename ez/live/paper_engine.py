@@ -111,6 +111,31 @@ class PaperTradingEngine:
                 sliced, dt, self.prev_weights, self.prev_returns,
             )
 
+            # V2.17 round 6: strategy can return None on non-rebalance days
+            # to signal "skip rebalancing today, hold prior positions".
+            # This mirrors `ez/portfolio/engine.py` V2.17 semantics so the
+            # same strategy behaves identically in backtest and paper.
+            # Without this guard, any strategy delegating to an inner
+            # weekly-signaled one (EtfRotateCombo, ARotateBondBlend) would
+            # crash with 'NoneType has no attribute items'.
+            if target_weights is None:
+                rebalanced = False
+                # Post-trade mark-to-market uses current prices (no trades)
+                post_equity = self._mark_to_market(prices)
+                self.equity_curve.append(post_equity)
+                self.dates.append(today)
+                self.risk_events.extend(day_risk_events)
+                self.prev_weights = self._compute_weights(prices, post_equity)
+                self.prev_returns = self._compute_returns()
+                return {
+                    "date": str(today), "equity": post_equity, "cash": self.cash,
+                    "holdings": dict(self.holdings),
+                    "weights": dict(self.prev_weights),
+                    "prev_returns": dict(self.prev_returns),
+                    "trades": [], "risk_events": day_risk_events,
+                    "rebalanced": False,
+                }
+
             # Optional optimizer
             if self.optimizer:
                 self.optimizer.set_context(today, sliced)
