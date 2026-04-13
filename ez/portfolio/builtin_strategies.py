@@ -710,3 +710,58 @@ class EtfStockEnhance(PortfolioStrategy):
         for sym, _ in ranked:
             result[sym] = stock_w
         return result
+
+
+class ARotateBondBlend(PortfolioStrategy):
+    """V2.18.1 research result: A 50% + 5Y Bond 50% static blend.
+
+    背景: 10-年 WF (2015-2024, 20 folds, 6-月 windows) 实证
+      - 100% folds MDD 改善 (A 单独 -19% 最差 fold → 本组合 -9.5%)
+      - 80% folds Sharpe 改善
+      - 2018 熊市: A Sharpe -0.28 → 本组合 +0.02 (转正)
+      - 国债与 A 股 10 年相关 -0.06 (唯一真负相关可投 A 股资产)
+
+    实现: 单一 wrapper 持有 EtfRotateCombo 实例, 每次调仓
+    把 A 权重乘以 (1 - bond_weight), 加固定 bond_weight 给国债.
+
+    Parameters
+    ----------
+    bond_symbol : str
+        避险资产 (默认 511010.SH, 5Y 国债 ETF).
+    bond_weight : float
+        国债固定比例 ∈ (0, 1). V2.18.1 实测 0.5 最稳 (80% folds 改善).
+        降低追求收益 (0.3 保留 74% A 收益), 升高追求稳定.
+
+    其他参数透传给内部 EtfRotateCombo (top_n / rotate_etfs / ...).
+    """
+
+    def __init__(
+        self,
+        bond_symbol: str = "511010.SH",
+        bond_weight: float = 0.5,
+        **combo_kwargs,
+    ):
+        super().__init__()
+        if not (0.0 < bond_weight < 1.0):
+            raise ValueError(f"bond_weight must be in (0, 1), got {bond_weight}")
+        self.bond_symbol = bond_symbol
+        self.bond_weight = float(bond_weight)
+        self._combo = EtfRotateCombo(**combo_kwargs)
+
+    @property
+    def lookback_days(self) -> int:
+        return self._combo.lookback_days
+
+    def generate_weights(self, universe_data, date, prev_weights, prev_returns):
+        a_weights = self._combo.generate_weights(
+            universe_data, date, prev_weights, prev_returns,
+        )
+        # Propagate None (non-rebalance day) so engine skips
+        if a_weights is None:
+            return None
+        a_scale = 1.0 - self.bond_weight
+        blended: dict[str, float] = {
+            sym: w * a_scale for sym, w in a_weights.items() if w > 0
+        }
+        blended[self.bond_symbol] = blended.get(self.bond_symbol, 0.0) + self.bond_weight
+        return blended
