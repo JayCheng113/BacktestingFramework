@@ -177,14 +177,17 @@ describe('CodeEditor - guard report rendering (V2.19.0)', () => {
     await userEvent.click(screen.getByRole('button', { name: /保存并测试/ }))
 
     // V2.19.0 regression: error response's detail.guard_result must
-    // populate the guard panel (not be ignored). If the code regresses
-    // to only populating guardReport on success, LookaheadGuard badge
-    // disappears and user can't see why save failed.
+    // populate the guard panel (not be ignored). We assert on the
+    // `[BLOCK]` prefix + runtime_ms rendering which is ONLY produced
+    // by the guardReport panel (CodeEditor.tsx L724). The errors
+    // array string ("LookaheadGuard 阻塞保存") does NOT contain
+    // "[BLOCK]", so a regression where guardReport stays null will
+    // fail this assertion even though the error banner leaks the name.
     await waitFor(() => {
       const body = document.body.textContent || ''
-      expect(body).toMatch(/LookaheadGuard/)
+      expect(body).toMatch(/\[BLOCK\]\s+LookaheadGuard/)
     })
-    // Error banner also present:
+    // Error banner also present (sanity):
     const body = document.body.textContent || ''
     expect(body).toMatch(/保存失败|阻塞保存/)
   })
@@ -235,34 +238,29 @@ describe('CodeEditor - delete with kind mismatch (V2.12.2 regression guard)', ()
       expect(textarea.value).toContain('FooStrategy')
     })
 
-    // Now find the delete button for the FACTOR foo.py and click it.
-    // The sidebar renders files with a 🗑 delete button each; we need the one
-    // associated with the FooFactor row.
+    // Find the delete button ("x") in the FooFactor row.
+    // CodeEditor.tsx L431 renders it as `<button>x</button>` with
+    // opacity-0 group-hover:opacity-100 (invisible until hover, but
+    // present in DOM). We search within the row by text content.
     const factorRow = screen.getByText('FooFactor').closest('div')
     expect(factorRow).toBeTruthy()
-    const deleteBtns = factorRow!.querySelectorAll('button')
-    // Find the delete button (icon 🗑 or text)
-    const delBtn = Array.from(deleteBtns).find(
-      (b) => b.textContent?.includes('🗑') || b.title === '删除',
+    const delBtn = Array.from(factorRow!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'x',
     ) as HTMLButtonElement | undefined
+    // Fail loudly if the delete button isn't found — a UI change that
+    // removes per-file delete should force this test to be rewritten,
+    // not silently skipped.
+    expect(delBtn, 'delete button (x) must exist in FooFactor sidebar row').toBeTruthy()
 
-    if (delBtn) {
-      await userEvent.click(delBtn)
-      expect(confirmMock).toHaveBeenCalled()
-      await waitFor(() => expect(deletedPath).toBe('deleted'))
+    await userEvent.click(delBtn!)
+    expect(confirmMock).toHaveBeenCalled()
+    await waitFor(() => expect(deletedPath).toBe('deleted'))
 
-      // CRITICAL: editor must STILL have the strategy content
-      const textarea = screen.getByTestId('monaco-editor') as HTMLTextAreaElement
-      expect(textarea.value).toContain('FooStrategy')
-    } else {
-      // If sidebar doesn't expose a delete button per row in this rendering,
-      // document and skip — but this is still a meaningful regression test
-      // when the UI changes to expose per-file delete.
-      // For now assert at least the structural invariant: the editor still
-      // shows the loaded strategy.
-      const textarea = screen.getByTestId('monaco-editor') as HTMLTextAreaElement
-      expect(textarea.value).toContain('FooStrategy')
-    }
+    // V2.12.2 CRITICAL regression guard: editor must STILL show the
+    // strategy content. If deleteFile regresses to filename-only match
+    // (ignoring kind), the strategy foo.py editor would be cleared.
+    const textarea = screen.getByTestId('monaco-editor') as HTMLTextAreaElement
+    expect(textarea.value).toContain('FooStrategy')
   })
 })
 
