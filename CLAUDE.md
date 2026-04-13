@@ -521,6 +521,18 @@ No version tag without review pass. No push without critical issues resolved.
   - **设计边界**: hash 是 diagnostic 不是 blocker — 不强制 run 拒绝; 用户可能有理由用旧数据 (研究回溯). 后续 UI 显示对比即可
   - 2766 → 2774 backend tests (+8)
 
+- **V2.16.2 round 5 (done)**: 跨引擎一致性 diff 测试 — 系统性 canary
+  - **动机**: 本 session 人肉扫 4 个 V2.18.1 类 bug 得靠眼力, 下次可能 miss. 用合成数据让三引擎自己 surface 分歧, **工具级检测**代替手动扫查
+  - **新 `tests/test_integration/test_cross_engine_consistency.py`** (6 tests): 同策略 (always-long) 同合成数据跑 3 个引擎 — `ez/backtest/engine` (单股) / `ez/portfolio/engine` (1-标的 universe) / `ez/live/paper_engine` (day-by-day 模拟), 断言 equity 差异 < 容差
+  - **场景覆盖**:
+    - flat 价格三角一致 (all-three <1% spread)
+    - 单股 vs 组合、组合 vs paper 两两比对 (<0.5%)
+    - 上行趋势下总收益捕获 (expected return = end/start, <2% drift)
+    - 非零佣金 (买+卖+持有, <1% drift)
+    - **分红日跨引擎** (V2.16.2 round 2 + V2.18.1 联合验证: -50% raw drop + 恒 adj_close, 两引擎都保持 ~flat, <1% drift)
+  - **意义**: 本 session 4 个修复 (V2.16.2 market gate / 单股分红 / API gate / 数据 hash) 全部通过该 canary. 未来任何引擎分歧 (新 feature、refactor) 都会被立刻 catch
+  - 2774 → 2780 backend tests (+6)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
