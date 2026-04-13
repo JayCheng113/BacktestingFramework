@@ -1998,15 +1998,47 @@ llm:
             <tr><td style={tds}>deployment_snapshots</td><td style={tds}>每日快照（权益、持仓、交易、风控事件）</td></tr>
           </tbody></table>
 
+          <div style={h2s}>自动调度 (V2.17)</div>
+          <p style={ps}>
+            手动每天调用 <code>/api/live/tick</code> 对长期运行不现实。V2.17 新增 asyncio 后台 loop，**默认关闭**，通过环境变量启用：
+          </p>
+          <pre style={code}>{`# 启动后端时启用自动 tick (每小时一次)
+EZ_LIVE_AUTO_TICK=1 ./scripts/start.sh
+
+# 自定义间隔 (秒), 默认 3600
+EZ_LIVE_AUTO_TICK=1 EZ_LIVE_AUTO_TICK_INTERVAL_S=1800 ./scripts/start.sh`}</pre>
+          <p style={ps}>
+            安全保证：
+          </p>
+          <ul style={{ marginLeft: '20px', marginTop: '4px' }}>
+            <li style={ps}>幂等：scheduler 内部 <code>last_processed_date</code> 守护，同一交易日重复 tick 是 no-op</li>
+            <li style={ps}>日历过滤：非交易日跳过（每个部署的 market 独立日历）</li>
+            <li style={ps}>异常隔离：单日 tick 失败不会杀掉 loop，下次间隔继续</li>
+            <li style={ps}>手动 <code>/api/live/tick</code> 仍可用，不互斥（都走同一 asyncio.Lock）</li>
+          </ul>
+          <div style={note}>
+            间隔设 1 小时比 10 分钟更稳（每天只真实处理一次）。频繁调用对资源无影响因为幂等，但日志会多。
+          </div>
+
+          <div style={h2s}>策略状态持久化 (V2.17)</div>
+          <p style={ps}>
+            <code>deployment_snapshots.strategy_state</code> BLOB 列每日保存整个策略实例的 pickle 快照。重启后 <code>_start_engine</code> 自动恢复，MLAlpha 训练的 sklearn 模型 / StrategyEnsemble 的 ledger / 用户自定义 <code>self.*</code> 字段跨重启保留。
+          </p>
+          <div style={note}>
+            picklable 要求：策略不能持有 lambda / 文件句柄 / DB 连接 / httpx client 等不可序列化对象。失败时自动降级到 "每次重启 fresh 构造"（保持 V2.15 行为）+ warning 日志。类名变了（spec 改 strategy_name）也会被 class-name guard 拒绝，避免静默 swap。
+          </div>
+
           <div style={h2s}>已知限制</div>
           <table style={tbl}><thead><tr><th style={ths}>限制</th><th style={ths}>说明</th><th style={ths}>影响</th></tr></thead><tbody>
-            <tr><td style={tds}>strategy.state 不持久化</td><td style={tds}>进程重启后策略内部状态丢失</td><td style={tds}>有状态策略（如 MLAlpha 模型）重启后首个 rebalance 从零训练</td></tr>
             <tr><td style={tds}>数据时效性</td><td style={tds}>依赖数据源更新速度</td><td style={tds}>tick 时数据可能尚未更新，需在收盘后足够时间执行</td></tr>
             <tr><td style={tds}>停止可选清仓</td><td style={tds}>停止时可选择清仓 (?liquidate=true)</td><td style={tds}>默认不清仓；选择清仓后系统卖出所有持仓并记录清仓快照</td></tr>
             <tr><td style={tds}>单进程</td><td style={tds}>Scheduler 无多 worker 支持</td><td style={tds}>大量部署时 tick 串行处理较慢</td></tr>
             <tr><td style={tds}>无 crash recovery</td><td style={tds}>tick 执行中途崩溃可能丢失当天快照</td><td style={tds}>下次 tick 会补执行（幂等保护）</td></tr>
+            <tr><td style={tds}>不可序列化策略</td><td style={tds}>含 lambda/文件句柄的自定义策略</td><td style={tds}>state 不持久化，重启 fresh 构造（V2.15 行为）</td></tr>
           </tbody></table>
-          <div style={warn}>模拟盘目前是实验性功能 (V2.15)。建议在收盘后 1-2 小时手动触发 tick，确保数据源已更新。</div>
+          <div style={warn}>
+            V2.17 beta。建议部署流程：(1) 先手动跑一周 tick 确认数据源稳定，(2) 再开 <code>EZ_LIVE_AUTO_TICK</code> 无人值守。
+          </div>
         </>}
 
         {/* ================================================================ */}

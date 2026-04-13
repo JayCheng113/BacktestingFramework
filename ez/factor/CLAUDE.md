@@ -25,6 +25,11 @@ Compute technical indicators and evaluate their predictive power via IC analysis
 3. Auto-registered via `__init_subclass__` — no manual registration needed
 4. Run `pytest tests/test_factor/test_factor_contract.py` — auto-validates
 
+## adj_close contract (V2.17)
+**Every built-in Factor / CrossSectionalFactor computes signals on `adj_close`, NOT raw `close`.** Raw close jumps ~50% on dividend days for ETFs — a factor reading it would produce phantom negative signals. V2.18.1 research measured 14pp/year impact on StaticLowVol.
+
+Contract canary: `tests/test_factor/test_adj_close_contract.py` runs every registered factor on synthetic dividend-day data; any factor with >40% phantom jump fails on CI. The only intentional raw-close use in the codebase is `ez/portfolio/builtin_strategies.py` (QMT-ported strategies) — NOT factors; documented as design choice in root CLAUDE.md.
+
 ## Factor Correctness (V2.10 fixes)
 - **RSI**: flat period = 50, pure uptrend = 100, pure downtrend = 0 (edge cases handled)
 - **VWAP**: adj_ratio scaling (`adj_close / close`) applied to high/low for split-adjusted consistency

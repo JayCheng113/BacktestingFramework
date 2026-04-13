@@ -66,3 +66,9 @@ Post-V2.15 audit found several V2.18.1-class silent bugs. Four commits:
   rewrite. Log loud warning advising redeploy.
 
 Regression: 171 → 182 tests (+11). All mutation-verified.
+
+## V2.17 — strategy.state + auto-tick
+- **strategy.state 跨重启持久化**: `deployment_snapshots.strategy_state` BLOB 列 + ALTER 迁移. `save_daily_snapshot(..., strategy_state: bytes | None)` 可选传入. `get_latest_strategy_state()` 取最新非空 blob. `Scheduler.tick` 成功后 `_pickle_strategy` pickle + 一次性 warn 失败. `Scheduler._start_engine` `_unpickle_strategy` + class-name guard + fallback to fresh 构造. 9 regression tests.
+- **auto-tick loop** (`ez/api/app.py`): asyncio background task, `EZ_LIVE_AUTO_TICK=1` 启用, interval 默认 3600s (`EZ_LIVE_AUTO_TICK_INTERVAL_S` 可调). 三层异常: CancelledError 干净退出; ValueError (future-date guard) warn + continue; 其他 Exception log.exception + continue. Loop 永不自杀. 5 regression tests.
+- **Scheduler future-date guard**: `tick(business_date)` 拒绝未来日期防污染 `last_processed_date`.
+- Regression: 182 → 196 tests (+14).
