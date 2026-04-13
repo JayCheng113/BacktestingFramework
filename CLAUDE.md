@@ -513,6 +513,14 @@ No version tag without review pass. No push without critical issues resolved.
   - **7 regression tests** (`tests/test_api/test_market_rule_gates.py`): 单股 CN auto-apply / 单股 US 保持 0 / CN 显式零保留 / 组合 US 清零 lot+limit / 组合 CN 保 A 股默认 / 组合 US 显式 lot 覆盖 / 组合 HK 非 CN 默认. **Mutation verified**: revert gate 后 3/7 测试炸 (CN 单股全 0, 组合 US/HK lot=100 + limit=0.10)
   - 2759 → 2766 backend tests (+7)
 
+- **V2.16.2 round 4 (done)**: 数据复现性 hash — 防止 parquet cache 更新后同 spec 结果悄悄漂移
+  - **动机**: V2.18.1 分红修复后 ETF adj_factor 历史 anomaly 经过修复; 后续 ETF adj drift 可能再发生. cache 重建 → 同策略同 spec 不同结果, 用户无感知
+  - **`DuckDBStore.get_data_hash()`** (`ez/data/store.py:113-152`): 从 parquet manifest 计算 12 字符 SHA-256 prefix. 包含所有 file md5 (按 filename 字典序) + date_range. 排除 build_timestamp / version / symbol counts 等元数据 (字节相同数据重建不应换 hash). 无 manifest 或无 md5 → None (unknown data state).
+  - **Portfolio `/run` 集成**: `_get_current_data_hash()` helper 调用 `get_store().get_data_hash()`. 写入 `run_config["_data_hash"]` 字段, 和其他 `_cost` / `_optimizer` / `_risk` / `_index` buckets 同级. 下游消费 (validation, deploy, comparison) 可读取做交叉对比, 一致则放心; 不同则 warn "数据版本漂移, 结果可能不可直接比较".
+  - **8 regression tests** (`tests/test_data/test_data_hash.py`): 相同 manifest → 相同 hash / md5 变 → hash 变 / date_range 变 → hash 变 / 文件顺序无关 / 无 manifest 返回 None / 空 files 返回 None / 元数据不影响 hash / 端到端 `_get_current_data_hash()` 接入
+  - **设计边界**: hash 是 diagnostic 不是 blocker — 不强制 run 拒绝; 用户可能有理由用旧数据 (研究回溯). 后续 UI 显示对比即可
+  - 2766 → 2774 backend tests (+8)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422

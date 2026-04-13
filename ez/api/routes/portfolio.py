@@ -34,6 +34,18 @@ _BUILTIN_FACTOR_MAP = {
 _BUILTIN_CLASS_NAMES = {"MomentumRank", "VolumeRank", "ReverseVolatilityRank"}
 
 
+def _get_current_data_hash() -> str | None:
+    """V2.16.2 round 4: fetch parquet cache hash from the DuckDBStore
+    singleton. Falls back to None if the store / cache manifest is
+    unavailable (dev env without cache, or fresh install)."""
+    try:
+        from ez.api.deps import get_store
+        store = get_store()
+        return store.get_data_hash() if store else None
+    except Exception:
+        return None
+
+
 def _is_fundamental_factor(cls_or_factory) -> bool:
     """Check if a factor class/factory is a FundamentalCrossFactor."""
     from ez.factor.builtin.fundamental import FundamentalCrossFactor
@@ -920,6 +932,12 @@ def run_portfolio(req: PortfolioRunRequest):
             "benchmark": req.index_benchmark,
             "max_tracking_error": req.max_tracking_error,
         },
+        # V2.16.2 round 4: data reproducibility hash. If parquet cache is
+        # rebuilt between runs (new build, ETF adj fix, etc.), the hash
+        # changes and same-spec runs may produce different results.
+        # Stored for cross-run comparison; a mismatch is a diagnostic
+        # signal, not a blocker.
+        "_data_hash": _get_current_data_hash(),
     }
     store = _get_store()
     run_id = store.save_run({

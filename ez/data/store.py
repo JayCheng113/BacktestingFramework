@@ -8,6 +8,7 @@ Date-range guard via manifest.json prevents staleness loops.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -124,6 +125,41 @@ class DuckDBStore(DataStore):
             except Exception:
                 logger.warning("Failed to read parquet manifest: %s", manifest_path)
         return self._manifest
+
+    def get_data_hash(self) -> str | None:
+        """Return a short (12-char) hash summarizing current parquet cache state.
+
+        V2.16.2 round 4: used for backtest reproducibility. The hash is
+        a SHA-256 prefix of the sorted file->md5 mapping plus the
+        manifest date_range. If a user re-runs the same spec after the
+        parquet cache was rebuilt, the hash changes -> results may differ.
+        Downstream callers (e.g. portfolio /run) embed this in
+        run_config to detect silent drift between runs.
+
+        Returns None if manifest absent or lacks file md5s — caller
+        should treat that as "unknown data state".
+        """
+        manifest = self._load_manifest()
+        if not manifest:
+            return None
+        files = manifest.get("files") or {}
+        md5_map = {
+            name: (info or {}).get("md5")
+            for name, info in files.items()
+            if isinstance(info, dict) and info.get("md5")
+        }
+        if not md5_map:
+            return None
+        date_range = manifest.get("date_range") or {}
+        payload = {
+            "files": dict(sorted(md5_map.items())),
+            "date_range": {
+                "start": date_range.get("start"),
+                "end": date_range.get("end"),
+            },
+        }
+        blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
     def _find_parquet_cache(self, market: str, period: str, end_date: date | None = None) -> str | None:
         """Return parquet path if file exists and date range is valid.
