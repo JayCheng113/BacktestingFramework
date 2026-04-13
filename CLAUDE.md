@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.29 | Tests: 2722 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.29 | Tests: 2738 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -433,8 +433,15 @@ No version tag without review pass. No push without critical issues resolved.
     - S11: tz-aware regression test (防 `normalize_returns_index` 回退)
     - S13: `StepError` context 在 500 响应里保留 step_name + partial artifacts
   - **类型**: 11 个新 TS interface (OptimizeWeightsRequest, OptimizerCandidate, NestedOOSResults, WalkForwardFold, WalkForwardResults, OptimizeWeightsResponse 等)
-  - 2698 → 2722 tests (+24: 19 初始 + 5 review regression). tsc + vite 零错误
-  - **真 · 延后**: S5 前端单测 (累积 session gap), S10 sleeve 上限 10 可能对 index enhancement 不够 (V3.x 考虑 hierarchical optimizer)
+  - **Round 2 codex 修复** (2 Critical + 4 Important):
+    - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
+    - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
+    - I4: objectives min_length=1 + uniqueness (空数组 500 → 422)
+    - I5: baseline_weights 0 ≤ sum ≤ 1 接受 cash residual, long-only 保留
+    - I6: `minimum_backtest_length_status()` 返回结构化 status (unprofitable/below_search_threshold/ok) + reason, verdict 渲染 below_search_threshold 为显式 fail 而非 silent skip
+    - I7: 前端 IS Sharpe 标签从 "IS Sharpe (均)" 改为 "聚合 IS Sharpe" (V2.23.2 I5 后 backend 已经是拼接重算, 原标签误导)
+  - 2698 → 2738 tests (+40: 24 初始 + 16 两轮 review regression). tsc + vite 零错误
+  - **真 · 延后**: S5 前端单测 (累积 session gap, 3 次 review 都提到), S10 sleeve 上限 10 可能对 index enhancement 不够 (V3.x 考虑 hierarchical optimizer), private sibling import (layering smell)
 
 - **V2.23.2 (done)**: 外部 review (codex) — 2 Critical + 7 Important 修复
   - **Critical 1 sandbox AST dynamic-alias bypass**: V2.21 closure fix 对 `_get_reload_lock()` 直接调用路径无效. 修复: 引入 `_DYNAMIC_UNSAFE` sentinel 标记来自 Call/Subscript/List/For/comprehension 等动态 RHS 的 binding. 新增 `_dynamic_chain_reaches_forbidden` 检查 dynamic-rooted 链的 suffix 是否可能到达 `_FORBIDDEN_FULL_MODULES`. For 和 comprehension target 现在作为动态绑定跟踪. 6 新攻击测试 (subscript/call/for/comprehension/arithmetic FP/benign-call FP)
