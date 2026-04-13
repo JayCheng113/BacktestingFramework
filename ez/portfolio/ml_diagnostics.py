@@ -409,9 +409,10 @@ class MLDiagnostics:
             return float("nan")
 
         try:
-            X_arr = np.asarray(X.to_numpy(), dtype=float)
+            # V2.24 round-2: pass DataFrame (feature names) to match training.
+            X_float = X.astype(float)
             y_arr = np.asarray(y.to_numpy(), dtype=float)
-            preds = model.predict(X_arr)
+            preds = model.predict(X_float)
         except Exception:
             return float("nan")
 

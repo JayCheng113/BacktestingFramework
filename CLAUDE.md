@@ -542,6 +542,21 @@ No version tag without review pass. No push without critical issues resolved.
 - **MLAlpha whitelist 9 个 estimator** (V2.14 扩展) — 7 sklearn (Ridge/Lasso/LR/EN/DT/RF/GBR) + LGBMRegressor + XGBRegressor. Classifier (LGBMClassifier/XGBClassifier) 未列入, 需先定义分类契约 (predict 输出语义 + TopNRotation 兼容性). 添加新 estimator 需要 (a) deepcopy regression test (b) sandbox smoke test (c) plan-file task
 - **MLAlpha `feature_warmup_days` 默认 0** — 用户的 `feature_fn` 若含 `rolling(N)` / `pct_change(N)`, 必须显式设置 `feature_warmup_days=N`. Runtime shortfall detection 在行数 < `train_window × 0.9` 时发一次性 warning 但不 raise
 
+### V2.24 session 延后 (V2.25+ 跟进)
+- **前端单测 (session 累积 gap)** — ValidationPanel 1400+ LOC, SleeveOptimizationPanel 700+ LOC, CodeEditor 等大组件无 vitest/React Testing Library 单测. 3 次 code review 都提到. 后端 contract test 只能 pin API shape, 无法捕获 CIBar 渲染/discriminated union 分支/markdown 报告生成等 UI 逻辑回归. 建议 V2.25+ 引入最小 vitest 配置 + smoke test
+- **n_trials 信任边界** — V2.23.2 Critical 2 UI 已暴露 "搜索数" 输入, 但 client 可以任意传. 正确做法是 /search 端点在 portfolio_runs 里持久化 n_trials_searched, /validate 从 DB 读回. 需 schema 变更 + /search 集成 (V2.25+)
+- **Sleeve 上限 10 (V2.24)** — 对 index enhancement (20-50 只成分股) 不够. 超出需要 hierarchical optimizer 或 regularized SLSQP (V3.x)
+- **Private sibling import** (`validation.py` → `routes.portfolio._get_store`) — layering smell 非 bug. 共享 store accessor 应移到 `ez.api.deps` (V2.25 small refactor)
+- **annual_breakdown `min_profitable_ratio` 0.60/0.40 默认** — 3-5 个年份 bucket 时一个年份可翻转裁决. 应加 min year count gate 或阈值按 year count 缩放 (V2.25)
+- **listPortfolioRuns(50, 0) 硬截断** — ValidationPanel baseline selector + SleeveOptimizationPanel sleeve list 都只看最新 50 个 run. 超过会静默丢失. 需加"只显示最新 50 条"hint 或 search/filter (V2.25)
+
+### V2.20.2-V2.24 session 测试 warnings 说明
+- **总 61 warnings (2738 tests)**: 全部第三方库内部, 非应用代码 bug:
+  - ~40 guards 测试的 `divide by zero in log` — **有意** 生成 NaN/Inf 验证拦截
+  - ~6 scipy DE `invalid value in subtract` — optimizer 探索时返回 inf (infeasible) 标记
+  - ~10 pandas/tushare 库内部 (SSL socket/event loop/dtype 等)
+  - **V2.24 round-2 减少 190**: MLAlpha + MLDiagnostics 把 fit/predict 两侧从 numpy 改为 DataFrame, 消除 sklearn "X does not have valid feature names" 对称警告
+
 ## V2.12.2 指标公式语义变更 (⚠ 非 backward compat)
 V2.12.2 修复 codex 发现的"同名指标不同公式"问题, 跨 `ez/backtest/engine.py`
 和 `ez/portfolio/engine.py` 统一以下 5 个指标为标准公式:

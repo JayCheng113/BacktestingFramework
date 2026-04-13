@@ -607,8 +607,14 @@ class MLAlpha(CrossSectionalFactor):
         # The try/except is still useful as defense-in-depth for edge
         # cases like pandas nullable Int64 with pd.NA, mixed-type object
         # columns that somehow slipped the kind check, etc.
+        # V2.24 round-2 warning cleanup: keep X as DataFrame (float-coerced)
+        # for fit, so feature names survive into the model. predict also
+        # receives a DataFrame (single-row), which matches. This eliminates
+        # sklearn's "X does not have valid feature names" warnings
+        # symmetrically.
         try:
-            X_arr = np.asarray(X.to_numpy(), dtype=float)
+            X_float = X.astype(float)
+            X_arr = X_float.to_numpy()  # for finite_mask only
             y_arr = np.asarray(y.to_numpy(), dtype=float)
         except (TypeError, ValueError) as e:
             if not self._non_numeric_warned:
@@ -632,6 +638,7 @@ class MLAlpha(CrossSectionalFactor):
         # dropped from earlier stages.
         finite_mask = np.isfinite(X_arr).all(axis=1) & np.isfinite(y_arr)
         if not finite_mask.all():
+            X_float = X_float.iloc[finite_mask]
             X_arr = X_arr[finite_mask]
             y_arr = y_arr[finite_mask]
             if len(X_arr) < 10:
@@ -667,7 +674,10 @@ class MLAlpha(CrossSectionalFactor):
         _assert_supported_estimator(model)
 
         try:
-            model.fit(X_arr, y_arr)
+            # V2.24 round-2: pass DataFrame so model stores feature_names_in_
+            # and subsequent predict(DataFrame) doesn't trigger the sklearn
+            # name-mismatch warning.
+            model.fit(X_float, y_arr)
         except Exception as e:
             _logger.warning(
                 "MLAlpha[%s]: fit() raised %s at %s: %s. Keeping prior "
@@ -1069,8 +1079,12 @@ class MLAlpha(CrossSectionalFactor):
             # wrong feature count (model trained on N features, predict
             # given M), dtype mismatch (e.g., feature_fn emits datetime64
             # at predict but float at training), shape mismatch.
+            # V2.24 round-2 warning cleanup: pass `latest` as a single-row
+            # DataFrame (keeps feature names) so sklearn/LightGBM don't
+            # emit `X does not have valid feature names` warnings.
+            # `latest` is already a single-row DataFrame from iloc[-1:].
             try:
-                pred = float(self._current_model.predict(latest.to_numpy())[0])
+                pred = float(self._current_model.predict(latest)[0])
             except Exception as e:
                 if not self._predict_call_exception_warned:
                     _logger.warning(
