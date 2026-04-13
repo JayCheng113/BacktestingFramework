@@ -461,6 +461,19 @@ No version tag without review pass. No push without critical issues resolved.
   - **剩余 reviewer gaps (未做, 边际递减)**: aiCreatedFileRef 行为 (V2.12.1), CodeEditor auto-overwrite 重试 (V2.12.2). reviewer 自评为"机械", 优先级 < 新组件首次测试
   - 2738 + 73 tests. tsc + vite build 零错误
 
+- **V2.25-Fe Phase 3 (done)**: PaperTradingPage + live.ts API client 守卫 (73 → 80 tests)
+  - **动机**: V2.15 paper trading 是前端唯一"真金白银"相关 surface, 0 测试覆盖. Explore agent 审出 3 个高价值失败模式, 全部编码为 canary:
+  - **`live.test.ts` (3 tests)**: stopDeployment liquidate 参数契约
+    - `liquidate=true` 必须序列化为字符串 `?liquidate=true` (非 boolean, 非 omit)
+    - `liquidate=false` 必须 omit (非 `?liquidate=false`, 避免 PHP-style truthy 误解)
+    - `liquidate` undefined 默认 omit
+    - vi.hoisted() 绕过 vi.mock factory 对 const 的 hoisting 限制
+  - **`PaperTradingPage.test.tsx` (4 tests)**:
+    - **DeployGate 422 message 提取 (V2.17 regression)**: 后端 detail 为 `{message, verdict}` 对象时, showToast 必须收到 string 非 object (否则 React 渲染 object → 黑屏). 2 测试: message 优先 / message 缺失时 fallback 到 verdict.summary
+    - **Holdings shape drift (字段漂移)**: backend 重命名 `market_value` → `value` / null entry / string entry 等畸形数据, defensive filter (line 183) 必须 skip 而非崩溃. 2 测试: 畸形 holdings 降级到 cash-only pie / 空 holdings+0 cash 不渲染 pie 但页面不崩
+  - **基础设施**: `vi.hoisted()` pattern 首次使用 (live.ts test), ECharts 全局 mock 避开 jsdom no-canvas 崩溃, 完整 live API 模块 mock 让每个测试独立控制响应
+  - 2738 + 80 tests. tsc + vite build 零错误
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
