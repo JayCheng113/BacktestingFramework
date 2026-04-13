@@ -175,11 +175,22 @@ export function SleeveOptimizationPanel() {
     }
   }
 
-  // Invalidate result on any config change
+  // Invalidate result on ANY config change (Review I4).
+  // Serialized deps catch same-length array mutations (e.g. MaxSharpe→MaxCalmar)
+  // which a bare `.length` dep would miss. Toggle handlers no longer need
+  // manual setResult(null) but we keep them for immediate UX feedback.
+  const objectivesKey = objectives.join(',')
+  const selectedKey = selectedIds.join(',')
+  const labelsKey = JSON.stringify(labels)
+  const baselineKey = useBaseline ? JSON.stringify(baselineWeights) : ''
   useEffect(() => {
     setResult(null)
     tokenRef.current += 1
-  }, [mode, objectives.length, nSplits, trainRatio, isStart, isEnd, oosStart, oosEnd])
+  }, [
+    mode, objectivesKey, selectedKey, labelsKey,
+    nSplits, trainRatio, isStart, isEnd, oosStart, oosEnd,
+    useBaseline, baselineKey,
+  ])
 
   return (
     <div style={{ padding: 16 }}>
@@ -525,10 +536,11 @@ function OptimizeResultView({ result }: { result: OptimizeWeightsResponse }) {
         {result.date_range[0]} → {result.date_range[1]}
       </div>
 
-      {result.mode === 'nested' && result.nested_oos_results && (
+      {/* Discriminated union narrowing via `mode` */}
+      {result.mode === 'nested' && (
         <NestedResultsTable nested={result.nested_oos_results} labels={result.labels} />
       )}
-      {result.mode === 'walk_forward' && result.walk_forward_results && (
+      {result.mode === 'walk_forward' && (
         <WalkForwardResultsView wf={result.walk_forward_results} labels={result.labels} />
       )}
     </div>

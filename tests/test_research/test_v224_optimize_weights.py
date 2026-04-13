@@ -362,3 +362,123 @@ class TestFrontendContract:
         })
         assert resp.status_code == 200
         json.dumps(resp.json())  # must not raise
+
+
+# ============================================================
+# Review fixes: I1 I2 I3 + S11 regression tests
+# ============================================================
+
+class TestReviewFixes:
+    def test_i1_duplicate_explicit_labels_rejected(self, client, three_sleeves):
+        """I1: explicit duplicate labels must be rejected (not silently deduped)."""
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": three_sleeves,
+            "labels": ["Same", "Same", "Other"],
+            "mode": "walk_forward",
+            "n_splits": 3,
+        })
+        assert resp.status_code == 422
+        assert "unique" in resp.json()["detail"].lower()
+
+    def test_i2_baseline_sum_out_of_range_rejected(self, client, three_sleeves):
+        """I2: baseline_weights sum must be in [0.95, 1.05]."""
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": three_sleeves,
+            "mode": "walk_forward",
+            "baseline_weights": {
+                "EtfRotate": 0.1,
+                "511010_BuyHold": 0.1,
+                "518880_BuyHold": 0.1,
+            },  # sum = 0.3
+        })
+        assert resp.status_code == 422
+        assert "sum" in resp.json()["detail"].lower()
+
+    def test_i2_baseline_negative_weight_rejected(self, client, three_sleeves):
+        """I2: negative baseline weights (A-share long-only)."""
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": three_sleeves,
+            "mode": "walk_forward",
+            "baseline_weights": {
+                "EtfRotate": 1.2,
+                "511010_BuyHold": -0.1,
+                "518880_BuyHold": -0.1,
+            },
+        })
+        assert resp.status_code == 422
+        assert "non-negative" in resp.json()["detail"].lower()
+
+    def test_i3_insufficient_overlap_rejected(self, client, in_memory_store):
+        """I3: inner-join, insufficient common overlap must error clearly.
+
+        Sleeves with date ranges that don't overlap enough produce < 30 rows
+        common; prior outer-join would have silently succeeded with NaN-filled
+        rows, biasing the optimizer.
+        """
+        # Sleeve A: first 100 days
+        a = _make_run_data("rA", "A", seed=1, n_days=100)
+        # Sleeve B: 800 days starting after A ends
+        rng = np.random.default_rng(2)
+        b_dates = pd.bdate_range("2025-01-01", periods=800)
+        b_equity = [1_000_000.0]
+        for r in rng.normal(0.0005, 0.01, 800):
+            b_equity.append(b_equity[-1] * (1 + r))
+        b = {
+            "run_id": "rB", "strategy_name": "B",
+            "strategy_params": {}, "symbols": [], "start_date": "2025-01-01",
+            "end_date": "2027-12-31", "freq": "weekly", "initial_cash": 1_000_000,
+            "metrics": {}, "equity_curve": list(b_equity),
+            "trade_count": 0, "rebalance_count": 0, "rebalance_weights": [],
+            "trades": [], "config": {}, "warnings": [],
+            "dates": [d.strftime("%Y-%m-%d") for d in b_dates] + [
+                b_dates[-1].strftime("%Y-%m-%d")
+            ],
+            "weights_history": [],
+        }
+        # Fix b: dates length must match equity_curve length
+        b["dates"] = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2025-01-01", periods=801)]
+        in_memory_store.save_run(a)
+        in_memory_store.save_run(b)
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": ["rA", "rB"],
+            "mode": "walk_forward",
+            "n_splits": 3,
+        })
+        assert resp.status_code == 422
+        assert "overlap" in resp.json()["detail"].lower()
+
+    def test_s11_tz_aware_returns_dont_crash(
+        self, client, monkeypatch, in_memory_store,
+    ):
+        """S11: tz-aware DatetimeIndex should be normalized to tz-naive,
+        not crash the merge. This guards against regression of
+        normalize_returns_index usage in _build_returns_frame.
+        """
+        # Two sleeves where one has tz-aware dates (simulated by forcing
+        # tz into the equity index after load). The easiest way: patch the
+        # loader to inject tz on one sleeve.
+        in_memory_store.save_run(_make_run_data("tz1", "TZ1", seed=1))
+        in_memory_store.save_run(_make_run_data("tz2", "TZ2", seed=2))
+
+        # Monkeypatch _run_to_returns so one run returns tz-aware series
+        from ez.api.routes import validation as val_mod
+        original = val_mod._run_to_returns
+
+        def tz_aware_for_tz1(run):
+            series = original(run)
+            if run.get("run_id") == "tz1":
+                # Localize to UTC → tz-aware
+                series = series.copy()
+                series.index = series.index.tz_localize("UTC")
+            return series
+        monkeypatch.setattr(val_mod, "_run_to_returns", tz_aware_for_tz1)
+
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": ["tz1", "tz2"],
+            "mode": "walk_forward",
+            "n_splits": 3,
+            "seed": 42,
+            "max_iter": 50,
+        })
+        # Should NOT crash with "Cannot join tz-naive with tz-aware"
+        assert resp.status_code == 200, resp.json()

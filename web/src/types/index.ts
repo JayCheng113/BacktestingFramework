@@ -384,11 +384,14 @@ export interface WalkForwardResults {
   }
 }
 
-export interface OptimizeWeightsResponse {
-  mode: OptimizeMode
+// Review S9: discriminated union via `mode`. TS can narrow access without
+// non-null assertions. Adding a third mode in future = add a variant.
+interface OptimizeBase {
   labels: string[]
   n_observations: number
   date_range: [string, string]
-  nested_oos_results?: NestedOOSResults | null
-  walk_forward_results?: WalkForwardResults | null
 }
+
+export type OptimizeWeightsResponse =
+  | (OptimizeBase & { mode: 'nested'; nested_oos_results: NestedOOSResults })
+  | (OptimizeBase & { mode: 'walk_forward'; walk_forward_results: WalkForwardResults })

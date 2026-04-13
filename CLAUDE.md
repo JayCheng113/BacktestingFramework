@@ -3,7 +3,7 @@
 Agent-Native quantitative trading platform. Human researchers and AI agents are both
 first-class citizens — same pipeline, same gates, same audit trail.
 Python 3.12+ / FastAPI / DuckDB / React 19 / ECharts / C++ (nanobind).
-Version: 0.2.28 | Tests: 2698 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
+Version: 0.2.29 | Tests: 2722 passed + 10 skipped with sklearn+lgbm+xgb | C++ acceleration: up to 7.9x
 
 ## Architecture Docs (MUST READ before major changes)
 - [System Architecture](docs/architecture/system-architecture.md) — 7-layer design, gates (Research/Deploy/Runtime + PreTradeRisk), dual state machine
@@ -419,6 +419,22 @@ No version tag without review pass. No push without critical issues resolved.
     - I6 (n_trials 信任边界): 需 `/search` endpoint 把 n_trials 存进 portfolio_runs 让 /validate 读回, 涉及 schema 变更
     - S2 (block bootstrap 向量化): 性能优化, 当前 n_bootstrap=10000 在 ~5s 内完成, 非优先
   - 2685 tests passing, 零 regression
+
+- **V2.24 (done)**: 多 sleeve 组合权重优化 (前后端)
+  - **动机**: `WalkForwardStep` / `NestedOOSStep` 后端在 V2.20.1/V2.20.3 就有, 但无前端入口. V2.22 改做"单 run 验证"后, "多策略 sleeve 权重优化"的 UI 被阉割. V2.24 补齐.
+  - **后端**: `POST /api/validation/optimize-weights` 端点. 输入 `{run_ids[2-10], labels?, mode: 'nested'|'walk_forward', objectives[], is_window, oos_window, n_splits, train_ratio, baseline_weights?, cvar_alpha, seed, max_iter}`. 复用 `_load_run_returns`, `normalize_returns_index`, 调 `NestedOOSStep` / `WalkForwardStep`. Pydantic 验证 + labels unique / baseline sum ∈ [0.95, 1.05] / long-only + inner-join (共同 overlap ≥ 30 行)
+  - **前端** `web/src/components/SleeveOptimizationPanel.tsx` (~680 LOC): PortfolioPanel 第 4 个 sub-tab "组合优化". 4 步引导 (① 选 sleeve / ② 选目标 / ③ 选模式 / ④ 基线). sleeve 选择器 checkbox 列表, 目标按钮组 (MaxSharpe/MaxCalmar/MaxSortino/MinCVaR), 模式按钮 (WF 折数 + 训练比例 / nested IS+OOS 日期). 结果: 候选表 (objective/状态/权重%/IS Sharpe/OOS Sharpe/OOS MDD) + (WF) per-fold 可展开. 颜色品牌蓝 #3b82f6 避开 A-股绿跌色.
+  - **Review 修复**:
+    - I1: 显式重复 label 拒绝 (不再静默合并成一列)
+    - I2: 基线权重 sum ∈ [0.95, 1.05] + long-only (A-股约束)
+    - I3: outer-join → inner-join, 共同 overlap < 30 行明确 422 (不再 NaN 填充混到 optimizer 里)
+    - I4: `useEffect` deps 完整 (序列化 arrays/objects 避免同长度 mutation 漏清 stale)
+    - S9: TS `OptimizeWeightsResponse` 改 discriminated union (mode-narrowed)
+    - S11: tz-aware regression test (防 `normalize_returns_index` 回退)
+    - S13: `StepError` context 在 500 响应里保留 step_name + partial artifacts
+  - **类型**: 11 个新 TS interface (OptimizeWeightsRequest, OptimizerCandidate, NestedOOSResults, WalkForwardFold, WalkForwardResults, OptimizeWeightsResponse 等)
+  - 2698 → 2722 tests (+24: 19 初始 + 5 review regression). tsc + vite 零错误
+  - **真 · 延后**: S5 前端单测 (累积 session gap), S10 sleeve 上限 10 可能对 index enhancement 不够 (V3.x 考虑 hierarchical optimizer)
 
 - **V2.23.2 (done)**: 外部 review (codex) — 2 Critical + 7 Important 修复
   - **Critical 1 sandbox AST dynamic-alias bypass**: V2.21 closure fix 对 `_get_reload_lock()` 直接调用路径无效. 修复: 引入 `_DYNAMIC_UNSAFE` sentinel 标记来自 Call/Subscript/List/For/comprehension 等动态 RHS 的 binding. 新增 `_dynamic_chain_reaches_forbidden` 检查 dynamic-rooted 链的 suffix 是否可能到达 `_FORBIDDEN_FULL_MODULES`. For 和 comprehension target 现在作为动态绑定跟踪. 6 新攻击测试 (subscript/call/for/comprehension/arithmetic FP/benign-call FP)

@@ -409,14 +409,19 @@ def _build_returns_frame(
         series_map[lbl] = returns
         resolved_labels.append(lbl)
 
-    # Outer join to get aligned DataFrame
-    df = pd.DataFrame(series_map)
-    # Drop all-NaN rows
-    df = df.dropna(how="all")
+    # Review I3: inner-join (require EVERY sleeve present on a given date).
+    # Prior outer-join + dropna(how='all') silently produced rows where some
+    # sleeves were all-NaN within a fold window, biasing optimizer and WF.
+    # Inner-join gives the common overlap across ALL selected sleeves.
+    df = pd.DataFrame(series_map).dropna(how="any")
     if len(df) < 30:
         raise HTTPException(
             status_code=422,
-            detail=f"Aligned returns have only {len(df)} rows (need >= 30)",
+            detail=(
+                f"Common overlap across all sleeves is only {len(df)} rows "
+                f"(need >= 30). Check that selected runs have sufficient date "
+                f"overlap, or remove sleeves with short histories."
+            ),
         )
     return df, resolved_labels
 
@@ -435,6 +440,13 @@ def optimize_weights(req: OptimizeWeightsRequest) -> dict[str, Any]:
             status_code=422,
             detail=f"labels length ({len(req.labels)}) != run_ids length ({len(req.run_ids)})",
         )
+    # Review I1: explicit duplicate labels silently collapse if passed through
+    # as dict keys downstream; reject early with clear error.
+    if req.labels is not None and len(set(req.labels)) != len(req.labels):
+        raise HTTPException(
+            status_code=422,
+            detail="labels must be unique (no duplicates allowed)",
+        )
 
     # Load and align returns
     returns_df, resolved_labels = _build_returns_frame(req.run_ids, req.labels)
@@ -450,6 +462,20 @@ def optimize_weights(req: OptimizeWeightsRequest) -> dict[str, Any]:
                     f"baseline_weights keys {sorted(bw_keys)} must be a subset of "
                     f"resolved labels {sorted(lbl_set)}"
                 ),
+            )
+        # Review I2: backend enforces sum ≈ 1 + long-only (A-share constraint).
+        # Frontend has ±0.05 check, but direct API callers (curl/notebook/agent)
+        # bypass it. This is the safety net.
+        total = sum(req.baseline_weights.values())
+        if not (0.95 <= total <= 1.05):
+            raise HTTPException(
+                status_code=422,
+                detail=f"baseline_weights sum={total:.3f}, must be in [0.95, 1.05]",
+            )
+        if any(w < 0 for w in req.baseline_weights.values()):
+            raise HTTPException(
+                status_code=422,
+                detail="baseline_weights must be non-negative (A-share long-only)",
             )
 
     # Build optimizer
@@ -507,7 +533,17 @@ def optimize_weights(req: OptimizeWeightsRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
+        # Review S13: preserve StepError context where possible.
+        from ez.research.pipeline import StepError
         logger.exception("optimize-weights failed")
+        if isinstance(e, StepError):
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Step '{e.step_name}' failed: {e.original}. "
+                    f"Partial artifacts: {list(e.context.artifacts.keys()) if e.context else []}"
+                ),
+            )
         raise HTTPException(status_code=500, detail=f"Optimization failed: {e}")
 
     return response
