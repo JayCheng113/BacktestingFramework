@@ -558,6 +558,17 @@ No version tag without review pass. No push without critical issues resolved.
   - **关键**: 这是 V2.16.2 round 5 跨引擎 canary 的**姊妹守卫** — 一个防引擎层 bug, 一个防因子层 bug. 两个 canary 组合覆盖 V2.18.1 类型所有可能的藏身处
   - 2789 → 2791 backend tests (+2)
 
+- **V2.17 round 3 (done)**: 模拟盘 tick 自动调度 — paper trading 最后一公里
+  - **动机**: V2.15 paper trading 只能靠用户手动调 `/api/live/tick` 或外部 cron. 无自动调度 = 无法无人值守部署. Known Limitations 里 "V3.x 再考虑" 的实际 operational blocker
+  - **设计**: 最简 asyncio 循环, 不引入 APScheduler 依赖
+    - `_auto_tick_loop(scheduler, interval_s)` in `ez/api/app.py`: `while True: await asyncio.sleep(interval_s); await scheduler.tick(today)`
+    - 启动: lifespan 里 `EZ_LIVE_AUTO_TICK=1` env 启用, 创建 `asyncio.create_task`. 关闭: `task.cancel() + await`. 无 env 变量时完全 noop, 保持旧行为
+    - 间隔默认 1 小时 (`EZ_LIVE_AUTO_TICK_INTERVAL_S`), 可调. 频繁 tick 无害 — scheduler 内部 idempotency (`last_processed_date`) + 日历过滤 + future-date guard 组合保证重复 tick 是 no-op
+  - **容错**: 三层异常边界 — `asyncio.CancelledError` clean return; `ValueError` (future-date guard / 配置错) warn + continue; `Exception` (任何崩溃) `log.exception` + continue. Loop 永不自杀, paper trading 不会因为一个 tick 失败就彻底哑火
+  - **5 regression tests** (`test_auto_tick_loop.py`): happy path / ValueError 存活 / 未知异常存活 / cancel 干净退出 / 启动前不先 tick (防 resume_all 竞态)
+  - **Scope 保守**: 不改默认启动行为 (env 控制), 不加 cron 表达式, 不加市场时钟对齐 (scheduler 日历自带). 再 fancy 的调度 (15:30 精确触发 / 特定时区) 等到有用户提需求再加.
+  - 2791 → 2796 backend tests (+5)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
@@ -647,6 +658,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **研究任务不支持进程恢复 (crash recovery)** — 需 task state 序列化 + DB 持久化中间状态. V3.x 重新设计研究引擎时处理
 - **研究任务串行 (同时只跑 1 个)** — 设计选择 (asyncio.Lock 保护资源隔离), 非 bug. 并发需要资源池 (LLM rate limit + Store 事务隔离)
 - ~~**模拟盘 strategy.state 不持久化**~~ — ✅ **已关闭** (V2.17: `deployment_snapshots.strategy_state` BLOB 列 + pickle 持久化 + `_start_engine` 恢复 + class-name 匹配 guard. MLAlpha sklearn 模型 / Ensemble ledger / 用户自定义 state 跨重启保留)
+- ~~**模拟盘无自动 tick (手动触发)**~~ — ✅ **已关闭** (V2.17 round 3: asyncio loop 在 app lifespan 中后台运行, env `EZ_LIVE_AUTO_TICK=1` 启用, scheduler idempotency + calendar + future-date guard 组合让频繁 tick 无害. 默认 off 保持旧行为)
 - **Scheduler 单进程** — 无多 worker, tick() 串行处理所有部署. 大量部署 (>50) 时可能在交易日窗口内处理不完. 需要分布式 scheduler
 - **C++ 加速路径持 GIL** — 需 C++ 端释放 GIL 才能真正并发加速, 当前单线程效果
 - **数据源链扁平去重** — 设计选择, 非 bug. 按市场独立路由需要 provider 声明支持的市场集 + 链查分 (未来 refactor)

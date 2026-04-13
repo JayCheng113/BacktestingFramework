@@ -1,8 +1,10 @@
 """FastAPI application entry point."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 
 from pathlib import Path
 
@@ -27,12 +29,29 @@ async def lifespan(app: FastAPI):
     load_cross_factors()
     load_ml_alphas()  # V2.13.1 Phase 5
     # V2.15: Resume running paper-trading deployments from DB
+    auto_tick_task = None
     try:
         from ez.api.routes.live import get_scheduler
         scheduler = get_scheduler()
         restored = await scheduler.resume_all()
         if restored:
             logging.getLogger(__name__).info("Restored %d paper-trading deployments", restored)
+
+        # V2.17 round 3: auto-tick loop for unattended operation.
+        # Opt-in via EZ_LIVE_AUTO_TICK=1 env var. Scheduler's
+        # idempotency (last_processed_date) + calendar check + future-
+        # date guard make this safe to run frequently — re-ticking
+        # today's date on an already-processed deployment is a no-op.
+        import os as _os
+        if _os.environ.get("EZ_LIVE_AUTO_TICK") == "1":
+            interval_s = int(_os.environ.get("EZ_LIVE_AUTO_TICK_INTERVAL_S", "3600"))
+            auto_tick_task = asyncio.create_task(
+                _auto_tick_loop(scheduler, interval_s),
+                name="live_auto_tick",
+            )
+            logging.getLogger(__name__).info(
+                "Live auto-tick enabled (interval=%ds)", interval_s,
+            )
     except Exception as exc:
         logging.getLogger(__name__).warning("Live scheduler resume_all failed: %s", exc)
     # Pre-warm symbol cache in background (don't block startup)
@@ -46,6 +65,13 @@ async def lifespan(app: FastAPI):
                 logging.getLogger(__name__).warning("Symbol cache pre-warm failed: %s", exc)
         threading.Thread(target=_warm, daemon=True).start()
     yield
+    # V2.17 round 3: stop auto-tick loop cleanly on shutdown
+    if auto_tick_task is not None:
+        auto_tick_task.cancel()
+        try:
+            await auto_tick_task
+        except (asyncio.CancelledError, Exception):
+            pass
     # Async cleanup of LLM provider (must happen before sync close_resources).
     # close_resources() also calls reset_provider_cache() → close(), but that is
     # a no-op because aclose() already sets _async_client = None.
@@ -56,6 +82,47 @@ async def lifespan(app: FastAPI):
             await provider.aclose()
     finally:
         close_resources()
+
+
+async def _auto_tick_loop(scheduler, interval_s: int) -> None:
+    """V2.17 round 3: background loop that ticks the live scheduler
+    at a fixed interval for unattended paper-trading operation.
+
+    Safety:
+    - scheduler.tick() is idempotent per (deployment_id, snapshot_date)
+      via `last_processed_date` — re-ticking today during an already-
+      processed day is a no-op for that deployment.
+    - Calendar check per-deployment: non-trading days skip naturally.
+    - future-date guard in scheduler.tick() prevents pollution if the
+      system clock drifts.
+    - Each iteration logs errors but does NOT crash the loop. User can
+      still trigger /api/live/tick manually.
+
+    Enabled via env EZ_LIVE_AUTO_TICK=1. Default off — manual-only.
+    Interval configurable via EZ_LIVE_AUTO_TICK_INTERVAL_S (default 1h).
+    A short interval is cheap because of the idempotency guarantees.
+    """
+    log = logging.getLogger(__name__)
+    while True:
+        try:
+            await asyncio.sleep(interval_s)
+        except asyncio.CancelledError:
+            return
+        try:
+            today = date.today()
+            results = await scheduler.tick(today)
+            if results:
+                log.info(
+                    "Auto-tick for %s: %d deployments processed",
+                    today, len(results),
+                )
+        except asyncio.CancelledError:
+            return
+        except ValueError as e:
+            # future-date guard or similar config error — log once, keep loop
+            log.warning("Auto-tick skipped: %s", e)
+        except Exception:
+            log.exception("Auto-tick iteration failed (loop continues)")
 
 
 def _get_version() -> str:
