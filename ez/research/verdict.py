@@ -226,15 +226,29 @@ def compute_verdict(
             value=dsr,
         ))
 
-    # 6. Minimum backtest length — skip when Sharpe ≤ 0 (redundant with
-    # other checks that already fail for unprofitable strategies).
+    # 6. Minimum backtest length.
+    # V2.24 round-2 Important 6: render structured status explicitly
+    # instead of silently skipping when required=None. Three paths:
+    #   - status="unprofitable": Sharpe ≤ 0. Other checks caught it, skip.
+    #   - status="below_search_threshold": search-adjusted MinBTL unreachable
+    #     at ANY data length. This is a "fail" we must surface, not hide.
+    #   - status="ok": standard check (actual years vs required years).
     if min_btl_result is not None and t.include_min_btl_check:
+        btl_status = min_btl_result.get("status", "ok")
         actual = min_btl_result.get("actual_years", 0)
         required = min_btl_result.get("min_btl_years")
-        if required is None:
-            # Sharpe ≤ 0 → other checks already caught this, skip MinBTL
+        reason_detail = min_btl_result.get("reason", "")
+        if btl_status == "unprofitable":
+            # Skip — other checks handle this
             pass
-        else:
+        elif btl_status == "below_search_threshold":
+            checks.append(CheckResult(
+                name="Minimum backtest length",
+                status="fail",
+                reason=reason_detail or "搜索调整后无法达到显著性门槛",
+                value={"actual": actual, "required": required, "status": btl_status},
+            ))
+        elif required is not None:
             if actual >= required:
                 status = "pass"
                 reason = f"Backtest {actual:.1f}y ≥ MinBTL {required:.1f}y."
@@ -245,7 +259,7 @@ def compute_verdict(
                 name="Minimum backtest length",
                 status=status,
                 reason=reason,
-                value={"actual": actual, "required": required},
+                value={"actual": actual, "required": required, "status": btl_status},
             ))
 
     # 7. Annual stability

@@ -309,13 +309,10 @@ def minimum_backtest_length(
 
     Returns
     -------
-    Minimum backtest length in years, or None if:
-      - sharpe <= 0 (unprofitable), OR
-      - n_trials > 1 and observed Sharpe doesn't beat the Gumbel
-        expected-max-SR threshold (search-adjusted minimum).
+    Minimum backtest length in years (backward-compatible float), or None.
 
-    Callers should distinguish `None` (cannot be significant regardless
-    of length) from a finite number (needs that many years of data).
+    Note: for richer semantics (distinguishing "Sharpe ≤ 0" from
+    "below search-adjusted threshold"), use ``minimum_backtest_length_status()``.
     """
     if sharpe <= 0:
         return None
@@ -337,6 +334,61 @@ def minimum_backtest_length(
     z_alpha = float(norm.ppf(1 - alpha))
     years = (z_alpha / effective_sr) ** 2
     return float(years)
+
+
+def minimum_backtest_length_status(
+    sharpe: float,
+    alpha: float = 0.05,
+    n_trials: int = 1,
+) -> dict[str, Any]:
+    """Structured MinBTL result (V2.24 round-2 I6).
+
+    Returns a dict with:
+      status: "ok" | "unprofitable" | "below_search_threshold"
+      min_btl_years: float | None
+      effective_sr: float | None
+      gumbel_threshold: float — the expected-max-SR under null
+      reason: short Chinese description
+    """
+    if n_trials > 1:
+        gumbel_adj = (
+            (1 - _GAMMA_EULER) * float(norm.ppf(1 - 1 / n_trials))
+            + _GAMMA_EULER * float(norm.ppf(1 - 1 / (n_trials * math_e)))
+        )
+    else:
+        gumbel_adj = 0.0
+
+    if sharpe <= 0:
+        return {
+            "status": "unprofitable",
+            "min_btl_years": None,
+            "effective_sr": None,
+            "gumbel_threshold": gumbel_adj,
+            "reason": "Sharpe ≤ 0, 策略本身不盈利",
+        }
+
+    effective_sr = sharpe - gumbel_adj
+    if effective_sr <= 0:
+        return {
+            "status": "below_search_threshold",
+            "min_btl_years": None,
+            "effective_sr": effective_sr,
+            "gumbel_threshold": gumbel_adj,
+            "reason": (
+                f"搜索 {n_trials} 个组合的情况下, 观察 Sharpe {sharpe:.2f} "
+                f"≤ Gumbel 期望最大 {gumbel_adj:.2f}, 无法在任何数据量下显著"
+            ),
+        }
+
+    z_alpha = float(norm.ppf(1 - alpha))
+    years = (z_alpha / effective_sr) ** 2
+    return {
+        "status": "ok",
+        "min_btl_years": float(years),
+        "effective_sr": float(effective_sr),
+        "gumbel_threshold": gumbel_adj,
+        "reason": f"需要 ≥ {years:.1f} 年数据才能在 {alpha * 100:.0f}% 显著",
+    }
 
 
 def annual_breakdown(

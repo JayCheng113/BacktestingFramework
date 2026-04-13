@@ -380,19 +380,55 @@ class TestReviewFixes:
         assert resp.status_code == 422
         assert "unique" in resp.json()["detail"].lower()
 
-    def test_i2_baseline_sum_out_of_range_rejected(self, client, three_sleeves):
-        """I2: baseline_weights sum must be in [0.95, 1.05]."""
+    def test_i2_baseline_sum_over_one_rejected(self, client, three_sleeves):
+        """I2 (Round 2 I5 relax): baseline now allows 0 <= sum <= 1
+        (residual = cash). Only sum > 1 or negative gets rejected."""
         resp = client.post("/api/validation/optimize-weights", json={
             "run_ids": three_sleeves,
             "mode": "walk_forward",
             "baseline_weights": {
-                "EtfRotate": 0.1,
-                "511010_BuyHold": 0.1,
-                "518880_BuyHold": 0.1,
-            },  # sum = 0.3
+                "EtfRotate": 0.5,
+                "511010_BuyHold": 0.5,
+                "518880_BuyHold": 0.3,
+            },  # sum = 1.3 > 1
         })
         assert resp.status_code == 422
         assert "sum" in resp.json()["detail"].lower()
+
+    def test_i5_baseline_cash_residual_accepted(self, client, three_sleeves):
+        """Round 2 I5: sum < 1 treated as cash residual, accepted."""
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": three_sleeves,
+            "mode": "walk_forward",
+            "n_splits": 3,
+            "max_iter": 50,
+            "baseline_weights": {
+                "EtfRotate": 0.4,
+                "511010_BuyHold": 0.4,
+                # Omit third sleeve → 0.2 residual cash
+            },
+        })
+        assert resp.status_code == 200, resp.json()
+
+    def test_round2_empty_objectives_rejected(self, client, three_sleeves):
+        """Round 2 I4: objectives=[] previously caused 500; now 422 via
+        Pydantic min_length=1."""
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": three_sleeves,
+            "mode": "walk_forward",
+            "objectives": [],
+        })
+        assert resp.status_code == 422
+
+    def test_round2_duplicate_objectives_rejected(self, client, three_sleeves):
+        """Round 2 I4: duplicate objectives explicit rejection."""
+        resp = client.post("/api/validation/optimize-weights", json={
+            "run_ids": three_sleeves,
+            "mode": "walk_forward",
+            "objectives": ["MaxSharpe", "MaxSharpe"],
+        })
+        assert resp.status_code == 422
+        assert "unique" in resp.json()["detail"].lower()
 
     def test_i2_baseline_negative_weight_rejected(self, client, three_sleeves):
         """I2: negative baseline weights (A-share long-only)."""

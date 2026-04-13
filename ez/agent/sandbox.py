@@ -204,14 +204,20 @@ _FORBIDDEN_MODULES = frozenset({
 # separate process-level synchronization), so user code cannot access
 # it regardless of binding tricks. This is a V2.21+ architectural task.
 _FORBIDDEN_FULL_MODULES = frozenset({
-    # Sandbox itself — V2.21: lock is no longer a module attr, but
-    # sandbox still exposes internal helpers (registries, reload fns)
-    # that user code must not call directly.
-    "ez.agent.sandbox",
+    # V2.24 round-2 Critical 2: forbid ALL ez.agent.* and ez.api.routes.*
+    # as default-deny. Previous enumeration missed ez.agent.tools
+    # (create_portfolio_strategy file-write), ez.api.routes.portfolio
+    # (_get_store DuckDB handle), ez.api.routes.validation
+    # (_load_run_returns). Direct suffix match covers all internal
+    # modules + future additions without re-enumeration.
+    "ez.agent",               # blocks ez.agent.tools, .sandbox, .chat, .runner, ...
+    "ez.api.routes",          # blocks all REST route internals
+    "ez.api.deps",            # global store/provider singletons
     # Guard framework internals — user code in a guard probe must not
     # bypass the guard suite or pollute its mock data.
     "ez.testing.guards",
-    # Routes that wrap the sandbox — same attack surface.
+    # Backwards-compat: specific entries retained for clarity
+    "ez.agent.sandbox",
     "ez.api.routes.code",
 })
 
@@ -619,30 +625,69 @@ def check_syntax(code: str) -> list[str]:
                         name_bindings[target_name] = None
                 else:
                     name_bindings[target_name] = resolved
-        elif isinstance(node, ast.For):
-            # V2.23.2 Critical 1: `for z in [ez]: ...` binds z to
-            # something drawn from an iterable. We can't statically
-            # determine what; mark as dynamic-unsafe so chains rooted
-            # at z get conservatively checked.
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            # `for z in [ez]: ...` / `async for z in stream: ...` binds
+            # z to iterable element — statically unknowable, mark dynamic.
             if isinstance(node.target, ast.Name):
-                target_name = node.target.id
-                # Special case: `for z in [single_name]` where single_name
-                # is itself a known safe value → could propagate, but
-                # we conservatively mark dynamic since users writing
-                # `for z in [ez]` are almost certainly attempting bypass.
-                name_bindings[target_name] = _DYNAMIC_UNSAFE
+                name_bindings[node.target.id] = _DYNAMIC_UNSAFE
         elif isinstance(node, ast.withitem):
-            # `with ... as x` — context manager result, usually a file
-            # or lock. Mark as None (safe local); user code doing
-            # `with ez as z: z.agent.sandbox` would still fail because
-            # `ez` as a context manager is absurd at import time.
+            # V2.24 round-2 Critical 1: `with X() as z` can evaluate X()
+            # to the live sandbox module if a custom __enter__ returns it
+            # (codex reproduced). Mark dynamic-unsafe, not None.
             if node.optional_vars is not None and isinstance(node.optional_vars, ast.Name):
-                target_name = node.optional_vars.id
-                name_bindings[target_name] = None
+                name_bindings[node.optional_vars.id] = _DYNAMIC_UNSAFE
         elif isinstance(node, ast.comprehension):
             # List/set/dict/generator comprehension target. Conservative.
             if isinstance(node.target, ast.Name):
                 name_bindings[node.target.id] = _DYNAMIC_UNSAFE
+        elif isinstance(node, ast.ExceptHandler):
+            # V2.24 round-2 Critical 1: `except E as z: z.agent.sandbox...`.
+            # Exception instances don't usually hold module refs, but a
+            # carefully-crafted custom exception class could. Mark dynamic
+            # to be safe.
+            if node.name:
+                name_bindings[node.name] = _DYNAMIC_UNSAFE
+        elif hasattr(ast, "MatchAs") and isinstance(node, ast.MatchAs):
+            # V2.24 round-2 Critical 1: `match x: case _ as z: ...` or
+            # `case [z]: ...` binds z from the matched subject. The subject
+            # can be `ez` or any alias. Mark dynamic.
+            if node.name:
+                name_bindings[node.name] = _DYNAMIC_UNSAFE
+        elif hasattr(ast, "MatchStar") and isinstance(node, ast.MatchStar):
+            if node.name:
+                name_bindings[node.name] = _DYNAMIC_UNSAFE
+        elif hasattr(ast, "MatchMapping") and isinstance(node, ast.MatchMapping):
+            if node.rest:
+                name_bindings[node.rest] = _DYNAMIC_UNSAFE
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # V2.24 round-2 Important: function args SHADOW outer bindings
+            # within the function body. We approximate by marking every
+            # positional/kw/vararg/kwarg name as None (locally rebound,
+            # safe). This fixes false-positives like
+            # `def f(sys): return sys.mean()` which was wrongly blocked
+            # because the global `sys` binding polluted the check.
+            # Limitation: this is module-flat, not truly scoped, so if
+            # the function arg `sys` is used AFTER the function's scope
+            # (syntactically impossible but AST-flat), the shadow persists
+            # for the rest of the file. Worst case: user can't use `sys`
+            # as a name outside of a function after declaring a function
+            # that has `sys` as an arg — acceptable degradation.
+            for arg_list in (node.args.args, node.args.posonlyargs, node.args.kwonlyargs):
+                for a in arg_list:
+                    name_bindings[a.arg] = None
+            if node.args.vararg:
+                name_bindings[node.args.vararg.arg] = None
+            if node.args.kwarg:
+                name_bindings[node.args.kwarg.arg] = None
+        elif isinstance(node, ast.Lambda):
+            # `lambda sys: sys.mean()` — same logic as function args.
+            for arg_list in (node.args.args, node.args.posonlyargs, node.args.kwonlyargs):
+                for a in arg_list:
+                    name_bindings[a.arg] = None
+            if node.args.vararg:
+                name_bindings[node.args.vararg.arg] = None
+            if node.args.kwarg:
+                name_bindings[node.args.kwarg.arg] = None
 
     _DYNAMIC_CHAIN_MARKER = "__DYNAMIC_UNSAFE__"
 

@@ -574,7 +574,7 @@ function WalkForwardSection({
   return (
     <Section title="Walk-Forward 验证" subtitle="— 样本外是否坍塌">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-        <MetricCard label="IS Sharpe (均)" value={avgIsSharpe} fmt="num" />
+        <MetricCard label="聚合 IS Sharpe" value={avgIsSharpe} fmt="num" />
         <MetricCard label="OOS Sharpe" value={oosSharpe} fmt="num" />
         <MetricCard
           label="降解率"
@@ -1083,7 +1083,7 @@ function generateMarkdown(result: ValidationResult): string {
   if (result.walk_forward) {
     const wf = result.walk_forward
     lines.push(`## Walk-Forward`, '')
-    if (typeof wf.avg_is_sharpe === 'number') lines.push(`- IS Sharpe 均值: ${wf.avg_is_sharpe.toFixed(3)}`)
+    if (typeof wf.avg_is_sharpe === 'number') lines.push(`- 聚合 IS Sharpe: ${wf.avg_is_sharpe.toFixed(3)}`)
     if (typeof wf.oos_sharpe === 'number') lines.push(`- OOS Sharpe: ${wf.oos_sharpe.toFixed(3)}`)
     if (typeof wf.degradation === 'number') lines.push(`- 降解率: ${(wf.degradation * 100).toFixed(1)}%`)
     if (typeof wf.overfitting_score === 'number') lines.push(`- 过拟合分数: ${wf.overfitting_score.toFixed(3)}`)

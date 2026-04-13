@@ -130,8 +130,13 @@ export function SleeveOptimizationPanel() {
         (s, lbl) => s + (baselineWeights[lbl] ?? 0),
         0,
       )
-      if (Math.abs(sum - 1.0) > 0.05) {
-        toast.showToast('warning', `基线权重之和 ${sum.toFixed(2)} 应该 ≈ 1.0`)
+      // Round 2 Important 5: allow 0 <= sum <= 1 (residual = 现金)
+      if (sum < -0.001 || sum > 1.001) {
+        toast.showToast('warning', `基线权重之和 ${sum.toFixed(2)} 须在 [0, 1] 之间 (剩余计作现金)`)
+        return
+      }
+      if (Object.values(baselineWeights).some((w) => w < 0)) {
+        toast.showToast('warning', '基线权重不能为负 (long-only)')
         return
       }
     }

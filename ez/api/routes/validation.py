@@ -28,6 +28,7 @@ from ez.research._metrics import (
     compute_basic_metrics,
     deflated_sharpe_ratio,
     minimum_backtest_length,
+    minimum_backtest_length_status,
     annual_breakdown,
 )
 from ez.research.steps.paired_bootstrap import paired_block_bootstrap, sample_block_indices
@@ -209,13 +210,19 @@ def validate(req: ValidationRequest) -> dict[str, Any]:
         main_returns, n_trials=req.n_trials, sr_benchmark=0.0,
     )
     sharpe = deflated["sharpe"] if deflated else 0.0
-    min_btl_years = minimum_backtest_length(
+    # Round 2 I6: use structured status to distinguish "unprofitable"
+    # vs "below search threshold" vs "needs N years". Verdict engine
+    # now renders these explicitly instead of silently skipping.
+    min_btl_status = minimum_backtest_length_status(
         sharpe, alpha=0.05, n_trials=req.n_trials,
     )
     actual_years = len(main_returns) / 252.0
     min_btl_result = {
         "actual_years": actual_years,
-        "min_btl_years": min_btl_years,
+        "min_btl_years": min_btl_status["min_btl_years"],
+        "status": min_btl_status["status"],
+        "reason": min_btl_status["reason"],
+        "gumbel_threshold": min_btl_status["gumbel_threshold"],
     }
 
     # 4. Annual breakdown
@@ -348,7 +355,12 @@ class OptimizeWeightsRequest(BaseModel):
     n_splits: int = Field(default=5, ge=2, le=20)
     train_ratio: float = Field(default=0.8, gt=0, lt=1)
     # Common
-    objectives: list[str] = Field(default_factory=lambda: ["MaxSharpe"])
+    objectives: list[str] = Field(
+        default_factory=lambda: ["MaxSharpe"],
+        min_length=1,
+        max_length=10,
+        description="至少 1 个 objective, 最多 10 个, 不允许重复",
+    )
     baseline_weights: dict[str, float] | None = Field(
         default=None,
         description="Optional reference weights for comparison (keys must match labels)",
@@ -435,6 +447,12 @@ def optimize_weights(req: OptimizeWeightsRequest) -> dict[str, Any]:
     the specified objectives. Returns candidate weights + IS/OOS
     metrics.
     """
+    # Round 2 Important 4: reject duplicate objectives.
+    if len(set(req.objectives)) != len(req.objectives):
+        raise HTTPException(
+            status_code=422,
+            detail="objectives must be unique (no duplicates)",
+        )
     if req.labels is not None and len(req.labels) != len(req.run_ids):
         raise HTTPException(
             status_code=422,
@@ -463,14 +481,17 @@ def optimize_weights(req: OptimizeWeightsRequest) -> dict[str, Any]:
                     f"resolved labels {sorted(lbl_set)}"
                 ),
             )
-        # Review I2: backend enforces sum ≈ 1 + long-only (A-share constraint).
-        # Frontend has ±0.05 check, but direct API callers (curl/notebook/agent)
-        # bypass it. This is the safety net.
+        # Round 2 Important 5: accept 0 <= sum <= 1 + epsilon. Simplex
+        # optimizer allows residual cash (1 - sum(weights)); baseline
+        # should too. Frontend hint uses ≈1 but backend is permissive.
         total = sum(req.baseline_weights.values())
-        if not (0.95 <= total <= 1.05):
+        if not (-1e-6 <= total <= 1.0 + 1e-3):
             raise HTTPException(
                 status_code=422,
-                detail=f"baseline_weights sum={total:.3f}, must be in [0.95, 1.05]",
+                detail=(
+                    f"baseline_weights sum={total:.3f}, must be in [0, 1] "
+                    f"(residual goes to cash)"
+                ),
             )
         if any(w < 0 for w in req.baseline_weights.values()):
             raise HTTPException(

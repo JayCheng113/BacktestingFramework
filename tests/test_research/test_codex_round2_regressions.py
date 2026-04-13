@@ -824,6 +824,124 @@ class TestV232DynamicAliasBypass:
         assert not errs, f"Benign function call wrongly flagged: {errs}"
 
 
+class TestV24Round2SandboxHardening:
+    """V2.24 round-2 codex review — additional binder forms (Match/
+    AsyncFor/ExceptHandler/function args) + broadened forbidden modules."""
+
+    # -- Critical 1: missing binder forms --
+
+    def test_match_capture_dynamic_alias_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = (
+            "import ez\n"
+            "match [ez]:\n"
+            "    case [z]:\n"
+            "        z.agent.sandbox._get_reload_lock()"
+        )
+        errs = check_syntax(code)
+        assert errs, "match case capture bypass NOT blocked"
+
+    def test_match_as_pattern_dynamic_alias_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = (
+            "import ez\n"
+            "match ez:\n"
+            "    case _ as z:\n"
+            "        z.agent.sandbox._get_reload_lock()"
+        )
+        errs = check_syntax(code)
+        assert errs, "match _ as z bypass NOT blocked"
+
+    def test_custom_context_manager_dynamic_bypass_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = (
+            "import ez\n"
+            "class CM:\n"
+            "    def __enter__(self): return ez\n"
+            "    def __exit__(self, *a): pass\n"
+            "with CM() as z:\n"
+            "    z.agent.sandbox._get_reload_lock()"
+        )
+        errs = check_syntax(code)
+        assert errs, "with CM() as z bypass NOT blocked"
+
+    def test_except_dynamic_alias_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = (
+            "import ez\n"
+            "try:\n"
+            "    raise RuntimeError()\n"
+            "except Exception as z:\n"
+            "    ez.agent.sandbox._get_reload_lock()"
+        )
+        # Note: z isn't used to reach ez; this tests that ez itself
+        # is still caught via normal path AFTER an except block
+        errs = check_syntax(code)
+        assert errs
+
+    def test_async_for_dynamic_alias_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = (
+            "import ez\n"
+            "async def f():\n"
+            "    async for z in [ez]:\n"
+            "        z.agent.sandbox._get_reload_lock()"
+        )
+        errs = check_syntax(code)
+        assert errs, "async for target bypass NOT blocked"
+
+    # -- Important: scope false-positives must NOT be flagged --
+
+    def test_function_arg_shadows_forbidden_root(self):
+        from ez.agent.sandbox import check_syntax
+        errs = check_syntax("def f(sys): return sys.mean()")
+        assert not errs, f"function arg false-positive: {errs}"
+
+    def test_lambda_arg_shadows(self):
+        from ez.agent.sandbox import check_syntax
+        errs = check_syntax("f = lambda sys: sys.mean()")
+        assert not errs, f"lambda arg false-positive: {errs}"
+
+    def test_except_as_shadows(self):
+        from ez.agent.sandbox import check_syntax
+        # except-as binds the NAME locally. With `as sys`, sys inside the
+        # except body no longer refers to the stdlib sys; any .attr is
+        # on the exception instance (not a real module).
+        errs = check_syntax(
+            "try:\n    pass\nexcept Exception as sys:\n    sys.mean()"
+        )
+        assert not errs, f"except-as false-positive: {errs}"
+
+    # -- Critical 2: forbidden module denylist broadened --
+
+    def test_ez_agent_tools_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        errs = check_syntax("import ez.agent.tools as t")
+        assert errs, "ez.agent.tools import NOT blocked"
+
+    def test_ez_agent_tools_attribute_chain_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = "import ez\nt = ez.agent.tools.create_portfolio_strategy"
+        errs = check_syntax(code)
+        assert errs, "ez.agent.tools attribute chain NOT blocked"
+
+    def test_ez_api_routes_portfolio_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        errs = check_syntax("from ez.api.routes.portfolio import _get_store")
+        assert errs, "ez.api.routes.portfolio NOT blocked"
+
+    def test_ez_api_routes_validation_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        code = "import ez\nrun = ez.api.routes.validation._load_run_returns('x')"
+        errs = check_syntax(code)
+        assert errs, "ez.api.routes.validation NOT blocked"
+
+    def test_ez_api_deps_blocked(self):
+        from ez.agent.sandbox import check_syntax
+        errs = check_syntax("from ez.api.deps import get_store")
+        assert errs, "ez.api.deps NOT blocked"
+
+
 # ------------------------------------------------------------
 # P2-2: nested StepError context preservation
 # ------------------------------------------------------------
