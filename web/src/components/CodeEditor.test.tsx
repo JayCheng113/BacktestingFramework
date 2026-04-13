@@ -44,9 +44,13 @@ vi.mock('@monaco-editor/react', () => ({
   },
 }))
 
-// Mock ChatPanel to prevent it from trying to fetch /api/chat/status
+// Mock ChatPanel to prevent it from trying to fetch /api/chat/status.
+// Exposes the fileKey prop via data attribute so committedFilename
+// binding behaviour is observable from tests.
 vi.mock('./ChatPanel', () => ({
-  default: () => <div data-testid="mock-chat-panel" />,
+  default: ({ fileKey }: { fileKey?: string }) => (
+    <div data-testid="mock-chat-panel" data-file-key={fileKey || ''} />
+  ),
 }))
 
 // Mock confirm (used by deleteFile)
@@ -294,5 +298,110 @@ describe('CodeEditor - guard report optional field handling', () => {
     // Status shows success; no LookaheadGuard badge (because no guard_result)
     await waitFor(() => expect(screen.getByText(/已保存至/)).toBeInTheDocument())
     expect(screen.queryByText(/LookaheadGuard/)).not.toBeInTheDocument()
+  })
+})
+
+
+describe('CodeEditor - committedFilename binding (V2.12.2 round 8)', () => {
+  it('live filename edits do NOT change ChatPanel fileKey', async () => {
+    // Regression guard: ChatPanel.fileKey is derived from committedFilename,
+    // not from the editable filename input. If this regresses, every
+    // keystroke in the rename box would fragment the AI conversation
+    // into a new thread.
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = makeFetchRouter({
+      '/api/code/files?kind=factor': () => jsonResponse([]),
+      '/api/code/files?kind=portfolio_strategy': () => jsonResponse([]),
+      '/api/code/files?kind=cross_factor': () => jsonResponse([]),
+      '/api/code/files?kind=ml_alpha': () => jsonResponse([]),
+      '/api/code/files/stable.py?kind=strategy': () => jsonResponse({
+        code: 'class StableStrategy: pass',
+      }),
+      '/api/code/files': () => jsonResponse([
+        { filename: 'stable.py', class_name: 'StableStrategy', path: 'strategies/stable.py' },
+      ]),
+      '/api/code/registry': () => jsonResponse({}),
+    })
+
+    render(<CodeEditor />)
+    await waitFor(() => expect(screen.getByText('StableStrategy')).toBeInTheDocument(), { timeout: 3000 })
+
+    // Click sidebar entry to load the file → committedFilename = "stable.py"
+    await userEvent.click(screen.getByText('StableStrategy'))
+    await waitFor(() => {
+      const ta = screen.getByTestId('monaco-editor') as HTMLTextAreaElement
+      expect(ta.value).toContain('StableStrategy')
+    })
+
+    // Open AI chat so the mock ChatPanel mounts with fileKey
+    await userEvent.click(screen.getByRole('button', { name: /AI助手/ }))
+    const chatPanel = await screen.findByTestId('mock-chat-panel')
+    expect(chatPanel.getAttribute('data-file-key')).toBe('strategy:stable.py')
+
+    // User starts renaming the file in the filename input — but does
+    // NOT save. committedFilename must remain "stable.py".
+    const filenameInput = screen.getByPlaceholderText(/filename\.py/i) as HTMLInputElement
+    await userEvent.clear(filenameInput)
+    await userEvent.type(filenameInput, 'renamed_v2.py')
+    expect(filenameInput.value).toBe('renamed_v2.py')
+
+    // ChatPanel fileKey must NOT track the half-typed rename
+    expect(chatPanel.getAttribute('data-file-key')).toBe('strategy:stable.py')
+  })
+
+  it('delete-while-renaming still clears editor (committedFilename anchors identity)', async () => {
+    // V2.12.2 round 8 regression: if deleteFile matches against the live
+    // `filename` input (now "renamed_v2.py") instead of committedFilename
+    // ("stable.py"), clicking delete on sidebar's stable.py would NOT
+    // clear the editor — leaving the user looking at source from a file
+    // they just deleted.
+    let deleted = false;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = makeFetchRouter({
+      '/api/code/files?kind=factor': () => jsonResponse([]),
+      '/api/code/files?kind=portfolio_strategy': () => jsonResponse([]),
+      '/api/code/files?kind=cross_factor': () => jsonResponse([]),
+      '/api/code/files?kind=ml_alpha': () => jsonResponse([]),
+      '/api/code/files/stable.py?kind=strategy': (init) => {
+        if (init?.method === 'DELETE') {
+          deleted = true
+          return jsonResponse({ deleted: 'strategies/stable.py' })
+        }
+        return jsonResponse({ code: 'class StableStrategy: pass' })
+      },
+      '/api/code/files': () => jsonResponse([
+        { filename: 'stable.py', class_name: 'StableStrategy', path: 'strategies/stable.py' },
+      ]),
+      '/api/code/registry': () => jsonResponse({}),
+    })
+
+    render(<CodeEditor />)
+    await waitFor(() => expect(screen.getByText('StableStrategy')).toBeInTheDocument(), { timeout: 3000 })
+    await userEvent.click(screen.getByText('StableStrategy'))
+    await waitFor(() => {
+      const ta = screen.getByTestId('monaco-editor') as HTMLTextAreaElement
+      expect(ta.value).toContain('StableStrategy')
+    })
+
+    // Simulate rename-in-flight: change filename input but never save
+    const filenameInput = screen.getByPlaceholderText(/filename\.py/i) as HTMLInputElement
+    await userEvent.clear(filenameInput)
+    await userEvent.type(filenameInput, 'renamed_v2.py')
+
+    // Delete original sidebar entry
+    const row = screen.getByText('StableStrategy').closest('div')
+    const delBtn = Array.from(row!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'x',
+    ) as HTMLButtonElement | undefined
+    expect(delBtn, 'delete button must exist').toBeTruthy()
+    await userEvent.click(delBtn!)
+
+    await waitFor(() => expect(deleted).toBe(true))
+
+    // Editor MUST clear — loaded content was stable.py which is now gone.
+    // If the regression hits (match against `filename`="renamed_v2.py"),
+    // `fname`="stable.py" won't match and the stale source stays.
+    await waitFor(() => {
+      const ta = screen.getByTestId('monaco-editor') as HTMLTextAreaElement
+      expect(ta.value).toBe('')
+    })
   })
 })

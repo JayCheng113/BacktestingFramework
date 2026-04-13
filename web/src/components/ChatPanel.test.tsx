@@ -178,6 +178,106 @@ describe('ChatPanel - send ↔ stop button toggle (V2.23)', () => {
 })
 
 
+describe('ChatPanel - fileKey binding mid-stream (V2.12.2 targetId regression)', () => {
+  it('AI create_strategy result binds fileKey to originating conv, not the conv active at tool_result time', async () => {
+    // V2.12.2 codex regression: if the stream handler binds fileKey by
+    // `activeId` (closure/state) instead of `targetId` (captured at send
+    // time), switching conversations mid-stream routes the AI-created
+    // file to the WRONG conv. User ends up with a "file-bound" label on
+    // the conv they just switched TO, while the originating conv (where
+    // the AI actually wrote the file) stays unbound.
+    //
+    // This is the canary: regression would flip which conv carries the
+    // fileKey after the switch.
+
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const encoder = new TextEncoder()
+    ;(globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn((url: string) => {
+      if (typeof url === 'string' && url.includes('/api/chat/status')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ available: true }),
+        } as Response)
+      }
+      // Post-tool fetch: file body lookup used by ChatPanel to push code
+      if (typeof url === 'string' && url.includes('/api/code/files/new_strat.py')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ code: 'class NewStrat: pass' }),
+        } as Response)
+      }
+      // /api/chat/send — return a stream whose controller we retain
+      return Promise.resolve({
+        ok: true,
+        body: new ReadableStream<Uint8Array>({
+          start(c) { streamController = c },
+        }),
+      } as Response)
+    }) as typeof fetch
+
+    const onCodeUpdate = vi.fn()
+    render(
+      <ToastProvider>
+        <ChatPanel onCodeUpdate={onCodeUpdate} />
+      </ToastProvider>,
+    )
+    await waitFor(() => expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument())
+
+    // Create conv A, send a message → starts stream, captures targetId = A
+    const plusBtn = screen.getByTitle('新建对话')
+    await userEvent.click(plusBtn)  // conv A, activeId = A
+    await userEvent.type(screen.getByPlaceholderText(/输入消息/), 'make a strategy')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    // Wait for stream to be in-flight (controller captured)
+    await waitFor(() => expect(streamController).not.toBeNull())
+
+    // Snapshot conv A's id before switch — it's the only conv right now
+    const convsBeforeSwitch: Array<{ id: string; fileKey?: string }> =
+      JSON.parse(localStorage.getItem('ez-chat-conversations') || '[]')
+    expect(convsBeforeSwitch).toHaveLength(1)
+    const convAId = convsBeforeSwitch[0].id
+
+    // User switches: create a NEW conv B → activeId = B while A is still streaming
+    await userEvent.click(plusBtn)
+
+    // Verify conv B is now active (there are now 2 convs, B is newest and active)
+    await waitFor(() => {
+      const convs = JSON.parse(localStorage.getItem('ez-chat-conversations') || '[]')
+      expect(convs.length).toBe(2)
+    })
+    const convsAfterSwitch = JSON.parse(localStorage.getItem('ez-chat-conversations') || '[]')
+    const convBId = convsAfterSwitch.find((c: { id: string }) => c.id !== convAId)?.id
+    expect(convBId).toBeTruthy()
+    expect(localStorage.getItem('ez-chat-active-id')).toBe(convBId)
+
+    // Now emit the tool_result on conv A's stream
+    const payload = JSON.stringify({
+      name: 'create_strategy',
+      result: { success: true, path: 'strategies/new_strat.py' },
+    })
+    streamController!.enqueue(encoder.encode(`event: tool_result\ndata: ${payload}\n\n`))
+    streamController!.close()
+
+    // Wait for the post-tool fetch + state updates to flush
+    await waitFor(() => expect(onCodeUpdate).toHaveBeenCalled())
+    await waitFor(() => {
+      const convs = JSON.parse(localStorage.getItem('ez-chat-conversations') || '[]')
+      const convA = convs.find((c: { id: string }) => c.id === convAId)
+      return expect(convA?.fileKey).toBe('strategy:new_strat.py')
+    })
+
+    // CRITICAL: fileKey went to conv A (originating), NOT conv B (active at tool_result).
+    // If this flips, V2.12.2 targetId fix has regressed.
+    const finalConvs = JSON.parse(localStorage.getItem('ez-chat-conversations') || '[]')
+    const convA = finalConvs.find((c: { id: string }) => c.id === convAId)
+    const convB = finalConvs.find((c: { id: string }) => c.id === convBId)
+    expect(convA?.fileKey).toBe('strategy:new_strat.py')
+    expect(convB?.fileKey).toBeFalsy()
+  })
+})
+
+
 describe('ChatPanel - AbortController.abort wired to 停止 button (V2.23 regression)', () => {
   it('clicking 停止 aborts the in-flight fetch signal', async () => {
     let capturedSignal: AbortSignal | undefined
