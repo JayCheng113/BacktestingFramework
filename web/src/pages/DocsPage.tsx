@@ -2020,6 +2020,32 @@ EZ_LIVE_AUTO_TICK=1 EZ_LIVE_AUTO_TICK_INTERVAL_S=1800 ./scripts/start.sh`}</pre>
             间隔设 1 小时比 10 分钟更稳（每天只真实处理一次）。频繁调用对资源无影响因为幂等，但日志会多。
           </div>
 
+          <div style={h2s}>告警 Webhook 下发 (V2.17)</div>
+          <p style={ps}>
+            Monitor 检测 5 类告警 (连续亏损日 / 最大回撤 / 执行缓慢 / 连续错误 / 长期未成交). 之前只在前端面板显示, 无人值守时等于不存在. 现支持 webhook POST:
+          </p>
+          <pre style={code}>{`# 启用 webhook 告警
+EZ_LIVE_AUTO_TICK=1 \\
+  EZ_ALERT_WEBHOOK_URL="https://oapi.dingtalk.com/robot/send?access_token=..." \\
+  EZ_ALERT_WEBHOOK_FORMAT=dingtalk \\
+  ./scripts/start.sh`}</pre>
+          <p style={ps}>
+            支持的 <code>FORMAT</code> 值: <code>plain</code> (通用 JSON) / <code>dingtalk</code> / <code>wecom</code> / <code>slack</code>. 默认 <code>plain</code>.
+          </p>
+          <table style={tbl}>
+            <thead><tr><th style={ths}>特性</th><th style={ths}>行为</th></tr></thead>
+            <tbody>
+              <tr><td style={tds}>触发时机</td><td style={tds}>每次 auto-tick 完成后检查 Monitor.check_alerts(), 有新告警就 dispatch</td></tr>
+              <tr><td style={tds}>去重</td><td style={tds}>(deployment_id, alert_type, date) 同日同类型只发一次</td></tr>
+              <tr><td style={tds}>失败容错</td><td style={tds}>webhook 崩了不阻止 tick loop, 失败时回滚去重让下次重试</td></tr>
+              <tr><td style={tds}>超时</td><td style={tds}>默认 10s, 可调 <code>EZ_ALERT_WEBHOOK_TIMEOUT_S</code></td></tr>
+              <tr><td style={tds}>需要 auto-tick</td><td style={tds}>告警集成在 tick loop 里; 手动 /api/live/tick 不发</td></tr>
+            </tbody>
+          </table>
+          <div style={note}>
+            同一个部署同一天多次 tick, 同类告警只发一次. 重启后 dedup 状态丢失, 重新发一次 — 这是有意为之 (进程丢失状态时用户应该被提醒).
+          </div>
+
           <div style={h2s}>策略状态持久化 (V2.17)</div>
           <p style={ps}>
             <code>deployment_snapshots.strategy_state</code> BLOB 列每日保存整个策略实例的 pickle 快照。重启后 <code>_start_engine</code> 自动恢复，MLAlpha 训练的 sklearn 模型 / StrategyEnsemble 的 ledger / 用户自定义 <code>self.*</code> 字段跨重启保留。

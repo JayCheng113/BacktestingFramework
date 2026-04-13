@@ -136,6 +136,77 @@ async def test_loop_exits_cleanly_on_cancel(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_loop_dispatches_alerts_after_tick(monkeypatch) -> None:
+    """V2.17 round 5: when an AlertDispatcher + Monitor are supplied,
+    the loop calls monitor.check_alerts() after each tick and dispatches
+    any new alerts. Verifies the wiring exists (not the dispatcher
+    internals — those are in test_alert_dispatcher.py)."""
+    from ez.api.app import _auto_tick_loop
+
+    sleep_count = [0]
+    orig_sleep = asyncio.sleep
+
+    async def fast_sleep(s):
+        sleep_count[0] += 1
+        if sleep_count[0] >= 2:
+            raise asyncio.CancelledError()
+        await orig_sleep(0)
+
+    monkeypatch.setattr("ez.api.app.asyncio.sleep", fast_sleep)
+
+    sched = _FakeScheduler("ok")
+    dispatcher = MagicMock()
+    dispatcher.dispatch_new = AsyncMock(return_value=1)
+    monitor = MagicMock()
+    monitor.check_alerts.return_value = [
+        {"deployment_id": "dep-1", "alert_type": "high_drawdown",
+         "message": "test"},
+    ]
+
+    await _auto_tick_loop(
+        sched, interval_s=1,
+        alert_dispatcher=dispatcher, monitor=monitor,
+    )
+    # After one tick: check_alerts called, dispatch_new called
+    assert monitor.check_alerts.call_count == 1
+    dispatcher.dispatch_new.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_loop_continues_when_dispatch_raises(monkeypatch) -> None:
+    """V2.17 round 5: a crashing dispatcher must not kill the loop.
+    Paper trading continues to tick even when webhook is down."""
+    from ez.api.app import _auto_tick_loop
+
+    sleep_count = [0]
+    orig_sleep = asyncio.sleep
+
+    async def fast_sleep(s):
+        sleep_count[0] += 1
+        if sleep_count[0] >= 4:
+            raise asyncio.CancelledError()
+        await orig_sleep(0)
+
+    monkeypatch.setattr("ez.api.app.asyncio.sleep", fast_sleep)
+
+    sched = _FakeScheduler("ok")
+    dispatcher = MagicMock()
+    dispatcher.dispatch_new = AsyncMock(side_effect=RuntimeError("webhook crash"))
+    monitor = MagicMock()
+    monitor.check_alerts.return_value = [
+        {"deployment_id": "dep-1", "alert_type": "x", "message": "y"},
+    ]
+
+    # Should NOT raise despite dispatcher crashing every time
+    await _auto_tick_loop(
+        sched, interval_s=1,
+        alert_dispatcher=dispatcher, monitor=monitor,
+    )
+    # Loop kept ticking 3 times
+    assert len(sched.calls) == 3
+
+
+@pytest.mark.asyncio
 async def test_loop_does_not_tick_before_first_interval(monkeypatch) -> None:
     """Loop must sleep BEFORE first tick, not after. Prevents startup
     from instantly ticking (which could hit a race with resume_all

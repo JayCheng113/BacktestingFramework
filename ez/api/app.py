@@ -45,12 +45,22 @@ async def lifespan(app: FastAPI):
         import os as _os
         if _os.environ.get("EZ_LIVE_AUTO_TICK") == "1":
             interval_s = int(_os.environ.get("EZ_LIVE_AUTO_TICK_INTERVAL_S", "3600"))
+            # V2.17 round 5: webhook alert dispatcher (optional)
+            from ez.live.alert_dispatcher import from_env as _alerts_from_env
+            from ez.api.routes.live import _get_monitor
+            alert_dispatcher = _alerts_from_env()
+            monitor = _get_monitor() if alert_dispatcher else None
             auto_tick_task = asyncio.create_task(
-                _auto_tick_loop(scheduler, interval_s),
+                _auto_tick_loop(
+                    scheduler, interval_s,
+                    alert_dispatcher=alert_dispatcher,
+                    monitor=monitor,
+                ),
                 name="live_auto_tick",
             )
             logging.getLogger(__name__).info(
-                "Live auto-tick enabled (interval=%ds)", interval_s,
+                "Live auto-tick enabled (interval=%ds, alerts=%s)",
+                interval_s, "on" if alert_dispatcher else "off",
             )
     except Exception as exc:
         logging.getLogger(__name__).warning("Live scheduler resume_all failed: %s", exc)
@@ -84,7 +94,12 @@ async def lifespan(app: FastAPI):
         close_resources()
 
 
-async def _auto_tick_loop(scheduler, interval_s: int) -> None:
+async def _auto_tick_loop(
+    scheduler,
+    interval_s: int,
+    alert_dispatcher=None,
+    monitor=None,
+) -> None:
     """V2.17 round 3: background loop that ticks the live scheduler
     at a fixed interval for unattended paper-trading operation.
 
@@ -101,6 +116,11 @@ async def _auto_tick_loop(scheduler, interval_s: int) -> None:
     Enabled via env EZ_LIVE_AUTO_TICK=1. Default off — manual-only.
     Interval configurable via EZ_LIVE_AUTO_TICK_INTERVAL_S (default 1h).
     A short interval is cheap because of the idempotency guarantees.
+
+    V2.17 round 5: if `alert_dispatcher` and `monitor` are supplied,
+    after each successful tick iteration the loop checks monitor
+    alerts and dispatches new ones to the configured webhook. Webhook
+    failures are logged but never crash the loop.
     """
     log = logging.getLogger(__name__)
     while True:
@@ -116,6 +136,14 @@ async def _auto_tick_loop(scheduler, interval_s: int) -> None:
                     "Auto-tick for %s: %d deployments processed",
                     today, len(results),
                 )
+            # V2.17 round 5: alert dispatch after tick
+            if alert_dispatcher is not None and monitor is not None:
+                try:
+                    alerts = monitor.check_alerts()
+                    if alerts:
+                        await alert_dispatcher.dispatch_new(alerts)
+                except Exception:
+                    log.exception("Alert dispatch failed (loop continues)")
         except asyncio.CancelledError:
             return
         except ValueError as e:

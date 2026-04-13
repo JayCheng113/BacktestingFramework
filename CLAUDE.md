@@ -579,6 +579,20 @@ No version tag without review pass. No push without critical issues resolved.
   - **意义**: canary 现在覆盖 9 个场景 (trivial 3 + trend 1 + commission 1 + dividend 1 + A 股 3). 未来任何引擎改动只要破坏其中一个就立刻炸
   - 2796 → 2799 backend tests (+3)
 
+- **V2.17 round 5 (done)**: 告警 webhook 下发通道 — 真正 "无人值守" 闭环
+  - **动机**: Monitor 检测 5 类告警但只在前端面板显示. 配合 auto-tick 无人值守部署时, 告警出不去等于不存在. 用户不看 UI = 部署挂了也不知道
+  - **`ez/live/alert_dispatcher.py` 新模块**:
+    - `AlertDispatcher` 类: webhook URL + template + timeout 构造, `dispatch_new(alerts) -> int` 去重+发
+    - 4 种 payload 模板: `plain` (通用 JSON) / `dingtalk` / `wecom` / `slack`
+    - 去重 key: `(deployment_id, alert_type, YYYY-MM-DD)`, 同日同类型同部署只发一次
+    - 失败回滚: webhook POST 异常时从 `_seen` 移除该 key, 下次 tick 重试
+    - 完全隔离: `dispatch_new` 永远不 raise, 所有异常 log + swallow
+    - `from_env()` 工厂: `EZ_ALERT_WEBHOOK_URL` 为空/缺失 → None (feature off), 无效 format/timeout fallback to default
+  - **集成到 auto-tick loop** (`ez/api/app.py`): 仅在 `EZ_LIVE_AUTO_TICK=1` 且 `EZ_ALERT_WEBHOOK_URL` 都设置时启用. tick 成功后 `monitor.check_alerts()` + `dispatcher.dispatch_new()`. 手动 `/api/live/tick` 不发告警 (design: 手动触发时用户已经在看面板了).
+  - **17 dispatcher tests + 2 loop integration tests**: 构造校验 / 4 个 template payload / 日内去重 / 新 type 放行 / POST 失败回滚 / 空列表 noop / 异常吞咽 / env 组合; loop 调 monitor+dispatcher / 崩了不杀 loop
+  - **Scope 保守**: 单一 POST 方式, 不做 SMTP / 不做 retry 策略 / 不做模板自定义. 用户要 SMS / 短信其他通道, 自己用 Webhook 中转
+  - 2799 → 2818 backend tests (+19)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
