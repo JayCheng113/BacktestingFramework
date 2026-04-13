@@ -547,6 +547,17 @@ No version tag without review pass. No push without critical issues resolved.
   - **安全**: pickle 只从自己 DB 读, 没有不可信数据源. 类路径变化 / Python 版本升级会 unpickle 失败 → 自动降级
   - 2780 → 2789 backend tests (+9)
 
+- **V2.17 round 2 (done)**: Factor 层 adj_close 契约审查 + 固化
+  - **动机**: V2.16.2 round 2 修 engine 层分红 bug 后, factor 层有没有同类? 如果因子用 raw close 做动量/收益率, 分红日会产生虚假信号 (V2.18.1 研究表明: StaticLowVol 从 +13.9% 掉到 -0.5%)
+  - **审查结果**: **Factor 层全部用 adj_close** ✓
+    - `ez/factor/builtin/technical.py` (MA/EMA/RSI/MACD/BBands/MomentumN/VWAP/OBV/ATR): 全部 adj_close, VWAP/ATR 用 `adj_ratio = adj_close/close` 缩放 high/low (V2.10 post-release 已修)
+    - `ez/factor/builtin/fundamental.py`: 所有价格使用 adj_close
+    - `ez/portfolio/cross_factor.py` (MomentumRank/VolumeRank/ReverseVolatilityRank): 全部 adj_close
+  - **例外**: `ez/portfolio/builtin_strategies.py` 3 个 QMT 移植策略使用 raw_close — **设计选择** (V2.17 严格 QMT 平价), 不是 Factor, 不在审查范围. Known Limitation 里显式记录副作用
+  - **固化**: `tests/test_factor/test_adj_close_contract.py` (2 tests) — 合成分红日数据, 迭代 `Factor.get_registry()` + `CrossSectionalFactor.get_registry()`, 断言**每个**已注册因子在分红日不产生 phantom signal. 未来任何内置因子新增时只要用 raw close, 契约测试立即炸
+  - **关键**: 这是 V2.16.2 round 5 跨引擎 canary 的**姊妹守卫** — 一个防引擎层 bug, 一个防因子层 bug. 两个 canary 组合覆盖 V2.18.1 类型所有可能的藏身处
+  - 2789 → 2791 backend tests (+2)
+
 - **Round 2 codex 修复** (2 Critical + 4 Important):
     - C1 sandbox AST: 补齐 Match*/AsyncFor/withitem/ExceptHandler/function args/Lambda 绑定. match [ez]/with CM() as z/async for z in [ez]/except Exception as z 全部 block 掉. function arg + except-as 作为 local 安全 shadow (false-positive 修复)
     - C2 forbidden modules: 扩禁 ez.agent.* / ez.api.routes.* / ez.api.deps prefix. ez.agent.tools, ez.api.routes.portfolio._get_store, ez.api.routes.validation._load_run_returns 全部 422
@@ -641,6 +652,7 @@ No version tag without review pass. No push without critical issues resolved.
 - **数据源链扁平去重** — 设计选择, 非 bug. 按市场独立路由需要 provider 声明支持的市场集 + 链查分 (未来 refactor)
 
 ### 设计选择 (不修)
+- **QMT 移植策略用 raw_close 做信号计算 (V2.17)** — `ez/portfolio/builtin_strategies.py` 的 3 个 QMT 策略 (`EtfMacdRotation` / `EtfSectorSwitch` / `EtfRotateCombo`) 在 6 日/20 日收益率计算里使用 `_get_raw_close()` 而非 adj_close, 为**严格 QMT 平价移植**. **副作用**: ETF 分红日 raw_close 跳 -50% 会产生虚假负信号 (V2.18.1 类型 bug). 对年度分红小的 ETF (~1-2%) 影响微小; 对高分红或频繁换仓策略, 长期跑会吃亏. 非 QMT 平价需求的用户建议自写策略用 adj_close. 参见 `tests/test_factor/test_adj_close_contract.py` — **Factor 层**所有内置类都是 adj_close, 只有 QMT 策略是此例外.
 - **LLM 调用计数近似** — chat_sync 内部多轮不精确计入, 文档化为估计值
 - **模拟盘数据时效性** — 收盘后数据源延迟, 建议收盘后 1-2 小时再触发 tick (文档提示)
 - **约束风险平价近似** — 行业约束 SLSQP 内处理, 可能偏离纯等风险贡献, 有 inverse-vol fallback 兜底
