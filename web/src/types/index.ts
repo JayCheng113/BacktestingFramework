@@ -306,6 +306,8 @@ export interface VerdictResult {
   total: number
   checks: VerdictCheck[]
   summary: string
+  badge_color?: string  // V2.23.2: 'green' | 'amber' | 'red' (separate from summary)
+  badge_emoji?: string  // V2.23.2: 🟢 / 🟡 / 🔴 (optional, frontend can ignore)
 }
 
 export interface ValidationResult {
