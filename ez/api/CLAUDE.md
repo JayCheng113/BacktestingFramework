@@ -83,9 +83,11 @@ REST API exposing market data, backtesting, factor evaluation, experiments, code
 | routes/chat.py | AI chat SSE endpoint + status (V2.7) |
 | routes/settings.py | LLM + Tushare config read/write (V2.7) |
 | routes/portfolio.py | Portfolio: strategies/run/runs/detail/delete + factor evaluation/correlation + walk-forward + fundamental factor injection (V2.9+V2.10+V2.11) |
+| _portfolio_helpers.py | Portfolio route helpers: data fetching, factor resolution, weight computation, attribution (extracted from routes/portfolio.py) |
 | routes/fundamental.py | Fundamental: fetch/quality/factors endpoints (V2.11) |
 | routes/research.py | Autonomous research: start/list/detail/cancel/stream + serialization guard (V2.8) |
 | routes/live.py | Paper trading: deploy/list/detail/approve/start/stop/pause/resume/tick/dashboard/snapshots/trades/stream (V2.15) |
+| _live_helpers.py | Live route helpers: spec building, QMT gate builders, serialization, event helpers (extracted from routes/live.py) |
 
 ## Dependencies
 - Upstream: All ez modules (including ez/agent/ for experiments, ez/llm/ for chat)
