@@ -12,7 +12,6 @@ from ez.research.optimizers import (
     SimplexMultiObjectiveOptimizer,
     MaxSharpe,
     MaxCalmar,
-    EpsilonConstraint,
 )
 
 
@@ -213,26 +212,6 @@ class TestBaseline:
         )
         with pytest.raises(ValueError, match="unknown labels"):
             step.run(_ctx())
-
-    def test_baseline_label_for_epsilon_constraint(self):
-        """baseline_label provides IS metrics for the alpha sleeve,
-        used by EpsilonConstraint's "baseline_ret" references."""
-        opt = SimplexMultiObjectiveOptimizer(
-            objectives=[
-                EpsilonConstraint("min_mdd", "ret", ">=", "0.5*baseline_ret"),
-            ],
-            max_iter=200,
-        )
-        step = NestedOOSStep(
-            is_window=("2023-01-01", "2023-12-31"),
-            oos_window=("2024-01-01", "2024-12-31"),
-            optimizer=opt,
-            baseline_label="A",
-        )
-        # Should not crash — baseline_label → IS metrics for "A"
-        # → passed to optimizer.optimize(is_returns, baseline_metrics)
-        out = step.run(_ctx())
-        assert len(out.artifacts["nested_oos_results"]["candidates"]) == 1
 
     def test_baseline_label_unknown_raises(self):
         step = NestedOOSStep(

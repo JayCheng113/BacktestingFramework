@@ -15,7 +15,6 @@ from ez.research.optimizers import (
     MaxCalmar,
     MaxSortino,
     MinCVaR,
-    EpsilonConstraint,
 )
 
 
@@ -169,51 +168,6 @@ class TestMultiObjective:
         assert [r.objective_name for r in results] == [
             "Max Sortino", "Max Sharpe", "Max Calmar",
         ]
-
-
-# ============================================================
-# EpsilonConstraint integration
-# ============================================================
-
-class TestEpsilonConstraintIntegration:
-    def test_epsilon_constraint_with_baseline(self):
-        """Min |MDD| s.t. ret >= 0.5 * baseline_ret — feasible when
-        the optimizer can find weights that meet the constraint."""
-        opt = SimplexMultiObjectiveOptimizer(
-            objectives=[
-                EpsilonConstraint("min_mdd", "ret", ">=", "0.5*baseline_ret"),
-            ],
-            max_iter=80,
-        )
-        rets = _make_returns_3asset()
-        # Compute baseline as the standalone "A" asset
-        from ez.research._metrics import compute_basic_metrics
-        baseline = compute_basic_metrics(rets["A"])
-        results = opt.optimize(rets, baseline_metrics=baseline)
-        assert len(results) == 1
-        r = results[0]
-        # Should be feasible (we're asking for half the baseline)
-        # If infeasible, the test still passes (status is "infeasible")
-        # but typically this should converge.
-        assert r.objective_name.startswith("min_mdd")
-
-    def test_unsatisfiable_constraint_returns_infeasible(self):
-        """Demand ret >= 100x baseline — should always be infeasible."""
-        opt = SimplexMultiObjectiveOptimizer(
-            objectives=[
-                EpsilonConstraint("min_mdd", "ret", ">=", "100*baseline_ret"),
-            ],
-            max_iter=200,
-        )
-        rets = _make_returns_3asset()
-        from ez.research._metrics import compute_basic_metrics
-        baseline = compute_basic_metrics(rets["A"])
-        results = opt.optimize(rets, baseline_metrics=baseline)
-        r = results[0]
-        # Optimizer should mark as infeasible
-        assert r.optimizer_status == "infeasible"
-        # All weights should be zero in infeasible result
-        assert all(w == 0.0 for w in r.weights.values())
 
 
 # ============================================================

@@ -364,7 +364,6 @@ class TestReviewSuggestions:
         should merge cleanly via outer join despite different index origins."""
         import pandas as pd
         from datetime import date as d
-        from ez.research.steps.run_portfolio import RunPortfolioStep
 
         # Simulate portfolio returns: DatetimeIndex from date objects
         port_dates = pd.DatetimeIndex([d(2024, 1, i) for i in range(2, 20)])
