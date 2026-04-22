@@ -290,11 +290,11 @@ def test_non_negative_weights_guard_uses_fresh_panel_per_date():
 
 # ============================================================
 # P2 #1: Hook 2/3 restore_err must surface as half-state, not silent log
-# (verified via integration test that monkey-patches _reload_factor_code)
+# (verified via integration test that monkey-patches _reload_code)
 # ============================================================
 
 def test_factor_guard_rollback_restore_failure_surfaces_critical(tmp_path, monkeypatch):
-    """When guard blocks AND _reload_factor_code fails to re-register the
+    """When guard blocks AND _reload_code fails to re-register the
     backup, the response must include a CRITICAL half-state warning,
     not just the guard failure message."""
     from ez.agent import sandbox
@@ -336,19 +336,19 @@ class P2RolloverTestFactor(Factor):
     r1 = sandbox.save_and_validate_code("p2_rollover_test_factor.py", clean, "factor")
     assert r1["success"] is True, r1.get("errors")
 
-    # Now monkey-patch _reload_factor_code to raise ON THE BACKUP RELOAD
+    # Now monkey-patch _reload_code to raise ON THE BACKUP RELOAD
     # path. The first call (hot-reload of new code) succeeds normally,
     # then the guard blocks, and the second call (restore backup) raises.
-    original_reload = sandbox._reload_factor_code
+    original_reload = sandbox._reload_code
     call_count = {"n": 0}
-    def flaky_reload(filename, target_dir):
+    def flaky_reload(filename, kind, target_dir, get_base_classes, dual_registry=True):
         call_count["n"] += 1
         if call_count["n"] == 1:
             # First call: hot-reload of buggy code — let it succeed
-            return original_reload(filename, target_dir)
+            return original_reload(filename, kind, target_dir, get_base_classes, dual_registry=dual_registry)
         # Second call: restore backup — fail
         raise RuntimeError("simulated re-register failure")
-    monkeypatch.setattr(sandbox, "_reload_factor_code", flaky_reload)
+    monkeypatch.setattr(sandbox, "_reload_code", flaky_reload)
 
     r2 = sandbox.save_and_validate_code(
         "p2_rollover_test_factor.py", buggy, "factor", overwrite=True
@@ -362,7 +362,7 @@ class P2RolloverTestFactor(Factor):
     assert "half-state" in errs_combined.lower() or "refresh" in errs_combined.lower()
 
     # Cleanup registry pollution from this test
-    monkeypatch.setattr(sandbox, "_reload_factor_code", original_reload)
+    monkeypatch.setattr(sandbox, "_reload_code", original_reload)
     from ez.factor.base import Factor
     for k in list(Factor._registry.keys()):
         if Factor._registry[k].__module__ == "factors.p2_rollover_test_factor":

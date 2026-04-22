@@ -168,7 +168,7 @@ class TestTemplate:
 
 
 class TestReloadUserStrategyDedup:
-    """Test AST-based class name dedup in _reload_user_strategy."""
+    """Test AST-based class name dedup in _reload_code (strategy path)."""
 
     def test_strategy_subclass_detected(self):
         """Only classes inheriting Strategy should be matched."""
@@ -274,7 +274,7 @@ class TestRunWithTimeout:
 class TestFactorHotReload:
     """Regression test for codex finding: factor save previously registered a
     stub with compute() raising NotImplementedError, requiring manual refresh.
-    Fixed by calling _reload_factor_code() in the factor save path.
+    Fixed by calling _reload_code() in the factor save path.
     """
 
     def test_factor_save_registers_real_implementation(self, tmp_path, monkeypatch):
@@ -362,7 +362,7 @@ class TestReloadSafety:
         the user module path is cleaned.
         """
         from ez.strategy.base import Strategy
-        from ez.agent.sandbox import _reload_user_strategy
+        from ez.agent.sandbox import _reload_code, _strategy_bases
 
         # Ensure builtin MACrossStrategy is registered
         import ez.strategy.builtin.ma_cross  # noqa: F401
@@ -385,7 +385,7 @@ class TestReloadSafety:
 
         # Trigger the reload
         try:
-            _reload_user_strategy("ma_cross.py")
+            _reload_code("ma_cross.py", "strategy", tmp_path, _strategy_bases, dual_registry=False)
         except Exception:
             pass  # may fail in sandbox, but the registry cleanup happens first
 
@@ -401,7 +401,7 @@ class TestReloadSafety:
         modules. Now only the user module path is cleaned.
         """
         from ez.strategy.base import Strategy
-        from ez.agent.sandbox import _reload_user_strategy
+        from ez.agent.sandbox import _reload_code, _strategy_bases
         import pandas as pd
 
         # Create a fake "other module" class with name ResultTestStrat
@@ -426,7 +426,7 @@ class TestReloadSafety:
                 "        return pd.Series([0.0] * len(data), index=data.index)\n"
             )
             try:
-                _reload_user_strategy("my_strat.py")
+                _reload_code("my_strat.py", "strategy", tmp_path, _strategy_bases, dual_registry=False)
             except Exception:
                 pass
             # The other module's ResultTestStrat must still be registered
@@ -445,14 +445,14 @@ class TestHotReloadFailureSignal:
 
     def test_reload_failure_returns_success_false(self, monkeypatch, tmp_path):
         """save_and_validate_strategy previously returned success=True even
-        when _reload_user_strategy raised. Now returns success=False.
+        when _reload_code raised. Now returns success=False.
         """
         from ez.agent import sandbox
 
-        def _raise_reload(filename):
+        def _raise_reload(filename, kind, target_dir, get_base_classes, dual_registry=True):
             raise RuntimeError("simulated reload failure")
 
-        monkeypatch.setattr(sandbox, "_reload_user_strategy", _raise_reload)
+        monkeypatch.setattr(sandbox, "_reload_code", _raise_reload)
         monkeypatch.setattr(sandbox, "_STRATEGIES_DIR", tmp_path)
         # Mock contract test to pass so we reach the reload step
         monkeypatch.setattr(

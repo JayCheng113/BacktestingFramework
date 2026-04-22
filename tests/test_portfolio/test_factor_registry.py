@@ -136,8 +136,8 @@ class TmpGhostCross(CrossSectionalFactor):
         # Write file + manually trigger registration
         target = target_dir / "tmp_ghost_cross.py"
         target.write_text(code, encoding="utf-8")
-        from ez.agent.sandbox import _reload_portfolio_code
-        _reload_portfolio_code("tmp_ghost_cross.py", "cross_factor", target_dir)
+        from ez.agent.sandbox import _reload_code, _portfolio_bases
+        _reload_code("tmp_ghost_cross.py", "cross_factor", target_dir, lambda: _portfolio_bases("cross_factor"))
         assert "TmpGhostCross" in CrossSectionalFactor._registry
 
         # Delete via API

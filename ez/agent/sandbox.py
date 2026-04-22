@@ -921,7 +921,7 @@ def save_and_validate_strategy(
     guard_result = _run_guards(safe_name, "strategy", _STRATEGIES_DIR)
     if guard_result is not None and guard_result.blocked:
         # Disk rollback FIRST (I2: don't leave registry cleaned and disk
-        # dirty). Hook 1 runs guards BEFORE _reload_user_strategy, so
+        # dirty). Hook 1 runs guards BEFORE _reload_code, so
         # the production registry was never touched on this code path —
         # we only need to roll back the file. No registry surgery here.
         try:
@@ -952,12 +952,12 @@ def save_and_validate_strategy(
 
     # Hot-reload: make the strategy available immediately.
     # V2.12.1 post-review (codex): prior version returned success=True even
-    # when _reload_user_strategy raised, hiding the fact that the main
+    # when _reload_code raised, hiding the fact that the main
     # process registry still held the old implementation. Editor showed
     # "保存成功" but subsequent backtests ran the previous version.
     # Now reload failure surfaces as success=False with a clear reason.
     try:
-        _reload_user_strategy(safe_name)
+        _reload_code(safe_name, "strategy", _STRATEGIES_DIR, _strategy_bases, dual_registry=False)
     except Exception as e:
         logger.warning("Strategy saved but hot-reload failed: %s", e)
         return {
@@ -1039,52 +1039,69 @@ def _make_lock_accessor():
 _get_reload_lock = _make_lock_accessor()
 
 
-def _reload_user_strategy(filename: str) -> None:
-    """Hot-reload a user strategy after save (thread-safe).
-
-    Steps:
-    1. Remove old registry entries for THIS user module only
-    2. Remove old module from sys.modules
-    3. Re-import the module, triggering __init_subclass__ auto-registration
-
-    V2.12.1 post-review (codex #11 + #17): prior version also deleted
-    registry entries where `__module__ == "ez.strategy.builtin.{stem}"`
-    (erasing built-in strategies whose filename stem matched — e.g.,
-    saving a user file `ma_cross.py` wiped the built-in MACrossStrategy)
-    AND deleted any class with the same `__name__` globally (erasing
-    unrelated modules' strategies just because they shared a class name).
-    Both paths are removed: Strategy registry uses `module.class` keys, so
-    two different modules with the same class name coexist safely — we
-    only need to clean entries belonging to THIS user module.
-    """
+def _strategy_bases():
+    """Deferred import: return Strategy base class list for registry cleanup."""
     from ez.strategy.base import Strategy
+    return [Strategy]
 
+
+def _portfolio_bases(kind: str):
+    """Deferred import: return PortfolioStrategy or CrossSectionalFactor base class list."""
+    if kind == "portfolio_strategy":
+        from ez.portfolio.portfolio_strategy import PortfolioStrategy
+        return [PortfolioStrategy]
+    else:
+        from ez.portfolio.cross_factor import CrossSectionalFactor
+        return [CrossSectionalFactor]
+
+
+def _factor_bases():
+    """Deferred import: return Factor base class list for registry cleanup."""
+    from ez.factor.base import Factor
+    return [Factor]
+
+
+def _reload_code(
+    filename: str,
+    kind: str,
+    target_dir: Path,
+    get_base_classes: callable,
+    dual_registry: bool = True,
+) -> None:
+    """Hot-reload user code: strategy, portfolio strategy, cross factor, ml_alpha, or factor.
+
+    Parameters
+    ----------
+    filename : .py file name
+    kind : human label for logging
+    target_dir : directory containing the file
+    get_base_classes : zero-arg callable returning list of base classes whose registries to clean.
+                       Deferred to avoid import at definition time.
+    dual_registry : if True, clean both _registry and _registry_by_key
+    """
     stem = filename.replace(".py", "")
-    module_name = f"strategies.{stem}"
+    module_name = f"{target_dir.name}.{stem}"
 
     with _get_reload_lock():
-        # Only clean entries from the user module being reloaded.
-        # DO NOT touch ez.strategy.builtin.* or cross-module name matches —
-        # they belong to different classes that should coexist with user code.
-        old_keys = [k for k, v in Strategy._registry.items() if v.__module__ == module_name]
-        for k in old_keys:
-            Strategy._registry.pop(k, None)
+        for base_cls in get_base_classes():
+            old_keys = [k for k, v in base_cls._registry.items() if v.__module__ == module_name]
+            for k in old_keys:
+                base_cls._registry.pop(k, None)
+            if dual_registry and hasattr(base_cls, "_registry_by_key"):
+                old_full_keys = [k for k, v in base_cls._registry_by_key.items() if v.__module__ == module_name]
+                for k in old_full_keys:
+                    base_cls._registry_by_key.pop(k, None)
 
-        # Remove old module from sys.modules (user module only)
         if module_name in sys.modules:
             del sys.modules[module_name]
 
-        # Delete .pyc to defeat Python's mtime-based bytecode cache
-        # (same-second writes produce same mtime → stale .pyc reuse)
-        py_file = _STRATEGIES_DIR / filename
-        pycache = _STRATEGIES_DIR / "__pycache__"
+        pycache = target_dir / "__pycache__"
         if pycache.exists():
             for pyc in pycache.glob(f"{stem}*.pyc"):
                 pyc.unlink(missing_ok=True)
         importlib.invalidate_caches()
 
-        # Re-import via spec_from_file_location (same as loader fallback)
-        py_file = _STRATEGIES_DIR / filename
+        py_file = target_dir / filename
         if not py_file.exists():
             return
         try:
@@ -1093,33 +1110,22 @@ def _reload_user_strategy(filename: str) -> None:
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod
                 spec.loader.exec_module(mod)
-                logger.info("Hot-reloaded strategy: %s", filename)
+                logger.info("Hot-reloaded %s: %s", kind, filename)
         except Exception as e:
-            logger.warning("Failed to hot-reload strategy %s: %s", filename, e)
+            logger.warning("Failed to hot-reload %s %s: %s", kind, filename, e)
             raise
 
 
-def _validate_strategy_inprocess(filename: str) -> dict:
-    """In-process strategy validation for frozen mode (no subprocess Python)."""
-    try:
-        target = _STRATEGIES_DIR / filename
-        spec = importlib.util.spec_from_file_location(f"_check_{filename.replace('.py', '')}", str(target))
-        if not spec or not spec.loader:
-            return {"passed": False, "output": f"Cannot create module spec for {filename}"}
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        from ez.strategy.base import Strategy
-        classes = [v for v in vars(mod).values()
-                   if isinstance(v, type) and issubclass(v, Strategy) and v is not Strategy]
-        if not classes:
-            return {"passed": False, "output": "No Strategy subclass found"}
-        return {"passed": True, "output": f"(frozen模式进程内验证) OK: {[c.__name__ for c in classes]}"}
-    except Exception as e:
-        return {"passed": False, "output": f"(frozen模式验证失败) {e}"}
+def _validate_inprocess(filename: str, kind: str, target_dir: Path, get_base_classes: callable) -> dict:
+    """In-process validation for frozen mode (no subprocess Python).
 
-
-def _validate_portfolio_inprocess(filename: str, kind: str, target_dir: Path) -> dict:
-    """In-process portfolio/factor validation for frozen mode."""
+    Parameters
+    ----------
+    filename : .py file name
+    kind : human label (unused but kept for symmetry with _reload_code)
+    target_dir : directory containing the file
+    get_base_classes : zero-arg callable returning list of base classes to check against
+    """
     try:
         target = target_dir / filename
         module_name = f"_check_{filename.replace('.py', '')}"
@@ -1128,18 +1134,12 @@ def _validate_portfolio_inprocess(filename: str, kind: str, target_dir: Path) ->
             return {"passed": False, "output": f"Cannot create module spec for {filename}"}
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        if kind == "portfolio_strategy":
-            from ez.portfolio.portfolio_strategy import PortfolioStrategy
-            classes = [v for v in vars(mod).values()
-                       if isinstance(v, type) and issubclass(v, PortfolioStrategy) and v is not PortfolioStrategy]
-            if not classes:
-                return {"passed": False, "output": "No PortfolioStrategy subclass found"}
-        else:
-            from ez.portfolio.cross_factor import CrossSectionalFactor
-            classes = [v for v in vars(mod).values()
-                       if isinstance(v, type) and issubclass(v, CrossSectionalFactor) and v is not CrossSectionalFactor]
-            if not classes:
-                return {"passed": False, "output": "No CrossSectionalFactor subclass found"}
+        base_classes = get_base_classes()
+        classes = [v for v in vars(mod).values()
+                   if isinstance(v, type) and any(issubclass(v, bc) and v is not bc for bc in base_classes)]
+        if not classes:
+            class_names = " or ".join(c.__name__ for c in base_classes)
+            return {"passed": False, "output": f"No {class_names} subclass found"}
         return {"passed": True, "output": f"(frozen模式进程内验证) OK: {[c.__name__ for c in classes]}"}
     except Exception as e:
         return {"passed": False, "output": f"(frozen模式验证失败) {e}"}
@@ -1156,7 +1156,7 @@ def _run_contract_test(filename: str, timeout: int = 30) -> dict:
 
     # Frozen mode without Python interpreter: in-process import validation
     if not python_exe:
-        return _validate_strategy_inprocess(filename)
+        return _validate_inprocess(filename, "strategy", _STRATEGIES_DIR, _strategy_bases)
 
     # Check if pytest is available
     check = subprocess.run(
@@ -1289,7 +1289,7 @@ def save_and_validate_code(
             # but any evaluation crashed until a manual /api/code/refresh or restart.
             # Skip if frozen in-process: exec_module above already registered real classes.
             if not _frozen_inprocess:
-                _reload_factor_code(safe_name, target_dir)
+                _reload_code(safe_name, "factor", target_dir, _factor_bases)
                 # Verify the reload actually placed real (non-stub) classes in the registry
                 live = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
                 if not live:
@@ -1299,27 +1299,27 @@ def save_and_validate_code(
 
             # V2.19.0: guard framework — run after hot-reload succeeds,
             # before returning success. On block: roll back the file and
-            # let _reload_factor_code clean out the now-invalid v2 + load
+            # let _reload_code clean out the now-invalid v2 + load
             # v0 from the backup (or clean registry if there is no backup).
             # Straight-line rollback (not via the `except Exception` block
             # which would mis-categorize the error as "Factor validation failed").
             factor_guard_result = _run_guards(safe_name, "factor", target_dir)
             if factor_guard_result is not None and factor_guard_result.blocked:
-                # I2: disk write first, then rely on _reload_factor_code
+                # I2: disk write first, then rely on _reload_code
                 # to clean the dual-dict registry atomically. Wrap the
                 # disk write in try/except so a disk error is surfaced
                 # instead of swallowed.
                 try:
                     if backup is not None:
                         target.write_text(backup, encoding="utf-8")
-                        # _reload_factor_code internally cleans BOTH
+                        # _reload_code internally cleans BOTH
                         # _registry and _registry_by_key for this module
                         # (V2.12.2 hot-reload helper), then re-imports
                         # the backup source. One call, atomic semantics.
                         # Codex round-2 P2 #1: surface re-register failure
                         # as a half-state CRITICAL, not a silent log line.
                         try:
-                            _reload_factor_code(safe_name, target_dir)
+                            _reload_code(safe_name, "factor", target_dir, _factor_bases)
                         except Exception as restore_err:
                             logger.error(
                                 "Factor guard rollback re-register failed: %s",
@@ -1393,7 +1393,7 @@ def save_and_validate_code(
                 # import (shouldn't happen, but defend against environment
                 # drift), leave the registry empty rather than crashing.
                 try:
-                    _reload_factor_code(safe_name, target_dir)
+                    _reload_code(safe_name, "factor", target_dir, _factor_bases)
                 except Exception as restore_err:
                     logger.warning(
                         "Factor rollback succeeded but re-register failed: %s",
@@ -1441,7 +1441,7 @@ def save_and_validate_code(
     # on reload failure, hiding stale-registry state. Now reload failure is
     # reported as success=False (matches strategy save behavior).
     try:
-        _reload_portfolio_code(safe_name, kind, target_dir)
+        _reload_code(safe_name, kind, target_dir, lambda: _portfolio_bases(kind))
     except Exception as e:
         logger.warning("Portfolio code saved but hot-reload failed: %s", e)
         return {
@@ -1457,7 +1457,7 @@ def save_and_validate_code(
 
     # V2.19.0: guard framework — run after hot-reload succeeds, before
     # returning success. On block: roll back the file and either re-run
-    # _reload_portfolio_code (backup path) or manually clean the v2
+    # _reload_code (backup path) or manually clean the v2
     # entries via _sandbox_registries_for_kind (no-backup path).
     portfolio_guard_result = _run_guards(safe_name, kind, target_dir)
     if portfolio_guard_result is not None and portfolio_guard_result.blocked:
@@ -1469,7 +1469,7 @@ def save_and_validate_code(
                 # Codex round-2 P2 #1: surface re-register failure as
                 # half-state CRITICAL.
                 try:
-                    _reload_portfolio_code(safe_name, kind, target_dir)
+                    _reload_code(safe_name, kind, target_dir, lambda: _portfolio_bases(kind))
                 except Exception as restore_err:
                     logger.error(
                         "Portfolio guard rollback re-register failed: %s",
@@ -1530,7 +1530,7 @@ def _run_portfolio_contract_test(filename: str, kind: str, target_dir: Path) -> 
     """Contract test for portfolio strategies and cross-sectional factors."""
     python_exe = _get_python_executable()
     if not python_exe:
-        return _validate_portfolio_inprocess(filename, kind, target_dir)
+        return _validate_inprocess(filename, kind, target_dir, lambda: _portfolio_bases(kind))
 
     safe_path_repr = repr(str(target_dir / filename))
     if kind == "portfolio_strategy":
@@ -1618,101 +1618,6 @@ print(f'OK: {{cls.__name__}} scores={{result.to_dict()}}')
         return {"passed": False, "output": "Contract test timed out (30s)"}
     except Exception as e:
         return {"passed": False, "output": f"Failed: {e}"}
-
-
-def _reload_portfolio_code(filename: str, kind: str, target_dir: Path) -> None:
-    """Hot-reload portfolio strategy or cross-factor in main process."""
-    stem = filename.replace(".py", "")
-    module_name = f"{target_dir.name}.{stem}"
-
-    with _get_reload_lock():
-        if kind == "portfolio_strategy":
-            from ez.portfolio.portfolio_strategy import PortfolioStrategy
-            # V2.12.1 post-review: dual-dict registry (_registry_by_key is
-            # authoritative, _registry is the name-keyed backward-compat view).
-            # Must clean BOTH dicts or the full-key dict leaks zombies.
-            old_name_keys = [k for k, v in PortfolioStrategy._registry.items() if v.__module__ == module_name]
-            for k in old_name_keys:
-                del PortfolioStrategy._registry[k]
-            old_full_keys = [k for k, v in PortfolioStrategy._registry_by_key.items() if v.__module__ == module_name]
-            for k in old_full_keys:
-                del PortfolioStrategy._registry_by_key[k]
-        elif kind in ("cross_factor", "ml_alpha"):
-            # V2.13 Phase 4: ml_alpha is a CrossSectionalFactor subclass,
-            # shares the same dual-dict registry. Same cleanup path.
-            from ez.portfolio.cross_factor import CrossSectionalFactor
-            # V2.12.2 codex: dual-dict registry — clean BOTH dicts or the
-            # full-key dict leaks zombies on hot-reload.
-            old_name_keys = [k for k, v in CrossSectionalFactor._registry.items() if v.__module__ == module_name]
-            for k in old_name_keys:
-                del CrossSectionalFactor._registry[k]
-            old_full_keys = [k for k, v in CrossSectionalFactor._registry_by_key.items() if v.__module__ == module_name]
-            for k in old_full_keys:
-                del CrossSectionalFactor._registry_by_key[k]
-
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-
-        pycache = target_dir / "__pycache__"
-        if pycache.exists():
-            for pyc in pycache.glob(f"{stem}*.pyc"):
-                pyc.unlink(missing_ok=True)
-        importlib.invalidate_caches()
-
-        py_file = target_dir / filename
-        if not py_file.exists():
-            return
-        try:
-            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = mod
-                spec.loader.exec_module(mod)
-                logger.info("Hot-reloaded %s: %s", kind, filename)
-        except Exception as e:
-            logger.warning("Failed to hot-reload %s %s: %s", kind, filename, e)
-            raise
-
-
-def _reload_factor_code(filename: str, target_dir: Path) -> None:
-    """Hot-reload user factor in main process (trigger __init_subclass__)."""
-    stem = filename.replace(".py", "")
-    module_name = f"{target_dir.name}.{stem}"
-
-    with _get_reload_lock():
-        from ez.factor.base import Factor
-        # V2.12.2 codex: dual-dict registry — clean BOTH dicts or the
-        # full-key dict leaks zombies on hot-reload.
-        old_name_keys = [k for k, v in Factor._registry.items() if v.__module__ == module_name]
-        for k in old_name_keys:
-            del Factor._registry[k]
-        old_full_keys = [k for k, v in Factor._registry_by_key.items() if v.__module__ == module_name]
-        for k in old_full_keys:
-            del Factor._registry_by_key[k]
-
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-
-        # Clear pycache to prevent stale bytecode
-        pycache = target_dir / "__pycache__"
-        if pycache.exists():
-            for pyc in pycache.glob(f"{stem}*.pyc"):
-                pyc.unlink(missing_ok=True)
-        importlib.invalidate_caches()
-
-        py_file = target_dir / filename
-        if not py_file.exists():
-            return
-        try:
-            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = mod
-                spec.loader.exec_module(mod)
-                logger.info("Hot-reloaded factor: %s", filename)
-        except Exception as e:
-            logger.warning("Failed to hot-reload factor %s: %s", filename, e)
-            raise
 
 
 def list_user_strategies() -> list[dict]:
