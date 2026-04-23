@@ -47,7 +47,7 @@ V2.8 adds autonomous research agent: Hypothesis → CodeGen → BatchExec → An
 | batch_runner.py | Batch execution + ranking pipeline (V2.5) |
 | tools.py | Tool registration framework + 9 built-in tools (V2.7) |
 | assistant.py | Agent loop: message → LLM → tool_use → execute → respond (V2.7+V2.8: allowed_tools) |
-| sandbox.py | Code validation: syntax check, forbidden imports, contract test (V2.7) |
+| sandbox.py | Code validation: syntax check, forbidden imports, contract test, hot-reload (V2.7). `_reload_code` and `_validate_inprocess` are parameterized — handle strategy/portfolio/factor via `get_base_classes` callable |
 | fdr.py | False Discovery Rate correction: Bonferroni, Benjamini-Hochberg (V2.7) |
 | data_access.py | Agent-layer data singletons: chain, experiment_store, research_store (V2.7+V2.8) |
 | hypothesis.py | E1: LLM hypothesis generation from research goal (V2.8) |
