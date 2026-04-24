@@ -4,11 +4,14 @@ SimpleMatcher — instant fill, no slippage (V1 default).
 SlippageMatcher — adds configurable market impact (V2.2).
 
 All implementations share the same Matcher ABC so the engine is agnostic.
+Numba JIT fill kernels (V3 performance) are used when available.
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+from ez.core._jit_fill import jit_fill_buy, jit_fill_sell
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,35 +81,12 @@ class SimpleMatcher(Matcher):
         self._min_comm = min_commission
 
     def fill_buy(self, price: float, amount: float) -> FillResult:
-        if amount <= 0 or price <= 0:
-            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
-
-        comm = max(amount * self._rate, self._min_comm)
-        if comm >= amount:
-            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
-
-        shares = (amount - comm) / price
-        return FillResult(
-            shares=shares,
-            fill_price=price,
-            commission=comm,
-            net_amount=-amount,
-        )
+        sh, fp, cm, na = jit_fill_buy(price, amount, self._rate, self._min_comm, 0.0)
+        return FillResult(shares=sh, fill_price=fp, commission=cm, net_amount=na)
 
     def fill_sell(self, price: float, shares: float) -> FillResult:
-        if shares <= 0 or price <= 0:
-            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
-
-        value = shares * price
-        comm = max(value * self._sell_rate, self._min_comm)
-        if comm > value:
-            comm = value
-        return FillResult(
-            shares=shares,
-            fill_price=price,
-            commission=comm,
-            net_amount=value - comm,
-        )
+        sh, fp, cm, na = jit_fill_sell(price, shares, self._sell_rate, self._min_comm, 0.0)
+        return FillResult(shares=sh, fill_price=fp, commission=cm, net_amount=na)
 
 
 class SlippageMatcher(Matcher):
@@ -146,36 +126,38 @@ class SlippageMatcher(Matcher):
         self._min_comm = min_commission
 
     def fill_buy(self, price: float, amount: float) -> FillResult:
-        if amount <= 0 or price <= 0:
-            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
-
-        fill_price = price * (1 + self._slip)
-        comm = max(amount * self._rate, self._min_comm)
-        if comm >= amount:
-            return FillResult(shares=0, fill_price=fill_price, commission=0, net_amount=0)
-
-        shares = (amount - comm) / fill_price
-        return FillResult(
-            shares=shares,
-            fill_price=fill_price,
-            commission=comm,
-            net_amount=-amount,
-        )
+        sh, fp, cm, na = jit_fill_buy(price, amount, self._rate, self._min_comm, self._slip)
+        return FillResult(shares=sh, fill_price=fp, commission=cm, net_amount=na)
 
     def fill_sell(self, price: float, shares: float) -> FillResult:
-        if shares <= 0 or price <= 0:
-            return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
+        sh, fp, cm, na = jit_fill_sell(price, shares, self._sell_rate, self._min_comm, self._slip)
+        return FillResult(shares=sh, fill_price=fp, commission=cm, net_amount=na)
 
-        fill_price = price * (1 - self._slip)
-        if fill_price <= 0:
-            fill_price = 0.0
-        value = shares * fill_price
-        comm = max(value * self._sell_rate, self._min_comm)
-        if comm > value:
-            comm = value
+
+class SellSideTaxMatcher(Matcher):
+    """Wrapper: adds sell-side stamp tax (A-share 0.05%) without modifying core Matcher.
+
+    Moved from ez/api/routes/backtest.py to ez/core/ so paper engine, scripts,
+    and research pipelines can all use it — not just the API layer.
+    """
+
+    def __init__(self, inner: Matcher, stamp_tax_rate: float = 0.0005):
+        self._inner = inner
+        self._tax = stamp_tax_rate
+
+    def fill_buy(self, price: float, amount: float) -> FillResult:
+        return self._inner.fill_buy(price, amount)
+
+    def fill_sell(self, price: float, shares: float) -> FillResult:
+        result = self._inner.fill_sell(price, shares)
+        if result.shares <= 0:
+            return result
+        tax = result.shares * result.fill_price * self._tax
+        max_tax = max(result.net_amount, 0.0)
+        tax = min(tax, max_tax)
         return FillResult(
-            shares=shares,
-            fill_price=fill_price,
-            commission=comm,
-            net_amount=value - comm,
+            shares=result.shares,
+            fill_price=result.fill_price,
+            commission=result.commission + tax,
+            net_amount=result.net_amount - tax,
         )

@@ -111,12 +111,21 @@ class WalkForwardValidator:
             splits.append(oos_result)
             oos_equities.append(oos_result.equity_curve)
 
-        # Combine OOS equity curves
-        oos_equity = (
-            pd.concat(oos_equities, ignore_index=True)
-            if oos_equities
-            else pd.Series([initial_capital])
-        )
+        # Combine OOS equity via chained returns (not raw concat).
+        # Prior version concat'd each split's equity starting at initial_capital,
+        # creating artificial jumps at boundaries. Chaining daily returns produces
+        # a continuous equity curve as if splits were executed sequentially.
+        if oos_equities:
+            chained = [initial_capital]
+            for eq in oos_equities:
+                if len(eq) < 2:
+                    continue
+                split_returns = eq.pct_change().dropna()
+                for r in split_returns:
+                    chained.append(chained[-1] * (1 + r))
+            oos_equity = pd.Series(chained)
+        else:
+            oos_equity = pd.Series([initial_capital])
 
         # OOS aggregate metrics — recompute from the COMBINED equity curve.
         # Prior version (codex finding): `sum(oos_sharpes) / len(oos_sharpes)`

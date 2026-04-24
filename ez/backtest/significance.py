@@ -50,11 +50,14 @@ def compute_significance(
 
     rng = np.random.default_rng(seed)
 
-    # 1. Bootstrap CI for Sharpe
-    boot_sharpes = np.array([
-        _sharpe(rng.choice(returns, size=len(returns), replace=True), daily_rf)
-        for _ in range(n_bootstrap)
-    ])
+    # 1. Bootstrap CI for Sharpe (vectorized: one matrix op, no Python loop)
+    n_ret = len(returns)
+    boot_indices = rng.integers(0, n_ret, size=(n_bootstrap, n_ret))
+    boot_samples = returns[boot_indices]  # (n_bootstrap, n_ret)
+    boot_excess = boot_samples - daily_rf
+    boot_means = boot_excess.mean(axis=1)
+    boot_stds = boot_excess.std(axis=1, ddof=1)
+    boot_sharpes = np.where(boot_stds > 1e-10, boot_means / boot_stds * np.sqrt(252), 0.0)
     ci_lower = float(np.percentile(boot_sharpes, 2.5))
     ci_upper = float(np.percentile(boot_sharpes, 97.5))
 
@@ -66,30 +69,27 @@ def compute_significance(
         sig_vals = sig_vals[:n]
         ar_vals = ar_vals[:n]
 
-        # Skip permutation for constant signals (e.g., buy-and-hold):
-        # shuffling a constant array produces the same result → p≈0 false
-        # positive. V2.12.2 codex round 7: return p_value=1.0 (conventional
-        # "fail to reject null" = not significant) instead of NaN. NaN
-        # propagates through .toFixed(3) in the frontend and displays
-        # literally as "NaN", confusing users on legitimate edge cases like
-        # full-long buy-and-hold. 1.0 is the semantically correct value for
-        # "no timing information" and renders as "1.000" cleanly.
         if np.std(sig_vals) < 1e-10:
             return SignificanceTest(
                 sharpe_ci_lower=ci_lower, sharpe_ci_upper=ci_upper,
                 monte_carlo_p_value=1.0, is_significant=False,
             )
 
-        perm_sharpes = np.array([
-            _sharpe(rng.permutation(sig_vals) * ar_vals, daily_rf)
-            for _ in range(n_permutations)
-        ])
+        # Vectorized: generate all permutation indices at once
+        perm_indices = np.array([rng.permutation(n) for _ in range(n_permutations)])
+        perm_signals = sig_vals[perm_indices]          # (n_perm, n)
+        perm_returns = perm_signals * ar_vals           # (n_perm, n)
+        perm_excess = perm_returns - daily_rf
+        perm_means = perm_excess.mean(axis=1)
+        perm_stds = perm_excess.std(axis=1, ddof=1)
+        perm_sharpes = np.where(perm_stds > 1e-10, perm_means / perm_stds * np.sqrt(252), 0.0)
     else:
-        # Fallback: permute returns (less accurate but backward compatible)
-        perm_sharpes = np.array([
-            _sharpe(rng.permutation(returns), daily_rf)
-            for _ in range(n_permutations)
-        ])
+        perm_indices = np.array([rng.permutation(n_ret) for _ in range(n_permutations)])
+        perm_samples = returns[perm_indices]
+        perm_excess = perm_samples - daily_rf
+        perm_means = perm_excess.mean(axis=1)
+        perm_stds = perm_excess.std(axis=1, ddof=1)
+        perm_sharpes = np.where(perm_stds > 1e-10, perm_means / perm_stds * np.sqrt(252), 0.0)
 
     p_value = float(np.mean(perm_sharpes >= observed_sharpe))
 

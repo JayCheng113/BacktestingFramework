@@ -2,13 +2,22 @@
 
 Extracted from ez/portfolio/engine.py (V2.15 A1) so both the backtest engine
 and the upcoming paper-trading engine use identical fill logic.
+C++ fast path (V3 performance) used when available.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 
 EPS_FUND = 0.01  # accounting tolerance (cents)
+
+_HAS_CPP_REBAL = False
+try:
+    from ez.core._portfolio_rebalance_cpp import portfolio_rebalance_day as _cpp_rebalance
+    _HAS_CPP_REBAL = True
+except ImportError:
+    pass
 
 
 @dataclass
@@ -66,6 +75,16 @@ def execute_portfolio_trades(
     """
     if sold_today is None:
         sold_today = set()
+
+    if _HAS_CPP_REBAL and limit_pct <= 0:
+        try:
+            return _execute_cpp(
+                target_weights, holdings, equity, cash, prices,
+                raw_close_today, prev_raw_close, has_bar_today,
+                cost_model, lot_size, limit_pct, t_plus_1, sold_today,
+            )
+        except Exception:
+            pass  # fallback to Python
 
     # Convert weights -> target shares (discrete)
     target_shares: dict[str, int] = {}
@@ -168,3 +187,74 @@ def execute_portfolio_trades(
         trade_volume += amount
 
     return trades, holdings, cash, trade_volume
+
+
+def _execute_cpp(
+    target_weights, holdings, equity, cash, prices,
+    raw_close_today, prev_raw_close, has_bar_today,
+    cost_model, lot_size, limit_pct, t_plus_1, sold_today,
+):
+    """C++ fast path: marshal dicts → arrays → C++ → unmarshal."""
+    all_syms = sorted(set(holdings.keys()) | set(target_weights.keys()) | set(prices.keys()))
+    all_syms = [s for s in all_syms if s in prices and prices[s] > 0]
+    n = len(all_syms)
+    if n == 0:
+        return [], holdings, cash, 0.0
+
+    sym_to_idx = {s: i for i, s in enumerate(all_syms)}
+
+    tw_arr = np.zeros(n, dtype=np.float64)
+    px_arr = np.zeros(n, dtype=np.float64)
+    rpc_arr = np.zeros(n, dtype=np.float64)
+    hld_arr = np.zeros(n, dtype=np.int64)
+
+    for i, s in enumerate(all_syms):
+        w = target_weights.get(s, 0.0)
+        if t_plus_1 and w > 0 and s in sold_today:
+            w = float(holdings.get(s, 0) * prices[s]) / equity if equity > 0 else 0.0
+        if s not in has_bar_today:
+            w = float(holdings.get(s, 0) * prices[s]) / equity if equity > 0 else 0.0
+        tw_arr[i] = w
+        px_arr[i] = prices.get(s, 0.0)
+        rpc_arr[i] = prev_raw_close.get(s, 0.0) if s in has_bar_today else 0.0
+        hld_arr[i] = holdings.get(s, 0)
+
+    sell_rate_with_stamp = cost_model.sell_commission_rate + cost_model.stamp_tax_rate
+
+    result = _cpp_rebalance(
+        tw_arr, px_arr, rpc_arr, hld_arr, float(cash),
+        float(cost_model.buy_commission_rate), float(sell_rate_with_stamp),
+        float(cost_model.min_commission), float(cost_model.slippage_rate),
+        int(lot_size), float(limit_pct),
+    )
+
+    new_hld_arr, new_cash, tc = result[0], float(result[1]), int(result[2])
+    t_syms, t_sides, t_shares, t_prices, t_costs = result[3], result[4], result[5], result[6], result[7]
+
+    trades = []
+    trade_volume = 0.0
+    for j in range(tc):
+        sym = all_syms[int(t_syms[j])]
+        side = "buy" if int(t_sides[j]) == 0 else "sell"
+        sh = int(t_shares[j])
+        pr = float(t_prices[j])
+        amt = sh * pr
+        cst = float(t_costs[j])
+        stamp = amt * cost_model.stamp_tax_rate if side == "sell" else 0.0
+        comm = cst - stamp if side == "sell" else cst
+        if side == "sell":
+            sold_today.add(sym)
+        trades.append(TradeResult(
+            symbol=sym, side=side, shares=sh, price=pr,
+            amount=amt, commission=max(comm, 0.0), stamp_tax=stamp, cost=cst,
+        ))
+        trade_volume += amt
+
+    for i, s in enumerate(all_syms):
+        new_sh = int(new_hld_arr[i])
+        if new_sh > 0:
+            holdings[s] = new_sh
+        elif s in holdings:
+            del holdings[s]
+
+    return trades, holdings, float(new_cash), trade_volume

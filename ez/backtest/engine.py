@@ -8,7 +8,15 @@ import pandas as pd
 
 from ez.backtest.metrics import MetricsCalculator
 from ez.backtest.significance import compute_significance
-from ez.core.matcher import Matcher, SimpleMatcher
+from ez.core._jit_fill import _HAS_NUMBA, jit_simulate_loop
+from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
+
+_HAS_CPP_SIMULATE = False
+try:
+    from ez.core._simulate_cpp import simulate_loop as _cpp_simulate_loop
+    _HAS_CPP_SIMULATE = True
+except ImportError:
+    pass
 from ez.strategy.base import Strategy
 from ez.types import BacktestResult, TradeRecord
 
@@ -31,6 +39,7 @@ class VectorizedBacktestEngine:
         data: pd.DataFrame,
         strategy: Strategy,
         initial_capital: float = 1000000.0,
+        skip_significance: bool = False,
     ) -> BacktestResult:
         df = data.copy()
 
@@ -105,11 +114,18 @@ class VectorizedBacktestEngine:
             metrics["avg_holding_days"] = 0.0
 
         # 7. Significance — permute signals (not returns) for Monte Carlo
-        asset_returns = df["adj_close"].pct_change().fillna(0.0)
-        significance = compute_significance(
-            daily_returns, risk_free_rate=self._metrics._rf,
-            signals=signals, asset_returns=asset_returns,
-        )
+        if skip_significance:
+            from ez.types import SignificanceTest as SignificanceResult
+            significance = SignificanceResult(
+                sharpe_ci_lower=0.0, sharpe_ci_upper=0.0,
+                monte_carlo_p_value=1.0, is_significant=False,
+            )
+        else:
+            asset_returns = df["adj_close"].pct_change().fillna(0.0)
+            significance = compute_significance(
+                daily_returns, risk_free_rate=self._metrics._rf,
+                signals=signals, asset_returns=asset_returns,
+            )
 
         return BacktestResult(
             equity_curve=equity,
@@ -137,7 +153,14 @@ class VectorizedBacktestEngine:
         # adj_open ≈ open for non-dividend bars (adj_close == close),
         # so this is a no-op for the vast majority of bars.
         prices = df["adj_close"].values
-        _raw_open = df["open"].values if "open" in df.columns else prices
+        if "open" in df.columns:
+            _raw_open = df["open"].values
+        elif "close" in df.columns:
+            # If raw open is unavailable, fall back to raw close first so the
+            # dividend adjustment ratio is only applied once.
+            _raw_open = df["close"].values
+        else:
+            _raw_open = prices
         raw_close = df["close"].values if "close" in df.columns else prices
         # Build adj_open = raw_open * (adj_close / raw_close), guarding
         # zero/NaN raw close (keeps raw_open unchanged in that case).
@@ -157,6 +180,81 @@ class VectorizedBacktestEngine:
                 [],
                 pd.Series([0.0], dtype=float),
             )
+
+        # JIT fast-path: bypass Python loop entirely for Simple/Slippage matchers
+        matcher = self._matcher
+        _unique_weights = np.unique(weights[np.isfinite(weights)])
+        _is_binary = len(_unique_weights) <= 2 and all(w in (0.0, 1.0) for w in _unique_weights)
+        _can_accel = (
+            isinstance(matcher, (SimpleMatcher, SlippageMatcher))
+            and not hasattr(matcher, 'on_bar')
+            and _is_binary
+        )
+        _use_cpp = _can_accel and _HAS_CPP_SIMULATE
+        _use_jit = _can_accel and not _use_cpp and _HAS_NUMBA
+        if _use_cpp or _use_jit:
+            _sim_fn = _cpp_simulate_loop if _use_cpp else jit_simulate_loop
+            slip = getattr(matcher, '_slip', 0.0)
+            _jit_out = _sim_fn(
+                prices.astype(np.float64),
+                open_prices.astype(np.float64),
+                weights.astype(np.float64),
+                float(capital),
+                float(matcher._rate),
+                float(matcher._sell_rate),
+                float(matcher._min_comm),
+                float(slip),
+            )
+            eq, dr = _jit_out[0], _jit_out[1]
+            te, tx, tep, txp, tpnl, tcm, tw = _jit_out[2], _jit_out[3], _jit_out[4], _jit_out[5], _jit_out[6], _jit_out[7], _jit_out[8]
+            tc = int(_jit_out[9])
+            f_shares = float(_jit_out[10])
+            f_entry_bar = int(_jit_out[12])
+            f_entry_price = float(_jit_out[13])
+            f_entry_comm = float(_jit_out[14])
+
+            times = list(df.index) if hasattr(df.index, "__iter__") else list(range(n))
+            trades = []
+            # JIT pnl_pct uses equity-based formula (exit_eq / entry_eq - 1)
+            # which differs from the Python path's cost-basis formula
+            # (total_pnl / cycle_peak_invested). For binary 0/1 signals at
+            # full weight the two converge; the JIT path is restricted to
+            # binary signals so the divergence is minimal.
+            for j in range(tc):
+                ei, xi = int(te[j]), int(tx[j])
+                entry_eq = float(eq[ei - 1]) if ei > 0 else capital
+                exit_eq = float(eq[xi])
+                trades.append(TradeRecord(
+                    entry_time=times[ei], exit_time=times[xi],
+                    entry_price=float(tep[j]), exit_price=float(txp[j]),
+                    weight=float(tw[j]), pnl=float(tpnl[j]),
+                    pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
+                    commission=float(tcm[j]),
+                ))
+            if f_shares > 1e-10 and f_entry_bar >= 0 and n > 0:
+                liq_price = prices[n - 1]
+                if not np.isnan(liq_price) and liq_price > 0:
+                    fill = matcher.fill_sell(liq_price, f_shares)
+                    if fill.shares > 0:
+                        pnl = (fill.fill_price - f_entry_price) * fill.shares - fill.commission - f_entry_comm
+                        entry_eq = float(eq[f_entry_bar - 1]) if f_entry_bar > 0 else capital
+                        exit_eq = float(eq[n - 1])
+                        trades.append(TradeRecord(
+                            entry_time=times[f_entry_bar], exit_time=times[n - 1],
+                            entry_price=f_entry_price, exit_price=fill.fill_price,
+                            weight=float(weights[f_entry_bar]) if f_entry_bar < len(weights) else 0.0,
+                            pnl=pnl,
+                            pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
+                            commission=f_entry_comm + fill.commission,
+                        ))
+
+            return (
+                pd.Series(eq, index=df.index),
+                trades,
+                pd.Series(dr, index=df.index),
+            )
+
+        # --- Original Python loop (MarketRulesMatcher or no numba) ---
 
         equity_arr = np.zeros(n)
         equity_arr[0] = capital
@@ -188,9 +286,11 @@ class VectorizedBacktestEngine:
         time_list = list(times)
         matcher = self._matcher
 
+        _nan_mask = np.isnan(prices) | np.isnan(open_prices)
+        _has_on_bar = hasattr(matcher, 'on_bar')
+
         for i in range(1, n):
-            # Guard: skip trading on NaN prices, carry equity forward
-            if np.isnan(prices[i]) or np.isnan(open_prices[i]):
+            if _nan_mask[i]:
                 equity_arr[i] = equity_arr[i - 1]
                 daily_ret[i] = 0.0
                 continue
@@ -198,22 +298,9 @@ class VectorizedBacktestEngine:
             target_weight = weights[i] if i < len(weights) else 0.0
             exec_price = open_prices[i]
 
-            # V2.6: notify matcher of bar context (MarketRules uses this)
-            # Use raw close (not adj_close) for price limit checks —
-            # 涨跌停 is based on unadjusted previous close.
-            if hasattr(matcher, 'on_bar'):
+            if _has_on_bar:
                 matcher.on_bar(bar_index=i, prev_close=raw_close[i - 1])
 
-            # V2.12.2 codex round 6 reviewer: raise threshold from 1e-6 to
-            # 1e-3. Round 6 changed prev_weight to reflect the ACTUAL
-            # achieved weight (not target), which correctly fixes the
-            # lot-rounding residual gap retry but introduced a secondary
-            # issue: commission-induced drift (~7.5e-5 for standard rates)
-            # exceeds 1e-6, triggering a phantom retry every bar that
-            # pays min_commission for a ~0.05-share tiny trade. 1e-3 is
-            # well above float-precision noise but below any meaningful
-            # weight change, so real rebalancing still fires while
-            # fractional drift is tolerated.
             if abs(target_weight - prev_weight) > 1e-3:
                 current_equity = cash + shares * exec_price
                 target_value = current_equity * target_weight
