@@ -347,12 +347,77 @@ API: `POST /experiments/submit`, `GET /experiments/{id}`, `GET /experiments`。
 │                                                      │
 │  Broker 适配                                          │
 │  ├── PaperBroker（仿真，优先实现）                    │
-│  ├── [未来] 中国券商 API（通达信/恒生/CTP 期货）      │
-│  └── 幂等下单, 重试, 撤单一致性                      │
+│  ├── BrokerAdapter（已落地抽象）                      │
+│  ├── QMTShadowBroker（只读/影子 + 对账/回报同步）     │
+│  ├── QMTRealBroker（小额白名单 real submit）          │
+│  │   按官方 xtquant: trader/account/callback/startup │
+│  │   同配置共享 shadow session owner（进程内复用）   │
+│  │   session lifecycle -> runtime events             │
+│  │   owner state / owner events 可观测               │
+│  │   start/resume 即刻写入 runtime events            │
+│  │   deployment attach/detach 驱动 owner 生命周期    │
+│  │   explicit broker-sync pump（无需等日线 tick）    │
+│  │   session_consumer_state loop snapshots           │
+│  │   callback-driven asset state progression         │
+│  │   callback freshness/fallback gate                │
+│  │   qmt_readiness summary for future submit gate    │
+│  │   explicit qmt_submit_gate（shadow_only / blocked / open）│
+│  │   qmt_reconcile_hard_gate (fail-closed runtime)   │
+│  │   deployment-level qmt_real_submit_policy preflight│
+│  │   qmt_release_gate for release workflow             │
+│  │   preview/runtime gate source explicitly exposed    │
+│  │   qmt_release_gate surfaced in monitor/dashboard    │
+│  │   V3 live frontend now consumes broker-state/gates  │
+│  │   and surfaces release workflow / candidate blockers│
+│  │   resident owner moved to qmt_session_owner.py      │
+│  │   run_forever callback consumer skeleton          │
+│  │   last-owner teardown 保留 consumer runtime       │
+│  │   sync 前 supervision: owner 在则补起 consumer    │
+│  │   增量 execution sync: callback 优先, query 兜底  │
+│  │   order reconcile: latest reports 覆盖 open_orders│
+│  │   callback-first broker_order_states reducer      │
+│  │   broker-order links: client_order_id <-> sysid   │
+│  │   minimal cancel-request: API -> scheduler -> link │
+│  │   callback + query merge, dedupe, forward-only link │
+│  │   callback-aware snapshot open/trade state           │
+│  │   collect_sync_state fast-path 也会走 canonical link │
+│  │   tick()/broker-sync 共享 aggregated sync bundle   │
+│  │   stop/error teardown 会再次同步 runtime events    │
+│  │   runtime callbacks -> append-only broker events    │
+│  │   broker account snapshot -> audit + reconcile      │
+│  │   broker order reconcile -> local links vs broker open orders │
+│  │   real submit ack: broker_submit_id != broker_order_id │
+│  │   submit-time broker-order link can persist before fill │
+│  │   stale projection 会回退到最新 append-only truth      │
+│  │   callback 到达会 push-refresh runtime projection      │
+│  │   real-QMT cancel route 优先 execution broker         │
+│  │   real owner execution reports 直接进入 event/link     │
+│  │   cancel success ack 可直接推进 cancel-pending         │
+│  │   /cancel 同周期会 harvest real owner callback         │
+│  │   callback cursor 会继续吃 terminal cancel confirm    │
+│  └── [后续] 实盘对账闭环 / 主机外编排增强                │
 │                                                      │
-│  持仓对账: 本地 tracker vs 券商实际                    │
+│  持仓对账: 本地 ledger vs 券商实际                    │
 │                                                      │
-│  当前实现: ❌ 未实现                                  │
+│  当前实现: OMS-lite + PaperBroker + event-ledger 已实现 │
+│            Shadow reconcile/report ingest 已实现      │
+│            Shared shadow session owner 已实现          │
+│            resident owner boundary 已抽出              │
+│            小额白名单 real submit 已实现              │
+│            submit-time ack/link 持久化 已实现         │
+│            stale projection fallback guard 已实现     │
+│            callback-push projection refresh 已实现    │
+│            deployment-level dual owner 已实现        │
+│            host-pinned always-on real-QMT owner 已实现   │
+│            process-owned warmup/introspection 已实现  │
+│            execution-broker cancel route 已实现       │
+│            real callback execution consumption 已实现 │
+│            callback receipt-time event persistence 已实现 │
+│            success-ack cancel-pending closure 已实现  │
+│            callback cursor terminal confirm 已实现    │
+│            real/shadow fast-path canonical link 已实现 │
+│            剩余缺口是 full callback order-state closure │
+│            + full reconcile closure + 主机外编排增强    │
 │  (Matcher 是回测撮合模拟，不是 OMS)                   │
 └─────────────────────────────────────────────────────┘
 ```
@@ -386,7 +451,9 @@ API: `POST /experiments/submit`, `GET /experiments/{id}`, `GET /experiments`。
 │  通知: 微信/钉钉/Discord（中国团队优先微信）          │
 │  审计: 每笔决策日志, 每次 run 可复现                  │
 │                                                      │
-│  当前实现: ❌ 未实现                                  │
+│  当前实现: 单进程 scheduler + monitor + SSE + webhook │
+│            broker drift / runtime disconnect 告警已接入 │
+│            正式运维层 (SLO/降级/审计归档) 尚未实现    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -624,6 +691,15 @@ Live 面:     ████░░░░░░ ~40% (Paper Trading可用, 真实Br
 | Research / Gate / API / 编排 | Python | Agent 友好，开发效率高 |
 | 数值热路径 (ts_ops) | C++ (nanobind) | 已证实 4-8x 加速 |
 | Live 核心 (OMS/风控/执行) | **Python（V3.0 起步）** | 先跑通逻辑，验证正确性 |
+
+### 为什么在接 QMT 之后仍然保留自研引擎
+
+- `QMT` 是券商接入层，负责下单、查询、回报和账户连接，不替代研究链路、风控、OMS、ledger 和部署审计。
+- 自研引擎的速度优势主要在研究和组合构造阶段，而不是“比券商 SDK 更快地下单”：
+  - `ts_ops` C++ 热路径已经证明有 4-8x 加速，适合批量因子/回测/搜索。
+  - 研究控制面可以做批量候选筛选、Walk-Forward、显著性检验、约束优化 allocator，这些不是券商终端的职责。
+  - Live 面的价值是统一语义：`strategy -> allocator -> risk -> OMS -> broker -> ledger`，使 paper / shadow / real broker 共用同一套审计与恢复路径。
+- 正确的分层关系应该是：自研引擎做“决策、风控、审计、恢复”，`QMT` 做“真实 A 股 broker adapter”。
 
 ### Rust 引入触发条件（硬门槛，未达到前不引入）
 
