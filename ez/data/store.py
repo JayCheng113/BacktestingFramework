@@ -48,10 +48,9 @@ class DuckDBStore(DataStore):
     PERIODS = ("daily", "weekly", "monthly")
     _PARQUET_GRACE_DAYS = 7  # C4: date-range grace for weekends/holidays
 
-    def __init__(self, db_path: str = "data/ez_trading.db"):
+    def __init__(self, db_path: str = "data/ez_trading.db", read_only: bool = False):
         import os
         import sys as _sys
-        # EZ_DATA_DIR overrides default data location (used in packaged builds)
         data_dir = os.environ.get("EZ_DATA_DIR")
         if data_dir:
             p = Path(data_dir) / "ez_trading.db"
@@ -60,9 +59,12 @@ class DuckDBStore(DataStore):
             if not p.is_absolute():
                 project_root = Path(__file__).resolve().parent.parent.parent
                 p = project_root / p
-        p.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = duckdb.connect(str(p))
-        self._init_tables()
+        if not read_only:
+            p.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = duckdb.connect(str(p), read_only=read_only)
+        self._read_only = read_only
+        if not read_only:
+            self._init_tables()
 
         # Parquet cache directory resolution:
         # 1. EZ_DATA_DIR/cache  (env override)
@@ -111,8 +113,11 @@ class DuckDBStore(DataStore):
 
     # ── Parquet cache helpers ─────────────────────────────────────────
 
-    def _load_manifest(self) -> dict | None:
+    def _load_manifest(self, *, force: bool = False) -> dict | None:
         """Load and cache manifest.json from parquet cache directory."""
+        if force:
+            self._manifest = None
+            self._manifest_loaded = False
         if self._manifest_loaded:
             return self._manifest
         self._manifest_loaded = True
@@ -139,7 +144,7 @@ class DuckDBStore(DataStore):
         Returns None if manifest absent or lacks file md5s — caller
         should treat that as "unknown data state".
         """
-        manifest = self._load_manifest()
+        manifest = self._load_manifest(force=True)
         if not manifest:
             return None
         files = manifest.get("files") or {}
@@ -188,7 +193,7 @@ class DuckDBStore(DataStore):
 
         # Date-range guard (V2.17 round 7: strict)
         if end_date is not None:
-            manifest = self._load_manifest()
+            manifest = self._load_manifest(force=True)
             if manifest:
                 try:
                     manifest_end = date.fromisoformat(manifest["date_range"]["end"])
@@ -227,6 +232,60 @@ class DuckDBStore(DataStore):
              datetime.combine(end_date, datetime.max.time())],
         ).fetchall()
         return _rows_to_bars(rows)
+
+    def query_kline_df(
+        self, symbol: str, market: str, period: str,
+        start_date: date, end_date: date,
+    ) -> pd.DataFrame:
+        """Zero-copy DataFrame path: DuckDB fetchdf(), no Bar object overhead."""
+        start_ts = datetime.combine(start_date, datetime.min.time())
+        end_ts = datetime.combine(end_date, datetime.max.time())
+        parquet_path = self._find_parquet_cache(market, period, end_date)
+        if parquet_path:
+            df = self._conn.execute(
+                "SELECT time, symbol, market, open, high, low, close, adj_close, volume "
+                "FROM read_parquet(?) "
+                "WHERE symbol = ? AND time >= ? AND time <= ? ORDER BY time",
+                [parquet_path, symbol, start_ts, end_ts],
+            ).fetchdf()
+            if not df.empty:
+                return df
+        table = _safe_table(period)
+        return self._conn.execute(
+            f"SELECT time, symbol, market, open, high, low, close, adj_close, volume "
+            f"FROM {table} WHERE symbol=? AND market=? AND time>=? AND time<=? ORDER BY time",
+            [symbol, market, start_ts, end_ts],
+        ).fetchdf()
+
+    def query_kline_batch_df(
+        self, symbols: list[str], market: str, period: str,
+        start_date: date, end_date: date,
+    ) -> dict[str, pd.DataFrame]:
+        """Batch zero-copy: one SQL → split by symbol."""
+        if not symbols:
+            return {}
+        start_ts = datetime.combine(start_date, datetime.min.time())
+        end_ts = datetime.combine(end_date, datetime.max.time())
+        parquet_path = self._find_parquet_cache(market, period, end_date)
+        placeholders = ",".join(["?"] * len(symbols))
+        if parquet_path:
+            df = self._conn.execute(
+                f"SELECT time, symbol, market, open, high, low, close, adj_close, volume "
+                f"FROM read_parquet(?) WHERE symbol IN ({placeholders}) "
+                f"AND time >= ? AND time <= ? ORDER BY symbol, time",
+                [parquet_path, *symbols, start_ts, end_ts],
+            ).fetchdf()
+        else:
+            table = _safe_table(period)
+            df = self._conn.execute(
+                f"SELECT time, symbol, market, open, high, low, close, adj_close, volume "
+                f"FROM {table} WHERE symbol IN ({placeholders}) AND market=? "
+                f"AND time >= ? AND time <= ? ORDER BY symbol, time",
+                [*symbols, market, start_ts, end_ts],
+            ).fetchdf()
+        if df.empty:
+            return {s: pd.DataFrame() for s in symbols}
+        return {sym: grp.reset_index(drop=True) for sym, grp in df.groupby("symbol")}
 
     def query_kline_batch(
         self, symbols: list[str], market: str, period: str,
@@ -291,7 +350,10 @@ class DuckDBStore(DataStore):
             f"""INSERT INTO {table}
                 (time, symbol, market, open, high, low, close, adj_close, volume)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO NOTHING""",
+                ON CONFLICT (time, symbol, market) DO UPDATE SET
+                    open = EXCLUDED.open, high = EXCLUDED.high,
+                    low = EXCLUDED.low, close = EXCLUDED.close,
+                    adj_close = EXCLUDED.adj_close, volume = EXCLUDED.volume""",
             params,
         )
         count_after = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

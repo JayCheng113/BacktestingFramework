@@ -41,8 +41,8 @@ class DataValidator:
 
     @staticmethod
     def _check_bar(bar: Bar) -> list[str]:
+        import math
         errors = []
-        # Reject negative prices (corrupt data from API errors)
         for field in ("open", "high", "low", "close"):
             val = getattr(bar, field)
             if val < 0:
@@ -55,4 +55,10 @@ class DataValidator:
             errors.append(f"OHLC consistency: high ({bar.high}) < open/close for {bar.symbol} at {bar.time}")
         if bar.volume < 0:
             errors.append(f"Negative volume ({bar.volume}) for {bar.symbol} at {bar.time}")
+        adj = getattr(bar, "adj_close", None)
+        if adj is not None:
+            if not math.isfinite(adj):
+                errors.append(f"Non-finite adj_close ({adj}) for {bar.symbol} at {bar.time}")
+            elif adj <= 0:
+                errors.append(f"Non-positive adj_close ({adj}) for {bar.symbol} at {bar.time}")
         return errors

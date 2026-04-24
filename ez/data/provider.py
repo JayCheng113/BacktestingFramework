@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from datetime import date
+from datetime import date, timedelta
 
 from datetime import datetime as _dt
 
@@ -88,12 +88,12 @@ class DataProviderChain:
     # infinite refetch loop on every subsequent call for the same symbol.
     # Key: (symbol, market, period) — range-independent so a 1-month query
     # and 6-month query share the same "known sparse" flag.
-    _known_sparse_symbols: dict[tuple[str, str, str], float] = {}
     _SPARSE_TTL_SECONDS: float = 86400.0
 
     def __init__(self, providers: list[DataProvider], store: DataStore):
         self._providers = providers
         self._store = store
+        self._known_sparse_symbols: dict[tuple[str, str, str], float] = {}
 
     @staticmethod
     def _is_cache_complete(
@@ -126,9 +126,22 @@ class DataProviderChain:
             return False, f"start gap: have {cs}, need {start_date}"
         if (end_date - ce).days > 3:
             return False, f"end gap: have {ce}, need {end_date}"
+        def _has_weekday_gap(have: date, need: date) -> bool:
+            if have >= need:
+                return False
+            cursor = have + timedelta(days=1)
+            while cursor <= need:
+                if cursor.weekday() < 5:
+                    return True
+                cursor += timedelta(days=1)
+            return False
         # Density check — only for ranges long enough to be reliable
         req_days = (end_date - start_date).days
         if req_days <= 14:
+            if _has_weekday_gap(ce, end_date):
+                return False, f"short-range trailing gap: have {ce}, need {end_date}"
+            if _has_weekday_gap(start_date, cs):
+                return False, f"short-range leading gap: have {cs}, need {start_date}"
             return True, "boundary ok (short range, skip density check)"
         if skip_density:
             return True, "boundary ok (known-sparse symbol, skip density check)"
