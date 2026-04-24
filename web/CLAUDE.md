@@ -68,6 +68,16 @@ Dark (#0d1117). Chinese convention: red = up, green = down.
 - **StrategyEnsemble UI**: 新 `EnsembleBuilder.tsx` 组件 — 4 mode radio (等权/手动/收益加权/反向波动率) + 子策略卡片 (参数编辑+同名序号) + 手动权重输入 + 高级设置折叠. PortfolioRunContent 检测 `selected === 'StrategyEnsemble'` 切换渲染. 后端 `_create_strategy` 新增 Ensemble 分支 (列表格式 sub_strategies 避免同名 key 冲突).
 - **LightGBM/XGBoost 白名单**: `_build_supported_estimator_set` 可选加载 `LGBMRegressor` + `XGBRegressor` (仅 regressor, classifier 待定义分类契约), GPU 拦截 (tree_method/device/device_type), `pyproject.toml` 新增 `[ml-extra]` group.
 
+## V3.3.25 — Live Broker Operations Frontend
+- **PaperTradingPage**: 从 V2.15 的 paper dashboard 升级为 V3 live/broker 页面：接入 `broker-state`、`broker-orders`、`qmt_readiness`、`qmt_submit_gate`、`qmt_release_gate`、recent runtime events、显式 broker-sync 和最小撤单入口
+- **API client**: `web/src/api/live.ts` 现在覆盖 broker-facing typed endpoints：`/broker-state`、`/broker-orders`、`/broker-sync`、`/broker-submit-gate`、`/release-gate`、`/cancel`
+- **前端语义修正**: `qmt_submit_gate` / `qmt_release_gate` 显式展示 `source=preview|runtime`，避免把审批预览误读成运行态真相
+
+## V3.3.26 — Release Workflow Frontend
+- **左侧部署列表**: 新增 `全部 / QMT 候选 / QMT 受阻` 过滤器，部署卡片直接显示 `qmt_release_gate_status` 和 blocker 数
+- **详情页主视图**: 新增 `QMT Release Workflow` 面板，把 `readiness -> submit gate -> release gate` 和 release context 显式做成运营视图
+- **DocsPage live API**: Live 章节升级到 `V3.3.26 Live / Broker API`，补齐 `broker-state`、`broker-orders`、`broker-sync`、`cancel`、`broker-submit-gate`、`release-gate`
+
 ## V2.15 — 模拟盘 (Paper Trading)
 - **PaperTradingPage**: 独立页面 (pages/PaperTradingPage.tsx) — 部署列表+状态徽章+权益曲线 ECharts+指标面板+交易记录表+控制按钮(审批/启动/暂停/恢复/停止)+手动 tick 触发+预警面板
 - **Navbar 新 tab**: `{ id: 'paper-trading', label: '模拟盘' }`, 位于组合回测之后
@@ -114,8 +124,8 @@ API proxied to http://localhost:8000
 | components/ResearchPanel.tsx | Research: goal form + SSE progress + report + promote (V2.8) |
 | components/DateRangePicker.tsx | Shared date range picker with preset buttons (V2.10) |
 | components/PortfolioPanel.tsx | 组合回测: 3-tab+中性化+多因子合成+参数搜索 (V2.9+V2.10+V2.11.1) |
-| pages/DocsPage.tsx | 开发文档: 15章 (V2.15: +Ch15 模拟盘) |
-| pages/PaperTradingPage.tsx | 模拟盘: 部署列表+权益曲线+控制面板 (V2.15) |
-| api/live.ts | 模拟盘 API client: 13 typed functions (V2.15) |
+| pages/DocsPage.tsx | 开发文档: 15章；live 章节已升级到 V3.3.26 broker API |
+| pages/PaperTradingPage.tsx | V3 live/broker 页面: 部署列表过滤+Release Workflow+Gate/Runtime/Broker Orders+控制面板 |
+| api/live.ts | live + broker API client: deployment/broker-state/broker-orders/broker-sync/cancel typed functions |
 | components/shared/portfolioLabels.ts | 共享 CATEGORY_LABELS + FACTOR_LABELS (V2.13.2, 消除 3 处重复) |
 | components/EnsembleBuilder.tsx | 策略组合构建器: mode/sub-strategies/weights/advanced (V2.14) |

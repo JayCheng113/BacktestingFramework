@@ -1663,11 +1663,11 @@ FMP_API_KEY=your_key_here`}</pre>
           ))}
 
           {/* Live / Paper Trading */}
-          <div style={h2s}>模拟盘 API (V2.15)</div>
+          <div style={h2s}>Live / Broker API (V3.3.39)</div>
           {[
             { method: 'POST', path: '/api/live/deploy', desc: '从组合回测创建部署', body: '{ source_run_id: string, name: string }', resp: '{ deployment_id, spec_id }' },
             { method: 'GET', path: '/api/live/deployments', desc: '部署列表 (可按状态筛选)', body: '?status=running', resp: '[{ deployment_id, name, status, ... }]' },
-            { method: 'GET', path: '/api/live/deployments/{id}', desc: '部署详情 + 最新快照', body: '(无)', resp: '{ deployment_id, status, spec, latest_snapshot }' },
+            { method: 'GET', path: '/api/live/deployments/{id}', desc: '部署详情 + 最新快照 + release gate 预览', body: '(无)', resp: '{ deployment_id, status, spec, latest_snapshot, qmt_release_gate? }' },
             { method: 'POST', path: '/api/live/deployments/{id}/approve', desc: '运行部署门控审批', body: '(无)', resp: '{ deployment_id, status, verdict }' },
             { method: 'POST', path: '/api/live/deployments/{id}/start', desc: '启动模拟交易', body: '(无)', resp: '{ deployment_id, status: "running" }' },
             { method: 'POST', path: '/api/live/deployments/{id}/stop', desc: '停止部署 (可选清仓)', body: '{ reason: string } ?liquidate=true', resp: '{ deployment_id, status: "stopped", liquidated }' },
@@ -1677,6 +1677,12 @@ FMP_API_KEY=your_key_here`}</pre>
             { method: 'GET', path: '/api/live/dashboard', desc: '监控仪表盘', body: '(无)', resp: '{ deployments: [DeploymentHealth], alerts: [...] }' },
             { method: 'GET', path: '/api/live/deployments/{id}/snapshots', desc: '历史每日快照', body: '(无)', resp: '[{ snapshot_date, equity, cash, holdings, weights, trades }]' },
             { method: 'GET', path: '/api/live/deployments/{id}/trades', desc: '部署交易记录', body: '(无)', resp: '[{ symbol, side, shares, price, cost, snapshot_date }]' },
+            { method: 'GET', path: '/api/live/deployments/{id}/broker-state', desc: 'Broker 运行态 / reconcile / runtime / gate 聚合视图', body: '?runtime_limit=10', resp: '{ target_account_id, qmt_readiness, qmt_submit_gate, qmt_release_gate, recent_runtime_events, latest_reconcile, latest_order_reconcile, ... }' },
+            { method: 'GET', path: '/api/live/deployments/{id}/broker-orders', desc: 'Broker 订单映射表（submit-ack / callback / reconcile 持久化视图）', body: '(无)', resp: '[{ client_order_id, broker_order_id, latest_status, ... }]' },
+            { method: 'POST', path: '/api/live/deployments/{id}/broker-sync', desc: '显式同步 broker shadow 状态', body: '(无)', resp: '{ status, broker_type, qmt_readiness?, qmt_submit_gate?, qmt_release_gate? }' },
+            { method: 'POST', path: '/api/live/deployments/{id}/cancel', desc: '最小 broker 撤单入口', body: '{ broker_order_id? | client_order_id? }', resp: '{ status: "cancel_requested", ... }' },
+            { method: 'GET', path: '/api/live/deployments/{id}/broker-submit-gate', desc: 'QMT submit gate', body: '(无)', resp: '{ qmt_submit_gate, target_account_id, projection_source, projection_ts }' },
+            { method: 'GET', path: '/api/live/deployments/{id}/release-gate', desc: 'QMT release gate', body: '(无)', resp: '{ deployment_status, qmt_release_gate, target_account_id, projection_source, projection_ts }' },
             { method: 'GET', path: '/api/live/deployments/{id}/stream', desc: '实时 SSE 事件流', body: '(无)', resp: 'SSE: event:snapshot|done + keepalive' },
           ].map(a => (
             <div key={a.path + a.method} style={{ marginBottom: '10px', padding: '8px 12px', borderRadius: '6px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>

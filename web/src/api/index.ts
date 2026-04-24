@@ -10,18 +10,18 @@ export const fetchKline = (params: {
 export const searchSymbols = (keyword: string, market: string = '') =>
   api.get('/market-data/symbols', { params: { keyword, market } })
 
-export const runBacktest = (data: any) => api.post('/backtest/run', data)
+export const runBacktest = (data: Record<string, unknown>) => api.post('/backtest/run', data)
 
-export const runWalkForward = (data: any) => api.post('/backtest/walk-forward', data)
+export const runWalkForward = (data: Record<string, unknown>) => api.post('/backtest/walk-forward', data)
 
 export const listStrategies = () => api.get('/backtest/strategies')
 
 export const listFactors = () => api.get('/factors')
 
-export const evaluateFactor = (data: any) => api.post('/factors/evaluate', data)
+export const evaluateFactor = (data: Record<string, unknown>) => api.post('/factors/evaluate', data)
 
 // Experiments
-export const submitExperiment = (data: any) => api.post('/experiments', data)
+export const submitExperiment = (data: Record<string, unknown>) => api.post('/experiments', data)
 
 export const listExperiments = (limit = 50, offset = 0) =>
   api.get('/experiments', { params: { limit, offset } })
@@ -34,7 +34,7 @@ export const cleanupExperiments = (keepLast = 200) =>
   api.post('/experiments/cleanup', null, { params: { keep_last: keepLast } })
 
 // Candidate search
-export const searchCandidates = (data: any) => api.post('/candidates/search', data)
+export const searchCandidates = (data: Record<string, unknown>) => api.post('/candidates/search', data)
 
 // Code editor (V2.7)
 export const generateTemplate = (data: { kind: string; class_name?: string; description?: string }) =>
@@ -61,19 +61,19 @@ export const chatStatus = () => api.get('/chat/status')
 
 // Portfolio (V2.9)
 export const listPortfolioStrategies = () => api.get('/portfolio/strategies')
-export const runPortfolioBacktest = (data: any) => api.post('/portfolio/run', data)
+export const runPortfolioBacktest = (data: Record<string, unknown>) => api.post('/portfolio/run', data)
 export const listPortfolioRuns = (limit = 50, offset = 0) =>
   api.get('/portfolio/runs', { params: { limit, offset } })
 export const getPortfolioRun = (runId: string) => api.get(`/portfolio/runs/${runId}`)
 export const deletePortfolioRun = (runId: string) => api.delete(`/portfolio/runs/${runId}`)
-export const portfolioWalkForward = (data: any) => api.post('/portfolio/walk-forward', data)
+export const portfolioWalkForward = (data: Record<string, unknown>) => api.post('/portfolio/walk-forward', data)
 
 // Factor evaluation (V2.10)
-export const evaluateFactors = (data: any) => api.post('/portfolio/evaluate-factors', data)
-export const factorCorrelation = (data: any) => api.post('/portfolio/factor-correlation', data)
+export const evaluateFactors = (data: Record<string, unknown>) => api.post('/portfolio/evaluate-factors', data)
+export const factorCorrelation = (data: Record<string, unknown>) => api.post('/portfolio/factor-correlation', data)
 
 // Portfolio parameter search (V2.11.1)
-export const portfolioSearch = (data: any) => api.post('/portfolio/search', data)
+export const portfolioSearch = (data: Record<string, unknown>) => api.post('/portfolio/search', data)
 
 // Portfolio run weights history (V2.12.1)
 export const getPortfolioRunWeights = (runId: string) => api.get(`/portfolio/runs/${runId}/weights`)
@@ -86,8 +86,8 @@ export const getPortfolioRunHoldings = (runId: string) => api.get(`/portfolio/ru
 export const getPortfolioRunTrades = (runId: string) => api.get(`/portfolio/runs/${runId}/trades`)
 
 // Fundamental data (V2.11)
-export const fetchFundamentalData = (data: any) => api.post('/fundamental/fetch', data)
-export const fundamentalDataQuality = (data: any) => api.post('/fundamental/quality', data)
+export const fetchFundamentalData = (data: Record<string, unknown>) => api.post('/fundamental/fetch', data)
+export const fundamentalDataQuality = (data: Record<string, unknown>) => api.post('/fundamental/quality', data)
 export const listFundamentalFactors = () => api.get('/fundamental/factors')
 
 // ML Alpha Diagnostics (V2.13.2)

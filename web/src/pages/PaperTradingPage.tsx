@@ -1,6 +1,9 @@
 /**
- * V2.15 C2: Paper Trading Dashboard — deployment list, equity curve,
- * metrics, trades, and control panel.
+ * V3.3.26: Release workflow frontend.
+ *
+ * This page now surfaces QMT shadow broker readiness, submit/release gates,
+ * release candidate blockers, runtime state, and broker-order links instead
+ * of staying at the old V2.15 paper-only dashboard layer.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useToast } from '../components/shared/Toast'
@@ -9,10 +12,30 @@ import { CHART } from '../components/shared/chartTheme'
 import {
   listDeployments, getDeployment, getDashboard, getSnapshots, getTrades,
   approveDeployment, startDeployment, stopDeployment, pauseDeployment,
-  resumeDeployment, triggerTick,
+  resumeDeployment, triggerTick, getBrokerOrders, getBrokerState,
+  syncBrokerState, cancelBrokerOrder,
   type DeploymentSummary, type DeploymentDetail, type DeploymentHealth,
-  type DashboardAlert, type SnapshotRecord, type TradeEntry,
+  type DashboardAlert, type SnapshotRecord, type TradeEntry, type BrokerStateResponse,
+  type BrokerOrderLink, type BrokerReconcileSummary, type QMTReadiness, type QMTHardGate, type QMTSubmitGate,
+  type PreviewQMTReleaseGate, type RuntimeQMTReleaseGate,
 } from '../api/live'
+
+// V3.3.27 Fix-A Issue #5: structured per-panel sync error map so a single
+// failing sub-request surfaces a visible retry bar next to the affected
+// panel instead of silently showing empty state.
+type SyncErrors = Record<string, string>
+
+function extractErrorMessage(e: unknown): string {
+  if (e instanceof Error && e.message) return e.message
+  if (typeof e === 'object' && e !== null) {
+    const err = e as { response?: { data?: { detail?: unknown } }; message?: string }
+    const detailMsg = extractActionErrorMessage(err?.response?.data?.detail)
+    if (detailMsg) return detailMsg
+    if (err?.message) return err.message
+  }
+  if (typeof e === 'string' && e) return e
+  return '未知错误'
+}
 
 const inputStyle = { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -39,10 +62,158 @@ const fmt = (v: number | null | undefined, pct = false, digits = 2) => {
   return pct ? `${(v * 100).toFixed(digits)}%` : v.toFixed(digits)
 }
 
+const gateTone = (status?: string | null) => {
+  switch (status) {
+    case 'open':
+    case 'candidate':
+    case 'ready':
+    case 'ok':
+    case 'fresh':
+    case 'callback_preferred':
+      return '#22c55e'
+    case 'blocked':
+    case 'shadow_only':
+    case 'degraded':
+    case 'drift':
+    case 'query_fallback':
+    case 'stale':
+      return '#f59e0b'
+    case 'error':
+    case 'failed':
+    case 'disconnected':
+    case 'unavailable':
+      return '#ef4444'
+    default:
+      return 'var(--text-secondary)'
+  }
+}
+
+const fmtGateLabel = (value?: string | null) => value ? value.replaceAll('_', ' ') : '-'
+
+const TERMINAL_BROKER_ORDER_STATUSES = new Set([
+  'cancel_requested',
+  'filled',
+  'canceled',
+  'partially_canceled',
+  'rejected',
+  'junk',
+  'order_error',
+  'cancel_error',
+])
+
+type ReleaseSummary = {
+  status: string | null
+  candidate: boolean
+  blockers: string[]
+  source: 'runtime' | 'preview' | null
+}
+
+function extractActionErrorMessage(detail: unknown): string | null {
+  if (typeof detail === 'string') {
+    const text = detail.trim()
+    return text || null
+  }
+  if (Array.isArray(detail)) {
+    for (const item of detail) {
+      const nested = extractActionErrorMessage(item)
+      if (nested) return nested
+    }
+    return null
+  }
+  if (detail && typeof detail === 'object') {
+    const record = detail as Record<string, unknown>
+    for (const key of ['message', 'summary', 'error', 'reason']) {
+      const nested = extractActionErrorMessage(record[key])
+      if (nested) return nested
+    }
+    const verdict = extractActionErrorMessage(record.verdict)
+    if (verdict) return verdict
+    const nestedDetail = extractActionErrorMessage(record.detail)
+    if (nestedDetail) return nestedDetail
+  }
+  return null
+}
+
+function resolveReleaseSummary(
+  deployment: DeploymentSummary,
+  health?: DeploymentHealth | null,
+): ReleaseSummary {
+  const runtimeBlockers = health?.qmt_release_blockers || []
+  const runtimeStatus = health?.qmt_release_gate_status || (runtimeBlockers.length > 0 ? 'blocked' : null)
+  const runtimeCandidate = Boolean(health?.qmt_release_candidate)
+  // V3.3.27 Fix-A Issue #6: runtime truth requires both
+  //   (a) a runtime signal (projection/blockers/candidate/status), AND
+  //   (b) the deployment is actually `running`.
+  // Outside of `running`, the source is at best preview — prior code
+  // accepted any runtime signal as runtime truth, which could surface a
+  // stale projection from a paused/stopped deployment as if it were
+  // currently authoritative.
+  const hasRuntimeSignal = Boolean(
+    health?.qmt_projection_source === 'runtime'
+    || runtimeStatus
+    || runtimeCandidate
+    || runtimeBlockers.length > 0,
+  )
+  const isRunning = deployment.status === 'running'
+  if (hasRuntimeSignal && isRunning) {
+    return {
+      status: runtimeStatus,
+      candidate: runtimeCandidate,
+      blockers: runtimeBlockers,
+      source: 'runtime',
+    }
+  }
+
+  const previewGate = deployment.qmt_release_gate
+  if (!previewGate) {
+    return {
+      status: null,
+      candidate: false,
+      blockers: [],
+      source: null,
+    }
+  }
+  return {
+    status: previewGate.status || (previewGate.blockers?.length ? 'blocked' : null),
+    candidate: Boolean(previewGate.eligible_for_release_candidate),
+    blockers: previewGate.blockers || [],
+    // V3.3.27 Fix-A Issue #6: if the deployment is not running, we force
+    // display as preview even if the API returned source=runtime. The API
+    // truth can still claim runtime, but for display purposes we degrade
+    // to preview to avoid misleading the operator.
+    source: isRunning ? (previewGate.source || 'preview') : 'preview',
+  }
+}
+
+function formatTimestamp(value?: string | null): string | null {
+  if (!value) return null
+  return value.slice(0, 19).replace('T', ' ')
+}
+
+function appendSummaryItem(items: string[], label: string, value?: string | null) {
+  if (!value) return
+  items.push(`${label}:${value}`)
+}
+
+function summarizeRiskSummary(
+  summary: BrokerReconcileSummary | QMTHardGate | null | undefined,
+  fallbackAccountId?: string | null,
+): string[] {
+  if (!summary) return []
+  const items: string[] = []
+  appendSummaryItem(items, 'event', summary.event)
+  appendSummaryItem(items, 'status', summary.status)
+  appendSummaryItem(items, 'account', summary.account_id || fallbackAccountId || null)
+  appendSummaryItem(items, 'at', formatTimestamp(summary.compared_at || summary.date || null))
+  appendSummaryItem(items, 'message', summary.message || null)
+  return items
+}
+
 export default function PaperTradingPage() {
   const { showToast } = useToast()
   // ----- State -----
   const [deployments, setDeployments] = useState<DeploymentSummary[]>([])
+  const [deploymentFilter, setDeploymentFilter] = useState<'all' | 'qmt_candidate' | 'qmt_blocked'>('all')
   const [listLoading, setListLoading] = useState(true)  // show spinner on first load
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<DeploymentDetail | null>(null)
@@ -50,18 +221,27 @@ export default function PaperTradingPage() {
   const [alerts, setAlerts] = useState<DashboardAlert[]>([])
   const [snapshots, setSnapshots] = useState<SnapshotRecord[]>([])
   const [trades, setTrades] = useState<TradeEntry[]>([])
+  const [brokerState, setBrokerState] = useState<BrokerStateResponse | null>(null)
+  const [brokerOrders, setBrokerOrders] = useState<BrokerOrderLink[]>([])
+  const [brokerOrdersAccountId, setBrokerOrdersAccountId] = useState<string | null>(null)
+  // V3.3.27 Fix-A Issue #5: per-panel sync errors so broker-state /
+  // broker-orders failures surface as a small red retry bar rather than
+  // leaving the UI at "no data".
+  const [syncErrors, setSyncErrors] = useState<SyncErrors>({})
   const [loading, setLoading] = useState(false)
   const [tickDate, setTickDate] = useState('')
   const [tickLoading, setTickLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
+  const [brokerSyncLoading, setBrokerSyncLoading] = useState(false)
 
   // Race token refs
   const listTokenRef = useRef(0)
   const detailTokenRef = useRef(0)
 
   // ----- Fetch deployment list + dashboard -----
-  const refreshList = useCallback(async () => {
+  const refreshList = useCallback(async (options?: { surfaceErrors?: boolean }) => {
     const token = ++listTokenRef.current
+    let failure: unknown = null
     try {
       const [listRes, dashRes] = await Promise.all([
         listDeployments(),
@@ -75,11 +255,13 @@ export default function PaperTradingPage() {
       }
       setHealthMap(map)
       setAlerts(dashRes.data.alerts)
-    } catch {
+    } catch (e) {
+      failure = e
       // silent — dashboard auto-refreshes
     } finally {
-      setListLoading(false)
+      if (listTokenRef.current === token) setListLoading(false)
     }
+    if (failure && options?.surfaceErrors) throw failure
   }, [])
 
   useEffect(() => {
@@ -89,24 +271,74 @@ export default function PaperTradingPage() {
   }, [refreshList])
 
   // ----- Fetch detail when selected -----
-  const refreshDetail = useCallback(async (id: string) => {
+  const refreshDetail = useCallback(async (id: string, options?: { surfaceErrors?: boolean }) => {
     const token = ++detailTokenRef.current
     setLoading(true)
+    let failure: unknown = null
     try {
-      const [detailRes, snapRes, tradeRes] = await Promise.all([
+      const results = await Promise.allSettled([
         getDeployment(id),
         getSnapshots(id),
         getTrades(id),
+        getBrokerState(id),
+        getBrokerOrders(id),
       ])
       if (detailTokenRef.current !== token) return
-      setDetail(detailRes.data)
-      setSnapshots(snapRes.data)
-      setTrades(tradeRes.data)
-    } catch {
-      // will show empty state
+      const [detailRes, snapRes, tradeRes, brokerStateRes, brokerOrdersRes] = results
+      // V3.3.27 Fix-A Issue #5: record per-panel success/failure so the
+      // UI can render a visible retry bar for the failing sub-request
+      // while continuing to render the rest of the detail (Promise.allSettled
+      // semantics preserved).
+      const nextSyncErrors: SyncErrors = {}
+      setDetail(detailRes.status === 'fulfilled' ? detailRes.value.data : null)
+      if (detailRes.status === 'rejected') {
+        nextSyncErrors.detail = extractErrorMessage(detailRes.reason)
+      }
+      setSnapshots(snapRes.status === 'fulfilled' ? snapRes.value.data : [])
+      if (snapRes.status === 'rejected') {
+        nextSyncErrors.snapshots = extractErrorMessage(snapRes.reason)
+      }
+      setTrades(tradeRes.status === 'fulfilled' ? tradeRes.value.data : [])
+      if (tradeRes.status === 'rejected') {
+        nextSyncErrors.trades = extractErrorMessage(tradeRes.reason)
+      }
+      setBrokerState(brokerStateRes.status === 'fulfilled' ? brokerStateRes.value.data : null)
+      if (brokerStateRes.status === 'rejected') {
+        nextSyncErrors.broker_state = extractErrorMessage(brokerStateRes.reason)
+      }
+      // V3.3.27 Fix-A Issue #2: broker-orders now returns a wrapped object
+      // ({target_account_id, orders}). Unwrap defensively — pre-fix tests
+      // and older callers may still pass an array directly, so accept both.
+      if (brokerOrdersRes.status === 'fulfilled') {
+        const payload = brokerOrdersRes.value.data as
+          | BrokerOrderLink[]
+          | { target_account_id?: string | null; orders?: BrokerOrderLink[] }
+          | null
+        if (Array.isArray(payload)) {
+          setBrokerOrders(payload)
+          setBrokerOrdersAccountId(null)
+        } else if (payload && typeof payload === 'object') {
+          setBrokerOrders(Array.isArray(payload.orders) ? payload.orders : [])
+          setBrokerOrdersAccountId(payload.target_account_id ?? null)
+        } else {
+          setBrokerOrders([])
+          setBrokerOrdersAccountId(null)
+        }
+      } else {
+        setBrokerOrders([])
+        setBrokerOrdersAccountId(null)
+        nextSyncErrors.broker_orders = extractErrorMessage(brokerOrdersRes.reason)
+      }
+      setSyncErrors(nextSyncErrors)
+      if (detailRes.status === 'rejected') {
+        failure = detailRes.reason
+      }
+    } catch (e) {
+      failure = e
     } finally {
       if (detailTokenRef.current === token) setLoading(false)
     }
+    if (failure && options?.surfaceErrors) throw failure
   }, [])
 
   useEffect(() => {
@@ -114,37 +346,27 @@ export default function PaperTradingPage() {
       setDetail(null)
       setSnapshots([])
       setTrades([])
+      setBrokerState(null)
+      setBrokerOrders([])
+      setBrokerOrdersAccountId(null)
+      setSyncErrors({})
       return
     }
     refreshDetail(selectedId)
   }, [selectedId, refreshDetail])
-
-  // Auto-select first if none selected
-  useEffect(() => {
-    if (!selectedId && deployments.length > 0) {
-      setSelectedId(deployments[0].deployment_id)
-    }
-  }, [deployments, selectedId])
 
   // ----- Action handlers -----
   const handleAction = async (action: () => Promise<unknown>) => {
     setActionLoading(true)
     try {
       await action()
+      await refreshList({ surfaceErrors: true })
+      if (selectedId) await refreshDetail(selectedId, { surfaceErrors: true })
       showToast('success', '操作成功')
-      await refreshList()
-      if (selectedId) await refreshDetail(selectedId)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: unknown } }; message?: string }
       const detail = err?.response?.data?.detail
-      // Backend returns object {message, verdict} for gate failures, string for others
-      let msg: string
-      if (typeof detail === 'object' && detail !== null) {
-        const d = detail as { message?: string; verdict?: { summary?: string } }
-        msg = d.message || d.verdict?.summary || '操作失败'
-      } else {
-        msg = (typeof detail === 'string' ? detail : err?.message) || '操作失败'
-      }
+      const msg = extractActionErrorMessage(detail) || err?.message || '操作失败'
       showToast('error', msg)
     } finally {
       setActionLoading(false)
@@ -169,8 +391,115 @@ export default function PaperTradingPage() {
     }
   }
 
+  const handleBrokerSync = async () => {
+    if (!selectedId) return
+    setBrokerSyncLoading(true)
+    try {
+      await syncBrokerState(selectedId)
+      await refreshList({ surfaceErrors: true })
+      await refreshDetail(selectedId, { surfaceErrors: true })
+      showToast('success', 'Broker 状态已同步')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      showToast('error', 'Broker 同步失败: ' + (err?.response?.data?.detail || err?.message || ''))
+    } finally {
+      setBrokerSyncLoading(false)
+    }
+  }
+
+  // V3.3.27 Fix-A Issue #5: simple retry handler — re-runs refreshDetail,
+  // which will re-populate / clear the relevant syncErrors entries.
+  const handleRetrySync = async () => {
+    if (!selectedId) return
+    await refreshDetail(selectedId)
+  }
+
   // ----- Derived data -----
   const health = selectedId ? healthMap[selectedId] : null
+  const qmtReadiness: QMTReadiness | null = brokerState?.qmt_readiness || null
+  const qmtHardGate: QMTHardGate | null = brokerState?.latest_qmt_hard_gate || null
+  const qmtSubmitGate: QMTSubmitGate | null = brokerState?.qmt_submit_gate || null
+  const runtimeReleaseGate: RuntimeQMTReleaseGate | null = brokerState?.qmt_release_gate?.source === 'runtime'
+    ? brokerState.qmt_release_gate
+    : null
+  const previewReleaseGate: PreviewQMTReleaseGate | null = detail?.qmt_release_gate?.source === 'preview'
+    ? detail.qmt_release_gate
+    : null
+  const recentRuntimeEvents = brokerState?.recent_runtime_events || []
+  const runtimeProjectionSource = brokerState?.projection_source || health?.qmt_projection_source || null
+  const runtimeProjectionTs = brokerState?.projection_ts || health?.qmt_projection_ts || null
+  // V3.3.27 Fix-A Issue #2: prefer broker-state's explicit target_account_id,
+  // then broker-orders' explicit target_account_id (now a first-class
+  // field), then fall back to the older triangulation paths.
+  const targetAccountId = brokerState?.target_account_id
+    || brokerOrdersAccountId
+    || qmtSubmitGate?.account_id
+    || health?.qmt_target_account_id
+    || null
+  const accountReconcile = brokerState?.latest_reconcile || null
+  const orderReconcile = brokerState?.latest_order_reconcile || null
+  const accountReconcileStatus = accountReconcile?.status || health?.broker_reconcile_status || null
+  const accountReconcileSource = accountReconcile ? 'runtime' : (health?.broker_reconcile_status ? 'dashboard' : null)
+  const orderReconcileStatus = orderReconcile?.status || health?.broker_order_reconcile_status || null
+  const orderReconcileSource = orderReconcile ? 'runtime' : (health?.broker_order_reconcile_status ? 'dashboard' : null)
+  const qmtHardGateStatus = (qmtHardGate?.status || health?.qmt_hard_gate_status || null)
+  const qmtHardGateSource = qmtHardGate ? 'runtime' : (health?.qmt_hard_gate_status ? 'dashboard' : null)
+  const projectionContext = [
+    runtimeProjectionSource ? `projection:${runtimeProjectionSource}` : '',
+    runtimeProjectionTs ? `updated:${formatTimestamp(runtimeProjectionTs)}` : '',
+    targetAccountId ? `account:${targetAccountId}` : '',
+  ].filter(Boolean)
+  const accountReconcileContext = summarizeRiskSummary(accountReconcile, targetAccountId)
+  const orderReconcileContext = summarizeRiskSummary(orderReconcile, targetAccountId)
+  const hardGateContext = summarizeRiskSummary(qmtHardGate, targetAccountId)
+  const isQmtRelated = Boolean(
+    detail?.spec?.broker_type === 'qmt'
+    || detail?.spec?.shadow_broker_type === 'qmt'
+    || brokerState?.qmt_readiness
+    || brokerState?.qmt_submit_gate
+    || brokerState?.qmt_release_gate,
+  )
+  const releaseSummaries = deployments.reduce<Record<string, ReleaseSummary>>((acc, deployment) => {
+    acc[deployment.deployment_id] = resolveReleaseSummary(deployment, healthMap[deployment.deployment_id])
+    return acc
+  }, {})
+  const filteredDeployments = deployments.filter((deployment) => {
+    const releaseSummary = releaseSummaries[deployment.deployment_id]
+    if (deploymentFilter === 'qmt_candidate') {
+      return releaseSummary.candidate
+    }
+    if (deploymentFilter === 'qmt_blocked') {
+      return Boolean(
+        releaseSummary.status === 'blocked'
+        || releaseSummary.blockers.length > 0,
+      )
+    }
+    return true
+  })
+  const qmtCandidateCount = deployments.filter((deployment) => releaseSummaries[deployment.deployment_id]?.candidate).length
+  const qmtBlockedCount = deployments.filter((deployment) => {
+    const releaseSummary = releaseSummaries[deployment.deployment_id]
+    return Boolean(
+      releaseSummary?.status === 'blocked'
+      || releaseSummary?.blockers.length,
+    )
+  }).length
+  const runtimeStages = [
+    { label: 'Readiness', value: qmtReadiness?.status, color: gateTone(qmtReadiness?.status), source: qmtReadiness ? 'runtime' : null },
+    { label: 'Submit Gate', value: qmtSubmitGate?.status, color: gateTone(qmtSubmitGate?.status), source: qmtSubmitGate?.source || null },
+    { label: 'Release Gate', value: runtimeReleaseGate?.status, color: gateTone(runtimeReleaseGate?.status), source: runtimeReleaseGate?.source || null },
+  ]
+
+  // Keep the selected deployment aligned with the active list filter.
+  useEffect(() => {
+    if (filteredDeployments.length === 0) {
+      if (deploymentFilter !== 'all') setSelectedId(null)
+      return
+    }
+    if (!selectedId || !filteredDeployments.some((deployment) => deployment.deployment_id === selectedId)) {
+      setSelectedId(filteredDeployments[0].deployment_id)
+    }
+  }, [deploymentFilter, filteredDeployments, selectedId])
 
   // Equity curve from snapshots
   const equityDates = snapshots.map(s => s.snapshot_date)
@@ -194,7 +523,13 @@ export default function PaperTradingPage() {
   const riskEvents: { date: string; event: string }[] = []
   for (const snap of snapshots) {
     for (const evt of (snap.risk_events || [])) {
-      riskEvents.push({ date: snap.snapshot_date, event: evt })
+      if (typeof evt === 'string') {
+        riskEvents.push({ date: snap.snapshot_date, event: evt })
+      } else if (evt && typeof evt === 'object') {
+        const eventName = typeof evt.event === 'string' ? evt.event : 'risk_event'
+        const status = typeof evt.status === 'string' ? ` (${evt.status})` : ''
+        riskEvents.push({ date: snap.snapshot_date, event: `${eventName}${status}` })
+      }
     }
   }
 
@@ -268,6 +603,26 @@ export default function PaperTradingPage() {
             {deployments.length} 个部署
             {alerts.length > 0 && <span style={{ color: '#ef4444' }}> | {alerts.length} 个告警</span>}
           </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            {[
+              { id: 'all' as const, label: `全部 (${deployments.length})` },
+              { id: 'qmt_candidate' as const, label: `QMT 候选 (${qmtCandidateCount})` },
+              { id: 'qmt_blocked' as const, label: `QMT 受阻 (${qmtBlockedCount})` },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setDeploymentFilter(item.id)}
+                className="px-2 py-1 rounded text-[11px]"
+                style={{
+                  border: `1px solid ${deploymentFilter === item.id ? 'var(--color-accent)' : 'var(--border)'}`,
+                  backgroundColor: deploymentFilter === item.id ? 'rgba(37, 99, 235, 0.12)' : 'var(--bg-primary)',
+                  color: deploymentFilter === item.id ? 'var(--color-accent)' : 'var(--text-secondary)',
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
         {listLoading && deployments.length === 0 && (
           <div className="p-4 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -279,10 +634,18 @@ export default function PaperTradingPage() {
             暂无部署。请先在组合回测中运行策略，然后点击 "部署到模拟盘"。
           </div>
         )}
-        {deployments.map(d => {
+        {!listLoading && deployments.length > 0 && filteredDeployments.length === 0 && (
+          <div className="p-4 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
+            当前过滤条件下没有部署。
+          </div>
+        )}
+        {filteredDeployments.map(d => {
           const h = healthMap[d.deployment_id]
           const isSelected = d.deployment_id === selectedId
           const hasAlert = alerts.some(a => a.deployment_id === d.deployment_id)
+          const releaseSummary = releaseSummaries[d.deployment_id]
+          const releaseStatus = releaseSummary?.status
+          const releaseBlockers = releaseSummary?.blockers || []
           return (
             <button
               key={d.deployment_id}
@@ -325,6 +688,28 @@ export default function PaperTradingPage() {
                   <span>今日 {fmt(h.today_pnl)}</span>
                 </div>
               )}
+              {(releaseStatus || releaseBlockers.length > 0) && (
+                <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+                  <span
+                    className="px-1.5 py-0.5 rounded"
+                    style={{
+                      backgroundColor: `${gateTone(releaseStatus || 'blocked')}20`,
+                      color: gateTone(releaseStatus || 'blocked'),
+                      border: `1px solid ${gateTone(releaseStatus || 'blocked')}40`,
+                    }}
+                  >
+                    {fmtGateLabel(releaseStatus || 'blocked')}
+                  </span>
+                  {releaseBlockers.length > 0 && (
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      {releaseBlockers.length} blocker
+                    </span>
+                  )}
+                  {releaseSummary?.source && (
+                    <SourceBadge label={releaseSummary.source} />
+                  )}
+                </div>
+              )}
               {!h && d.created_at && (
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                   {d.created_at.slice(0, 10)}
@@ -359,6 +744,10 @@ export default function PaperTradingPage() {
                   <span>策略: {detail.spec?.strategy_name || '-'}</span>
                   <span>市场: {detail.spec?.market || '-'}</span>
                   <span>标的: {detail.spec?.symbols?.length || 0} 只</span>
+                  <span>Broker: {detail.spec?.broker_type || 'paper'}</span>
+                  {detail.spec?.shadow_broker_type && (
+                    <span>Shadow: {detail.spec.shadow_broker_type}</span>
+                  )}
                   <span>初始资金: {detail.spec?.initial_cash?.toLocaleString() || '-'}</span>
                 </div>
               </div>
@@ -452,6 +841,364 @@ export default function PaperTradingPage() {
                 {alerts.filter(a => a.deployment_id === selectedId).map((a, i) => (
                   <div key={i} className="text-xs" style={{ color: '#ef4444' }}>{a.message}</div>
                 ))}
+              </div>
+            )}
+
+            {/* V3.3.27 Fix-A Issue #5: render sync error bars so transient
+                broker-state / broker-orders failures are visible instead of
+                showing "no data". Placement is before QMT panel so both
+                QMT and non-QMT deployments can surface retry hints. */}
+            {syncErrors.broker_state && (
+              <SyncErrorBar
+                testId="sync-error-broker-state"
+                label="broker-state"
+                message={syncErrors.broker_state}
+                onRetry={handleRetrySync}
+              />
+            )}
+            {syncErrors.broker_orders && (
+              <SyncErrorBar
+                testId="sync-error-broker-orders"
+                label="broker-orders"
+                message={syncErrors.broker_orders}
+                onRetry={handleRetrySync}
+              />
+            )}
+            {syncErrors.snapshots && (
+              <SyncErrorBar
+                testId="sync-error-snapshots"
+                label="snapshots"
+                message={syncErrors.snapshots}
+                onRetry={handleRetrySync}
+              />
+            )}
+            {syncErrors.trades && (
+              <SyncErrorBar
+                testId="sync-error-trades"
+                label="trades"
+                message={syncErrors.trades}
+                onRetry={handleRetrySync}
+              />
+            )}
+
+            {isQmtRelated && (
+              <div data-testid="qmt-runtime-panel" className="rounded p-3 space-y-3" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h4 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Broker 运行态</h4>
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                      QMT runtime / gate / callback / reconcile 视图
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleBrokerSync}
+                    disabled={brokerSyncLoading || !selectedId}
+                    className="px-3 py-1.5 rounded text-xs font-medium text-white"
+                    style={{ backgroundColor: brokerSyncLoading ? '#30363d' : '#2563eb' }}
+                  >
+                    {brokerSyncLoading ? '同步中...' : '同步 Broker'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-4 gap-3">
+                  <MetricCard
+                    testId="runtime-readiness-card"
+                    label="QMT Readiness"
+                    value={fmtGateLabel(qmtReadiness?.status)}
+                    customColor={gateTone(qmtReadiness?.status)}
+                    sourceLabel={qmtReadiness ? 'runtime' : null}
+                  />
+                  <MetricCard
+                    testId="runtime-submit-gate-card"
+                    label="Submit Gate"
+                    value={fmtGateLabel(qmtSubmitGate?.status)}
+                    customColor={gateTone(qmtSubmitGate?.status)}
+                    sourceLabel={qmtSubmitGate?.source || null}
+                  />
+                  <MetricCard
+                    testId="runtime-release-gate-card"
+                    label="Release Gate"
+                    value={fmtGateLabel(runtimeReleaseGate?.status)}
+                    customColor={gateTone(runtimeReleaseGate?.status)}
+                    sourceLabel={runtimeReleaseGate?.source || null}
+                  />
+                  <MetricCard
+                    label="Callback Mode"
+                    value={fmtGateLabel(brokerState?.latest_callback_account_mode)}
+                    customColor={gateTone(brokerState?.latest_callback_account_mode)}
+                    sourceLabel={brokerState ? 'runtime' : null}
+                  />
+                  <MetricCard
+                    label="Asset Freshness"
+                    value={fmtGateLabel(brokerState?.latest_callback_account_freshness)}
+                    customColor={gateTone(brokerState?.latest_callback_account_freshness)}
+                    sourceLabel={brokerState ? 'runtime' : null}
+                  />
+                  <MetricCard
+                    label="Account Reconcile"
+                    value={fmtGateLabel(accountReconcileStatus)}
+                    customColor={gateTone(accountReconcileStatus)}
+                    sourceLabel={accountReconcileSource}
+                  />
+                  <MetricCard
+                    label="Order Reconcile"
+                    value={fmtGateLabel(orderReconcileStatus)}
+                    customColor={gateTone(orderReconcileStatus)}
+                    sourceLabel={orderReconcileSource}
+                  />
+                  <MetricCard
+                    testId="runtime-hard-gate-card"
+                    label="Reconcile Hard Gate"
+                    value={fmtGateLabel(qmtHardGateStatus)}
+                    customColor={gateTone(qmtHardGateStatus)}
+                    sourceLabel={qmtHardGateSource}
+                  />
+                </div>
+
+                <div className="rounded p-3" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-primary)' }}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+                    <div>
+                      <h5 className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>QMT Runtime Workflow</h5>
+                      <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                        这里只展示 runtime truth，不回填审批态 preview gate。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {runtimeStages.map((stage) => (
+                      <div
+                        key={stage.label}
+                        className="rounded p-3"
+                        style={{ border: `1px solid ${stage.color}40`, backgroundColor: `${stage.color}12` }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{stage.label}</div>
+                          {stage.source && <SourceBadge label={stage.source} />}
+                        </div>
+                        <div className="text-sm font-medium mt-1" style={{ color: stage.color }}>{fmtGateLabel(stage.value)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                    <BrokerInfoBlock
+                      title="Runtime Release Candidate"
+                      items={runtimeReleaseGate ? [
+                        runtimeReleaseGate.eligible_for_release_candidate ? 'eligible_for_release_candidate' : 'not_release_candidate',
+                        runtimeReleaseGate.eligible_for_real_submit ? 'eligible_for_real_submit' : 'not_real_submit_ready',
+                      ] : []}
+                      emptyText="暂无 runtime release candidate 状态"
+                      sourceLabel={runtimeReleaseGate?.source || null}
+                    />
+                    <BrokerInfoBlock
+                      title="Runtime Release Context"
+                      items={runtimeReleaseGate ? [
+                        runtimeReleaseGate.deployment_status ? `deployment:${runtimeReleaseGate.deployment_status}` : '',
+                        runtimeReleaseGate.submit_gate_status ? `submit:${runtimeReleaseGate.submit_gate_status}` : '',
+                        runtimeReleaseGate.deploy_gate_passed == null ? '' : (runtimeReleaseGate.deploy_gate_passed ? 'deploy_gate:passed' : 'deploy_gate:blocked'),
+                      ].filter(Boolean) : []}
+                      emptyText="暂无 runtime release context"
+                      sourceLabel={runtimeReleaseGate?.source || null}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-4">
+                  <BrokerInfoBlock
+                    title="Projection Context"
+                    items={projectionContext}
+                    emptyText="暂无 projection context"
+                    sourceLabel={runtimeProjectionSource}
+                  />
+                  <BrokerInfoBlock
+                    title="Account Reconcile Context"
+                    items={accountReconcileContext}
+                    emptyText="暂无 account reconcile context"
+                    sourceLabel={accountReconcileSource}
+                  />
+                  <BrokerInfoBlock
+                    title="Order Reconcile Context"
+                    items={orderReconcileContext}
+                    emptyText="暂无 order reconcile context"
+                    sourceLabel={orderReconcileSource}
+                  />
+                  <BrokerInfoBlock
+                    title="Hard Gate Context"
+                    items={hardGateContext}
+                    emptyText="暂无 hard gate context"
+                    sourceLabel={qmtHardGateSource}
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-4">
+                  <BrokerInfoBlock
+                    title="Readiness Blockers"
+                    items={qmtReadiness?.blockers || []}
+                    emptyText="无 blocker"
+                    sourceLabel={qmtReadiness ? 'runtime' : null}
+                  />
+                  <BrokerInfoBlock
+                    title="Submit Gate Blockers"
+                    items={qmtSubmitGate?.blockers || []}
+                    emptyText="无 blocker"
+                    sourceLabel={qmtSubmitGate?.source || null}
+                  />
+                  <BrokerInfoBlock
+                    title="Release Gate Blockers"
+                    items={runtimeReleaseGate?.blockers || []}
+                    emptyText="无 blocker"
+                    sourceLabel={runtimeReleaseGate?.source || null}
+                  />
+                  <BrokerInfoBlock
+                    title="Hard Gate Blockers"
+                    items={qmtHardGate?.blockers || health?.qmt_hard_gate_blockers || []}
+                    emptyText="无 blocker"
+                    sourceLabel={qmtHardGateSource}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded p-3" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-primary)' }}>
+                    <h5 className="text-xs font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Recent Runtime Events</h5>
+                    {recentRuntimeEvents.length === 0 ? (
+                      <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暂无 runtime 事件</p>
+                    ) : (
+                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                        {recentRuntimeEvents.map((event) => {
+                          const runtimeKind = String(event.payload?.runtime_kind || '-')
+                          const runtimePayload = event.payload?.payload
+                          const status = typeof runtimePayload === 'object' && runtimePayload
+                            ? String((runtimePayload as Record<string, unknown>).status || (runtimePayload as Record<string, unknown>).consumer_status || '')
+                            : ''
+                          return (
+                            <div key={event.event_id} className="text-xs rounded px-2 py-1.5" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span style={{ color: gateTone(status || runtimeKind) }}>{runtimeKind}</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{event.event_ts.slice(0, 19).replace('T', ' ')}</span>
+                              </div>
+                              {status && (
+                                <div style={{ color: 'var(--text-secondary)' }}>status: {status}</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded p-3" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-primary)' }}>
+                    <h5 className="text-xs font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Broker Orders ({brokerOrders.length})</h5>
+                    {brokerOrders.length === 0 ? (
+                      <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>暂无 broker order link</p>
+                    ) : (
+                      <div className="overflow-y-auto max-h-56">
+                        <table className="w-full text-xs" style={{ color: 'var(--text-primary)' }}>
+                          <thead>
+                            <tr style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
+                              <th className="text-left py-1">Symbol</th>
+                              <th className="text-left py-1">Broker ID</th>
+                              <th className="text-left py-1">状态</th>
+                              <th className="text-right py-1">动作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {brokerOrders.map((order) => {
+                              const canCancel = (
+                                detail.status === 'running' || detail.status === 'paused'
+                              ) && order.broker_type === 'qmt'
+                                && !TERMINAL_BROKER_ORDER_STATUSES.has(order.latest_status)
+                              return (
+                                <tr key={order.client_order_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                  <td className="py-1">{order.symbol || '-'}</td>
+                                  <td className="py-1">{order.broker_order_id || '-'}</td>
+                                  <td className="py-1" style={{ color: gateTone(order.latest_status) }}>{fmtGateLabel(order.latest_status)}</td>
+                                  <td className="text-right py-1">
+                                    {canCancel ? (
+                                      <button
+                                        onClick={() => handleAction(() => cancelBrokerOrder(detail.deployment_id, { broker_order_id: order.broker_order_id }))}
+                                        disabled={actionLoading}
+                                        className="px-2 py-1 rounded text-[11px] text-white"
+                                        style={{ backgroundColor: actionLoading ? '#30363d' : '#ef4444' }}
+                                      >
+                                        撤单
+                                      </button>
+                                    ) : (
+                                      <span style={{ color: 'var(--text-secondary)' }}>-</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {previewReleaseGate && (
+              <div data-testid="qmt-preview-panel" className="rounded p-3 space-y-3" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h4 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Release Preview</h4>
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                      审批态 release candidate 预览，不代表 broker runtime。
+                    </p>
+                  </div>
+                  <SourceBadge label={previewReleaseGate.source || 'preview'} />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <MetricCard
+                    testId="preview-release-gate-card"
+                    label="Preview Release Gate"
+                    value={fmtGateLabel(previewReleaseGate.status)}
+                    customColor={gateTone(previewReleaseGate.status)}
+                    sourceLabel={previewReleaseGate.source || 'preview'}
+                  />
+                  <MetricCard
+                    label="Deployment Status"
+                    value={fmtGateLabel(previewReleaseGate.deployment_status)}
+                    customColor={gateTone(previewReleaseGate.deployment_status)}
+                    sourceLabel={previewReleaseGate.source || 'preview'}
+                  />
+                  <MetricCard
+                    label="Deploy Gate"
+                    value={previewReleaseGate.deploy_gate_passed == null ? '-' : (previewReleaseGate.deploy_gate_passed ? 'passed' : 'blocked')}
+                    customColor={previewReleaseGate.deploy_gate_passed == null ? undefined : gateTone(previewReleaseGate.deploy_gate_passed ? 'ok' : 'blocked')}
+                    sourceLabel={previewReleaseGate.source || 'preview'}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <BrokerInfoBlock
+                    title="Preview Candidate"
+                    items={[
+                      previewReleaseGate.eligible_for_release_candidate ? 'eligible_for_release_candidate' : 'not_release_candidate',
+                      previewReleaseGate.eligible_for_real_submit ? 'eligible_for_real_submit' : 'not_real_submit_ready',
+                    ]}
+                    emptyText="暂无 preview candidate 状态"
+                    sourceLabel={previewReleaseGate.source || 'preview'}
+                  />
+                  <BrokerInfoBlock
+                    title="Preview Context"
+                    items={[
+                      previewReleaseGate.submit_gate_status ? `submit:${previewReleaseGate.submit_gate_status}` : '',
+                      previewReleaseGate.deploy_gate_passed == null ? '' : (previewReleaseGate.deploy_gate_passed ? 'deploy_gate:passed' : 'deploy_gate:blocked'),
+                      previewReleaseGate.submit_gate_preflight_ok == null ? '' : (previewReleaseGate.submit_gate_preflight_ok ? 'preflight:ok' : 'preflight:blocked'),
+                    ].filter(Boolean)}
+                    emptyText="暂无 preview context"
+                    sourceLabel={previewReleaseGate.source || 'preview'}
+                  />
+                </div>
+
+                <BrokerInfoBlock
+                  title="Preview Blockers"
+                  items={previewReleaseGate.blockers || []}
+                  emptyText="无 blocker"
+                  sourceLabel={previewReleaseGate.source || 'preview'}
+                />
               </div>
             )}
 
@@ -620,23 +1367,132 @@ export default function PaperTradingPage() {
 
 // ----- Sub-components -----
 
-function MetricCard({ label, value, positive, negative, warn }: {
+function MetricCard({ label, value, positive, negative, warn, customColor, sourceLabel, testId }: {
   label: string
   value: string
   positive?: boolean
   negative?: boolean
   warn?: boolean
+  customColor?: string
+  sourceLabel?: string | null
+  testId?: string
 }) {
   let valueColor = 'var(--text-primary)'
   if (positive === true) valueColor = CHART.down
   else if (positive === false) valueColor = CHART.up
   if (negative) valueColor = CHART.up
   if (warn) valueColor = CHART.warn
+  if (customColor) valueColor = customColor
 
   return (
-    <div className="p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-      <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</div>
+    <div data-testid={testId} className="p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{label}</div>
+        {sourceLabel && <SourceBadge label={sourceLabel} />}
+      </div>
       <div className="text-lg font-medium" style={{ color: valueColor }}>{value}</div>
+    </div>
+  )
+}
+
+function SourceBadge({ label }: { label: string }) {
+  // V3.3.27 Fix-A Issue #6: runtime badges are rendered in green and
+  // preview badges in gray/amber so operators can visually distinguish
+  // runtime truth from audit-time preview at a glance.
+  const normalized = (label || '').toLowerCase()
+  let fg = 'var(--text-secondary)'
+  let bg = 'var(--bg-primary)'
+  let border = 'var(--border)'
+  if (normalized === 'runtime') {
+    fg = '#22c55e'
+    bg = 'rgba(34,197,94,0.12)'
+    border = 'rgba(34,197,94,0.35)'
+  } else if (normalized === 'preview') {
+    fg = '#9ca3af'
+    bg = 'rgba(156,163,175,0.12)'
+    border = 'rgba(156,163,175,0.35)'
+  }
+  return (
+    <span
+      className="px-1.5 py-0.5 rounded text-[10px]"
+      style={{
+        backgroundColor: bg,
+        color: fg,
+        border: `1px solid ${border}`,
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+// V3.3.27 Fix-A Issue #5: small inline red bar surfacing a failed
+// sub-request. Placed next to the affected panel so the operator can
+// see "broker-state sync failed, click to retry" without relying on
+// ephemeral toasts.
+function SyncErrorBar({
+  label, message, onRetry, testId,
+}: {
+  label: string
+  message: string
+  onRetry: () => void | Promise<void>
+  testId?: string
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="p-2 rounded flex items-center justify-between gap-2"
+      style={{
+        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+        border: '1px solid rgba(239, 68, 68, 0.4)',
+      }}
+    >
+      <div className="text-xs" style={{ color: '#ef4444' }}>
+        <span className="mr-1">⚠️</span>
+        {label} 同步失败: {message}
+      </div>
+      <button
+        onClick={() => { void onRetry() }}
+        className="px-2 py-0.5 rounded text-[11px]"
+        style={{
+          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+          color: '#ef4444',
+          border: '1px solid rgba(239, 68, 68, 0.4)',
+        }}
+      >
+        重试
+      </button>
+    </div>
+  )
+}
+
+function BrokerInfoBlock({ title, items, emptyText, sourceLabel }: {
+  title: string
+  items: string[]
+  emptyText: string
+  sourceLabel?: string | null
+}) {
+  return (
+    <div className="rounded p-3" style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-primary)' }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <h5 className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{title}</h5>
+        {sourceLabel && <SourceBadge label={sourceLabel} />}
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{emptyText}</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item) => (
+            <span
+              key={item}
+              className="px-2 py-1 rounded text-[11px]"
+              style={{ backgroundColor: '#f59e0b20', color: '#f59e0b', border: '1px solid #f59e0b40' }}
+            >
+              {fmtGateLabel(item)}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
