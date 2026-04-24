@@ -1,7 +1,10 @@
 """V2.17 round 3: paper-trading auto-tick loop.
 
 Contract:
-1. Loop sleeps `interval_s`, then calls `scheduler.tick(date.today())`.
+1. Loop sleeps `interval_s`, then calls `scheduler.tick(...)`.
+   If the scheduler exposes market-scoped auto-tick batches, the loop
+   uses those market-local dates; otherwise it falls back to
+   `scheduler.tick(date.today())`.
 2. ValueError (future-date guard, other config) logged as warning,
    loop continues.
 3. Arbitrary exception from tick() doesn't crash the loop — it keeps
@@ -29,10 +32,12 @@ import pytest
 class _FakeScheduler:
     def __init__(self, behavior: str = "ok"):
         self.calls: list[date] = []
+        self.calls_with_markets: list[tuple[date, tuple[str, ...] | None]] = []
         self.behavior = behavior  # "ok" / "value_error" / "exception"
 
-    async def tick(self, business_date: date):
+    async def tick(self, business_date: date, *, markets: tuple[str, ...] | None = None):
         self.calls.append(business_date)
+        self.calls_with_markets.append((business_date, markets))
         if self.behavior == "value_error":
             raise ValueError("future-date simulated")
         if self.behavior == "exception":
@@ -207,6 +212,70 @@ async def test_loop_continues_when_dispatch_raises(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_loop_dispatches_alerts_after_tick_exception(monkeypatch) -> None:
+    """Webhook dispatch must still run when tick itself failed."""
+    from ez.api.app import _auto_tick_loop
+
+    sleep_count = [0]
+    orig_sleep = asyncio.sleep
+
+    async def fast_sleep(s):
+        sleep_count[0] += 1
+        if sleep_count[0] >= 2:
+            raise asyncio.CancelledError()
+        await orig_sleep(0)
+
+    monkeypatch.setattr("ez.api.app.asyncio.sleep", fast_sleep)
+
+    sched = _FakeScheduler("exception")
+    dispatcher = MagicMock()
+    dispatcher.dispatch_new = AsyncMock(return_value=1)
+    monitor = MagicMock()
+    monitor.check_alerts.return_value = [{"deployment_id": "dep-1", "alert_type": "runtime_error"}]
+
+    await _auto_tick_loop(
+        sched, interval_s=1,
+        alert_dispatcher=dispatcher, monitor=monitor,
+    )
+
+    assert len(sched.calls) == 1
+    assert monitor.check_alerts.call_count == 1
+    dispatcher.dispatch_new.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_loop_dispatches_alerts_after_tick_value_error(monkeypatch) -> None:
+    """Config/date guard failures should still flush any monitor alerts."""
+    from ez.api.app import _auto_tick_loop
+
+    sleep_count = [0]
+    orig_sleep = asyncio.sleep
+
+    async def fast_sleep(s):
+        sleep_count[0] += 1
+        if sleep_count[0] >= 2:
+            raise asyncio.CancelledError()
+        await orig_sleep(0)
+
+    monkeypatch.setattr("ez.api.app.asyncio.sleep", fast_sleep)
+
+    sched = _FakeScheduler("value_error")
+    dispatcher = MagicMock()
+    dispatcher.dispatch_new = AsyncMock(return_value=1)
+    monitor = MagicMock()
+    monitor.check_alerts.return_value = [{"deployment_id": "dep-1", "alert_type": "skipped"}]
+
+    await _auto_tick_loop(
+        sched, interval_s=1,
+        alert_dispatcher=dispatcher, monitor=monitor,
+    )
+
+    assert len(sched.calls) == 1
+    assert monitor.check_alerts.call_count == 1
+    dispatcher.dispatch_new.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_loop_does_not_tick_before_first_interval(monkeypatch) -> None:
     """Loop must sleep BEFORE first tick, not after. Prevents startup
     from instantly ticking (which could hit a race with resume_all
@@ -227,3 +296,43 @@ async def test_loop_does_not_tick_before_first_interval(monkeypatch) -> None:
     await _auto_tick_loop(sched, interval_s=1)
     assert call_order == ["sleep"]
     assert sched.calls == []  # never ticked
+
+
+@pytest.mark.asyncio
+async def test_loop_uses_market_local_tick_batches_when_scheduler_supports_them(monkeypatch) -> None:
+    from ez.api.app import _auto_tick_loop
+
+    class _MarketBatchScheduler(_FakeScheduler):
+        def get_auto_tick_batches(self):
+            return [
+                (date(2024, 1, 15), ("cn_stock",)),
+                (date(2024, 1, 14), ("us_stock",)),
+            ]
+
+    sleep_count = [0]
+    orig_sleep = asyncio.sleep
+
+    async def fast_sleep(s):
+        sleep_count[0] += 1
+        if sleep_count[0] >= 2:
+            raise asyncio.CancelledError()
+        await orig_sleep(0)
+
+    monkeypatch.setattr("ez.api.app.asyncio.sleep", fast_sleep)
+
+    sched = _MarketBatchScheduler("ok")
+    await _auto_tick_loop(sched, interval_s=1)
+
+    assert sched.calls_with_markets == [
+        (date(2024, 1, 15), ("cn_stock",)),
+        (date(2024, 1, 14), ("us_stock",)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_loop_rejects_non_positive_interval() -> None:
+    from ez.api.app import _auto_tick_loop
+
+    sched = _FakeScheduler("ok")
+    with pytest.raises(ValueError, match="positive"):
+        await _auto_tick_loop(sched, interval_s=0)

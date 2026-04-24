@@ -216,6 +216,8 @@ def get_registry():
     def _classify(registry: dict, user_prefixes: tuple[str, ...]) -> dict:
         builtin, user = [], []
         for name, cls in registry.items():
+            if getattr(cls, "PUBLIC_API", True) is False:
+                continue
             mod = getattr(cls, '__module__', '') or ''
             desc = ''
             try:

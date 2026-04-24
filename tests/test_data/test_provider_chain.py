@@ -95,6 +95,23 @@ class TestCacheLogic:
         assert result == cached
         mock_provider.get_kline.assert_not_called()
 
+    def test_cache_short_range_refetches_when_weekday_tail_missing(self, mock_store, mock_provider):
+        """A 1-business-day trailing gap on a short range is stale data, not a cache hit."""
+        cached = [_bar(2), _bar(5)]
+        mock_store.query_kline.return_value = cached
+        chain = DataProviderChain([mock_provider], mock_store)
+        chain.get_kline("TEST.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 1, 8))
+        mock_provider.get_kline.assert_called_once()
+
+    def test_cache_short_range_accepts_weekend_only_tail_gap(self, mock_store, mock_provider):
+        """Weekend-only gaps should still be treated as complete on short ranges."""
+        cached = [_bar(2), _bar(5)]
+        mock_store.query_kline.return_value = cached
+        chain = DataProviderChain([mock_provider], mock_store)
+        result = chain.get_kline("TEST.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 1, 7))
+        assert result == cached
+        mock_provider.get_kline.assert_not_called()
+
     def test_cache_complete_coverage_accepts(self, mock_store, mock_provider):
         """Cache with ~trading-day density should be accepted.
 
@@ -149,6 +166,22 @@ class TestCacheLogic:
         assert complete is True
         assert "known-sparse" in reason
 
+    def test_short_range_weekday_tail_gap_fails_helper(self):
+        bars = [_bar(2), _bar(5)]
+        complete, reason = DataProviderChain._is_cache_complete(
+            bars, date(2024, 1, 2), date(2024, 1, 8),
+        )
+        assert complete is False
+        assert "trailing gap" in reason
+
+    def test_short_range_weekend_tail_gap_passes_helper(self):
+        bars = [_bar(2), _bar(5)]
+        complete, reason = DataProviderChain._is_cache_complete(
+            bars, date(2024, 1, 2), date(2024, 1, 7),
+        )
+        assert complete is True
+        assert "short range" in reason
+
     def test_thinly_traded_symbol_no_infinite_refetch(self):
         """Regression test for reviewer finding I2: a legitimately thin symbol
         (e.g., niche ETF with ~10 trading days/month) should not cause repeated
@@ -162,9 +195,6 @@ class TestCacheLogic:
         # cache has 10 bars → density check would fail → must be bypassed via
         # the _known_sparse_symbols set.
         from ez.data.provider import DataProviderChain
-
-        # Clear any prior state from other tests
-        DataProviderChain._known_sparse_symbols.clear()
 
         # 10 bars spread over Jan 2 - Mar 28 (90 days). Last bar at Mar 28 is
         # within 3-day boundary of end_date Mar 31.
@@ -203,7 +233,7 @@ class TestCacheLogic:
         chain.get_kline("THIN.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))
         assert provider.get_kline.call_count == 1
         # The thin symbol should now be marked as known-sparse
-        assert ("THIN.SZ", "cn_stock", "daily") in DataProviderChain._known_sparse_symbols
+        assert ("THIN.SZ", "cn_stock", "daily") in chain._known_sparse_symbols
 
         # Second call: cache has 10 bars → density would fail → but skip_density=True
         # bypasses it → cache accepted → NO provider refetch
@@ -222,8 +252,7 @@ class TestCacheLogic:
         chain.get_kline_batch(["THIN.SZ"], "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))
         assert provider.get_kline.call_count == 1, "get_kline_batch refetched sparse symbol"
 
-        # Cleanup
-        DataProviderChain._known_sparse_symbols.clear()
+        # I5: sparse cache is instance-level now, no class-level cleanup needed
 
 
 class TestFailover:

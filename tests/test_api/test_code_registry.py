@@ -48,6 +48,12 @@ class TestRegistryEndpoint:
         assert "ROE" in names
         assert "MomentumRank" in names
 
+    def test_registry_hides_test_only_portfolio_strategy(self):
+        resp = client.get("/api/code/registry")
+        data = resp.json()
+        names = [s["name"] for s in data["portfolio_strategy"]["builtin"]]
+        assert "DailyEqualWeightTest" not in names
+
 
 class TestRefreshEndpoint:
     def test_refresh_returns_counts(self):

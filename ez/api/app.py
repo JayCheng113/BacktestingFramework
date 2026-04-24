@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
         import os as _os
         if _os.environ.get("EZ_LIVE_AUTO_TICK") == "1":
             interval_s = int(_os.environ.get("EZ_LIVE_AUTO_TICK_INTERVAL_S", "3600"))
+            if interval_s <= 0:
+                raise ValueError(
+                    f"EZ_LIVE_AUTO_TICK_INTERVAL_S must be positive, got {interval_s}"
+                )
             # V2.17 round 5: webhook alert dispatcher (optional)
             from ez.live.alert_dispatcher import from_env as _alerts_from_env
             from ez.api.routes.live import _get_monitor
@@ -118,39 +122,70 @@ async def _auto_tick_loop(
     A short interval is cheap because of the idempotency guarantees.
 
     V2.17 round 5: if `alert_dispatcher` and `monitor` are supplied,
-    after each successful tick iteration the loop checks monitor
-    alerts and dispatches new ones to the configured webhook. Webhook
-    failures are logged but never crash the loop.
+    after each iteration the loop checks monitor alerts and dispatches
+    new ones to the configured webhook, even if tick() itself failed.
+    Webhook failures are logged but never crash the loop.
     """
+    if interval_s <= 0:
+        raise ValueError(f"interval_s must be positive, got {interval_s}")
     log = logging.getLogger(__name__)
     while True:
         try:
             await asyncio.sleep(interval_s)
         except asyncio.CancelledError:
             return
-        try:
-            today = date.today()
-            results = await scheduler.tick(today)
-            if results:
-                log.info(
-                    "Auto-tick for %s: %d deployments processed",
-                    today, len(results),
+        tick_completed = False
+        total_results = 0
+        tick_batches = getattr(scheduler, "get_auto_tick_batches", None)
+        if callable(tick_batches):
+            batches = tick_batches()
+        else:
+            batches = [(date.today(), None)]
+        for business_date, markets in batches:
+            try:
+                if markets is None:
+                    results = await scheduler.tick(business_date)
+                else:
+                    results = await scheduler.tick(business_date, markets=markets)
+                tick_completed = True
+                total_results += len(results or [])
+            except asyncio.CancelledError:
+                return
+            except ValueError as e:
+                scope = (
+                    f" for markets {list(markets)}"
+                    if markets is not None
+                    else ""
                 )
-            # V2.17 round 5: alert dispatch after tick
-            if alert_dispatcher is not None and monitor is not None:
-                try:
-                    alerts = monitor.check_alerts()
-                    if alerts:
-                        await alert_dispatcher.dispatch_new(alerts)
-                except Exception:
-                    log.exception("Alert dispatch failed (loop continues)")
-        except asyncio.CancelledError:
-            return
-        except ValueError as e:
-            # future-date guard or similar config error — log once, keep loop
-            log.warning("Auto-tick skipped: %s", e)
-        except Exception:
-            log.exception("Auto-tick iteration failed (loop continues)")
+                log.warning("Auto-tick skipped for %s%s: %s", business_date, scope, e)
+            except Exception:
+                scope = (
+                    f" for markets {list(markets)}"
+                    if markets is not None
+                    else ""
+                )
+                log.exception(
+                    "Auto-tick iteration failed for %s%s (loop continues)",
+                    business_date,
+                    scope,
+                )
+        if tick_completed and total_results:
+            processed_dates = ", ".join(str(business_date) for business_date, _ in batches)
+            log.info(
+                "Auto-tick for %s: %d deployments processed",
+                processed_dates,
+                total_results,
+            )
+        if alert_dispatcher is not None and monitor is not None:
+            try:
+                alerts = monitor.check_alerts()
+                if alerts:
+                    await alert_dispatcher.dispatch_new(alerts)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                phase = "after tick" if tick_completed else "after tick failure"
+                log.exception("Alert dispatch failed (%s, loop continues)", phase)
 
 
 def _get_version() -> str:
@@ -175,7 +210,7 @@ def _get_version() -> str:
         return version("ez-trading")
     except Exception:
         pass
-    return "0.2.18"
+    return "0.3.1"
 
 _APP_VERSION = _get_version()
 

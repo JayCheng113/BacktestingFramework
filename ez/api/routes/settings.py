@@ -99,7 +99,7 @@ def get_llm_settings():
     return {
         "provider": provider,
         "api_key_set": bool(api_key),
-        "api_key_preview": f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else ("***" if api_key else ""),
+        "api_key_preview": f"sk-...{api_key[-4:]}" if len(api_key) > 4 else ("***" if api_key else ""),
         "model": config.llm.model or "(默认)",
         "base_url": config.llm.base_url or "(默认)",
         "temperature": config.llm.temperature,

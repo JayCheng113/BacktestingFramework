@@ -11,10 +11,8 @@ from ez.types import Bar
 
 @pytest.fixture(autouse=True)
 def _clear_sparse_cache():
-    """Reset sparse symbol cache before and after each test."""
-    DataProviderChain._known_sparse_symbols.clear()
+    """No-op: sparse cache is now instance-level (I5 fix), no shared state."""
     yield
-    DataProviderChain._known_sparse_symbols.clear()
 
 
 def _sparse_bars():
@@ -62,8 +60,8 @@ def test_sparse_cache_expires_after_ttl():
     chain = DataProviderChain([provider], store)
     key = ("THIN.SZ", "cn_stock", "daily")
 
-    # Manually mark sparse with a timestamp > 24h ago
-    DataProviderChain._known_sparse_symbols[key] = time.monotonic() - 90000.0
+    # Manually mark sparse with a timestamp > 24h ago (instance-level after I5 fix)
+    chain._known_sparse_symbols[key] = time.monotonic() - 90000.0
 
     # Call get_kline — TTL expired, so skip_density=False, density check fails,
     # provider should be called
@@ -72,7 +70,7 @@ def test_sparse_cache_expires_after_ttl():
         "Provider should be called after sparse cache TTL expires"
     )
     # Key should be re-populated with a fresh timestamp
-    assert key in DataProviderChain._known_sparse_symbols
+    assert key in chain._known_sparse_symbols
 
 
 def test_sparse_cache_within_ttl_skips_density():
@@ -87,8 +85,8 @@ def test_sparse_cache_within_ttl_skips_density():
     chain = DataProviderChain([provider], store)
     key = ("THIN.SZ", "cn_stock", "daily")
 
-    # Mark sparse with a fresh timestamp (just now)
-    DataProviderChain._known_sparse_symbols[key] = time.monotonic()
+    # Mark sparse with a fresh timestamp (just now) — instance-level after I5
+    chain._known_sparse_symbols[key] = time.monotonic()
 
     # Call get_kline — TTL not expired, skip_density=True, cache should be accepted
     result = chain.get_kline("THIN.SZ", "cn_stock", "daily", date(2024, 1, 2), date(2024, 3, 31))

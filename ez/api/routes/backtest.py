@@ -18,33 +18,9 @@ from ez.strategy.base import Strategy
 router = APIRouter()
 
 
-class _SellSideTaxMatcher(Matcher):
-    """Wrapper: adds sell-side stamp tax without modifying core Matcher.
-
-    A-share stamp tax is charged only on sells (0.05%).
-    """
-
-    def __init__(self, inner: Matcher, stamp_tax_rate: float):
-        self._inner = inner
-        self._tax = stamp_tax_rate
-
-    def fill_buy(self, price: float, amount: float) -> FillResult:
-        return self._inner.fill_buy(price, amount)
-
-    def fill_sell(self, price: float, shares: float) -> FillResult:
-        result = self._inner.fill_sell(price, shares)
-        if result.shares <= 0:
-            return result
-        tax = result.shares * result.fill_price * self._tax
-        # Cap tax so net_amount stays >= 0 (inner may have already capped commission)
-        max_tax = max(result.net_amount, 0.0)
-        tax = min(tax, max_tax)
-        return FillResult(
-            shares=result.shares,
-            fill_price=result.fill_price,
-            commission=result.commission + tax,
-            net_amount=result.net_amount - tax,
-        )
+# SellSideTaxMatcher moved to ez/core/matcher.py (V3 debt cleanup).
+# Re-import for backward compatibility with this module's usage.
+from ez.core.matcher import SellSideTaxMatcher as _SellSideTaxMatcher
 
 
 class BacktestRequest(BaseModel):

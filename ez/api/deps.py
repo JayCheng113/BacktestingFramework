@@ -56,6 +56,15 @@ def _build_provider(name: str) -> DataProvider | None:
     if name == "tencent":
         from ez.data.providers.tencent_provider import TencentDataProvider
         return TencentDataProvider()
+    if name == "jqdata":
+        if os.environ.get("JQDATA_USERNAME") and os.environ.get("JQDATA_PASSWORD"):
+            try:
+                from ez.data.providers.jqdata_provider import JQDataProvider
+                return JQDataProvider()
+            except ImportError:
+                logger.debug("jqdatasdk not installed, skipping jqdata provider")
+                return None
+        return None
     logger.warning("Unknown provider name in config: %s", name)
     return None
 
@@ -95,6 +104,13 @@ def get_chain() -> DataProviderChain:
         if "tencent" not in seen:
             from ez.data.providers.tencent_provider import TencentDataProvider
             providers.append(TencentDataProvider())
+
+        # JQData as lowest-priority fallback (cross-verification source)
+        if "jqdata" not in seen:
+            jq_provider = _build_provider("jqdata")
+            if jq_provider:
+                providers.append(jq_provider)
+                seen.add("jqdata")
 
         logger.info("DataProviderChain built: %s", [p.name for p in providers])
         _chain = DataProviderChain(providers=providers, store=store)

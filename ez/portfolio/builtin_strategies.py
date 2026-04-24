@@ -779,6 +779,7 @@ class DailyEqualWeightTest(PortfolioStrategy):
 
     NOT for production. DeployGate 会通过但这策略没有 alpha.
     """
+    PUBLIC_API = False
     lookback_days = 5  # 最小值, 加速 tick
 
     def __init__(self, symbols: list[str] | None = None):

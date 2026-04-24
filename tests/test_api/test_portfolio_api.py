@@ -31,6 +31,7 @@ class TestListStrategies:
         names = [s["name"] for s in data["strategies"]]
         assert "TopNRotation" in names
         assert "MultiFactorRotation" in names
+        assert "DailyEqualWeightTest" not in names
         assert len(data["available_factors"]) > 0
 
 
@@ -195,3 +196,12 @@ class TestRunValidation:
                 "start_date": "2024-01-01", "end_date": "2024-03-01",
             })
             assert resp.status_code == 404
+
+    def test_test_only_strategy_hidden_from_run_endpoint(self):
+        resp = client.post("/api/portfolio/run", json={
+            "strategy_name": "DailyEqualWeightTest",
+            "symbols": ["A"],
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+        })
+        assert resp.status_code == 404

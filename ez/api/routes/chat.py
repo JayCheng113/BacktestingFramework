@@ -10,7 +10,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ez.llm.factory import create_provider
 from ez.llm.provider import LLMMessage
@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
-    role: str  # "user" | "assistant"
-    content: str
+    role: str = Field(pattern=r"^(user|assistant|system)$")
+    content: str = Field(max_length=50000)
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
-    editor_code: str = ""
+    messages: list[ChatMessage] = Field(max_length=50)
+    editor_code: str = Field(default="", max_length=100000)
 
 
 @router.post("/send")

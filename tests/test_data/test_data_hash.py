@@ -121,6 +121,45 @@ def test_hash_none_when_no_manifest(tmp_path) -> None:
     assert store.get_data_hash() is None
 
 
+def test_hash_refreshes_when_manifest_changes_after_first_read(tmp_path) -> None:
+    """Long-lived processes must not pin the first manifest forever."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = cache_dir / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "date_range": {"start": "2015", "end": "2026-04-08"},
+        "files": {"cn_stock_daily.parquet": {"md5": "old"}},
+    }), encoding="utf-8")
+    store = DuckDBStore(db_path=str(tmp_path / "test.db"))
+    store._cache_dir = cache_dir
+    store._manifest = None
+    store._manifest_loaded = False
+
+    h1 = store.get_data_hash()
+    manifest_path.write_text(json.dumps({
+        "date_range": {"start": "2015", "end": "2026-04-09"},
+        "files": {"cn_stock_daily.parquet": {"md5": "new"}},
+    }), encoding="utf-8")
+
+    h2 = store.get_data_hash()
+    assert h1 != h2
+
+
+def test_hash_recovers_after_manifest_appears_later(tmp_path) -> None:
+    """An initial miss should not poison the cache for the whole process."""
+    store = _make_store(tmp_path, manifest=None)
+    assert store.get_data_hash() is None
+
+    (store._cache_dir / "manifest.json").write_text(json.dumps({
+        "date_range": {"start": "2015", "end": "2026"},
+        "files": {"cn_stock_daily.parquet": {"md5": "fresh"}},
+    }), encoding="utf-8")
+
+    h = store.get_data_hash()
+    assert h is not None
+    assert len(h) == 12
+
+
 def test_hash_none_when_files_section_empty(tmp_path) -> None:
     """Manifest exists but no file md5s (legacy or partial build)."""
     m = {

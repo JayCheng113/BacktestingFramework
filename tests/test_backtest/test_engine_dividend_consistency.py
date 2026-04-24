@@ -128,6 +128,28 @@ def test_buy_on_dividend_day_no_phantom_gain() -> None:
     )
 
 
+def test_buy_on_dividend_day_no_phantom_gain_when_open_is_missing() -> None:
+    """Missing `open` must fall back to raw close before adjustment.
+
+    Prior bug path: if `open` was missing, the engine used `adj_close`
+    as `_raw_open`, then multiplied by `(adj_close / raw_close)` again.
+    On a 5 / 2.5 dividend bar that turned the execution price into 10.0.
+    """
+    div_day = 10
+    df = _flat_data_with_dividend(n_days=20, div_day=div_day).drop(columns=["open"])
+    engine = VectorizedBacktestEngine(commission_rate=0.0, min_commission=0.0)
+    strategy = _BuyOnDayStrategy(buy_day_idx=div_day)
+    result = engine.run(df, strategy, initial_capital=100_000)
+
+    day_10_equity = result.equity_curve.values[div_day]
+    initial = result.equity_curve.values[0]
+
+    assert 99_000 <= day_10_equity <= 101_000, (
+        f"Buy on dividend day without open should NOT create phantom gain. "
+        f"Expected ~{initial}, got {day_10_equity}."
+    )
+
+
 def test_no_behavior_change_on_non_dividend_data() -> None:
     """Sanity: data where raw_close == adj_close (no dividends) must
     produce the same result as before the fix. adj_open = raw_open *
