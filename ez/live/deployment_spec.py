@@ -48,6 +48,8 @@ class DeploymentSpec:
         "_symbols",               # sorted tuple
         "_market",
         "_freq",
+        "_broker_type",
+        "_shadow_broker_type",
         "_t_plus_1",
         "_price_limit_pct",
         "_lot_size",
@@ -73,6 +75,8 @@ class DeploymentSpec:
         symbols: tuple[str, ...] | list[str],
         market: str,
         freq: str,
+        broker_type: str = "paper",
+        shadow_broker_type: str = "",
         t_plus_1: bool = True,
         price_limit_pct: float = 0.1,
         lot_size: int = 100,
@@ -97,6 +101,8 @@ class DeploymentSpec:
         _set(self, "_symbols", tuple(sorted(symbols)))
         _set(self, "_market", market)
         _set(self, "_freq", freq)
+        _set(self, "_broker_type", broker_type or "paper")
+        _set(self, "_shadow_broker_type", shadow_broker_type or "")
         _set(self, "_t_plus_1", bool(t_plus_1))
         _set(self, "_price_limit_pct", float(price_limit_pct))
         _set(self, "_lot_size", int(lot_size))
@@ -153,6 +159,14 @@ class DeploymentSpec:
     @property
     def freq(self) -> str:
         return self._freq
+
+    @property
+    def broker_type(self) -> str:
+        return self._broker_type
+
+    @property
+    def shadow_broker_type(self) -> str:
+        return self._shadow_broker_type
 
     @property
     def t_plus_1(self) -> bool:
@@ -220,6 +234,8 @@ class DeploymentSpec:
             "symbols": list(self._symbols),
             "market": self._market,
             "freq": self._freq,
+            "broker_type": self._broker_type,
+            "shadow_broker_type": self._shadow_broker_type,
             "t_plus_1": self._t_plus_1,
             "price_limit_pct": self._price_limit_pct,
             "lot_size": self._lot_size,
@@ -251,12 +267,14 @@ class DeploymentSpec:
         strategy_params = json.loads(d["strategy_params"]) if isinstance(d["strategy_params"], str) else d["strategy_params"]
         optimizer_params = json.loads(d["optimizer_params"]) if isinstance(d["optimizer_params"], str) else d.get("optimizer_params", {})
         risk_params = json.loads(d["risk_params"]) if isinstance(d["risk_params"], str) else d.get("risk_params", {})
-        return cls(
+        spec = cls(
             strategy_name=d["strategy_name"],
             strategy_params=strategy_params,
             symbols=tuple(d["symbols"]),
             market=d["market"],
             freq=d["freq"],
+            broker_type=d.get("broker_type", "paper"),
+            shadow_broker_type=d.get("shadow_broker_type", ""),
             t_plus_1=d.get("t_plus_1", True),
             price_limit_pct=d.get("price_limit_pct", 0.1),
             lot_size=d.get("lot_size", 100),
@@ -272,6 +290,30 @@ class DeploymentSpec:
             rebal_weekday=d.get("rebal_weekday"),
             initial_cash=d.get("initial_cash", 1_000_000.0),
         )
+        stored_spec_id = d.get("spec_id")
+        if isinstance(stored_spec_id, str) and stored_spec_id:
+            # Preserve the persisted identity for backward compatibility.
+            object.__setattr__(spec, "_spec_id", stored_spec_id)
+        return spec
+
+    # -- Legacy detection -------------------------------------------------
+
+    def compute_content_hash(self) -> str:
+        """Recompute the canonical content hash from scratch.
+
+        Compares against `self._spec_id`. Useful for detecting a spec whose
+        stored `spec_id` was generated before `broker_type` /
+        `shadow_broker_type` were folded into the hash seed (V3 cutover).
+        """
+        canonical = self._canonical_dict()
+        canonical_json = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(canonical_json.encode()).hexdigest()[:16]
+
+    def is_legacy_spec_id(self) -> bool:
+        """Return True if stored `spec_id` no longer matches freshly computed
+        content hash (i.e. hash seed evolved; spec was loaded from a legacy row).
+        """
+        return self._spec_id != self.compute_content_hash()
 
     def __repr__(self) -> str:
         return (

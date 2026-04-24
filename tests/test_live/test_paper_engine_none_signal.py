@@ -137,3 +137,24 @@ def test_none_signal_marks_to_market_at_current_prices() -> None:
     assert r[1]["equity"] > r[0]["equity"]
     # Day 3 (None signal, back to 10): equity should drop back near day 1
     assert abs(r[2]["equity"] - r[0]["equity"]) < 0.02 * r[0]["equity"]
+
+
+def test_none_signal_still_emits_market_snapshot_and_bars() -> None:
+    """Hold-only days still need market context for audit/replay."""
+    strategy = _NoneOnNonRebalStrategy("AAA")
+    _, results = _run_3_days(strategy, price=10.0)
+
+    for result in results[1:]:
+        assert result["_market_snapshot"]["source"] == "live"
+        assert result["_market_snapshot"]["prices"] == {"AAA": 10.0}
+        assert result["_market_snapshot"]["has_bar_symbols"] == ["AAA"]
+        assert result["_market_bars"] == [{
+            "symbol": "AAA",
+            "open": 10.0,
+            "high": 10.0,
+            "low": 10.0,
+            "close": 10.0,
+            "adj_close": 10.0,
+            "volume": 10000000.0,
+            "source": "live",
+        }]

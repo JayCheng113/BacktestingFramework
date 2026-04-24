@@ -24,6 +24,17 @@ from ez.live.deployment_spec import DeploymentSpec
 from ez.live.paper_engine import PaperTradingEngine
 
 
+class _FakeBar:
+    def __init__(self, d: datetime, close: float, adj_close: float):
+        self.time = d
+        self.open = close
+        self.high = close
+        self.low = close
+        self.close = close
+        self.adj_close = adj_close
+        self.volume = 1000
+
+
 def _engine() -> PaperTradingEngine:
     spec = DeploymentSpec(
         strategy_name="T", strategy_params={},
@@ -37,6 +48,14 @@ def _engine() -> PaperTradingEngine:
 def _df(rows: list[dict]) -> pd.DataFrame:
     dates = pd.date_range("2024-01-01", periods=len(rows), freq="D")
     return pd.DataFrame(rows, index=dates)
+
+
+def _bars(rows: list[dict]) -> list[_FakeBar]:
+    dates = pd.date_range("2024-01-01", periods=len(rows), freq="D")
+    return [
+        _FakeBar(ts.to_pydatetime(), float(row["close"]), float(row["adj_close"]))
+        for ts, row in zip(dates, rows)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -153,25 +172,66 @@ def test_dedup_same_anomaly_warned_once(caplog) -> None:
     """If the same bad bar persists across multiple _fetch_latest calls
     (hourly auto-tick), we only warn once — not 24 times/day."""
     e = _engine()
-    bar_df = _df([
+    e.strategy = MagicMock(lookback_days=2)
+    anomalous_bars = _bars([
         {"close": 10.0, "adj_close": 10.0},
         {"close": 13.0, "adj_close": 13.0},  # +30%
     ])
+    e.data_chain.get_kline.return_value = anomalous_bars
 
     with caplog.at_level("WARNING"):
-        # Simulate _fetch_latest returning same anomalous data twice
         e._sanity_warned.clear()
-        for msg in e._sanity_check_fresh_bars("AAA", bar_df):
-            key = (msg.split(":", 1)[0], "raw_spike")
-            # First call adds
-            if key not in e._sanity_warned:
-                e._sanity_warned.add(key)
-        first_count = len(e._sanity_warned)
-        assert first_count >= 1
+        e._fetch_latest(date(2024, 1, 2))
+        first_text = caplog.text
+        assert "[数据异常]" in first_text
+        assert ("X", "raw_spike") in e._sanity_warned
 
-        # Second call should not increase set size
-        for msg in e._sanity_check_fresh_bars("AAA", bar_df):
-            key = (msg.split(":", 1)[0], "raw_spike")
-            if key not in e._sanity_warned:
-                e._sanity_warned.add(key)
-        assert len(e._sanity_warned) == first_count
+        caplog.clear()
+        e._fetch_latest(date(2024, 1, 2))
+        assert caplog.text == ""
+        assert ("X", "raw_spike") in e._sanity_warned
+
+
+def test_fetch_latest_clears_warning_key_after_recovery(caplog) -> None:
+    e = _engine()
+    e.strategy = MagicMock(lookback_days=2)
+    anomalous_bars = _bars([
+        {"close": 10.0, "adj_close": 10.0},
+        {"close": 13.0, "adj_close": 13.0},
+    ])
+    normal_bars = _bars([
+        {"close": 10.0, "adj_close": 10.0},
+        {"close": 10.2, "adj_close": 10.2},
+    ])
+    e.data_chain.get_kline.side_effect = [anomalous_bars, normal_bars]
+
+    with caplog.at_level("WARNING"):
+        e._fetch_latest(date(2024, 1, 2))
+        assert ("X", "raw_spike") in e._sanity_warned
+
+        caplog.clear()
+        e._fetch_latest(date(2024, 1, 2))
+        assert caplog.text == ""
+        assert ("X", "raw_spike") not in e._sanity_warned
+
+
+def test_fetch_latest_warns_again_for_new_anomaly_kind_after_recovery(caplog) -> None:
+    e = _engine()
+    e.strategy = MagicMock(lookback_days=2)
+    normal_bars = _bars([
+        {"close": 10.0, "adj_close": 10.0},
+        {"close": 10.1, "adj_close": 10.1},
+    ])
+    divergence_bars = _bars([
+        {"close": 10.0, "adj_close": 5.0},
+        {"close": 10.1, "adj_close": 10.1},
+    ])
+    e.data_chain.get_kline.side_effect = [normal_bars, divergence_bars]
+
+    with caplog.at_level("WARNING"):
+        e._fetch_latest(date(2024, 1, 2))
+        assert e._sanity_warned == set()
+
+        e._fetch_latest(date(2024, 1, 2))
+        assert "[数据异常]" in caplog.text
+        assert ("X", "adj_raw_divergence") in e._sanity_warned

@@ -23,6 +23,14 @@ import pytest
 from ez.live.alert_dispatcher import AlertDispatcher, from_env
 
 
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
 # ---------------------------------------------------------------------------
 # Construction validation
 # ---------------------------------------------------------------------------
@@ -91,6 +99,17 @@ def test_slack_payload_shape() -> None:
     assert "text" in payload
     assert isinstance(payload["text"], str)
     assert "2 个告警" in payload["text"]
+
+
+def test_dingtalk_business_error_raises() -> None:
+    d = AlertDispatcher(webhook_url="http://x", template="dingtalk")
+    with pytest.raises(RuntimeError, match="errcode=310000"):
+        d._raise_on_business_error(_FakeResponse({"errcode": 310000, "errmsg": "invalid token"}))
+
+
+def test_wecom_business_success_does_not_raise() -> None:
+    d = AlertDispatcher(webhook_url="http://x", template="wecom")
+    d._raise_on_business_error(_FakeResponse({"errcode": 0, "errmsg": "ok"}))
 
 
 # ---------------------------------------------------------------------------

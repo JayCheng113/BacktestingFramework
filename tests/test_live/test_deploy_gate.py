@@ -224,6 +224,16 @@ class TestMinTrades:
         trades_reason = next(r for r in verdict.reasons if r.rule == "min_trades")
         assert trades_reason.passed
 
+    def test_legacy_total_trades_fallback_passes(self):
+        gate = DeployGate()
+        spec = _make_spec()
+        run = _make_run(metrics={"sharpe_ratio": 1.0, "max_drawdown": -0.1, "total_trades": 25})
+        store = _MockPortfolioStore({"run_001": run})
+        verdict = gate.evaluate(spec, "run_001", store)
+        trades_reason = next(r for r in verdict.reasons if r.rule == "min_trades")
+        assert trades_reason.passed
+        assert trades_reason.value == 25
+
 
 class TestMaxPValue:
     def test_above_threshold_fails(self):

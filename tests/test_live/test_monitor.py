@@ -4,13 +4,21 @@ Tests use an in-memory DuckDB store, no network calls.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
 import duckdb
 import pytest
 
+from ez.live.broker import BrokerExecutionReport
 from ez.live.deployment_spec import DeploymentRecord, DeploymentSpec
 from ez.live.deployment_store import DeploymentStore
+from ez.live.events import (
+    make_broker_account_event,
+    make_broker_cancel_requested_event,
+    make_broker_runtime_event,
+    make_risk_event,
+)
 from ez.live.monitor import (
     DeploymentHealth,
     Monitor,
@@ -18,6 +26,7 @@ from ez.live.monitor import (
     _compute_sharpe,
     _count_consecutive_loss_days,
     _compute_days_since_last_trade,
+    build_persisted_broker_order_view,
 )
 
 
@@ -81,6 +90,27 @@ def _save_snapshots(
             "error": None,
         }
         store.save_daily_snapshot(dep_id, snap_date, result)
+
+
+def _append_runtime_event(
+    store: DeploymentStore,
+    dep_id: str,
+    *,
+    broker_type: str = "qmt",
+    runtime_kind: str,
+    event_ts: datetime,
+    payload: dict,
+) -> None:
+    store.append_event(
+        make_broker_runtime_event(
+            dep_id,
+            runtime_event_id=f"{runtime_kind}:{event_ts.isoformat()}",
+            broker_type=broker_type,
+            runtime_kind=runtime_kind,
+            event_ts=event_ts,
+            payload=payload,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +492,330 @@ class TestDashboardWithRunning:
         health = monitor.get_dashboard()[0]
         assert health.error_count == 2
 
+    def test_broker_runtime_and_reconcile_statuses_surface_in_dashboard(self):
+        store = _make_store()
+        spec = _make_spec()
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok"},
+                {"event": "broker_order_reconcile", "status": "drift"},
+            ]],
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="account_status",
+            event_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+            payload={"status": "connected"},
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.broker_reconcile_status == "ok"
+        assert health.broker_order_reconcile_status == "drift"
+        assert health.broker_runtime_kind == "account_status"
+        assert health.broker_runtime_status == "connected"
+
+    def test_qmt_release_gate_surfaces_in_dashboard(self):
+        store = _make_store()
+        spec = _make_spec(
+            shadow_broker_type="qmt",
+            risk_params={
+                "shadow_broker_config": {"account_id": "acct-1"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-1"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 2_000_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok"},
+                {"event": "broker_order_reconcile", "status": "ok"},
+            ]],
+        )
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+                cash=90_000.0,
+                total_asset=140_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.qmt_release_gate_status == "blocked"
+        assert health.qmt_release_candidate is False
+        assert health.qmt_hard_gate_status is None
+        assert health.qmt_release_blockers == ["qmt_submit_gate_shadow_only"]
+
+    def test_real_qmt_release_gate_blocks_runtime_degraded_fallback(self):
+        store = _make_store()
+        spec = _make_spec(
+            broker_type="qmt",
+            shadow_broker_type="qmt",
+            initial_cash=100_000.0,
+            risk_params={
+                "qmt_real_broker_config": {"account_id": "acct-real"},
+                "shadow_broker_config": {"account_id": "acct-shadow"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-real"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 200_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [100_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok", "broker_type": "qmt"},
+                {"event": "broker_order_reconcile", "status": "ok", "broker_type": "qmt"},
+            ]],
+        )
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+                cash=100_000.0,
+                total_asset=120_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="disconnected",
+            event_ts=datetime(2026, 4, 13, 9, 38, tzinfo=timezone.utc),
+            payload={"status": "disconnected"},
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.qmt_release_gate_status == "blocked"
+        assert health.qmt_release_candidate is False
+        assert "qmt_submit_gate_blocked" in health.qmt_release_blockers
+        assert "qmt_submit_gate_shadow_only" not in health.qmt_release_blockers
+
+    def test_qmt_hard_gate_surfaces_in_dashboard_and_makes_release_gate_actionable(self):
+        store = _make_store()
+        spec = _make_spec(
+            shadow_broker_type="qmt",
+            risk_params={
+                "shadow_broker_config": {"account_id": "acct-1"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-1"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 2_000_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok"},
+                {"event": "broker_order_reconcile", "status": "drift"},
+                {
+                    "event": "qmt_reconcile_hard_gate",
+                    "status": "blocked",
+                    "message": "QMT reconcile checks failed; fail closed.",
+                    "blockers": ["broker_order_reconcile_drift"],
+                },
+            ]],
+        )
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+                cash=90_000.0,
+                total_asset=140_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.qmt_hard_gate_status == "blocked"
+        assert health.qmt_hard_gate_blockers == ["broker_order_reconcile_drift"]
+        assert health.qmt_release_gate_status == "blocked"
+        assert "qmt_submit_gate_blocked" in health.qmt_release_blockers
+
+        alerts = monitor.check_alerts()
+        release_alerts = [
+            a for a in alerts if a["alert_type"] == "qmt_release_gate_blocked"
+        ]
+        assert len(release_alerts) == 1
+
+    def test_monitor_prefers_recent_risk_recorded_events_for_qmt_reconcile(self):
+        store = _make_store()
+        spec = _make_spec(
+            shadow_broker_type="qmt",
+            risk_params={
+                "shadow_broker_config": {"account_id": "acct-1"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-1"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 2_000_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "drift"},
+                {"event": "broker_order_reconcile", "status": "drift"},
+            ]],
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 13),
+                risk_index=0,
+                risk_event={"event": "broker_reconcile", "status": "ok"},
+                event_ts=datetime(2026, 4, 13, 9, 40, tzinfo=timezone.utc),
+            )
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 13),
+                risk_index=1,
+                risk_event={"event": "broker_order_reconcile", "status": "ok"},
+                event_ts=datetime(2026, 4, 13, 9, 41, tzinfo=timezone.utc),
+            )
+        )
+        for idx in range(30):
+            store.append_event(
+                make_risk_event(
+                    rec.deployment_id,
+                    business_date=date(2026, 4, 13),
+                    risk_index=100 + idx,
+                    risk_event={"event": f"noise_{idx}", "status": "ok"},
+                    event_ts=datetime(2026, 4, 13, 10, 0, tzinfo=timezone.utc),
+                )
+            )
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+                cash=90_000.0,
+                total_asset=140_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 42, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.broker_reconcile_status == "ok"
+        assert health.broker_order_reconcile_status == "ok"
+
     def test_zero_pnl_no_snapshots(self):
         """Deployment with no snapshots should still return valid health."""
         store = _make_store()
@@ -671,6 +1025,890 @@ class TestAlertsInactivity:
         alerts = monitor.check_alerts()
         inact_alerts = [a for a in alerts if a["alert_type"] == "inactivity"]
         assert inact_alerts == []
+
+
+class TestAlertsBrokerHealth:
+    def test_broker_account_and_order_drift_alerts(self):
+        store = _make_store()
+        spec = _make_spec()
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "drift"},
+                {"event": "broker_order_reconcile", "status": "drift"},
+            ]],
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        assert any(a["alert_type"] == "broker_account_drift" for a in alerts)
+        assert any(a["alert_type"] == "broker_order_drift" for a in alerts)
+
+    def test_broker_session_disconnected_alert(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="disconnected",
+            event_ts=datetime(2026, 4, 13, 9, 35, tzinfo=timezone.utc),
+            payload={"status": "disconnected"},
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        disconnect_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_session_disconnected"
+        ]
+        assert len(disconnect_alerts) == 1
+        assert disconnect_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_session_disconnected_alert_prefers_session_lifecycle_event(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="disconnected",
+            event_ts=datetime(2026, 4, 13, 9, 35, tzinfo=timezone.utc),
+            payload={"status": "disconnected"},
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="account_status",
+            event_ts=datetime(2026, 4, 13, 9, 36, tzinfo=timezone.utc),
+            payload={"status": "connected"},
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        disconnect_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_session_disconnected"
+        ]
+        assert len(disconnect_alerts) == 1
+        assert disconnect_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_session_unhealthy_alert(self):
+        store = _make_store()
+        spec = _make_spec()
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_restart_failed",
+            event_ts=datetime(2026, 4, 13, 9, 36, tzinfo=timezone.utc),
+            payload={"error_msg": "consumer restart failed"},
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        unhealthy_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_session_unhealthy"
+        ]
+        assert len(unhealthy_alerts) == 1
+        assert unhealthy_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_callback_degraded_alert(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "consumer_status": "running",
+                "account_sync_mode": "query_fallback",
+                "asset_callback_freshness": "stale",
+            },
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        degraded_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_callback_degraded"
+        ]
+        assert len(degraded_alerts) == 1
+        assert degraded_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_callback_degraded_alert_survives_newer_generic_runtime(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "consumer_status": "running",
+                "account_sync_mode": "query_fallback",
+                "asset_callback_freshness": "stale",
+            },
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="account_status",
+            event_ts=datetime(2026, 4, 13, 9, 38, tzinfo=timezone.utc),
+            payload={"status": "connected"},
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        degraded_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_callback_degraded"
+        ]
+        assert len(degraded_alerts) == 1
+        assert degraded_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_callback_degraded_alert_when_owner_teardown_is_newer_than_state(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_owner_closed",
+            event_ts=datetime(2026, 4, 13, 9, 38, tzinfo=timezone.utc),
+            payload={"status": "closed"},
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.broker_account_sync_mode == "query_fallback"
+        assert health.broker_asset_callback_freshness == "unavailable"
+
+        alerts = monitor.check_alerts()
+        degraded_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_callback_degraded"
+        ]
+        assert len(degraded_alerts) == 1
+        assert degraded_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_callback_degraded_alert_when_disconnected_is_newer_than_state(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="disconnected",
+            event_ts=datetime(2026, 4, 13, 9, 38, tzinfo=timezone.utc),
+            payload={"status": "disconnected"},
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.broker_account_sync_mode == "query_fallback"
+        assert health.broker_asset_callback_freshness == "unavailable"
+
+        alerts = monitor.check_alerts()
+        degraded_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_callback_degraded"
+        ]
+        assert len(degraded_alerts) == 1
+        assert degraded_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_broker_callback_degraded_alert_clears_after_newer_consumer_state_recovery(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [1_000_000.0])
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_owner_closed",
+            event_ts=datetime(2026, 4, 13, 9, 38, tzinfo=timezone.utc),
+            payload={"status": "closed"},
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 39, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.broker_account_sync_mode == "callback_preferred"
+        assert health.broker_asset_callback_freshness == "fresh"
+
+        alerts = monitor.check_alerts()
+        degraded_alerts = [
+            a for a in alerts if a["alert_type"] == "broker_callback_degraded"
+        ]
+        assert degraded_alerts == []
+
+    def test_monitor_ignores_stale_runtime_projection_when_newer_runtime_event_exists(self):
+        store = _make_store()
+        spec = _make_spec(
+            broker_type="qmt",
+            shadow_broker_type="qmt",
+            initial_cash=100_000.0,
+            risk_params={
+                "qmt_real_broker_config": {"account_id": "acct-real"},
+                "shadow_broker_config": {"account_id": "acct-shadow"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-real"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 200_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-real")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [100_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok", "broker_type": "qmt"},
+                {"event": "broker_order_reconcile", "status": "ok", "broker_type": "qmt"},
+            ]],
+        )
+        store.upsert_broker_state_projection(
+            rec.deployment_id,
+            broker_type="qmt",
+            projection={
+                "deployment_status": "running",
+                "projection_source": "runtime",
+                "projection_ts": "2026-04-13T09:37:00+00:00",
+                "latest_callback_account_mode": "callback_preferred",
+                "latest_callback_account_freshness": "fresh",
+                "qmt_submit_gate": {"status": "open", "can_submit_now": True},
+                "qmt_release_gate": {
+                    "status": "candidate",
+                    "eligible_for_real_submit": True,
+                    "blockers": [],
+                },
+            },
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="disconnected",
+            event_ts=datetime(2026, 4, 13, 9, 38, tzinfo=timezone.utc),
+            payload={"status": "disconnected"},
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.broker_account_sync_mode == "query_fallback"
+        assert health.broker_asset_callback_freshness == "unavailable"
+        assert health.qmt_release_gate_status == "blocked"
+        assert "qmt_submit_gate_blocked" in health.qmt_release_blockers
+        assert health.qmt_projection_source is None
+        assert health.qmt_projection_ts is None
+        assert health.qmt_target_account_id == "acct-real"
+
+    def test_monitor_exposes_qmt_projection_provenance_from_runtime_projection(self):
+        store = _make_store()
+        spec = _make_spec(
+            broker_type="qmt",
+            shadow_broker_type="qmt",
+            initial_cash=100_000.0,
+            risk_params={
+                "qmt_real_broker_config": {"account_id": "acct-real"},
+                "shadow_broker_config": {"account_id": "acct-shadow"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-real"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 200_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-real")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        store.upsert_broker_state_projection(
+            rec.deployment_id,
+            broker_type="qmt",
+            projection={
+                "deployment_status": "running",
+                "projection_source": "runtime",
+                "projection_ts": "2026-04-14T09:37:00+00:00",
+                "target_account_id": "acct-real",
+                "latest_callback_account_mode": "callback_preferred",
+                "latest_callback_account_freshness": "fresh",
+                "qmt_submit_gate": {
+                    "status": "open",
+                    "can_submit_now": True,
+                    "preflight_ok": True,
+                    "source": "runtime",
+                },
+                "qmt_release_gate": {
+                    "status": "candidate",
+                    "eligible_for_real_submit": True,
+                    "eligible_for_release_candidate": True,
+                    "blockers": [],
+                    "source": "runtime",
+                },
+            },
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.qmt_projection_source == "runtime"
+        assert health.qmt_projection_ts == "2026-04-14T09:37:00+00:00"
+        assert health.qmt_target_account_id == "acct-real"
+        assert health.qmt_release_gate_status == "candidate"
+        assert health.qmt_release_candidate is True
+
+    def test_qmt_release_gate_blocked_alert_clears_after_newer_real_reconcile_recovery(self):
+        store = _make_store()
+        spec = _make_spec(
+            broker_type="qmt",
+            shadow_broker_type="qmt",
+            initial_cash=100_000.0,
+            risk_params={
+                "qmt_real_broker_config": {"account_id": "acct-real"},
+                "shadow_broker_config": {"account_id": "acct-shadow"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-real"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 200_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-real")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(store, rec.deployment_id, [100_000.0])
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 14, 9, 34, tzinfo=timezone.utc),
+                cash=100_000.0,
+                total_asset=100_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+                account_id="acct-real",
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_connected",
+            event_ts=datetime(2026, 4, 14, 9, 35, tzinfo=timezone.utc),
+            payload={"status": "connected"},
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 14, 9, 36, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 14),
+                risk_index=0,
+                risk_event={"event": "real_broker_reconcile", "status": "drift", "broker_type": "qmt"},
+                event_ts=datetime(2026, 4, 14, 9, 37, tzinfo=timezone.utc),
+            )
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 14),
+                risk_index=1,
+                risk_event={
+                    "event": "real_qmt_reconcile_hard_gate",
+                    "status": "blocked",
+                    "broker_type": "qmt",
+                    "blockers": ["broker_reconcile_drift"],
+                },
+                event_ts=datetime(2026, 4, 14, 9, 37, 1, tzinfo=timezone.utc),
+            )
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 14),
+                risk_index=2,
+                risk_event={"event": "real_broker_reconcile", "status": "ok", "broker_type": "qmt"},
+                event_ts=datetime(2026, 4, 14, 9, 38, tzinfo=timezone.utc),
+            )
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 14),
+                risk_index=3,
+                risk_event={"event": "real_broker_order_reconcile", "status": "ok", "broker_type": "qmt"},
+                event_ts=datetime(2026, 4, 14, 9, 38, 1, tzinfo=timezone.utc),
+            )
+        )
+        store.append_event(
+            make_risk_event(
+                rec.deployment_id,
+                business_date=date(2026, 4, 14),
+                risk_index=4,
+                risk_event={
+                    "event": "real_qmt_reconcile_hard_gate",
+                    "status": "open",
+                    "broker_type": "qmt",
+                    "blockers": [],
+                },
+                event_ts=datetime(2026, 4, 14, 9, 38, 2, tzinfo=timezone.utc),
+            )
+        )
+
+        monitor = Monitor(store)
+        health = monitor.get_dashboard()[0]
+        assert health.qmt_hard_gate_status == "open"
+        assert health.qmt_release_gate_status == "candidate"
+        alerts = monitor.check_alerts()
+        blocked_alerts = [
+            a for a in alerts if a["alert_type"] == "qmt_release_gate_blocked"
+        ]
+        assert blocked_alerts == []
+
+    def test_build_persisted_broker_order_view_projects_cancel_error_from_runtime(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        store.save_broker_sync_result(
+            deployment_id=rec.deployment_id,
+            events=[],
+            broker_reports=[
+                BrokerExecutionReport(
+                    report_id="qmt:SYS-001:partially_filled:600:400:2026-04-13T15:00:00+00:00",
+                    broker_type="qmt",
+                    as_of=datetime(2026, 4, 13, 15, 0, tzinfo=timezone.utc),
+                    client_order_id="dep-1:2026-04-13:000001.SZ:buy",
+                    broker_order_id="SYS-001",
+                    symbol="000001.SZ",
+                    side="buy",
+                    status="partially_filled",
+                    filled_shares=600,
+                    remaining_shares=400,
+                    avg_price=12.34,
+                )
+            ],
+        )
+        store.append_event(
+            make_broker_cancel_requested_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                request_ts=datetime(2026, 4, 13, 15, 1, tzinfo=timezone.utc),
+                client_order_id="dep-1:2026-04-13:000001.SZ:buy",
+                broker_order_id="SYS-001",
+                symbol="000001.SZ",
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="cancel_error",
+            event_ts=datetime(2026, 4, 13, 15, 2, tzinfo=timezone.utc),
+            payload={
+                "client_order_id": "dep-1:2026-04-13:000001.SZ:buy",
+                "order_sysid": "SYS-001",
+                "status_msg": "cancel rejected",
+            },
+        )
+
+        projected = build_persisted_broker_order_view(store, rec.deployment_id)
+
+        assert len(projected) == 1
+        assert projected[0]["latest_status"] == "partially_filled"
+        assert projected[0]["cancel_state"] == "cancel_error"
+        assert projected[0]["cancel_error_message"] == "cancel rejected"
+
+    def test_build_persisted_broker_order_view_uses_latest_retry_cancel_request(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        store.save_broker_sync_result(
+            deployment_id=rec.deployment_id,
+            events=[],
+            broker_reports=[
+                BrokerExecutionReport(
+                    report_id="qmt:SYS-001:partially_filled:600:400:2026-04-13T15:00:00+00:00",
+                    broker_type="qmt",
+                    as_of=datetime(2026, 4, 13, 15, 0, tzinfo=timezone.utc),
+                    client_order_id="dep-1:2026-04-13:000001.SZ:buy",
+                    broker_order_id="SYS-001",
+                    symbol="000001.SZ",
+                    side="buy",
+                    status="partially_filled",
+                    filled_shares=600,
+                    remaining_shares=400,
+                    avg_price=12.34,
+                )
+            ],
+        )
+        store.append_events(
+            [
+                make_broker_cancel_requested_event(
+                    rec.deployment_id,
+                    broker_type="qmt",
+                    request_ts=datetime(2026, 4, 13, 15, 1, tzinfo=timezone.utc),
+                    client_order_id="dep-1:2026-04-13:000001.SZ:buy",
+                    broker_order_id="SYS-001",
+                    symbol="000001.SZ",
+                ),
+                make_broker_runtime_event(
+                    rec.deployment_id,
+                    runtime_event_id="cancel_error:SYS-001",
+                    broker_type="qmt",
+                    runtime_kind="cancel_error",
+                    event_ts=datetime(2026, 4, 13, 15, 2, tzinfo=timezone.utc),
+                    payload={
+                        "client_order_id": "dep-1:2026-04-13:000001.SZ:buy",
+                        "order_sysid": "SYS-001",
+                        "status_msg": "cancel rejected",
+                    },
+                ),
+                make_broker_cancel_requested_event(
+                    rec.deployment_id,
+                    broker_type="qmt",
+                    request_ts=datetime(2026, 4, 13, 15, 3, tzinfo=timezone.utc),
+                    client_order_id="dep-1:2026-04-13:000001.SZ:buy",
+                    broker_order_id="SYS-001",
+                    symbol="000001.SZ",
+                ),
+            ]
+        )
+
+        projected = build_persisted_broker_order_view(store, rec.deployment_id)
+
+        assert len(projected) == 1
+        assert projected[0]["cancel_state"] == "cancel_inflight"
+        assert projected[0]["cancel_requested_at"] == datetime(2026, 4, 13, 15, 3)
+
+    def test_build_persisted_broker_order_view_scopes_cancel_events_by_broker_type(self):
+        store = _make_store()
+        spec = _make_spec(shadow_broker_type="qmt")
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        shared_client_order_id = "dep-1:2026-04-13:000001.SZ:buy"
+        store.save_broker_sync_result(
+            deployment_id=rec.deployment_id,
+            events=[],
+            broker_reports=[
+                BrokerExecutionReport(
+                    report_id="qmt:SYS-001:reported:0:1000:2026-04-13T15:00:00+00:00",
+                    broker_type="qmt",
+                    as_of=datetime(2026, 4, 13, 15, 0, tzinfo=timezone.utc),
+                    client_order_id=shared_client_order_id,
+                    broker_order_id="SYS-001",
+                    symbol="000001.SZ",
+                    side="buy",
+                    status="reported",
+                    filled_shares=0,
+                    remaining_shares=1000,
+                    avg_price=0.0,
+                ),
+                BrokerExecutionReport(
+                    report_id="paper:P-001:reported:0:1000:2026-04-13T15:00:00+00:00",
+                    broker_type="paper",
+                    as_of=datetime(2026, 4, 13, 15, 0, tzinfo=timezone.utc),
+                    client_order_id=shared_client_order_id,
+                    broker_order_id="P-001",
+                    symbol="000001.SZ",
+                    side="buy",
+                    status="reported",
+                    filled_shares=0,
+                    remaining_shares=1000,
+                    avg_price=0.0,
+                ),
+            ],
+        )
+        store.append_events(
+            [
+                make_broker_cancel_requested_event(
+                    rec.deployment_id,
+                    broker_type="qmt",
+                    request_ts=datetime(2026, 4, 13, 15, 1, tzinfo=timezone.utc),
+                    client_order_id=shared_client_order_id,
+                    broker_order_id="SYS-001",
+                    symbol="000001.SZ",
+                ),
+                make_broker_runtime_event(
+                    rec.deployment_id,
+                    runtime_event_id="cancel_error:SYS-001",
+                    broker_type="qmt",
+                    runtime_kind="cancel_error",
+                    event_ts=datetime(2026, 4, 13, 15, 2, tzinfo=timezone.utc),
+                    payload={
+                        "client_order_id": shared_client_order_id,
+                        "order_sysid": "SYS-001",
+                        "status_msg": "cancel rejected",
+                    },
+                ),
+            ]
+        )
+
+        projected = build_persisted_broker_order_view(store, rec.deployment_id)
+        projected_by_type = {
+            str(row["broker_type"]): row
+            for row in projected
+        }
+
+        assert projected_by_type["qmt"]["cancel_state"] == "cancel_error"
+        assert projected_by_type["paper"]["cancel_state"] == "none"
+
+    def test_qmt_release_gate_blocked_alert(self):
+        store = _make_store()
+        spec = _make_spec(
+            shadow_broker_type="qmt",
+            risk_params={
+                "shadow_broker_config": {"account_id": "acct-1"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-1"],
+                    "max_total_asset": 50_000.0,
+                    "max_initial_cash": 2_000_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok"},
+                {"event": "broker_order_reconcile", "status": "ok"},
+            ]],
+        )
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+                cash=90_000.0,
+                total_asset=140_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        release_alerts = [
+            a for a in alerts if a["alert_type"] == "qmt_release_gate_blocked"
+        ]
+        assert len(release_alerts) == 1
+        assert release_alerts[0]["deployment_id"] == rec.deployment_id
+
+    def test_qmt_release_gate_shadow_only_does_not_alert(self):
+        store = _make_store()
+        spec = _make_spec(
+            shadow_broker_type="qmt",
+            risk_params={
+                "shadow_broker_config": {"account_id": "acct-1"},
+                "qmt_real_submit_policy": {
+                    "enabled": True,
+                    "allowed_account_ids": ["acct-1"],
+                    "max_total_asset": 200_000.0,
+                    "max_initial_cash": 2_000_000.0,
+                },
+            },
+        )
+        store.save_spec(spec)
+        rec = _make_record(spec, status="running", name="qmt-shadow")
+        rec.gate_verdict = json.dumps({"passed": True, "summary": "ok", "reasons": []})
+        store.save_record(rec)
+        store.update_status(rec.deployment_id, "running")
+
+        _save_snapshots(
+            store,
+            rec.deployment_id,
+            [1_000_000.0],
+            risk_events_per_day=[[
+                {"event": "broker_reconcile", "status": "ok"},
+                {"event": "broker_order_reconcile", "status": "ok"},
+            ]],
+        )
+        store.append_event(
+            make_broker_account_event(
+                rec.deployment_id,
+                broker_type="qmt",
+                account_ts=datetime(2026, 4, 13, 9, 31, tzinfo=timezone.utc),
+                cash=90_000.0,
+                total_asset=140_000.0,
+                positions={},
+                open_orders=[],
+                fill_count=0,
+            )
+        )
+        _append_runtime_event(
+            store,
+            rec.deployment_id,
+            runtime_kind="session_consumer_state",
+            event_ts=datetime(2026, 4, 13, 9, 37, tzinfo=timezone.utc),
+            payload={
+                "status": "connected",
+                "consumer_status": "running",
+                "account_sync_mode": "callback_preferred",
+                "asset_callback_freshness": "fresh",
+            },
+        )
+
+        monitor = Monitor(store)
+        alerts = monitor.check_alerts()
+        release_alerts = [
+            a for a in alerts if a["alert_type"] == "qmt_release_gate_blocked"
+        ]
+        assert release_alerts == []
 
 
 class TestNoAlertsHealthy:

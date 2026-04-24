@@ -16,8 +16,9 @@ This test pins the restore contract:
    falls back silently to fresh construction — no crash.
 4. If unpickle fails (class renamed, format drift), restart falls back
    silently.
-5. Class-name mismatch between stored pickle and current spec is
-   detected (prevents restoring an MLAlpha over a TopNRotation).
+5. Class/schema mismatch between stored pickle and current spec is
+   detected (prevents restoring an MLAlpha over a TopNRotation, or
+   reviving an incompatible old state blob after a schema bump).
 """
 from __future__ import annotations
 
@@ -76,6 +77,13 @@ class _MismatchBeta:
     lookback_days = 5
 
 
+class _VersionedStrategy:
+    lookback_days = 5
+
+    def __init__(self, version: int):
+        self.__state_schema_version__ = version
+
+
 # ---------------------------------------------------------------------------
 # Store round-trip
 # ---------------------------------------------------------------------------
@@ -118,9 +126,8 @@ def test_no_strategy_state_returns_none(tmp_path) -> None:
     assert store.get_latest_strategy_state("dep-B") is None
 
 
-def test_latest_state_is_most_recent_non_null(tmp_path) -> None:
-    """Multi-day: getter returns the most recent non-null blob,
-    skipping days where state wasn't saved (e.g., a failure)."""
+def test_latest_state_is_only_from_latest_snapshot(tmp_path) -> None:
+    """A newer NULL snapshot must block reuse of an older pickle blob."""
     store = _tmp_store(tmp_path)
     early = pickle.dumps(("early", 1))
     late = pickle.dumps(("late", 99))
@@ -143,12 +150,13 @@ def test_latest_state_is_most_recent_non_null(tmp_path) -> None:
     )
     assert store.get_latest_strategy_state("dep-C") == late
 
-    # Day 4: no state again — still returns late (latest non-null)
+    # Day 4: no state again — restart must fall back to fresh strategy,
+    # not silently resurrect the older Day-3 pickle.
     store.save_daily_snapshot(
         "dep-C", date(2024, 1, 4),
         {"equity": 4, "cash": 4, "holdings": {}, "weights": {}},
     )
-    assert store.get_latest_strategy_state("dep-C") == late
+    assert store.get_latest_strategy_state("dep-C") is None
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +271,37 @@ def test_start_engine_ignores_mismatched_class_pickle(tmp_path, monkeypatch) -> 
     # Class-name mismatch blocked the swap.
     eng = sched._engines["dep-mismatch"]
     assert type(eng.strategy).__name__ == "_MismatchBeta"
+
+
+def test_start_engine_ignores_schema_mismatched_pickle(tmp_path, monkeypatch) -> None:
+    """Same class with a newer schema version must stay on fresh state."""
+    from ez.live.scheduler import Scheduler
+
+    store = _tmp_store(tmp_path)
+    store.save_daily_snapshot(
+        "dep-versioned", date(2024, 1, 1),
+        {"equity": 1, "cash": 1, "holdings": {}, "weights": {}},
+        strategy_state=pickle.dumps(_VersionedStrategy(version=1)),
+    )
+
+    fresh = _VersionedStrategy(version=2)
+    spec = MagicMock(
+        symbols=(), market="cn_stock", freq="daily",
+        initial_cash=1000.0, stamp_tax_rate=0.0, lot_size=1,
+        price_limit_pct=0.0, t_plus_1=False,
+    )
+    record = MagicMock(deployment_id="dep-versioned", spec_id="sp")
+
+    sched = Scheduler(store=store, data_chain=MagicMock())
+    monkeypatch.setattr(store, "get_record", lambda _id: record)
+    monkeypatch.setattr(store, "get_spec", lambda _id: spec)
+    monkeypatch.setattr(sched, "_instantiate", lambda _spec: (fresh, None, None))
+    monkeypatch.setattr(sched, "_restore_full_state", lambda _e, _d: None)
+
+    import asyncio
+
+    asyncio.run(sched._start_engine("dep-versioned"))
+
+    eng = sched._engines["dep-versioned"]
+    assert eng.strategy is fresh
+    assert eng.strategy.__state_schema_version__ == 2

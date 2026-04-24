@@ -115,7 +115,11 @@ class DeployGate:
             )
         )
 
-        trades_count = metrics.get("trade_count", 0)
+        trades_count = (
+            metrics.get("trade_count")
+            if "trade_count" in metrics
+            else metrics.get("total_trades", run.get("trade_count", 0))
+        )
         reasons.append(
             GateReason(
                 rule="min_trades",

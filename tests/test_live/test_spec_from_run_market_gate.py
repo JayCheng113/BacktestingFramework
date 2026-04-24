@@ -132,6 +132,29 @@ def test_legacy_top_level_fields_still_read() -> None:
     assert spec.price_limit_pct == 0.10
 
 
+def test_legacy_top_level_optimizer_and_risk_fields_still_read() -> None:
+    """Older run payloads may store optimizer/risk only in flat config keys."""
+    run = {
+        "strategy_name": "T",
+        "strategy_params": {},
+        "symbols": ["A"],
+        "initial_cash": 100000.0,
+        "config": {
+            "market": "cn_stock",
+            "freq": "weekly",
+            "optimizer": "mean_variance",
+            "optimizer_params": {"kind": "mean_variance", "window": 20},
+            "risk_control": True,
+            "risk_params": {"enabled": True, "max_drawdown": 0.2},
+        },
+    }
+    spec = _build_spec_from_run(run)
+    assert spec.optimizer == "mean_variance"
+    assert spec.optimizer_params == {"kind": "mean_variance", "window": 20}
+    assert spec.risk_control is True
+    assert spec.risk_params == {"enabled": True, "max_drawdown": 0.2}
+
+
 def test_missing_config_uses_market_gated_defaults() -> None:
     """If config is empty (minimal run dict, e.g. from a legacy path
     that didn't save anything), market determines the defaults — CN

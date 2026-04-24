@@ -155,6 +155,24 @@ class AlertDispatcher:
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(self.webhook_url, json=payload)
             resp.raise_for_status()
+            if self.template in {"dingtalk", "wecom"}:
+                self._raise_on_business_error(resp)
+
+    def _raise_on_business_error(self, response) -> None:
+        try:
+            payload = response.json()
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+        errcode = payload.get("errcode")
+        if errcode in (None, 0, "0", ""):
+            return
+        errmsg = str(payload.get("errmsg", "") or payload.get("message", "") or "").strip()
+        raise RuntimeError(
+            f"webhook business error errcode={errcode}"
+            + (f": {errmsg}" if errmsg else "")
+        )
 
 
 def from_env() -> AlertDispatcher | None:

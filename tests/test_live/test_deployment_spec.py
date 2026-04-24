@@ -169,6 +169,121 @@ class TestDeploymentSpec:
         assert s_none.spec_id != s_thu.spec_id
         assert s_thu.spec_id != s_fri.spec_id
 
+    def test_from_json_preserves_stored_spec_id_for_backward_compat(self):
+        s1 = DeploymentSpec(
+            strategy_name="TopN",
+            strategy_params={},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+            rebal_weekday=3,
+        )
+        payload = json.loads(s1.to_json())
+        payload["spec_id"] = "legacy-spec-id"
+        s2 = DeploymentSpec.from_json(json.dumps(payload, ensure_ascii=False))
+        assert s2.spec_id == "legacy-spec-id"
+
+    def test_broker_type_round_trip(self):
+        s1 = DeploymentSpec(
+            strategy_name="TopN",
+            strategy_params={},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+            broker_type="paper",
+        )
+        s2 = DeploymentSpec.from_json(s1.to_json())
+        assert s2.broker_type == "paper"
+        assert s1.spec_id == s2.spec_id
+
+    def test_broker_type_affects_spec_id(self):
+        base = dict(
+            strategy_name="TopN",
+            strategy_params={},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+        )
+        s1 = DeploymentSpec(**base, broker_type="paper")
+        s2 = DeploymentSpec(**base, broker_type="qmt")
+        assert s1.spec_id != s2.spec_id
+
+    def test_shadow_broker_type_round_trip(self):
+        s1 = DeploymentSpec(
+            strategy_name="TopN",
+            strategy_params={},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+            shadow_broker_type="qmt",
+            risk_params={"shadow_broker_config": {"account_id": "acct-1"}},
+        )
+        s2 = DeploymentSpec.from_json(s1.to_json())
+        assert s2.shadow_broker_type == "qmt"
+        assert s2.risk_params["shadow_broker_config"]["account_id"] == "acct-1"
+
+    def test_shadow_broker_type_affects_spec_id(self):
+        base = dict(
+            strategy_name="TopN",
+            strategy_params={},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+        )
+        s1 = DeploymentSpec(**base, shadow_broker_type="")
+        s2 = DeploymentSpec(**base, shadow_broker_type="qmt")
+        assert s1.spec_id != s2.spec_id
+
+    def test_spec_id_matches_for_same_broker_type_all_fields_equal(self):
+        """Same content AND same broker_type -> same spec_id."""
+        base = dict(
+            strategy_name="TopN",
+            strategy_params={"top_n": 5},
+            symbols=("000001.SZ", "600000.SH"),
+            market="cn_stock",
+            freq="weekly",
+            broker_type="qmt",
+            shadow_broker_type="qmt",
+        )
+        assert DeploymentSpec(**base).spec_id == DeploymentSpec(**base).spec_id
+
+    def test_spec_id_differs_for_different_broker_type_same_rest(self):
+        """Flipping broker_type alone is enough to diverge spec_id."""
+        base = dict(
+            strategy_name="TopN",
+            strategy_params={"top_n": 5},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+            shadow_broker_type="",
+        )
+        s_paper = DeploymentSpec(**base, broker_type="paper")
+        s_qmt = DeploymentSpec(**base, broker_type="qmt")
+        assert s_paper.spec_id != s_qmt.spec_id
+
+    def test_is_legacy_spec_id_detects_content_mismatch(self):
+        """A spec whose persisted spec_id no longer matches the canonical
+        content hash is flagged as legacy. Fresh specs are non-legacy.
+        """
+        fresh = DeploymentSpec(
+            strategy_name="TopN",
+            strategy_params={},
+            symbols=("A",),
+            market="cn_stock",
+            freq="weekly",
+            broker_type="qmt",
+        )
+        assert fresh.is_legacy_spec_id() is False
+        assert fresh.compute_content_hash() == fresh.spec_id
+
+        import json as _json
+        payload = _json.loads(fresh.to_json())
+        payload["spec_id"] = "legacy-hash-00"
+        legacy = DeploymentSpec.from_json(_json.dumps(payload, ensure_ascii=False))
+        assert legacy.spec_id == "legacy-hash-00"
+        assert legacy.is_legacy_spec_id() is True
+        assert legacy.compute_content_hash() == fresh.spec_id
+
 
 # ---------------------------------------------------------------------------
 # DeploymentRecord

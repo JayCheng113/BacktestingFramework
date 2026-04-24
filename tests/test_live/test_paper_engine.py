@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from ez.live.deployment_spec import DeploymentSpec
+from ez.live.events import EventType
 from ez.live.paper_engine import PaperTradingEngine
 from ez.portfolio.execution import CostModel
 
@@ -100,6 +101,17 @@ def _make_fake_bars(dates: list[date], close: float = 10.0) -> list[FakeBar]:
     ]
 
 
+def _make_fake_bars_prices(date_price_pairs: list[tuple[date, float]]) -> list[FakeBar]:
+    return [
+        FakeBar(
+            time=datetime.combine(d, datetime.min.time()),
+            open=price, high=price, low=price,
+            close=price, adj_close=price, volume=1000,
+        )
+        for d, price in date_price_pairs
+    ]
+
+
 def _make_strategy(target_weights: dict[str, float], lookback_days: int = 30):
     """Create a mock PortfolioStrategy returning fixed target_weights."""
     strat = MagicMock()
@@ -161,6 +173,235 @@ class TestExecuteDayRebalance:
         assert len(engine.equity_curve) == 1
         assert len(engine.dates) == 1
         assert engine.dates[0] == today
+
+    def test_execute_day_surfaces_pretrade_risk_events(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(35, 0, -1)]
+        lookback_dates.append(today)
+
+        spec = _make_spec(
+            symbols=("AAA",),
+            risk_control=True,
+            risk_params={"kill_switch": True},
+            slippage_rate=0.0,
+            min_commission=0.0,
+        )
+        bars = _make_fake_bars(lookback_dates, close=10.0)
+        chain = _mock_data_chain({"AAA": bars})
+        strategy = _make_strategy({"AAA": 0.5})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+
+        result = engine.execute_day(today)
+
+        assert result["rebalanced"] is True
+        assert result["trades"] == []
+        assert len(result["risk_events"]) == 1
+        assert result["risk_events"][0]["event"] == "pretrade_reject"
+        assert result["risk_events"][0]["rule"] == "kill_switch"
+        assert len(result["_oms_events"]) == 1
+        assert result["_oms_events"][0].event_type == EventType.ORDER_REJECTED
+
+    def test_execute_day_applies_runtime_allocation_gate_and_tracks_statuses(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(35, 0, -1)]
+        lookback_dates.append(today)
+
+        spec = _make_spec(
+            symbols=("AAA", "BBB"),
+            risk_control=True,
+            risk_params={"runtime_allocation_cap": 0.50},
+            slippage_rate=0.0,
+            min_commission=0.0,
+        )
+        bars = {
+            "AAA": _make_fake_bars(lookback_dates, close=10.0),
+            "BBB": _make_fake_bars(lookback_dates, close=10.0),
+        }
+        chain = _mock_data_chain(bars)
+        strategy = _make_strategy({"AAA": 0.6, "BBB": 0.4})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+
+        result = engine.execute_day(today)
+
+        assert result["risk_events"][0]["event"] == "runtime_allocation_gate"
+        assert result["holdings"] == {"AAA": 30_000, "BBB": 20_000}
+        assert len(engine._order_statuses) == 2
+        assert set(engine._order_statuses.values()) == {"filled"}
+
+    def test_execute_day_applies_runtime_allocator_policy(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(35, 0, -1)]
+        lookback_dates.append(today)
+
+        spec = _make_spec(
+            symbols=("AAA", "BBB", "CCC"),
+            risk_control=True,
+            risk_params={
+                "allocation_mode": "equal_weight_cap",
+                "runtime_allocation_cap": 0.6,
+                "max_names": 2,
+            },
+            slippage_rate=0.0,
+            min_commission=0.0,
+        )
+        bars = {
+            "AAA": _make_fake_bars(lookback_dates, close=10.0),
+            "BBB": _make_fake_bars(lookback_dates, close=10.0),
+            "CCC": _make_fake_bars(lookback_dates, close=10.0),
+        }
+        chain = _mock_data_chain(bars)
+        strategy = _make_strategy({"AAA": 0.5, "BBB": 0.3, "CCC": 0.2})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+
+        result = engine.execute_day(today)
+
+        assert result["holdings"] == {"AAA": 30_000, "BBB": 30_000}
+        assert result["risk_events"][0]["event"] == "runtime_allocator"
+        assert result["risk_events"][0]["details"]["dropped_symbols"] == ["CCC"]
+        assert set(engine._order_statuses.values()) == {"filled"}
+
+    def test_execute_day_uses_risk_budget_allocator_from_history_vols(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(40, 0, -1)]
+        lookback_dates.append(today)
+        aaa_prices = []
+        bbb_prices = []
+        for idx, d in enumerate(lookback_dates):
+            aaa_prices.append((d, 10.0 + ((-1) ** idx) * 1.5))
+            bbb_prices.append((d, 10.0 + ((-1) ** idx) * 0.2))
+
+        spec = _make_spec(
+            symbols=("AAA", "BBB"),
+            risk_control=True,
+            risk_params={
+                "allocation_mode": "risk_budget_cap",
+                "runtime_allocation_cap": 0.6,
+                "target_portfolio_vol": 0.15,
+                "vol_lookback_days": 20,
+            },
+            slippage_rate=0.0,
+            min_commission=0.0,
+        )
+        bars = {
+            "AAA": _make_fake_bars_prices(aaa_prices),
+            "BBB": _make_fake_bars_prices(bbb_prices),
+        }
+        chain = _mock_data_chain(bars)
+        strategy = _make_strategy({"AAA": 0.3, "BBB": 0.3})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+
+        result = engine.execute_day(today)
+
+        assert result["risk_events"][0]["event"] == "runtime_allocator"
+        details = result["risk_events"][0]["details"]
+        assert details["allocation_mode"] == "risk_budget_cap"
+        assert details["adjusted_weights"]["BBB"] > details["adjusted_weights"]["AAA"]
+        assert details["estimated_portfolio_vol"] > details["target_portfolio_vol"]
+
+    def test_execute_day_uses_constrained_optimizer_allocator_with_current_weights(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(40, 0, -1)]
+        lookback_dates.append(today)
+
+        spec = _make_spec(
+            symbols=("AAA", "BBB"),
+            risk_control=True,
+            risk_params={
+                "allocation_mode": "constrained_opt",
+                "runtime_allocation_cap": 0.8,
+                "max_daily_turnover": 0.4,
+            },
+            slippage_rate=0.0,
+            min_commission=0.0,
+        )
+        bars = {
+            "AAA": _make_fake_bars(lookback_dates, close=10.0),
+            "BBB": _make_fake_bars(lookback_dates, close=10.0),
+        }
+        chain = _mock_data_chain(bars)
+        strategy = _make_strategy({"AAA": 0.1, "BBB": 0.8})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+        engine.holdings = {"AAA": 50_000}
+        engine.cash = 500_000.0
+
+        result = engine.execute_day(today)
+
+        assert result["holdings"] == {"AAA": 35_000, "BBB": 25_000}
+        assert result["risk_events"][0]["event"] == "runtime_allocator"
+        assert result["risk_events"][0]["details"]["allocation_mode"] == "constrained_opt"
+        assert result["risk_events"][0]["details"]["effective_turnover"] == pytest.approx(0.4)
+        assert set(engine._order_statuses.values()) == {"filled"}
+
+    def test_execute_day_uses_covariance_aware_allocator_from_history(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(60, 0, -1)]
+        lookback_dates.append(today)
+        aaa_prices = []
+        bbb_prices = []
+        for idx, d in enumerate(lookback_dates):
+            aaa_prices.append((d, 10.0 + ((-1) ** idx) * 1.5))
+            bbb_prices.append((d, 10.0 + ((-1) ** idx) * 0.2))
+
+        spec = _make_spec(
+            symbols=("AAA", "BBB"),
+            risk_control=True,
+            risk_params={
+                "allocation_mode": "constrained_opt",
+                "runtime_allocation_cap": 0.8,
+                "covariance_risk_aversion": 8.0,
+                "risk_budget_strength": 0.5,
+                "covariance_lookback_days": 40,
+            },
+            slippage_rate=0.0,
+            min_commission=0.0,
+        )
+        bars = {
+            "AAA": _make_fake_bars_prices(aaa_prices),
+            "BBB": _make_fake_bars_prices(bbb_prices),
+        }
+        chain = _mock_data_chain(bars)
+        strategy = _make_strategy({"AAA": 0.4, "BBB": 0.4})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+
+        result = engine.execute_day(today)
+
+        details = result["risk_events"][0]["details"]
+        assert details["allocation_mode"] == "constrained_opt"
+        assert details["covariance_used"] is True
+        assert details["adjusted_weights"]["BBB"] > details["adjusted_weights"]["AAA"]
+        assert result["holdings"]["BBB"] > result["holdings"].get("AAA", 0)
+
+    def test_execute_day_surfaces_market_bar_payloads(self):
+        today = date(2024, 6, 28)
+        lookback_dates = [today - timedelta(days=i) for i in range(35, 0, -1)]
+        lookback_dates.append(today)
+
+        spec = _make_spec(symbols=("AAA",), slippage_rate=0.0, min_commission=0.0)
+        bars = {"AAA": _make_fake_bars(lookback_dates, close=10.0)}
+        chain = _mock_data_chain(bars)
+        strategy = _make_strategy({"AAA": 0.5})
+
+        engine = PaperTradingEngine(spec=spec, strategy=strategy, data_chain=chain)
+        engine._calendar = _make_calendar_patch(lookback_dates, [today])
+
+        result = engine.execute_day(today)
+
+        assert result["_market_snapshot"]["has_bar_symbols"] == ["AAA"]
+        assert len(result["_market_bars"]) == 1
+        assert result["_market_bars"][0]["symbol"] == "AAA"
+        assert result["_market_bars"][0]["adj_close"] == 10.0
 
     def test_strategy_receives_datetime_not_date(self):
         """Verify that strategy.generate_weights() receives datetime, not date."""
