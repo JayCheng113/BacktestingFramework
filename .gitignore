@@ -30,3 +30,5 @@ qlib_data/
 validation/
 .qlib/
 *.local
+.DS_Store
+data/cache/*.bak
