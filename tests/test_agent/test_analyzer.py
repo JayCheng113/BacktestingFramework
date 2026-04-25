@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ez.agent.analyzer import AnalysisResult, analyze_results, _build_summary
-from ez.agent.hypothesis import ResearchGoal
+from ez.agent.research.analyzer import AnalysisResult, analyze_results, _build_summary
+from ez.agent.research.hypothesis import ResearchGoal
 from ez.llm.provider import LLMResponse
 
 

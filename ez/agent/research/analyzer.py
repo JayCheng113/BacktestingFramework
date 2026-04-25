@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from ez.agent.hypothesis import ResearchGoal
+from ez.agent.research.hypothesis import ResearchGoal
 from ez.llm.provider import LLMMessage, LLMProvider
 
 logger = logging.getLogger(__name__)

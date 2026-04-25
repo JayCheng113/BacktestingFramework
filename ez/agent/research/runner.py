@@ -9,12 +9,12 @@ from datetime import datetime
 
 import pandas as pd
 
-from ez.agent.analyzer import analyze_results
-from ez.agent.code_gen import generate_strategy_code
+from ez.agent.research.analyzer import analyze_results
+from ez.agent.research.code_gen import generate_strategy_code
 from ez.agent.data_access import get_chain, get_experiment_store, get_research_store
-from ez.agent.hypothesis import ResearchGoal, generate_hypotheses
-from ez.agent.loop_controller import LoopConfig, LoopController, LoopState
-from ez.agent.research_report import build_report
+from ez.agent.research.hypothesis import ResearchGoal, generate_hypotheses
+from ez.agent.research.loop_controller import LoopConfig, LoopController, LoopState
+from ez.agent.research.report import build_report
 from ez.agent.run_spec import RunSpec
 from ez.agent.batch_runner import run_batch, BatchConfig
 from ez.agent.gates import GateConfig

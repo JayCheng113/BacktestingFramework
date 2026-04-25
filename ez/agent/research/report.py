@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from ez.agent.research_store import ResearchStore
+from ez.agent.research.store import ResearchStore
 from ez.llm.provider import LLMMessage, LLMProvider
 
 logger = logging.getLogger(__name__)

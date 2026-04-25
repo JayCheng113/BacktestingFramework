@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from ez.agent.experiment_store import ExperimentStore
-from ez.agent.research_store import ResearchStore
+from ez.agent.research.store import ResearchStore
 from ez.config import load_config
 from ez.data.provider import DataProvider, DataProviderChain
 from ez.data.store import DuckDBStore

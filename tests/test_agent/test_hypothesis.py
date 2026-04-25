@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ez.agent.hypothesis import ResearchGoal, generate_hypotheses, _parse_hypotheses
+from ez.agent.research.hypothesis import ResearchGoal, generate_hypotheses, _parse_hypotheses
 from ez.llm.provider import LLMResponse
 
 

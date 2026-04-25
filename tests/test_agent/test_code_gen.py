@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ez.agent.code_gen import generate_strategy_code, _extract_strategy_class_name
+from ez.agent.research.code_gen import generate_strategy_code, _extract_strategy_class_name
 from ez.llm.provider import LLMResponse
 
 
@@ -44,8 +44,8 @@ class TestGenerateStrategyCode:
     @pytest.mark.asyncio
     async def test_success(self):
         p = MagicMock()
-        with patch("ez.agent.code_gen.chat_sync", return_value=LLMResponse(content="done")), \
-             patch("ez.agent.code_gen._find_latest_strategy", return_value=("rsi.py", "RSI")):
+        with patch("ez.agent.research.code_gen.chat_sync", return_value=LLMResponse(content="done")), \
+             patch("ez.agent.research.code_gen._find_latest_strategy", return_value=("rsi.py", "RSI")):
             f, c, e = await generate_strategy_code(p, "RSI<30买入")
             assert f == "rsi.py"
             assert c == "RSI"
@@ -54,8 +54,8 @@ class TestGenerateStrategyCode:
     @pytest.mark.asyncio
     async def test_retries_exhaust(self):
         p = MagicMock()
-        with patch("ez.agent.code_gen.chat_sync", return_value=LLMResponse(content="fail")), \
-             patch("ez.agent.code_gen._find_latest_strategy", return_value=(None, None)):
+        with patch("ez.agent.research.code_gen.chat_sync", return_value=LLMResponse(content="fail")), \
+             patch("ez.agent.research.code_gen._find_latest_strategy", return_value=(None, None)):
             f, c, e = await generate_strategy_code(p, "bad", max_retries=2)
             assert f is None
             assert "2次重试" in e
@@ -73,8 +73,8 @@ class TestGenerateStrategyCode:
                 raise Exception("LLM down")
             return LLMResponse(content="done")
 
-        with patch("ez.agent.code_gen.chat_sync", side_effect=counting_chat), \
-             patch("ez.agent.code_gen._find_latest_strategy", return_value=("s.py", "S")):
+        with patch("ez.agent.research.code_gen.chat_sync", side_effect=counting_chat), \
+             patch("ez.agent.research.code_gen._find_latest_strategy", return_value=("s.py", "S")):
             f, c, e = await generate_strategy_code(p, "test", max_retries=3)
             assert f == "s.py"  # Recovered on second attempt
             assert call_count == 2
@@ -83,7 +83,7 @@ class TestGenerateStrategyCode:
     async def test_all_exceptions_exhaust_retries(self):
         """All attempts throw → returns error after all retries."""
         p = MagicMock()
-        with patch("ez.agent.code_gen.chat_sync", side_effect=Exception("persistent")):
+        with patch("ez.agent.research.code_gen.chat_sync", side_effect=Exception("persistent")):
             f, c, e = await generate_strategy_code(p, "test", max_retries=2)
             assert f is None
             assert "persistent" in e
@@ -92,8 +92,8 @@ class TestGenerateStrategyCode:
     async def test_max_retries_one(self):
         """max_retries=1 means exactly 1 attempt."""
         p = MagicMock()
-        with patch("ez.agent.code_gen.chat_sync", return_value=LLMResponse(content="fail")), \
-             patch("ez.agent.code_gen._find_latest_strategy", return_value=(None, None)):
+        with patch("ez.agent.research.code_gen.chat_sync", return_value=LLMResponse(content="fail")), \
+             patch("ez.agent.research.code_gen._find_latest_strategy", return_value=(None, None)):
             f, c, e = await generate_strategy_code(p, "test", max_retries=1)
             assert f is None
             assert "1次重试" in e
@@ -111,8 +111,8 @@ class TestGenerateStrategyCode:
                 return (None, None)
             return ("s.py", "S")
 
-        with patch("ez.agent.code_gen.chat_sync", return_value=LLMResponse(content="")), \
-             patch("ez.agent.code_gen._find_latest_strategy", side_effect=mock_find):
+        with patch("ez.agent.research.code_gen.chat_sync", return_value=LLMResponse(content="")), \
+             patch("ez.agent.research.code_gen._find_latest_strategy", side_effect=mock_find):
             f, c, e = await generate_strategy_code(p, "test", max_retries=3)
             assert f == "s.py"
             assert c == "S"

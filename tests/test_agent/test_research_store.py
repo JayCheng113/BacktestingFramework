@@ -7,7 +7,7 @@ from datetime import datetime
 import duckdb
 import pytest
 
-from ez.agent.research_store import ResearchStore
+from ez.agent.research.store import ResearchStore
 
 
 @pytest.fixture

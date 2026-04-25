@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import duckdb
 import pytest
 
-from ez.agent.research_report import ResearchReport, build_report
-from ez.agent.research_store import ResearchStore
+from ez.agent.research.report import ResearchReport, build_report
+from ez.agent.research.store import ResearchStore
 from ez.llm.provider import LLMResponse
 
 

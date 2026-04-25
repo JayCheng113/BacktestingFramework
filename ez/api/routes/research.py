@@ -11,10 +11,10 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ez.agent.hypothesis import ResearchGoal
-from ez.agent.loop_controller import LoopConfig
+from ez.agent.research.hypothesis import ResearchGoal
+from ez.agent.research.loop_controller import LoopConfig
 from ez.agent.gates import GateConfig
-from ez.agent.research_runner import (
+from ez.agent.research.runner import (
     run_research_task, cancel_task, get_task_events,
     is_any_task_running, register_task, get_start_lock,
 )

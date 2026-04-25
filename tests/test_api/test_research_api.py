@@ -8,8 +8,8 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
-from ez.agent.research_store import ResearchStore
-from ez.agent.research_runner import _running_tasks
+from ez.agent.research.store import ResearchStore
+from ez.agent.research.runner import _running_tasks
 from ez.api.app import app
 
 client = TestClient(app)

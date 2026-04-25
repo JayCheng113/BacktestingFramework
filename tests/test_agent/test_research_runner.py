@@ -9,14 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ez.agent.hypothesis import ResearchGoal
-from ez.agent.loop_controller import LoopConfig, LoopController
-from ez.agent.research_runner import (
+from ez.agent.research.hypothesis import ResearchGoal
+from ez.agent.research.loop_controller import LoopConfig, LoopController
+from ez.agent.research.runner import (
     run_research_task, cancel_task, get_task_events, _running_tasks,
     _emit, is_any_task_running, cleanup_finished_tasks, register_task,
     get_start_lock,
 )
-from ez.agent.research_store import ResearchStore
+from ez.agent.research.store import ResearchStore
 from ez.llm.provider import LLMResponse
 
 
@@ -186,13 +186,13 @@ def _standard_patches(research_store, mock_provider, code_result=("test.py", "Te
     if batch is None:
         batch = _mock_batch()
     return [
-        patch("ez.agent.research_runner.create_provider", return_value=mock_provider),
-        patch("ez.agent.research_runner.get_research_store", return_value=research_store),
-        patch("ez.agent.research_runner.get_experiment_store"),
-        patch("ez.agent.research_runner._fetch_data", return_value=_make_test_data()),
-        patch("ez.agent.research_runner.generate_strategy_code",
+        patch("ez.agent.research.runner.create_provider", return_value=mock_provider),
+        patch("ez.agent.research.runner.get_research_store", return_value=research_store),
+        patch("ez.agent.research.runner.get_experiment_store"),
+        patch("ez.agent.research.runner._fetch_data", return_value=_make_test_data()),
+        patch("ez.agent.research.runner.generate_strategy_code",
               new_callable=AsyncMock, return_value=code_result),
-        patch("ez.agent.research_runner._run_batch_for_strategies",
+        patch("ez.agent.research.runner._run_batch_for_strategies",
               return_value=(batch, ["spec_abc"])),
     ]
 
@@ -211,7 +211,7 @@ class TestRunResearchTask:
         rs = ResearchStore(conn)
         goal = ResearchGoal(description="test", n_hypotheses=1)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -263,7 +263,7 @@ class TestRunResearchTask:
         # no_improve_limit=3, all batches have 0 passed → should stop after 3 iterations
         loop_config = LoopConfig(max_iterations=10, no_improve_limit=3)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -295,7 +295,7 @@ class TestRunResearchTask:
         loop_config = LoopConfig(max_iterations=10, max_specs=1)
 
         # Batch executes 2 specs → exceeds max_specs=1
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -322,7 +322,7 @@ class TestRunResearchTask:
         rs = ResearchStore(conn)
         goal = ResearchGoal(description="test", n_hypotheses=1)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -343,9 +343,9 @@ class TestRunResearchTask:
         conn = duckdb.connect(":memory:")
         rs = ResearchStore(conn)
 
-        with patch("ez.agent.research_runner.create_provider", return_value=mock_provider), \
-             patch("ez.agent.research_runner.get_research_store", return_value=rs), \
-             patch("ez.agent.research_runner._fetch_data", side_effect=ValueError("No data")):
+        with patch("ez.agent.research.runner.create_provider", return_value=mock_provider), \
+             patch("ez.agent.research.runner.get_research_store", return_value=rs), \
+             patch("ez.agent.research.runner._fetch_data", side_effect=ValueError("No data")):
             task_id = await run_research_task(ResearchGoal(description="test"), LoopConfig(max_iterations=1))
 
         task = rs.get_task(task_id)
@@ -363,7 +363,7 @@ class TestRunResearchTask:
         conn = duckdb.connect(":memory:")
         rs = ResearchStore(conn)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -393,7 +393,7 @@ class TestRunResearchTask:
         conn = duckdb.connect(":memory:")
         rs = ResearchStore(conn)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -424,8 +424,8 @@ class TestRunResearchTask:
     async def test_init_failure_marks_done(self):
         """P0-1: If create_provider fails, task must still be marked done."""
         register_task("stuck_task")
-        with patch("ez.agent.research_runner.create_provider", side_effect=RuntimeError("no provider")), \
-             patch("ez.agent.research_runner.get_research_store") as mock_store:
+        with patch("ez.agent.research.runner.create_provider", side_effect=RuntimeError("no provider")), \
+             patch("ez.agent.research.runner.get_research_store") as mock_store:
             mock_store.return_value = MagicMock()
             mock_store.return_value.save_task = MagicMock(side_effect=RuntimeError("no store"))
             await run_research_task(ResearchGoal(description="test"), task_id="stuck_task")
@@ -449,7 +449,7 @@ class TestRunResearchTask:
         conn = duckdb.connect(":memory:")
         rs = ResearchStore(conn)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -491,7 +491,7 @@ class TestRunResearchTask:
         conn = duckdb.connect(":memory:")
         rs = ResearchStore(conn)
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -535,7 +535,7 @@ class TestRunResearchTask:
             release.wait(timeout=10)
             return (_mock_batch(), [])
 
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),
@@ -578,7 +578,7 @@ class TestRunResearchTask:
         rs = ResearchStore(conn)
 
         # Cancel the task immediately on first cancel check (before E2 starts)
-        with patch.multiple("ez.agent.research_runner",
+        with patch.multiple("ez.agent.research.runner",
                             create_provider=MagicMock(return_value=mock_provider),
                             get_research_store=MagicMock(return_value=rs),
                             get_experiment_store=MagicMock(),

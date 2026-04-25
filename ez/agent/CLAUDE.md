@@ -50,13 +50,13 @@ V2.8 adds autonomous research agent: Hypothesis → CodeGen → BatchExec → An
 | sandbox.py | Code validation: syntax check, forbidden imports, contract test, hot-reload (V2.7). `_reload_code` and `_validate_inprocess` are parameterized — handle strategy/portfolio/factor via `get_base_classes` callable |
 | fdr.py | False Discovery Rate correction: Bonferroni, Benjamini-Hochberg (V2.7) |
 | data_access.py | Agent-layer data singletons: chain, experiment_store, research_store (V2.7+V2.8) |
-| hypothesis.py | E1: LLM hypothesis generation from research goal (V2.8) |
-| code_gen.py | E2: LLM strategy code generation with filtered tools + retry (V2.8) |
-| analyzer.py | E4: LLM result analysis and direction suggestions (V2.8) |
-| loop_controller.py | E5: Budget tracking, convergence detection, 4 stop conditions (V2.8) |
-| research_report.py | E6: Aggregate iterations into final report + Top 5 strategies (V2.8) |
-| research_store.py | DuckDB persistence: research_tasks + research_iterations (V2.8) |
-| research_runner.py | Main orchestrator: async loop with SSE events + cancel + budget (V2.8) |
+| research/hypothesis.py | E1: LLM hypothesis generation from research goal (V2.8) |
+| research/code_gen.py | E2: LLM strategy code generation with filtered tools + retry (V2.8) |
+| research/analyzer.py | E4: LLM result analysis and direction suggestions (V2.8) |
+| research/loop_controller.py | E5: Budget tracking, convergence detection, 4 stop conditions (V2.8) |
+| research/report.py | E6: Aggregate iterations into final report + Top 5 strategies (V2.8) |
+| research/store.py | DuckDB persistence: research_tasks + research_iterations (V2.8) |
+| research/runner.py | Main orchestrator: async loop with SSE events + cancel + budget (V2.8) |
 
 ## Dependencies
 - Upstream: ez/backtest/ (Engine, WFO, significance), ez/core/ (Matcher), ez/strategy/ (Strategy registry), ez/llm/ (LLMProvider, V2.7+)

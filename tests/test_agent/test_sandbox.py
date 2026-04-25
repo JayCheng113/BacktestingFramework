@@ -334,7 +334,7 @@ class TestCodeGenAllowedTools:
         """The allowed_tools list must not include create_portfolio_strategy or
         create_cross_factor, since _find_latest_strategy() only checks strategies/."""
         import inspect
-        from ez.agent import code_gen
+        from ez.agent.research import code_gen
         source = inspect.getsource(code_gen.generate_strategy_code)
         # Must include the minimal set
         assert '"create_strategy"' in source

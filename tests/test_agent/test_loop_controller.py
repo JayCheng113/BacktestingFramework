@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ez.agent.loop_controller import LoopConfig, LoopState, LoopController
+from ez.agent.research.loop_controller import LoopConfig, LoopState, LoopController
 
 
 class TestLoopConfig:
