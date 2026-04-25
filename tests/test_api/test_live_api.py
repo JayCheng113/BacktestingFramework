@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 from ez.api.app import app
 from ez.live.broker import BrokerAccountSnapshot, BrokerCapability, BrokerExecutionReport, BrokerRuntimeEvent
 from ez.live.events import make_shadow_broker_client_order_id
-from ez.live.qmt_broker import QMTBrokerConfig, QMTRealBroker, QMTShadowBroker
-from ez.live.qmt_session_owner import QMTSessionManager
+from ez.live.qmt.broker import QMTBrokerConfig, QMTRealBroker, QMTShadowBroker
+from ez.live.qmt.session_owner import QMTSessionManager
 from ez.live.paper_broker import PaperBroker
 
 

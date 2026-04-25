@@ -22,7 +22,6 @@ This module now sits between two eras:
 
 ## Files
 - `broker.py` — broker adapter ABC + shared execution-report models
-- `qmt_broker.py` — QMT read-only/shadow broker, official xtquant session bridge, and report normalization
 - `deployment_spec.py` — spec + record models
 - `deployment_store.py` — specs / records / snapshots / `deployment_events`
 - `deploy_gate.py` — deploy-time checks
@@ -35,14 +34,20 @@ This module now sits between two eras:
 - `risk.py` — pre-trade order-level rejection rules
 - `events.py` — order, fill, event models
 - `scheduler.py` — start/pause/resume/stop/tick/recovery (orchestration core)
-- `_qmt_projection.py` — QMT runtime projection builder (extracted from scheduler)
 - `_snapshot_collectors.py` — snapshot serialization and reconcile helpers (extracted from scheduler)
 - `_broker_pump.py` — broker state pump helpers (extracted from scheduler)
 - `_utils.py` — shared private utilities (utc_now, coerce_timestamp, get_field, etc.)
-- `qmt_callback_bridge.py` — XtQuant trader callback bridge + consumer thread (extracted from qmt_session_owner)
 - `_broker_order_links.py` — BrokerOrderLinkRepository (extracted from deployment_store)
 - `monitor.py` — dashboard + alerts
 - `alert_dispatcher.py` — webhook dispatch
+
+### qmt/ — QMT 券商接入子包
+- `qmt/broker.py` — QMT read-only/shadow broker, official xtquant session bridge, report normalization, and gate builders
+- `qmt/session_owner.py` — resident QMT session owner, `QMTSessionManager`, `XtQuantShadowClient`, reconnect logic
+- `qmt/callback_bridge.py` — XtQuant trader callback bridge + consumer thread
+- `qmt/host.py` — `QMTHostService`: long-running host-external QMT orchestration (V3.3.45)
+- `qmt/_projection.py` — QMT runtime projection builder (stateless helpers extracted from scheduler)
+- `qmt/reconcile.py` — broker-state reconciliation: account, orders, positions, trades
 
 ## Key Design Facts
 - Reuse over rewrite: fill semantics still come from `ez.portfolio.execution.execute_portfolio_trades()`

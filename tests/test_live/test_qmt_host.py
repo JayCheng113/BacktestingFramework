@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from ez.live.qmt_host import (
+from ez.live.qmt.host import (
     HostHealth,
     HostStatusSummary,
     QMTHostService,

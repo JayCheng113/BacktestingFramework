@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ez.live import qmt_broker, qmt_session_owner
-from ez.live.qmt_session_owner import (
+from ez.live.qmt import broker as qmt_broker, session_owner as qmt_session_owner
+from ez.live.qmt.session_owner import (
     QMTBrokerConfig,
     QMTSessionManager,
     XtQuantShadowClient,
@@ -89,7 +89,7 @@ def test_xtquant_shadow_client_prepares_runtime_via_official_sequence(monkeypatc
         raise ModuleNotFoundError(name)
 
     monkeypatch.setattr(
-        "ez.live.qmt_session_owner.importlib.import_module", _fake_import
+        "ez.live.qmt.session_owner.importlib.import_module", _fake_import
     )
 
     client = XtQuantShadowClient.from_config(
@@ -154,7 +154,7 @@ def test_xtquant_shadow_client_cleans_up_trader_when_runtime_prepare_fails(monke
         raise ModuleNotFoundError(name)
 
     monkeypatch.setattr(
-        "ez.live.qmt_session_owner.importlib.import_module", _fake_import
+        "ez.live.qmt.session_owner.importlib.import_module", _fake_import
     )
 
     with pytest.raises(RuntimeError, match="connect\\(\\) failed"):
@@ -188,7 +188,7 @@ def test_xtquant_shadow_client_cancel_prefers_sysid_path_when_symbol_is_availabl
         raise ModuleNotFoundError(name)
 
     monkeypatch.setattr(
-        "ez.live.qmt_session_owner.importlib.import_module", _fake_import
+        "ez.live.qmt.session_owner.importlib.import_module", _fake_import
     )
 
     trader = _CancelTrader()
@@ -225,7 +225,7 @@ def test_xtquant_shadow_client_does_not_fallback_to_numeric_cancel_for_nonnumeri
         raise ModuleNotFoundError(name)
 
     monkeypatch.setattr(
-        "ez.live.qmt_session_owner.importlib.import_module", _fake_import
+        "ez.live.qmt.session_owner.importlib.import_module", _fake_import
     )
 
     trader = _CancelTrader()
@@ -553,7 +553,7 @@ def test_qmt_session_manager_since_filter_handles_out_of_order_harvested_events(
                 }
             ]
 
-    monkeypatch.setattr("ez.live.qmt_session_owner._utc_now", lambda: fixed_now)
+    monkeypatch.setattr("ez.live.qmt.session_owner._utc_now", lambda: fixed_now)
 
     config = QMTBrokerConfig(account_id="acct-1", session_id="42")
     factory = lambda _config: _Client()

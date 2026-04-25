@@ -1,6 +1,6 @@
 """ez/live — Deployment, paper trading, OMS-lite, and real-broker adapters."""
 
-from ez.live.qmt_broker import (  # re-export for package-level compatibility
+from ez.live.qmt.broker import (  # re-export for package-level compatibility
     QMTBrokerConfig,
     QMTShadowBroker,
     QMTSessionKey,

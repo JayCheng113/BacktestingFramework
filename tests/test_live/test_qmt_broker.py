@@ -8,7 +8,7 @@ import pytest
 
 from ez.live.broker import BrokerCapability
 from ez.live.events import Order
-from ez.live.qmt_broker import (
+from ez.live.qmt.broker import (
     QMTBrokerConfig,
     QMTShadowBroker,
     QMTRealBroker,
@@ -414,7 +414,7 @@ def test_xtquant_shadow_client_describes_async_submit_ack(monkeypatch):
             return SimpleNamespace(STOCK_BUY=11, STOCK_SELL=22, FIX_PRICE=33)
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_session_owner.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.session_owner.importlib.import_module", _fake_import)
 
     client = XtQuantShadowClient(
         trader=_SubmitTrader(),
@@ -734,7 +734,7 @@ def test_xtquant_shadow_client_prepares_runtime_via_official_sequence(monkeypatc
             return SimpleNamespace(StockAccount=_FakeStockAccount)
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_broker.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.broker.importlib.import_module", _fake_import)
 
     client = XtQuantShadowClient.from_config(
         QMTBrokerConfig(
@@ -886,7 +886,7 @@ def test_xtquant_shadow_client_default_session_id_is_positive_int(monkeypatch):
             return SimpleNamespace(StockAccount=_FakeStockAccount)
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_broker.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.broker.importlib.import_module", _fake_import)
 
     config = QMTBrokerConfig(
         account_id="acct-1",
@@ -921,7 +921,7 @@ def test_xtquant_shadow_client_cancel_prefers_sysid_path_when_symbol_is_availabl
             return SimpleNamespace(SH_MARKET=101, SZ_MARKET=202)
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_broker.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.broker.importlib.import_module", _fake_import)
 
     trader = _CancelTrader()
     client = XtQuantShadowClient(
@@ -950,7 +950,7 @@ def test_xtquant_shadow_client_cancel_uses_official_market_fallback_without_xtco
     def _fake_import(name: str):
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_broker.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.broker.importlib.import_module", _fake_import)
 
     trader = _CancelTrader()
     client = XtQuantShadowClient(
@@ -983,7 +983,7 @@ def test_xtquant_shadow_client_cancel_falls_back_to_order_id_when_sysid_rejects(
     def _fake_import(name: str):
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_broker.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.broker.importlib.import_module", _fake_import)
 
     trader = _CancelTrader()
     client = XtQuantShadowClient(
@@ -1063,7 +1063,7 @@ def test_xtquant_shadow_client_submit_order_prefers_async_api(monkeypatch):
             return SimpleNamespace(STOCK_BUY=11, STOCK_SELL=22, FIX_PRICE=33)
         raise ModuleNotFoundError(name)
 
-    monkeypatch.setattr("ez.live.qmt_session_owner.importlib.import_module", _fake_import)
+    monkeypatch.setattr("ez.live.qmt.session_owner.importlib.import_module", _fake_import)
 
     trader = _SubmitTrader()
     client = XtQuantShadowClient(

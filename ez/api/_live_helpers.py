@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from ez.live.deployment_spec import DeploymentRecord, DeploymentSpec
 from ez.live.deployment_store import DeploymentStore
-from ez.live.qmt_broker import (
+from ez.live.qmt.broker import (
     build_qmt_release_gate_decision,
     build_qmt_real_submit_policy,
     build_qmt_readiness_summary,

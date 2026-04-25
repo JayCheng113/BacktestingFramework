@@ -24,8 +24,8 @@ from ez.live.events import (
 )
 from ez.live.deployment_spec import DeploymentRecord, DeploymentSpec
 from ez.live.deployment_store import DeploymentStore
-from ez.live.qmt_broker import QMTRealBroker, QMTShadowBroker
-from ez.live.qmt_session_owner import QMTBrokerConfig, QMTSessionManager, XtQuantShadowClient
+from ez.live.qmt.broker import QMTRealBroker, QMTShadowBroker
+from ez.live.qmt.session_owner import QMTBrokerConfig, QMTSessionManager, XtQuantShadowClient
 from ez.live.paper_broker import PaperBroker
 from ez.live.scheduler import Scheduler
 
