@@ -14,7 +14,7 @@ Read these before major architectural changes:
 
 - `docs/architecture/system-architecture.md`
 - `docs/architecture/governance.md`
-- `docs/core-changes/v2.3-roadmap.md`
+- `docs/internal/core-changes/v2.3-roadmap.md`
 
 ## Architecture Summary
 
