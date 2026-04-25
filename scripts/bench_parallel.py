@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Benchmark: parallel batch backtest using ProcessPoolExecutor."""
+"""并行回测性能基准测试。
+
+使用 ProcessPoolExecutor 并发执行多个单股回测，
+测量不同并行度下的吞吐量。
+
+用法: python scripts/bench_parallel.py
+"""
 import time
 import sys
 sys.path.insert(0, ".")

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Benchmark parallel with heavier workload (significance enabled)."""
+"""重负载并行回测基准测试（含显著性检验）。
+
+与 bench_parallel.py 相同结构，但每个回测启用
+Bootstrap + Monte Carlo 显著性检验，模拟真实工作负载。
+
+用法: python scripts/bench_parallel_heavy.py
+"""
 import time, sys
 sys.path.insert(0, ".")
 from ez.backtest.parallel import parallel_backtest

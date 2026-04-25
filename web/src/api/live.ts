@@ -9,19 +9,25 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api/live' })
 
+/** 模拟盘部署摘要（列表页每行数据） */
 export interface DeploymentSummary {
   deployment_id: string
+  /** 内容寻址哈希，折叠 broker_type / shadow_broker_type（V3.2 硬化） */
   spec_id: string
   name: string
+  /** 部署状态：pending / approved / running / paused / stopped / error */
   status: string
   stop_reason: string | null
+  /** 来源回测 run_id */
   source_run_id: string | null
   code_commit: string | null
+  /** 部署门控综合判定（pass / warn / fail） */
   gate_verdict: string | null
   created_at: string | null
   approved_at: string | null
   started_at: string | null
   stopped_at: string | null
+  /** 预览态 QMT release gate（列表页轻量展示） */
   qmt_release_gate?: PreviewQMTReleaseGate | null
 }
 
@@ -112,8 +118,11 @@ export type RuntimeQMTReleaseGate = QMTReleaseGate & {
   source: 'runtime'
 }
 
+/** 模拟盘部署详情（详情页完整数据，扩展自 DeploymentSummary） */
 export interface DeploymentDetail extends DeploymentSummary {
+  /** 部署规格（策略名、标的、资金等） */
   spec: DeploymentSpecSummary | null
+  /** 最新一次 tick 快照（持仓 / 权益 / 订单链路等） */
   latest_snapshot: Record<string, unknown> | null
   qmt_release_gate?: PreviewQMTReleaseGate | null
 }
