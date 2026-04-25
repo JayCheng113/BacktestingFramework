@@ -16,11 +16,22 @@ from scipy import optimize
 
 logger = logging.getLogger(__name__)
 
+# ── 优化器常量 ──
+_DEFAULT_MAX_WEIGHT = 0.10          # 默认单票权重上限（10%）
+_FALLBACK_VARIANCE = 0.04           # Ledoit-Wolf 退化时的对角协方差（假设 20% 年化波动率）
+_COV_REGULARIZATION = 1e-8          # 协方差矩阵正定化修正项
+_LEDOIT_WOLF_DENOM_MIN = 1e-20     # Ledoit-Wolf 收缩系数分母最小值
+_WEIGHT_FLOOR = 1e-10               # 权重零值判断阈值
+_OPTIMIZER_FTOL = 1e-10             # scipy 优化器收敛容差
+_PORTFOLIO_VAR_FLOOR = 1e-20        # 组合方差零值保护（风险平价）
+_VOL_FLOOR = 1e-8                   # 波动率估计下限
+_WEIGHT_LOWER_BOUND = 1e-6          # 优化器权重下界
+
 
 @dataclass
 class OptimizationConstraints:
     """Constraints for portfolio optimization."""
-    max_weight: float = 0.10
+    max_weight: float = _DEFAULT_MAX_WEIGHT
     max_industry_weight: float = 0.30
     industry_map: dict[str, str] = field(default_factory=dict)
 
@@ -37,11 +48,11 @@ def ledoit_wolf_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
     T, N = returns.shape
     if T < 2:
-        return np.eye(N) * 0.04  # fallback: 20% vol identity
+        return np.eye(N) * _FALLBACK_VARIANCE  # fallback: 20% vol identity
 
     S = np.cov(returns, rowvar=False, ddof=1)
     if N == 1:
-        return S.reshape(1, 1) + 1e-8 * np.eye(1)
+        return S.reshape(1, 1) + _COV_REGULARIZATION * np.eye(1)
 
     trace_S = np.trace(S)
     trace_S2 = np.sum(S ** 2)
@@ -51,10 +62,10 @@ def ledoit_wolf_shrinkage(returns: np.ndarray) -> np.ndarray:
 
     rho_num = (1 - 2.0 / N) * trace_S2 + trace_S ** 2
     rho_den = (T + 1 - 2.0 / N) * (trace_S2 - trace_S ** 2 / N)
-    rho = min(1.0, max(0.0, rho_num / rho_den)) if abs(rho_den) > 1e-20 else 1.0
+    rho = min(1.0, max(0.0, rho_num / rho_den)) if abs(rho_den) > _LEDOIT_WOLF_DENOM_MIN else 1.0
 
     sigma = (1 - rho) * S + rho * F
-    sigma += 1e-8 * np.eye(N)
+    sigma += _COV_REGULARIZATION * np.eye(N)
     return sigma
 
 
@@ -198,7 +209,7 @@ class PortfolioOptimizer(ABC):
         total = sum(w.values())
         if total > 1.0 + 1e-9:
             w = {k: v / total for k, v in w.items()}
-        return {k: v for k, v in w.items() if v > 1e-10}
+        return {k: v for k, v in w.items() if v > _WEIGHT_FLOOR}
 
 
 # ── Concrete Optimizers ───────────────────────────────────────────────
@@ -244,7 +255,7 @@ class MeanVarianceOptimizer(PortfolioOptimizer):
         result = optimize.minimize(
             objective, w0, method="SLSQP",
             bounds=bounds, constraints=cons,
-            options={"maxiter": max(500, n * 5), "ftol": 1e-10},
+            options={"maxiter": max(500, n * 5), "ftol": _OPTIMIZER_FTOL},
         )
         if not result.success:
             raise RuntimeError(result.message)
@@ -304,7 +315,7 @@ class RiskParityOptimizer(PortfolioOptimizer):
 
         def risk_contribution_obj(w):
             port_var = float(w @ sigma @ w)
-            if port_var < 1e-20:
+            if port_var < _PORTFOLIO_VAR_FLOOR:
                 return 0.0
             marginal = sigma @ w
             rc = w * marginal / port_var
@@ -312,11 +323,11 @@ class RiskParityOptimizer(PortfolioOptimizer):
             return float(np.sum((rc - target) ** 2))
 
         vols = np.sqrt(np.diag(sigma))
-        vols = np.maximum(vols, 1e-8)
+        vols = np.maximum(vols, _VOL_FLOOR)
         w0 = (1.0 / vols) / np.sum(1.0 / vols)
 
         max_w = self._constraints.max_weight
-        bounds = [(1e-6, max_w)] * n
+        bounds = [(_WEIGHT_LOWER_BOUND, max_w)] * n
         cons = [{"type": "eq", "fun": lambda w: float(np.sum(w) - 1.0)}]
         # Industry constraints (same as MeanVariance/MinVariance)
         for _ind, idx_list in self._industry_groups(symbols).items():
