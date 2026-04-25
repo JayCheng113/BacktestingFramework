@@ -1,8 +1,12 @@
 __pycache__/
 *.pyc
+.pytest_cache/
+.uv_cache/
 data/*.db
 data/*.db.wal
 data/*.db.tmp
+data/*.duckdb
+data/*.sqlite
 .env
 web/node_modules/
 web/dist/
@@ -19,6 +23,11 @@ factors/*.py
 portfolio_strategies/*.py
 cross_factors/*.py
 ml_alphas/*.py
+!strategies/__init__.py
+!factors/__init__.py
+!portfolio_strategies/__init__.py
+!cross_factors/__init__.py
+!ml_alphas/__init__.py
 web/data/
 
 # Full A-share parquet cache (user-generated, too large for git)
