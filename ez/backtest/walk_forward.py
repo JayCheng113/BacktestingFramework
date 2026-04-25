@@ -22,6 +22,9 @@ from ez.backtest.engine import VectorizedBacktestEngine
 from ez.strategy.base import Strategy
 from ez.types import BacktestResult, WalkForwardResult
 
+_MIN_OOS_BARS = 10       # OOS 窗口最少交易日数（过少则结果无统计意义）
+_ZERO_THRESHOLD = 1e-10  # 零值判断阈值
+
 
 class WalkForwardValidator:
     """Split data into rolling train/test windows and measure OOS degradation.
@@ -65,7 +68,7 @@ class WalkForwardValidator:
         # Validation below uses the smallest possible window (n // n_splits)
         # as a conservative lower bound for the test size.
         min_window = n // n_splits
-        min_tradeable = 10
+        min_tradeable = _MIN_OOS_BARS
         min_test_size = min_window - int(min_window * train_ratio)
         if min_test_size < warmup + min_tradeable:
             max_splits = n // (int((warmup + min_tradeable) / (1 - train_ratio)) + 1)
@@ -147,7 +150,7 @@ class WalkForwardValidator:
         is_mean = sum(is_sharpes) / len(is_sharpes) if is_sharpes else 0.0
         oos_mean = sum(oos_sharpes) / len(oos_sharpes) if oos_sharpes else 0.0
         degradation = (
-            (is_mean - oos_mean) / abs(is_mean) if abs(is_mean) > 1e-10 else 0.0
+            (is_mean - oos_mean) / abs(is_mean) if abs(is_mean) > _ZERO_THRESHOLD else 0.0
         )
 
         return WalkForwardResult(
