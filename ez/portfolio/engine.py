@@ -32,6 +32,14 @@ from ez.portfolio.risk_manager import RiskManager
 from ez.portfolio.universe import Universe, slice_universe_data
 
 
+# ── 组合引擎常量 ──
+_TRADING_DAYS_PER_YEAR = 252    # 年化交易日数
+_DEFAULT_RISK_FREE_RATE = 0.03  # 默认无风险利率（3%）
+_PRICE_LIMIT_EPSILON = 1e-6     # 涨跌停浮点比较容差
+_TURNOVER_EPSILON = 1e-6        # 换手率浮点比较容差
+_ZERO_THRESHOLD = 1e-10         # 通用零值保护（Sharpe/Sortino 分母等）
+
+
 @dataclass
 class PortfolioResult:
     """Output of a portfolio backtest."""
@@ -87,7 +95,7 @@ def run_portfolio_backtest(
     # long-warmup factors silently received truncated history for the early
     # rebalance days, biasing results with no error.
     try:
-        strategy_lb = int(getattr(strategy, 'lookback_days', 252))
+        strategy_lb = int(getattr(strategy, 'lookback_days', _TRADING_DAYS_PER_YEAR))
         req_warmups: list[int] = []
         # Walk factor dependencies where available (both TopN and MultiFactor)
         for attr in ("factor", "factors"):
@@ -250,7 +258,7 @@ def run_portfolio_backtest(
                     # Bug4 fix: check limit down before emergency sell (same as normal sell)
                     if limit_pct > 0 and sym in raw_close_today and sym in prev_raw_close:
                         change = (raw_close_today[sym] - prev_raw_close[sym]) / prev_raw_close[sym] if prev_raw_close[sym] > 0 else 0
-                        if change <= -limit_pct + 1e-6:
+                        if change <= -limit_pct + _PRICE_LIMIT_EPSILON:
                             continue  # 跌停不可卖
                     sell_price = prices[sym] * (1 - cost_model.slippage_rate)
                     sell_amount = abs(delta) * sell_price
@@ -394,7 +402,7 @@ def run_portfolio_backtest(
                 )
                 realized_turnover = max(buy_vol, sell_vol) / pre_trade_equity
                 limit = risk_manager._config.max_turnover
-                if realized_turnover > limit + 1e-6:
+                if realized_turnover > limit + _TURNOVER_EPSILON:
                     result.risk_events.append({
                         "date": day.isoformat(),
                         "event": (
@@ -539,24 +547,24 @@ def run_portfolio_backtest(
     if len(result.equity_curve) > 1:
         eq = np.array(result.equity_curve)
         returns = np.diff(eq) / eq[:-1]
-        n_years = len(returns) / 252
+        n_years = len(returns) / _TRADING_DAYS_PER_YEAR
         total_ret = eq[-1] / eq[0] - 1
         ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1 if n_years > 0 else 0
         # ddof=1 (Bessel correction) to match pandas default used by
         # ez/backtest/metrics.py — the two engines must return numerically
         # identical Sharpe for identical inputs (codex finding #1).
-        vol = float(np.std(returns, ddof=1)) * np.sqrt(252) if len(returns) > 1 else 0
+        vol = float(np.std(returns, ddof=1)) * np.sqrt(_TRADING_DAYS_PER_YEAR) if len(returns) > 1 else 0
         # Standard Sharpe formula matching ez/backtest/metrics.py (codex finding):
         # prior version used `ann_ret / vol`, but single-stock and WF used
         # `excess.mean() / excess.std() × √252` with 3% risk-free rate. Same name,
         # different semantics → portfolio ranking could not be compared with
         # single-stock results. Unified to the standard daily-excess formula
         # with ddof=1 so numeric output matches MetricsCalculator exactly.
-        RF_ANNUAL = 0.03
-        daily_rf = RF_ANNUAL / 252
+        RF_ANNUAL = _DEFAULT_RISK_FREE_RATE
+        daily_rf = RF_ANNUAL / _TRADING_DAYS_PER_YEAR
         excess = returns - daily_rf
         excess_std = float(np.std(excess, ddof=1)) if len(excess) > 1 else 0.0
-        sharpe = float(np.mean(excess) / excess_std * np.sqrt(252)) if excess_std > 1e-10 else 0.0
+        sharpe = float(np.mean(excess) / excess_std * np.sqrt(_TRADING_DAYS_PER_YEAR)) if excess_std > _ZERO_THRESHOLD else 0.0
         drawdown = (eq / np.maximum.accumulate(eq)) - 1
         max_dd = float(np.min(drawdown))
 
@@ -579,7 +587,7 @@ def run_portfolio_backtest(
         #     sortino = excess.mean() / sqrt(mean(min(excess, 0)²)) × √252
         downside_sq = np.minimum(excess, 0) ** 2
         downside_dev = float(np.sqrt(downside_sq.mean())) if len(excess) > 0 else 0.0
-        sortino = float(np.mean(excess) / downside_dev * np.sqrt(252)) if downside_dev > 1e-10 else 0.0
+        sortino = float(np.mean(excess) / downside_dev * np.sqrt(_TRADING_DAYS_PER_YEAR)) if downside_dev > _ZERO_THRESHOLD else 0.0
 
         # Benchmark metrics
         bench_ret = 0.0
@@ -595,7 +603,7 @@ def run_portfolio_backtest(
             # Prior version computed alpha as (ann_ret - beta × ann_bench_ret)
             # without subtracting the risk-free rate, so portfolio alpha diverged
             # from single-stock alpha by ~5-6 percentage points.
-            if len(bench_returns) > 1 and np.std(bench_returns, ddof=1) > 1e-10:
+            if len(bench_returns) > 1 and np.std(bench_returns, ddof=1) > _ZERO_THRESHOLD:
                 excess_b = bench_returns - daily_rf
                 excess_s = returns - daily_rf
                 # Sample covariance (ddof=1) to match pd.Series.cov default
@@ -603,7 +611,7 @@ def run_portfolio_backtest(
                 var_b = float(np.var(excess_b, ddof=1))
                 beta = cov_sb / var_b if var_b > 0 else 0.0
                 # Annualized alpha: (mean daily excess_s - beta × mean daily excess_b) × 252
-                alpha = float((np.mean(excess_s) - beta * np.mean(excess_b)) * 252)
+                alpha = float((np.mean(excess_s) - beta * np.mean(excess_b)) * _TRADING_DAYS_PER_YEAR)
 
         # Turnover (average per rebalance)
         total_trade_value = sum(t["shares"] * t["price"] for t in result.trades if not t.get("liquidation"))
