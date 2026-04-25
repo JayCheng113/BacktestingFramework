@@ -12,10 +12,9 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from ez.api.deps import get_chain
 from ez.backtest.engine import VectorizedBacktestEngine
 from ez.config import load_config
-from ez.core.matcher import FillResult, Matcher, SimpleMatcher, SlippageMatcher
+from ez.core.matcher import Matcher, SimpleMatcher, SlippageMatcher
 from ez.core.market_rules import MarketRulesMatcher
 from ez.backtest.walk_forward import WalkForwardValidator
 from ez.strategy.base import Strategy
