@@ -1,3 +1,6 @@
+# OpenTrading 容器编排
+# 启动: docker compose up
+# 访问: http://localhost:8000
 services:
   ez-trading:
     build: .

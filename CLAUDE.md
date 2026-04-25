@@ -1,4 +1,4 @@
-# ez-trading
+# OpenTrading (ez-trading)
 
 Agent-native quantitative trading platform. Human researchers and AI agents use the same
 pipeline, gates, and audit trail.

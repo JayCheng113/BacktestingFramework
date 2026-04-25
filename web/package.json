@@ -1,5 +1,6 @@
 {
-  "name": "web",
+  "name": "opentrading-web",
+  "description": "OpenTrading 量化交易研究平台 — React 仪表板",
   "private": true,
   "version": "0.3.1",
   "type": "module",

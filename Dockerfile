@@ -1,3 +1,7 @@
+# OpenTrading 多阶段 Docker 构建
+# Stage 1 (node-builder): 构建 React 前端
+# Stage 2 (cpp-builder): 编译 C++ nanobind 扩展
+# Stage 3 (runtime): Python 运行环境 + 已构建的前端和扩展
 # Stage 1: Build frontend
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app/web
