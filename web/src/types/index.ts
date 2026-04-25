@@ -41,8 +41,10 @@ export interface TradeRecord {
   commission: number;
 }
 
+export type StrategyParamValue = number | string | boolean | string[]
+
 export interface StrategyInfo {
-  name: string; key: string; parameters: Record<string, any>; description?: string;
+  name: string; key: string; parameters: Record<string, StrategyParamValue>; description?: string;
 }
 
 /** Walk-forward 验证结果（单股） */
@@ -194,10 +196,19 @@ export interface AttributionResult {
 
 export interface ActiveWeight { portfolio: number; benchmark: number; active: number }
 
+export interface PortfolioTrade {
+  date: string
+  symbol: string
+  side: 'buy' | 'sell' | string
+  shares: number
+  price: number
+  cost: number
+}
+
 /** 组合回测完整结果（含净值曲线、交易记录、权重历史、归因） */
 export interface PortfolioRunResult {
   run_id: string; metrics: PortfolioMetrics; equity_curve: number[]
-  benchmark_curve: number[]; dates: string[]; trades: any[]; rebalance_dates: string[]
+  benchmark_curve: number[]; dates: string[]; trades: PortfolioTrade[]; rebalance_dates: string[]
   /** 成功拉取数据的股票数量 */
   symbols_fetched?: number;
   /** 因数据缺失而跳过的股票列表 */
