@@ -740,9 +740,9 @@ Expected: No TypeScript errors
 
 - [ ] **Step 3: Final commit — update spec**
 
-Mark all items as fixed in `docs/superpowers/specs/2026-04-06-deep-audit-bugfix.md`.
+Mark all items as fixed in `docs/internal/specs/2026-04-06-deep-audit-bugfix.md`.
 
 ```bash
-git add docs/superpowers/specs/2026-04-06-deep-audit-bugfix.md
+git add docs/internal/specs/2026-04-06-deep-audit-bugfix.md
 git commit -m "docs: mark all 8 audit bugs as fixed"
 ```

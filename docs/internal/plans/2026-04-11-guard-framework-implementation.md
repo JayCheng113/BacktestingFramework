@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+, pytest, pandas, numpy, React 19 + TypeScript, Monaco editor (frontend).
 
-**Spec reference:** `docs/superpowers/specs/2026-04-11-guard-framework-design.md`
+**Spec reference:** `docs/internal/specs/2026-04-11-guard-framework-design.md`
 
 **Test baseline:** 2265 tests (V2.18.1) → target 2322 tests (+57).
 
@@ -3504,7 +3504,7 @@ echo "V2.19.0 guard framework complete — ready for review."
 
 **Pre-flight checklist** (before starting Task 1):
 - Ensure baseline `pytest tests/` passes (2265 tests at time of writing — confirm via `pytest tests/ --collect-only 2>&1 | tail -5` or matching CLAUDE.md).
-- Read `docs/superpowers/specs/2026-04-11-guard-framework-design.md` for spec-level context (risks, non-goals, rationale).
+- Read `docs/internal/specs/2026-04-11-guard-framework-design.md` for spec-level context (risks, non-goals, rationale).
 - Read the 3 sandbox hook sites before starting Tasks 12-14:
   - `ez/agent/sandbox.py:383-456` (strategy)
   - `ez/agent/sandbox.py:624-751` (factor save branch)

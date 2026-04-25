@@ -37,7 +37,7 @@ Safety (V1):
 - User code never writes models to disk (``pickle`` is blocked by the
   sandbox).
 
-See ``docs/superpowers/plans/2026-04-06-v213-ml-alpha.md`` for design
+See ``docs/internal/plans/2026-04-06-v213-ml-alpha.md`` for design
 rationale.
 """
 from __future__ import annotations

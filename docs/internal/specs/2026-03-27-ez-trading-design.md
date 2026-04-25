@@ -948,7 +948,7 @@ class StrategySearchAgent:
 | 前端页面 | `web/src/pages/` | 新建 `XxxPage.tsx` |
 
 **Core 修改审批流程：**
-1. 在 `docs/core-changes/` 创建变更提案文档：为什么要改、影响范围、向后兼容方案
+1. 在 `docs/internal/core-changes/` 创建变更提案文档：为什么要改、影响范围、向后兼容方案
 2. 评估是否可以通过追加（而非修改）解决
 3. 如果必须修改：同步更新所有依赖的 Extension + 更新所有 CLAUDE.md + 更新所有 contract tests
 

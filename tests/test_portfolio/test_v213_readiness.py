@@ -18,7 +18,7 @@ NOT IN SCOPE — these are V2.13 implementation tasks, not pre-conditions:
 - Model persistence strategy under sandbox `pickle` /
   `multiprocessing` / `threading` / `subprocess` bans
 
-See `docs/audit/v2.13-readiness-audit.md` for the full readiness
+See `docs/internal/audit/v2.13-readiness-audit.md` for the full readiness
 analysis.
 
 Shape-level contracts verified here (with pure-Python mocks):

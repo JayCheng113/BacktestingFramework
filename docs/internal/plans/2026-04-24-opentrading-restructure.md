@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, FastAPI, React 19, DuckDB, Git
 
-**Spec reference:** `docs/superpowers/specs/2026-04-24-opentrading-restructure-design.md`
+**Spec reference:** `docs/internal/specs/2026-04-24-opentrading-restructure-design.md`
 
 ---
 
@@ -322,10 +322,10 @@ Expected: 96 tests pass
 ### Task 7: docs/ 目录重组
 
 **Files:**
-- Move: `docs/core-changes/*` → `docs/internal/core-changes/`
-- Move: `docs/audit/*` → `docs/internal/audit/`
-- Move: `docs/superpowers/specs/*` → `docs/internal/specs/`
-- Move: `docs/superpowers/plans/*` → `docs/internal/plans/`
+- Move: `docs/internal/core-changes/*` → `docs/internal/core-changes/`
+- Move: `docs/internal/audit/*` → `docs/internal/audit/`
+- Move: `docs/internal/specs/*` → `docs/internal/specs/`
+- Move: `docs/internal/plans/*` → `docs/internal/plans/`
 - Move: `docs/v2.12-code-audit.md` → `docs/internal/audit/`
 - Create: `docs/images/.gitkeep`
 - Create: `docs/guide/.gitkeep`
@@ -335,11 +335,11 @@ Expected: 96 tests pass
 ```bash
 mkdir -p docs/internal/core-changes docs/internal/audit docs/internal/specs docs/internal/plans docs/images docs/guide
 
-git mv docs/core-changes/* docs/internal/core-changes/
-git mv docs/audit/* docs/internal/audit/
+git mv docs/internal/core-changes/* docs/internal/core-changes/
+git mv docs/internal/audit/* docs/internal/audit/
 git mv docs/v2.12-code-audit.md docs/internal/audit/
-git mv docs/superpowers/specs/* docs/internal/specs/
-git mv docs/superpowers/plans/* docs/internal/plans/
+git mv docs/internal/specs/* docs/internal/specs/
+git mv docs/internal/plans/* docs/internal/plans/
 
 # Clean up empty directories
 rmdir docs/core-changes docs/audit docs/superpowers/specs docs/superpowers/plans docs/superpowers
@@ -374,9 +374,9 @@ git commit -m "docs: reorganize docs/ — internal docs moved to docs/internal/"
 
 - [ ] **Step 1: Update CLAUDE.md**
 
-Line 17: `docs/core-changes/v2.3-roadmap.md` → `docs/internal/core-changes/v2.3-roadmap.md`
+Line 17: `docs/internal/core-changes/v2.3-roadmap.md` → `docs/internal/core-changes/v2.3-roadmap.md`
 
-Line 67 (大约): `docs/core-changes/` → `docs/internal/core-changes/`
+Line 67 (大约): `docs/internal/core-changes/` → `docs/internal/core-changes/`
 
 同时更新 "Read First" 部分的列表，添加注释说明 docs 结构：
 
@@ -394,7 +394,7 @@ Read these before major architectural changes:
 
 `ez/portfolio/ml_alpha.py:40`:
 ```python
-See ``docs/superpowers/plans/2026-04-06-v213-ml-alpha.md`` for design
+See ``docs/internal/plans/2026-04-06-v213-ml-alpha.md`` for design
 ```
 →
 ```python
@@ -403,7 +403,7 @@ See ``docs/internal/plans/2026-04-06-v213-ml-alpha.md`` for design
 
 `ez/portfolio/engine.py:201`:
 ```python
-                # See docs/core-changes/2026-04-10-engine-dividend-fix.md
+                # See docs/internal/core-changes/2026-04-10-engine-dividend-fix.md
 ```
 →
 ```python
@@ -412,7 +412,7 @@ See ``docs/internal/plans/2026-04-06-v213-ml-alpha.md`` for design
 
 `tests/test_portfolio/test_v213_readiness.py:21`:
 ```python
-See `docs/audit/v2.13-readiness-audit.md` for the full readiness
+See `docs/internal/audit/v2.13-readiness-audit.md` for the full readiness
 ```
 →
 ```python
@@ -425,10 +425,10 @@ See `docs/internal/audit/v2.13-readiness-audit.md` for the full readiness
 
 ```bash
 find docs/internal -name "*.md" -exec sed -i '' \
-  -e 's|docs/core-changes/|docs/internal/core-changes/|g' \
-  -e 's|docs/audit/|docs/internal/audit/|g' \
-  -e 's|docs/superpowers/specs/|docs/internal/specs/|g' \
-  -e 's|docs/superpowers/plans/|docs/internal/plans/|g' \
+  -e 's|docs/internal/core-changes/|docs/internal/core-changes/|g' \
+  -e 's|docs/internal/audit/|docs/internal/audit/|g' \
+  -e 's|docs/internal/specs/|docs/internal/specs/|g' \
+  -e 's|docs/internal/plans/|docs/internal/plans/|g' \
   {} +
 ```
 

@@ -32,7 +32,7 @@
 | `ez/portfolio/__init__.py` | Export `MLDiagnostics`, `DiagnosticsResult`, `DiagnosticsConfig` |
 | `CLAUDE.md` | Test count update, V2.13 Phase 2 entry |
 | `ez/portfolio/CLAUDE.md` | Files table + Status entry |
-| `docs/core-changes/v2.3-roadmap.md` | Check off F9 |
+| `docs/internal/core-changes/v2.3-roadmap.md` | Check off F9 |
 
 ### CORE files — NONE modified
 

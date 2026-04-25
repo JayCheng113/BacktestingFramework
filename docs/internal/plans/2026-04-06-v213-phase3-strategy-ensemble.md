@@ -79,7 +79,7 @@ Rules:
 | `ez/portfolio/__init__.py` | Export `StrategyEnsemble` |
 | `CLAUDE.md` | Test count + V2.13 Phase 3 entry |
 | `ez/portfolio/CLAUDE.md` | Files table + Status |
-| `docs/core-changes/v2.3-roadmap.md` | Check off D5 |
+| `docs/internal/core-changes/v2.3-roadmap.md` | Check off D5 |
 
 ---
 

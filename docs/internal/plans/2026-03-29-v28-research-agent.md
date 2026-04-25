@@ -42,7 +42,7 @@
 | `web/src/App.tsx` | Add ResearchPanel render |
 | `CLAUDE.md` | Version bump + V2.8 entry |
 | `ez/agent/CLAUDE.md` | Document new modules |
-| `docs/core-changes/v2.3-roadmap.md` | Mark V2.8 deliverables complete |
+| `docs/internal/core-changes/v2.3-roadmap.md` | Mark V2.8 deliverables complete |
 
 ---
 
@@ -2048,7 +2048,7 @@ git commit -m "feat(v2.8): E7 ResearchPanel — goal form + task list + SSE prog
 **Files:**
 - Modify: `CLAUDE.md`
 - Modify: `ez/agent/CLAUDE.md`
-- Modify: `docs/core-changes/v2.3-roadmap.md`
+- Modify: `docs/internal/core-changes/v2.3-roadmap.md`
 - Modify: `ez/api/CLAUDE.md`
 - Modify: `ez/api/app.py` (version bump)
 - Modify: `pyproject.toml` (version bump)
@@ -2072,7 +2072,7 @@ Expected: ≥ 921 pass, 0 errors
 
 - `ez/agent/CLAUDE.md`: add E1-E6 modules + research_runner + research_store
 - `ez/api/CLAUDE.md`: add research endpoints
-- `docs/core-changes/v2.3-roadmap.md`: mark E1-E7 as [x]
+- `docs/internal/core-changes/v2.3-roadmap.md`: mark E1-E7 as [x]
 
 - [ ] **Step 4: Version bump**
 

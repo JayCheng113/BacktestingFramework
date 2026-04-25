@@ -1884,7 +1884,7 @@ Target: 2265 → 2322 (+57). (Baseline 2265 = current V2.18.1 test count per CLA
 
 **Phase 2 — Remaining 4 guards:** `nan_inf.py`, `weight_sum.py`, `non_negative.py`, `determinism.py`, hook 2 (factor), hook 3 (portfolio/cross_factor/ml_alpha), full test coverage.
 
-**Phase 3 — Frontend + docs:** `CodeEditor.tsx` extensions, `CLAUDE.md` updates, `web/CLAUDE.md` updates, `docs/superpowers/plans/2026-04-11-guard-framework-implementation.md` updates with any in-flight changes.
+**Phase 3 — Frontend + docs:** `CodeEditor.tsx` extensions, `CLAUDE.md` updates, `web/CLAUDE.md` updates, `docs/internal/plans/2026-04-11-guard-framework-implementation.md` updates with any in-flight changes.
 
 **Phase 4 — Golden bug tests:** the two historical bug regression tests, final `pytest` + benchmark run.
 

@@ -185,20 +185,20 @@ docs/
 │   └── governance.md
 │
 ├── internal/                        # 重组 — 内部开发文档
-│   ├── core-changes/                # ← 原 docs/core-changes/
-│   ├── audit/                       # ← 原 docs/audit/
-│   ├── specs/                       # ← 原 docs/superpowers/specs/
-│   └── plans/                       # ← 原 docs/superpowers/plans/
+│   ├── core-changes/                # ← 原 docs/internal/core-changes/
+│   ├── audit/                       # ← 原 docs/internal/audit/
+│   ├── specs/                       # ← 原 docs/internal/specs/
+│   └── plans/                       # ← 原 docs/internal/plans/
 ```
 
 ### 移动映射
 
 | 原路径 | 新路径 |
 |-------|--------|
-| `docs/core-changes/*` | `docs/internal/core-changes/*` |
-| `docs/audit/*` | `docs/internal/audit/*` |
-| `docs/superpowers/specs/*` | `docs/internal/specs/*` |
-| `docs/superpowers/plans/*` | `docs/internal/plans/*` |
+| `docs/internal/core-changes/*` | `docs/internal/core-changes/*` |
+| `docs/internal/audit/*` | `docs/internal/audit/*` |
+| `docs/internal/specs/*` | `docs/internal/specs/*` |
+| `docs/internal/plans/*` | `docs/internal/plans/*` |
 | `docs/v2.12-code-audit.md` | `docs/internal/audit/v2.12-code-audit.md` |
 
 ### 用户指南内容规划

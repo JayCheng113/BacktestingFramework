@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12+ / FastAPI / DuckDB / pandas / numpy / React 19 / Vite 7 / TailwindCSS 4 / ECharts 5
 
-**Spec:** `docs/superpowers/specs/2026-03-27-ez-trading-design.md`
+**Spec:** `docs/internal/specs/2026-03-27-ez-trading-design.md`
 
 ---
 
@@ -3583,7 +3583,7 @@ Agent-Native quantitative trading platform. Python 3.12+ / FastAPI / DuckDB / Re
 ez/types.py → ez/data/ → ez/factor/ → ez/strategy/ → ez/backtest/ → ez/api/ → web/
 ```
 
-## Core Files (DO NOT MODIFY without proposal in docs/core-changes/)
+## Core Files (DO NOT MODIFY without proposal in docs/internal/core-changes/)
 ez/types.py, ez/errors.py, ez/config.py, ez/data/provider.py, ez/data/validator.py,
 ez/data/store.py, ez/factor/base.py, ez/factor/evaluator.py, ez/strategy/base.py,
 ez/strategy/loader.py, ez/backtest/engine.py, ez/backtest/portfolio.py,
@@ -3605,7 +3605,7 @@ pytest tests/                # Full test suite
 ```
 
 ## Spec
-docs/superpowers/specs/2026-03-27-ez-trading-design.md
+docs/internal/specs/2026-03-27-ez-trading-design.md
 ```
 
 - [ ] **Step 5: Run full test suite**

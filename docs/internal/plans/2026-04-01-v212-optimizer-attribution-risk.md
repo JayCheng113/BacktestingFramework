@@ -8,7 +8,7 @@
 
 **Tech Stack:** scipy.optimize.minimize (SLSQP), numpy (Ledoit-Wolf covariance), existing FastAPI + React + ECharts stack.
 
-**Spec:** `docs/superpowers/specs/2026-04-01-v212-optimizer-attribution-risk.md`
+**Spec:** `docs/internal/specs/2026-04-01-v212-optimizer-attribution-risk.md`
 
 ---
 
@@ -33,7 +33,7 @@
 | `web/src/components/PortfolioPanel.tsx` | Optimizer/risk collapsible panels, attribution display, risk event log |
 | `CLAUDE.md` | V2.12 version entry |
 | `ez/portfolio/CLAUDE.md` | Module doc update |
-| `docs/core-changes/v2.3-roadmap.md` | Check off V2.12 deliverables |
+| `docs/internal/core-changes/v2.3-roadmap.md` | Check off V2.12 deliverables |
 
 ---
 
@@ -1598,7 +1598,7 @@ git commit -m "feat(v2.12): frontend — optimizer/risk panels + attribution + e
 **Files:**
 - Modify: `CLAUDE.md`
 - Modify: `ez/portfolio/CLAUDE.md`
-- Modify: `docs/core-changes/v2.3-roadmap.md`
+- Modify: `docs/internal/core-changes/v2.3-roadmap.md`
 
 - [ ] **Step 1: Update CLAUDE.md version progress**
 
@@ -1632,7 +1632,7 @@ Add to Status:
 
 - [ ] **Step 3: Update roadmap — check off V2.12 items**
 
-In `docs/core-changes/v2.3-roadmap.md`, change `- [ ]` to `- [x]` for completed F4/D4/F6 items.
+In `docs/internal/core-changes/v2.3-roadmap.md`, change `- [ ]` to `- [x]` for completed F4/D4/F6 items.
 
 - [ ] **Step 4: Run full test suite**
 
@@ -1642,7 +1642,7 @@ Expected: >= 1330 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add CLAUDE.md ez/portfolio/CLAUDE.md docs/core-changes/v2.3-roadmap.md
+git add CLAUDE.md ez/portfolio/CLAUDE.md docs/internal/core-changes/v2.3-roadmap.md
 git commit -m "docs: V2.12 — optimizer/attribution/risk documentation"
 ```
 

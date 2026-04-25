@@ -198,7 +198,7 @@ def run_portfolio_backtest(
                 # tracking to avoid underestimating dividend-reinvesting strategies.
                 # Previously use_open_price=True used raw_close, which broke on
                 # dividend days (raw dropped -50% while total return was flat).
-                # See docs/core-changes/2026-04-10-engine-dividend-fix.md
+                # See docs/internal/core-changes/2026-04-10-engine-dividend-fix.md
                 if not np.isnan(adj_val):
                     prices[sym] = adj_val
                 elif not np.isnan(raw_val):

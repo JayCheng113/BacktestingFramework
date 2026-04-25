@@ -64,7 +64,7 @@ Per-module details live in submodule memory files:
 
 - Preserve the dependency direction above. `ez/core/` stays leaf-like.
 - Prefer extension points over core edits.
-- Core semantic files should not be changed casually; if behavior changes materially, document it in `docs/core-changes/`.
+- Core semantic files should not be changed casually; if behavior changes materially, document it in `docs/internal/core-changes/`.
 - No version tag or push without code review.
 - On this macOS environment, prefer `scripts/run_pytest_safe.sh ...` over raw `pytest` because the system `readline` extension segfaults during pytest startup; the script injects a local shim and loads `pytest_asyncio` explicitly.
 
