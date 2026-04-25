@@ -181,7 +181,7 @@ class PaperTradingEngine:
             # This mirrors `ez/portfolio/engine.py` V2.17 semantics so the
             # same strategy behaves identically in backtest and paper.
             # Without this guard, any strategy delegating to an inner
-            # weekly-signaled one (EtfRotateCombo, ARotateBondBlend) would
+            # weekly-signaled one (e.g. strategies returning None) would
             # crash with 'NoneType has no attribute items'.
             if target_weights is None:
                 rebalanced = False

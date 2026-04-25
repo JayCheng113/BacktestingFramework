@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 from ez.portfolio.cross_factor import CrossSectionalFactor
 from ez.portfolio.engine import CostModel, run_portfolio_backtest
 from ez.portfolio.portfolio_strategy import PortfolioStrategy
-from ez.portfolio.builtin_strategies import EtfMacdRotation, EtfSectorSwitch, EtfStockEnhance, EtfRotateCombo  # noqa: F401
+from ez.portfolio.builtin_strategies import EtfMacdRotation  # noqa: F401
 from ez.portfolio.universe import Universe
 
 # Extracted helpers (pure functions, no FastAPI route coupling)
