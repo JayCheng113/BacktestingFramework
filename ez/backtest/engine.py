@@ -20,6 +20,10 @@ except ImportError:
 from ez.strategy.base import Strategy
 from ez.types import BacktestResult, TradeRecord
 
+# ── 回测引擎常量 ──
+_ZERO_THRESHOLD = 1e-10    # 通用零值判断阈值（股数、损益、权益等）
+_WEIGHT_CHANGE_MIN = 1e-3  # 触发调仓的最小权重变化（0.1%）
+
 
 class VectorizedBacktestEngine:
     """Run a vectorized backtest: factor compute -> signal generation -> simulation."""
@@ -31,6 +35,15 @@ class VectorizedBacktestEngine:
         risk_free_rate: float = 0.03,
         matcher: Matcher | None = None,
     ):
+        """初始化回测引擎。
+
+        Args:
+            commission_rate: 佣金费率，默认万 0.8。当 matcher 为 None 时用于构建 SimpleMatcher。
+            min_commission: 最低佣金，默认 0（免五）。
+            risk_free_rate: 无风险利率，用于 Sharpe/Sortino/Alpha 计算，默认 3%。
+            matcher: 撮合器实例。传入则忽略 commission_rate/min_commission。
+                支持 SimpleMatcher、SlippageMatcher、MarketRulesMatcher 装饰器链。
+        """
         self._matcher = matcher or SimpleMatcher(commission_rate, min_commission)
         self._metrics = MetricsCalculator(risk_free_rate=risk_free_rate)
 
@@ -41,6 +54,24 @@ class VectorizedBacktestEngine:
         initial_capital: float = 1000000.0,
         skip_significance: bool = False,
     ) -> BacktestResult:
+        """运行单股回测。
+
+        流程：
+        1. 计算策略所需因子
+        2. 生成交易信号（自动右移 1 日，避免前视偏差）
+        3. 裁剪因子预热期
+        4. 执行模拟交易（JIT 快速路径或 Python 循环）
+        5. 计算绩效指标 + 可选显著性检验
+
+        Args:
+            data: OHLCV DataFrame，需包含 close 和 adj_close 列。
+            strategy: 策略实例，需实现 required_factors() 和 generate_signals()。
+            initial_capital: 初始资金，默认 100 万。
+            skip_significance: 跳过 Bootstrap/Monte Carlo 显著性检验（加速）。
+
+        Returns:
+            BacktestResult: 包含 equity_curve、trades、metrics、daily_returns、significance。
+        """
         df = data.copy()
 
         # 1. Compute factors
@@ -95,7 +126,7 @@ class VectorizedBacktestEngine:
             # give the wrong answer.
             gross_profit = float(sum(t.pnl for t in wins)) if wins else 0.0
             gross_loss = abs(float(sum(t.pnl for t in losses))) if losses else 0.0
-            if gross_loss > 1e-10:
+            if gross_loss > _ZERO_THRESHOLD:
                 metrics["profit_factor"] = gross_profit / gross_loss
             elif gross_profit > 0:
                 metrics["profit_factor"] = float("inf")  # all winners, no losses
@@ -205,6 +236,22 @@ class VectorizedBacktestEngine:
                 float(matcher._min_comm),
                 float(slip),
             )
+            # ── JIT 快速路径输出结构 ──
+            # [0]  equity_curve      逐日净值 (n_bars,)
+            # [1]  daily_returns     逐日收益率 (n_bars,)
+            # [2]  trade_entry_bars  成交入场 bar 索引 (n_trades,)
+            # [3]  trade_exit_bars   成交出场 bar 索引 (n_trades,)
+            # [4]  trade_entry_prices 入场价格 (n_trades,)
+            # [5]  trade_exit_prices  出场价格 (n_trades,)
+            # [6]  trade_pnl         成交盈亏 (n_trades,)
+            # [7]  trade_commissions  成交手续费 (n_trades,)
+            # [8]  trade_weights      成交权重 (n_trades,)
+            # [9]  trade_count        成交笔数 (scalar)
+            # [10] final_shares       期末持仓股数 (scalar)
+            # [11] (reserved)
+            # [12] final_entry_bar    期末持仓入场 bar (scalar)
+            # [13] final_entry_price  期末持仓入场价 (scalar)
+            # [14] final_entry_comm   期末持仓入场手续费 (scalar)
             eq, dr = _jit_out[0], _jit_out[1]
             te, tx, tep, txp, tpnl, tcm, tw = _jit_out[2], _jit_out[3], _jit_out[4], _jit_out[5], _jit_out[6], _jit_out[7], _jit_out[8]
             tc = int(_jit_out[9])
@@ -231,7 +278,7 @@ class VectorizedBacktestEngine:
                     pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
                     commission=float(tcm[j]),
                 ))
-            if f_shares > 1e-10 and f_entry_bar >= 0 and n > 0:
+            if f_shares > _ZERO_THRESHOLD and f_entry_bar >= 0 and n > 0:
                 liq_price = prices[n - 1]
                 if not np.isnan(liq_price) and liq_price > 0:
                     fill = matcher.fill_sell(liq_price, f_shares)
@@ -301,7 +348,7 @@ class VectorizedBacktestEngine:
             if _has_on_bar:
                 matcher.on_bar(bar_index=i, prev_close=raw_close[i - 1])
 
-            if abs(target_weight - prev_weight) > 1e-3:
+            if abs(target_weight - prev_weight) > _WEIGHT_CHANGE_MIN:
                 current_equity = cash + shares * exec_price
                 target_value = current_equity * target_weight
                 current_value = shares * exec_price
@@ -321,12 +368,12 @@ class VectorizedBacktestEngine:
                         cash += fill.net_amount
                         old_shares = shares
                         shares -= fill.shares
-                        if shares < 1e-10:
+                        if shares < _ZERO_THRESHOLD:
                             shares = 0.0
                         # Update cycle net invested (sell proceeds reduce it)
                         cycle_net_invested -= fill.net_amount  # net_amount > 0 for sells
                         # Record trade when fully closing; include partial sell PnL
-                        if old_shares > 0 and shares < 1e-10 and entry_time is not None:
+                        if old_shares > 0 and shares < _ZERO_THRESHOLD and entry_time is not None:
                             final_pnl = (fill.fill_price - entry_price) * old_shares - fill.commission
                             total_pnl = partial_pnl + final_pnl - entry_comm
                             total_comm = entry_comm + partial_comm + fill.commission
