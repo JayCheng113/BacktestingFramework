@@ -8,64 +8,107 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
-    port: int = 8000
+    host: str = Field(default="0.0.0.0", description="FastAPI 监听地址；生产环境通常绑定到 0.0.0.0")
+    port: int = Field(default=8000, description="FastAPI 监听端口")
 
 
 class DatabaseConfig(BaseModel):
-    path: str = "data/ez_trading.db"
+    path: str = Field(default="data/ez_trading.db", description="DuckDB 数据库文件路径（相对于项目根目录）")
 
 
 class DataSourceEntry(BaseModel):
-    primary: str = "tencent"
-    backup: list[str] = []
+    primary: str = Field(default="tencent", description="主数据源提供商名称")
+    backup: list[str] = Field(default=[], description="备用数据源提供商列表，按优先级排序；空列表表示无备用")
 
 
 class DataSourcesConfig(BaseModel):
-    cn_stock: DataSourceEntry = DataSourceEntry(primary="tushare", backup=["akshare", "tencent"])
-    us_stock: DataSourceEntry = DataSourceEntry(primary="fmp", backup=["tencent"])
-    hk_stock: DataSourceEntry = DataSourceEntry(primary="tencent", backup=[])
-    timeout_seconds: int = 10
-    max_retries: int = 2
+    cn_stock: DataSourceEntry = Field(
+        default=DataSourceEntry(primary="tushare", backup=["akshare", "tencent"]),
+        description="A 股数据源配置；主源 tushare，备用 akshare / tencent",
+    )
+    us_stock: DataSourceEntry = Field(
+        default=DataSourceEntry(primary="fmp", backup=["tencent"]),
+        description="美股数据源配置",
+    )
+    hk_stock: DataSourceEntry = Field(
+        default=DataSourceEntry(primary="tencent", backup=[]),
+        description="港股数据源配置",
+    )
+    timeout_seconds: int = Field(default=10, description="单次数据源请求超时时间（秒）")
+    max_retries: int = Field(default=2, description="数据源请求失败后的最大重试次数")
 
 
 class BacktestConfig(BaseModel):
-    default_initial_capital: float = 1000000.0
-    default_commission_rate: float = 0.00008
-    default_min_commission: float = 0.0
-    risk_free_rate: float = 0.03
+    default_initial_capital: float = Field(
+        default=1000000.0,
+        description="默认初始资金（人民币元）；回测未指定 initial_capital 时使用此值",
+    )
+    default_commission_rate: float = Field(
+        default=0.00008,
+        description="默认佣金费率（万 0.8，即 0.008%）；A 股卖出时额外收取印花税需在策略层单独建模",
+    )
+    default_min_commission: float = Field(
+        default=0.0,
+        description="单笔最低佣金（元）；0.0 表示不设最低，按费率计算",
+    )
+    risk_free_rate: float = Field(
+        default=0.03,
+        description="无风险利率（年化，小数形式）；用于 Sharpe、Sortino、Alpha 等指标的超额收益基准",
+    )
 
 
 class StrategyConfig(BaseModel):
-    scan_dirs: list[str] = ["ez/strategy/builtin", "strategies"]
+    scan_dirs: list[str] = Field(
+        default=["ez/strategy/builtin", "strategies"],
+        description="策略自动扫描目录列表（相对于项目根目录）；新增自定义策略放到 strategies/ 即可被自动注册",
+    )
 
 
 class CorsConfig(BaseModel):
-    origins: list[str] = ["http://localhost:3000"]
+    origins: list[str] = Field(
+        default=["http://localhost:3000"],
+        description="允许跨域请求的前端域名列表；生产部署时替换为实际域名",
+    )
 
 
 class LLMConfig(BaseModel):
-    provider: str = "deepseek"  # deepseek | qwen | openai | local
-    api_key: str = ""  # read from env: DEEPSEEK_API_KEY, QWEN_API_KEY, etc.
-    model: str = ""  # empty = use provider default
-    base_url: str = ""  # empty = use provider default
-    timeout: float = 60.0
-    max_tokens: int = 4096
-    temperature: float = 0.3
+    provider: str = Field(
+        default="deepseek",
+        description="LLM 提供商标识；支持 deepseek | qwen | openai | local",
+    )
+    api_key: str = Field(
+        default="",
+        description="API 密钥；优先从环境变量读取（DEEPSEEK_API_KEY / QWEN_API_KEY / OPENAI_API_KEY）",
+    )
+    model: str = Field(
+        default="",
+        description="模型名称；留空则使用各提供商的默认模型",
+    )
+    base_url: str = Field(
+        default="",
+        description="API 基础 URL；留空则使用提供商官方地址（适用于代理或本地部署场景）",
+    )
+    timeout: float = Field(default=60.0, description="LLM 请求超时时间（秒）")
+    max_tokens: int = Field(default=4096, description="单次 LLM 响应的最大 token 数")
+    temperature: float = Field(
+        default=0.3,
+        description="采样温度（0.0–2.0）；较低值使输出更确定，适合代码生成；较高值增加创造性",
+    )
 
 
 class EzConfig(BaseModel):
-    server: ServerConfig = ServerConfig()
-    database: DatabaseConfig = DatabaseConfig()
-    data_sources: DataSourcesConfig = DataSourcesConfig()
-    backtest: BacktestConfig = BacktestConfig()
-    strategy: StrategyConfig = StrategyConfig()
-    cors: CorsConfig = CorsConfig()
-    llm: LLMConfig = LLMConfig()
+    """顶层配置对象，由 load_config() 从 YAML 文件构建。"""
+    server: ServerConfig = Field(default=ServerConfig(), description="FastAPI 服务器配置")
+    database: DatabaseConfig = Field(default=DatabaseConfig(), description="DuckDB 数据库配置")
+    data_sources: DataSourcesConfig = Field(default=DataSourcesConfig(), description="各市场数据源提供商配置")
+    backtest: BacktestConfig = Field(default=BacktestConfig(), description="回测引擎默认参数")
+    strategy: StrategyConfig = Field(default=StrategyConfig(), description="策略自动发现配置")
+    cors: CorsConfig = Field(default=CorsConfig(), description="跨域资源共享配置")
+    llm: LLMConfig = Field(default=LLMConfig(), description="LLM 提供商配置")
 
 
 _config: EzConfig | None = None
