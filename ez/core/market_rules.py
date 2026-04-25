@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from ez.core.matcher import FillResult, Matcher
 
+_PRICE_EPSILON = 1e-6  # 浮点价格比较容差，用于涨跌停判断
+
 
 def _zero_fill(price: float) -> FillResult:
     return FillResult(shares=0, fill_price=price, commission=0, net_amount=0)
@@ -54,7 +56,7 @@ class MarketRulesMatcher(Matcher):
         # 涨停不可买: price at or above upper limit
         if self._limit > 0 and self._prev_close > 0:
             upper = self._prev_close * (1 + self._limit)
-            if price >= upper - 1e-6:
+            if price >= upper - _PRICE_EPSILON:
                 return _zero_fill(price)
 
         fill = self._inner.fill_buy(price, amount)
@@ -115,7 +117,7 @@ class MarketRulesMatcher(Matcher):
         # 跌停不可卖: price at or below lower limit
         if self._limit > 0 and self._prev_close > 0:
             lower = self._prev_close * (1 - self._limit)
-            if price <= lower + 1e-6:
+            if price <= lower + _PRICE_EPSILON:
                 return _zero_fill(price)
 
         # 整手: round down to lot_size multiples for sell
