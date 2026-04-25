@@ -1,6 +1,7 @@
 # Lightweight Refactor Design
 
 **Date**: 2026-04-21
+**Status**: 历史设计，后续 QMT 代码已迁移到 `ez/live/qmt/` 子包；旧路径保留用于追溯当时的重构方案。
 **Goal**: 保留全部功能，通过清理 dead code、消除重复、拆解大文件实现轻量化和高效化
 **Scope**: 源码 + 测试同步瘦身
 **Estimated reduction**: ~15-18% (8-10K source lines + corresponding tests)

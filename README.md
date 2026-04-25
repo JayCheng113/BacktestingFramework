@@ -7,10 +7,6 @@
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Tests](https://img.shields.io/badge/Tests-3000%2B-brightgreen)
 
-<!-- 截图占位: Dashboard 全貌 -->
-<!-- 请将截图放置在 docs/images/dashboard.png 并取消注释下面的图片标签 -->
-<!-- ![Dashboard](docs/images/dashboard.png) -->
-
 ---
 
 ## 核心功能
@@ -31,8 +27,8 @@
 ### Docker（推荐）
 
 ```bash
-git clone https://github.com/your-org/opentrading.git
-cd opentrading
+git clone https://github.com/JayCheng113/OpenTrading.git
+cd OpenTrading
 docker compose up
 ```
 
@@ -41,8 +37,8 @@ docker compose up
 ### 本地安装
 
 ```bash
-git clone https://github.com/your-org/opentrading.git
-cd opentrading
+git clone https://github.com/JayCheng113/OpenTrading.git
+cd OpenTrading
 pip install -e ".[all]"
 cd web && npm install && npm run build && cd ..
 uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
@@ -56,32 +52,21 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 
 ### 策略编辑与回测
 
-<!-- ![代码编辑器](docs/images/code-editor.png) -->
-<!-- ![回测结果](docs/images/backtest-result.png) -->
-
 在浏览器中直接编写策略代码，实时运行回测并查看净值曲线、Sharpe 比率、最大回撤等完整指标。支持 Walk-forward 验证和显著性检验，有效识别过拟合策略。
 
 ### 因子研究面板
-
-<!-- ![因子研究面板](docs/images/factor-panel.png) -->
 
 内置多种技术与基本面因子，支持截面 IC/RankIC/ICIR 计算、因子衰减分析、分组收益回测，以及多因子相关性矩阵分析。
 
 ### 组合回测
 
-<!-- ![组合回测](docs/images/portfolio-panel.png) -->
-
 支持多标的轮动回测，提供均值方差、风险平价等多种组合优化方式，配合 Brinson 归因精确拆解超额收益来源。
 
 ### AI 研究助手
 
-<!-- ![AI研究助手](docs/images/ai-assistant.png) -->
-
 基于 LLM 的对话式策略开发助手，支持自然语言描述策略需求，自动生成并验证代码；自主研究模式可端到端完成因子挖掘与回测任务。
 
 ### 模拟实盘
-
-<!-- ![模拟实盘](docs/images/paper-trading.png) -->
 
 完整的模拟实盘环境，包括部署门控、定时调度、OMS 事件溯源与回放，支持 QMT 券商实单接口（白名单小额实盘）。
 
@@ -115,14 +100,14 @@ ez/research/ 可复用研究工作流层
 | `ez/api/` | FastAPI 路由层 |
 | `web/` | React 19 + ECharts 前端仪表盘 |
 
-详细架构说明见 [docs/architecture/](docs/architecture/)
+完整文档索引见 [docs/README.md](docs/README.md)，详细架构说明见 [docs/architecture/](docs/architecture/)。
 
 ---
 
 ## 项目结构
 
 ```
-opentrading/
+OpenTrading/
 ├── ez/                    # 后端核心包
 │   ├── core/              # 计算原语
 │   ├── data/              # 数据层

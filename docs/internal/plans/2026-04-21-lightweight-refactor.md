@@ -1,5 +1,7 @@
 # Lightweight Refactor Implementation Plan
 
+> **Status:** 历史实施计划，后续 QMT 代码已迁移到 `ez/live/qmt/` 子包；文件内旧路径保留用于追溯当时的拆分方案，不作为当前实现指南。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reduce codebase noise and cognitive load by removing dead code, eliminating duplicate functions, and splitting god classes — all without changing any public API.
@@ -16,7 +18,7 @@
 
 ### New files to create:
 - `ez/live/_utils.py` — shared utility functions extracted from QMT modules
-- `ez/live/_qmt_projection.py` ��� QMT runtime projection builder (from scheduler.py)
+- `ez/live/_qmt_projection.py` — QMT runtime projection builder (from scheduler.py)
 - `ez/live/_broker_pump.py` — broker state pump logic (from scheduler.py)
 - `ez/live/_snapshot_collectors.py` — snapshot context collection (from scheduler.py)
 - `ez/live/qmt_callback_bridge.py` — callback bridge + consumer thread (from qmt_session_owner.py)

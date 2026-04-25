@@ -1,5 +1,7 @@
 # OpenTrading 开源项目重整 Implementation Plan
 
+> **Status:** 历史实施计划，开源重整已实施；文件内占位截图和旧仓库示例保留用于追溯当时的执行方案，不作为当前用户文档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 ez-trading 重整为优秀开源项目标准的 OpenTrading，不改代码逻辑。

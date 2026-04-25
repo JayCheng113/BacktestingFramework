@@ -1,4 +1,4 @@
-# ez-trading 工程治理规则
+# OpenTrading 工程治理规则
 
 ## 1. 薄核心规则
 

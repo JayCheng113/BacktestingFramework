@@ -1,7 +1,7 @@
 # OpenTrading 开源项目重整设计
 
 > 日期: 2026-04-24
-> 状态: 待实施
+> 状态: 历史设计，开源重整已实施；保留用于追溯设计取舍
 > 目标: 将 ez-trading 项目重整为符合优秀开源项目标准的 OpenTrading
 
 ## 背景
@@ -54,7 +54,7 @@ OpenTrading/
 ├── portfolio_strategies/        # 保留原位 — 用户组合策略目录
 ├── factors/                     # 保留原位 — 用户因子目录
 ├── cross_factors/               # 保留原位 — 用户截面因子目录
-├─��� ml_alphas/                   # 保留���位 — 用户 ML Alpha 目录
+├── ml_alphas/                   # 保留原位 — 用户 ML Alpha 目录
 │
 ├── docs/                        # 重组 — 见第 4 节
 ├── configs/                     # 保留
@@ -332,7 +332,7 @@ Repository = "https://github.com/JayCheng113/OpenTrading"
 
 明确排除，避免范围蔓延：
 
-- **不拆分大文件**: `scheduler.py`（3583 行）、`qmt_session_owner.py`（2449 行）等保持现状
+- **不拆分大文件**: 当时的 `scheduler.py`、QMT session owner 等大文件保持现状；后续 QMT 代码已迁移到 `ez/live/qmt/` 子包
 - **不拆分大组件**: `ValidationPanel.tsx`（1316 行）等保持现状
 - **不改代码逻辑**: 只改文档、标准文件、builtin 策略精简
 - **不移动用户工作目录**: `strategies/`、`factors/` 等保持根目录原位

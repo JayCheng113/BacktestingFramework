@@ -1,6 +1,6 @@
 # Portfolio / Rotation Strategy Design
 
-> **状态**: 设计文档（未实施，已通过自审 + Codex 审计修正）
+> **状态**: 历史设计文档（未作为当前实现路线；已通过自审 + Codex 审计修正）
 > **Codex 审计修正**: 接口冻结为 compute(data, date)→Series（#6）; 会计不变量 cash+pos=equity（#4）; PIT 动态成分股提升为必做（#3）; 交易日历模块（#8）; 防前瞻改为引擎切片（#2）
 > **目标版本**: V2.9
 > **依赖**: V2.5 (BatchRunner)。V2.6 (MarketRules) 可选集成。

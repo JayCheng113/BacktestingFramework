@@ -5,7 +5,7 @@ pipeline, gates, and audit trail.
 
 - Stack: Python 3.12+, FastAPI, DuckDB, React 19, ECharts, C++ (`nanobind`)
 - Version: `0.3.3`
-- Recent verified baseline: `874` live/api tests passed (V3 QMT closure + capital wire-in 2026-04-16); full backend `3048` tests, frontend `96` tests, all green
+- Recent verified baseline: full backend `3182 passed, 10 skipped, 1 deselected`; focused live/api `712 passed`; frontend `96 passed`
 - Versioning note: `0.3.x` marks the product-level transition into the V3 execution/broker era; roadmap labels such as `V3.3.x` remain the architecture-stage line
 
 ## Read First

@@ -15,8 +15,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/opentrading.git
-cd opentrading
+git clone https://github.com/JayCheng113/OpenTrading.git
+cd OpenTrading
 
 # 2. 复制环境变量模板
 cp .env.example .env
@@ -29,8 +29,6 @@ docker compose up
 ```
 
 浏览器访问 `http://localhost:8000` 即可看到主界面。
-
-<!-- 截图占位: Docker 启动成功后的浏览器主界面 -->
 
 ### 数据持久化
 
@@ -59,8 +57,8 @@ Docker Compose 已配置以下 volume 映射，停止或重建容器后数据不
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/opentrading.git
-cd opentrading
+git clone https://github.com/JayCheng113/OpenTrading.git
+cd OpenTrading
 
 # 2. 安装 Python 依赖（含所有可选依赖）
 pip install -e ".[all]"
@@ -116,8 +114,6 @@ pip install -e . --no-build-isolation
 | `DB_PATH` | 可选 | DuckDB 数据库路径，默认 `data/ez_trading.db` |
 
 > **提示**：环境变量也可在 UI 设置面板（右上角齿轮图标）中动态配置，修改后立即生效，无需重启服务。
-
-<!-- 截图占位: UI 设置面板 — 环境变量配置界面 -->
 
 ---
 

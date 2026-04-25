@@ -1,8 +1,8 @@
-# ez-trading 系统架构设计
+# OpenTrading 系统架构设计
 
 ## 定位
 
-ez-trading 是 **Agent-Native 量化交易系统**。
+OpenTrading（包名 `ez-trading`，Python 命名空间 `ez`）是 **Agent-Native 量化交易系统**。
 
 "Agent-Native" 不是"只给 Agent 用"，而是：
 - **人类和 Agent 都是一等公民研究者**：人类写策略/因子 + Agent 自主探索，殊途同归
@@ -369,7 +369,7 @@ API: `POST /experiments/submit`, `GET /experiments/{id}`, `GET /experiments`。
 │  │   qmt_release_gate surfaced in monitor/dashboard    │
 │  │   V3 live frontend now consumes broker-state/gates  │
 │  │   and surfaces release workflow / candidate blockers│
-│  │   resident owner moved to qmt_session_owner.py      │
+│  │   resident owner lives in qmt/session_owner.py      │
 │  │   run_forever callback consumer skeleton          │
 │  │   last-owner teardown 保留 consumer runtime       │
 │  │   sync 前 supervision: owner 在则补起 consumer    │
