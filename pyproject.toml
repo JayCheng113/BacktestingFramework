@@ -5,8 +5,10 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "ez-trading"
 version = "0.3.3"
-description = "Agent-Native quantitative trading platform"
+description = "OpenTrading — 开源量化交易研究平台，从策略研究到模拟实盘，全流程 UI 驱动"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+readme = "README.md"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -47,3 +49,7 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+[project.urls]
+Homepage = "https://github.com/JayCheng113/OpenTrading"
+Repository = "https://github.com/JayCheng113/OpenTrading"
