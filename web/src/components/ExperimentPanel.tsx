@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { listExperiments, submitExperiment, listStrategies, deleteExperiment, cleanupExperiments } from '../api'
-import type { ExperimentRun, StrategyInfo, GateReason, ParamSchema } from '../types'
+import { coerceParamSchema } from '../types'
+import type { ExperimentRun, StrategyInfo, GateReason } from '../types'
 import CandidateSearch from './CandidateSearch'
 import DateBtn from './shared/DateBtn'
 import { useToast } from './shared/Toast'
@@ -39,7 +40,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
         // V2.12.1 post-review fix (codex): select by full key to avoid name-collision picks
         setStrategyName(userStrategies[0].key)
         const defaults: Record<string, number | string | boolean> = {}
-        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as ParamSchema).default
+        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = coerceParamSchema(v).default
         setParams(defaults)
       }
     }).catch((e: unknown) => {
@@ -69,7 +70,7 @@ export default function ExperimentPanel({ onNavigate }: { onNavigate?: (tab: str
     const s = strategies.find(s => s.key === key)
     if (s) {
       const defaults: Record<string, number | string | boolean> = {}
-      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as ParamSchema).default
+      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = coerceParamSchema(v).default
       setParams(defaults)
     }
   }

@@ -41,10 +41,28 @@ export interface TradeRecord {
   commission: number;
 }
 
-export type StrategyParamValue = number | string | boolean | string[]
+export interface ParamSchema {
+  type: string; default: number | string | boolean; min?: number; max?: number; label?: string
+  step?: number; options?: string[]
+}
+
+export type StrategyParamPrimitive = number | string | boolean | string[]
+export type StrategyParamValue = ParamSchema | StrategyParamPrimitive
 
 export interface StrategyInfo {
   name: string; key: string; parameters: Record<string, StrategyParamValue>; description?: string;
+}
+
+export function isParamSchema(value: unknown): value is ParamSchema {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'default' in value
+}
+
+export function coerceParamSchema(value: unknown): ParamSchema {
+  if (isParamSchema(value)) return value
+  if (Array.isArray(value)) return { type: 'select', default: value[0] ?? '', options: value }
+  if (typeof value === 'boolean') return { type: 'bool', default: value }
+  if (typeof value === 'number') return { type: Number.isInteger(value) ? 'int' : 'float', default: value }
+  return { type: 'str', default: typeof value === 'string' ? value : '' }
 }
 
 /** Walk-forward 验证结果（单股） */
@@ -242,11 +260,6 @@ export interface HistoryRun {
     index_benchmark?: string
   }
   warning_count?: number
-}
-
-export interface ParamSchema {
-  type: string; default: number | string | boolean; min?: number; max?: number; label?: string
-  step?: number; options?: string[]
 }
 
 // V2.13.2 Phase 6: ML Alpha Diagnostics types

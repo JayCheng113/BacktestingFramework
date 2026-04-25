@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { listStrategies, runBacktest, runWalkForward } from '../api'
-import type { StrategyInfo, BacktestResult, WalkForwardResult, ParamSchema } from '../types'
+import { coerceParamSchema } from '../types'
+import type { StrategyInfo, BacktestResult, WalkForwardResult } from '../types'
 import BacktestSettings, { getDefaultSettings } from './BacktestSettings'
 import type { BacktestSettingsValue } from './BacktestSettings'
 import { useToast } from './shared/Toast'
@@ -45,7 +46,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         // non-deterministic class.
         setSelected(userStrategies[0].key)
         const defaults: Record<string, number | string | boolean> = {}
-        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = (v as ParamSchema).default
+        for (const [k, v] of Object.entries(userStrategies[0].parameters)) defaults[k] = coerceParamSchema(v).default
         setParams(defaults)
       }
     }).catch((e: unknown) => {
@@ -159,7 +160,7 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
     const s = strategies.find(s => s.key === key)
     if (s) {
       const defaults: Record<string, number | string | boolean> = {}
-      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = (v as ParamSchema).default
+      for (const [k, v] of Object.entries(s.parameters)) defaults[k] = coerceParamSchema(v).default
       setParams(defaults)
     }
     // V2.12.2 codex: clear previous-strategy results + trades so the user
@@ -285,7 +286,8 @@ export default function BacktestPanel({ symbol, market, period = 'daily', startD
         </div>
         {/* Strategy params */}
         {Object.entries(params).map(([k, v]) => {
-          const schema = strategies.find(s => s.key === selected)?.parameters?.[k]
+          const rawSchema = strategies.find(s => s.key === selected)?.parameters?.[k]
+          const schema = rawSchema == null ? undefined : coerceParamSchema(rawSchema)
           const ptype = schema?.type || (typeof v)
           if (ptype === 'bool' || typeof v === 'boolean') {
             return (

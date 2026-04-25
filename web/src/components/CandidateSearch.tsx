@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { searchCandidates, listStrategies } from '../api'
-import type { StrategyInfo, CandidateResult, SearchResult, ParamSchema } from '../types'
+import { coerceParamSchema } from '../types'
+import type { StrategyInfo, CandidateResult, SearchResult } from '../types'
 import DateBtn from './shared/DateBtn'
 import { useToast } from './shared/Toast'
 
@@ -112,7 +113,7 @@ export default function CandidateSearch() {
     const s = (strats || strategies).find(s => s.name === name)
     if (s) {
       setParamRanges(Object.entries(s.parameters).map(([k, v]): ParamRangeState => {
-        const ps = v as ParamSchema
+        const ps = coerceParamSchema(v)
         const type = ps.type || 'float'
         if (type === 'bool' || typeof ps.default === 'boolean') {
           return { name: k, type: 'bool', selected: [true, false], defaultVal: (ps.default as boolean) ?? true }
