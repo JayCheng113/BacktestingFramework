@@ -168,12 +168,15 @@ class VectorizedBacktestEngine:
             significance=significance,
         )
 
-    def _simulate(
-        self,
-        df: pd.DataFrame,
-        signals: pd.Series,
-        capital: float,
-    ) -> tuple[pd.Series, list[TradeRecord], pd.Series]:
+    def _compute_adj_open(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """计算复权调整后的开盘价。
+
+        adj_open = raw_open * (adj_close / raw_close)，处理 NaN/零值守护。
+        非分红日 ratio ≈ 1（无行为变化），分红日自动 scale。
+
+        Returns:
+            (prices, open_prices, raw_close): adj_close 数组、调整后开盘价、原始收盘价。
+        """
         # V2.16.2: unit-consistent pricing (parity with V2.18.1 portfolio fix).
         # Valuation uses adj_close; execution uses adj_open derived from
         # open * (adj_close / close). Mixing raw open (execution) with
@@ -202,17 +205,21 @@ class VectorizedBacktestEngine:
                 1.0,
             )
         open_prices = _raw_open * _ratio
-        weights = signals.values
+        return prices, open_prices, raw_close
+
+    def _simulate_jit(
+        self,
+        prices: np.ndarray,
+        open_prices: np.ndarray,
+        weights: np.ndarray,
+        capital: float,
+        df: pd.DataFrame,
+    ) -> tuple[pd.Series, list[TradeRecord], pd.Series] | None:
+        """JIT 快速路径：SimpleMatcher/SlippageMatcher + 二值信号 → C++/Numba 向量化。
+
+        条件不满足时返回 None，由调用方 fallback 到 Python 路径。
+        """
         n = len(prices)
-
-        if n == 0:
-            return (
-                pd.Series([capital], dtype=float),
-                [],
-                pd.Series([0.0], dtype=float),
-            )
-
-        # JIT fast-path: bypass Python loop entirely for Simple/Slippage matchers
         matcher = self._matcher
         _unique_weights = np.unique(weights[np.isfinite(weights)])
         _is_binary = len(_unique_weights) <= 2 and all(w in (0.0, 1.0) for w in _unique_weights)
@@ -223,86 +230,105 @@ class VectorizedBacktestEngine:
         )
         _use_cpp = _can_accel and _HAS_CPP_SIMULATE
         _use_jit = _can_accel and not _use_cpp and _HAS_NUMBA
-        if _use_cpp or _use_jit:
-            _sim_fn = _cpp_simulate_loop if _use_cpp else jit_simulate_loop
-            slip = getattr(matcher, '_slip', 0.0)
-            _jit_out = _sim_fn(
-                prices.astype(np.float64),
-                open_prices.astype(np.float64),
-                weights.astype(np.float64),
-                float(capital),
-                float(matcher._rate),
-                float(matcher._sell_rate),
-                float(matcher._min_comm),
-                float(slip),
-            )
-            # ── JIT 快速路径输出结构 ──
-            # [0]  equity_curve      逐日净值 (n_bars,)
-            # [1]  daily_returns     逐日收益率 (n_bars,)
-            # [2]  trade_entry_bars  成交入场 bar 索引 (n_trades,)
-            # [3]  trade_exit_bars   成交出场 bar 索引 (n_trades,)
-            # [4]  trade_entry_prices 入场价格 (n_trades,)
-            # [5]  trade_exit_prices  出场价格 (n_trades,)
-            # [6]  trade_pnl         成交盈亏 (n_trades,)
-            # [7]  trade_commissions  成交手续费 (n_trades,)
-            # [8]  trade_weights      成交权重 (n_trades,)
-            # [9]  trade_count        成交笔数 (scalar)
-            # [10] final_shares       期末持仓股数 (scalar)
-            # [11] (reserved)
-            # [12] final_entry_bar    期末持仓入场 bar (scalar)
-            # [13] final_entry_price  期末持仓入场价 (scalar)
-            # [14] final_entry_comm   期末持仓入场手续费 (scalar)
-            eq, dr = _jit_out[0], _jit_out[1]
-            te, tx, tep, txp, tpnl, tcm, tw = _jit_out[2], _jit_out[3], _jit_out[4], _jit_out[5], _jit_out[6], _jit_out[7], _jit_out[8]
-            tc = int(_jit_out[9])
-            f_shares = float(_jit_out[10])
-            f_entry_bar = int(_jit_out[12])
-            f_entry_price = float(_jit_out[13])
-            f_entry_comm = float(_jit_out[14])
+        if not (_use_cpp or _use_jit):
+            return None
 
-            times = list(df.index) if hasattr(df.index, "__iter__") else list(range(n))
-            trades = []
-            # JIT pnl_pct uses equity-based formula (exit_eq / entry_eq - 1)
-            # which differs from the Python path's cost-basis formula
-            # (total_pnl / cycle_peak_invested). For binary 0/1 signals at
-            # full weight the two converge; the JIT path is restricted to
-            # binary signals so the divergence is minimal.
-            for j in range(tc):
-                ei, xi = int(te[j]), int(tx[j])
-                entry_eq = float(eq[ei - 1]) if ei > 0 else capital
-                exit_eq = float(eq[xi])
-                trades.append(TradeRecord(
-                    entry_time=times[ei], exit_time=times[xi],
-                    entry_price=float(tep[j]), exit_price=float(txp[j]),
-                    weight=float(tw[j]), pnl=float(tpnl[j]),
-                    pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
-                    commission=float(tcm[j]),
-                ))
-            if f_shares > _ZERO_THRESHOLD and f_entry_bar >= 0 and n > 0:
-                liq_price = prices[n - 1]
-                if not np.isnan(liq_price) and liq_price > 0:
-                    fill = matcher.fill_sell(liq_price, f_shares)
-                    if fill.shares > 0:
-                        pnl = (fill.fill_price - f_entry_price) * fill.shares - fill.commission - f_entry_comm
-                        entry_eq = float(eq[f_entry_bar - 1]) if f_entry_bar > 0 else capital
-                        exit_eq = float(eq[n - 1])
-                        trades.append(TradeRecord(
-                            entry_time=times[f_entry_bar], exit_time=times[n - 1],
-                            entry_price=f_entry_price, exit_price=fill.fill_price,
-                            weight=float(weights[f_entry_bar]) if f_entry_bar < len(weights) else 0.0,
-                            pnl=pnl,
-                            pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
-                            commission=f_entry_comm + fill.commission,
-                        ))
+        _sim_fn = _cpp_simulate_loop if _use_cpp else jit_simulate_loop
+        slip = getattr(matcher, '_slip', 0.0)
+        _jit_out = _sim_fn(
+            prices.astype(np.float64),
+            open_prices.astype(np.float64),
+            weights.astype(np.float64),
+            float(capital),
+            float(matcher._rate),
+            float(matcher._sell_rate),
+            float(matcher._min_comm),
+            float(slip),
+        )
+        # ── JIT 快速路径输出结构 ──
+        # [0]  equity_curve      逐日净值 (n_bars,)
+        # [1]  daily_returns     逐日收益率 (n_bars,)
+        # [2]  trade_entry_bars  成交入场 bar 索引 (n_trades,)
+        # [3]  trade_exit_bars   成交出场 bar 索引 (n_trades,)
+        # [4]  trade_entry_prices 入场价格 (n_trades,)
+        # [5]  trade_exit_prices  出场价格 (n_trades,)
+        # [6]  trade_pnl         成交盈亏 (n_trades,)
+        # [7]  trade_commissions  成交手续费 (n_trades,)
+        # [8]  trade_weights      成交权重 (n_trades,)
+        # [9]  trade_count        成交笔数 (scalar)
+        # [10] final_shares       期末持仓股数 (scalar)
+        # [11] (reserved)
+        # [12] final_entry_bar    期末持仓入场 bar (scalar)
+        # [13] final_entry_price  期末持仓入场价 (scalar)
+        # [14] final_entry_comm   期末持仓入场手续费 (scalar)
+        eq, dr = _jit_out[0], _jit_out[1]
+        te, tx, tep, txp, tpnl, tcm, tw = _jit_out[2], _jit_out[3], _jit_out[4], _jit_out[5], _jit_out[6], _jit_out[7], _jit_out[8]
+        tc = int(_jit_out[9])
+        f_shares = float(_jit_out[10])
+        f_entry_bar = int(_jit_out[12])
+        f_entry_price = float(_jit_out[13])
+        f_entry_comm = float(_jit_out[14])
 
-            return (
-                pd.Series(eq, index=df.index),
-                trades,
-                pd.Series(dr, index=df.index),
-            )
+        times = list(df.index) if hasattr(df.index, "__iter__") else list(range(n))
+        trades = []
+        # JIT pnl_pct uses equity-based formula (exit_eq / entry_eq - 1)
+        # which differs from the Python path's cost-basis formula
+        # (total_pnl / cycle_peak_invested). For binary 0/1 signals at
+        # full weight the two converge; the JIT path is restricted to
+        # binary signals so the divergence is minimal.
+        for j in range(tc):
+            ei, xi = int(te[j]), int(tx[j])
+            entry_eq = float(eq[ei - 1]) if ei > 0 else capital
+            exit_eq = float(eq[xi])
+            trades.append(TradeRecord(
+                entry_time=times[ei], exit_time=times[xi],
+                entry_price=float(tep[j]), exit_price=float(txp[j]),
+                weight=float(tw[j]), pnl=float(tpnl[j]),
+                pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
+                commission=float(tcm[j]),
+            ))
+        if f_shares > _ZERO_THRESHOLD and f_entry_bar >= 0 and n > 0:
+            liq_price = prices[n - 1]
+            if not np.isnan(liq_price) and liq_price > 0:
+                fill = matcher.fill_sell(liq_price, f_shares)
+                if fill.shares > 0:
+                    pnl = (fill.fill_price - f_entry_price) * fill.shares - fill.commission - f_entry_comm
+                    entry_eq = float(eq[f_entry_bar - 1]) if f_entry_bar > 0 else capital
+                    exit_eq = float(eq[n - 1])
+                    trades.append(TradeRecord(
+                        entry_time=times[f_entry_bar], exit_time=times[n - 1],
+                        entry_price=f_entry_price, exit_price=fill.fill_price,
+                        weight=float(weights[f_entry_bar]) if f_entry_bar < len(weights) else 0.0,
+                        pnl=pnl,
+                        pnl_pct=(exit_eq / entry_eq - 1.0) if entry_eq > 0 else 0.0,
+                        commission=f_entry_comm + fill.commission,
+                    ))
 
+        return (
+            pd.Series(eq, index=df.index),
+            trades,
+            pd.Series(dr, index=df.index),
+        )
+
+    def _simulate_python(
+        self,
+        prices: np.ndarray,
+        open_prices: np.ndarray,
+        raw_close: np.ndarray,
+        weights: np.ndarray,
+        capital: float,
+        df: pd.DataFrame,
+    ) -> tuple[pd.Series, list[TradeRecord], pd.Series]:
+        """Python 通用路径：支持任意 Matcher 链和连续权重信号。
+
+        包含逐 bar 交易循环和期末持仓虚拟清仓（TradeRecord 生成）。
+
+        关键状态变量：
+        - cycle_net_invested / cycle_peak_invested: 跟踪持仓周期的累计投入资金，
+          用于计算单笔交易的真实收益率。
+        """
         # --- Original Python loop (MarketRulesMatcher or no numba) ---
-
+        n = len(prices)
         equity_arr = np.zeros(n)
         equity_arr[0] = capital
         cash = capital
@@ -526,3 +552,34 @@ class VectorizedBacktestEngine:
         equity = pd.Series(equity_arr, index=df.index)
         daily_returns = pd.Series(daily_ret, index=df.index)
         return equity, trades, daily_returns
+
+    def _simulate(
+        self,
+        df: pd.DataFrame,
+        signals: pd.Series,
+        capital: float,
+    ) -> tuple[pd.Series, list[TradeRecord], pd.Series]:
+        """执行交易模拟，返回净值曲线、成交记录和日收益率。
+
+        两条执行路径：
+        - JIT 快速路径：SimpleMatcher/SlippageMatcher + 二值信号 → C++/Numba 向量化
+        - Python 通用路径：支持任意 Matcher 链（MarketRulesMatcher 等）和连续权重信号
+        """
+        prices, open_prices, raw_close = self._compute_adj_open(df)
+        weights = signals.values
+        n = len(prices)
+
+        if n == 0:
+            return (
+                pd.Series([capital], dtype=float),
+                [],
+                pd.Series([0.0], dtype=float),
+            )
+
+        # JIT 快速路径（条件不满足时返回 None）
+        jit_result = self._simulate_jit(prices, open_prices, weights, capital, df)
+        if jit_result is not None:
+            return jit_result
+
+        # Python 通用路径
+        return self._simulate_python(prices, open_prices, raw_close, weights, capital, df)
