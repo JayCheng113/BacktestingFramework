@@ -25,6 +25,7 @@ CORE_FILES = [
     "ez/errors.py",
     "ez/config.py",
     "ez/core/matcher.py",
+    "ez/core/_jit_fill.py",
     "ez/core/ts_ops.py",
     "ez/core/market_rules.py",
     "ez/data/provider.py",
@@ -194,7 +195,7 @@ class TestCoreStability:
 
     def test_core_package_no_unlisted_python_files(self):
         """ez/core/ should not contain unlisted .py files (excluding _cpp/)."""
-        expected = {"__init__.py", "matcher.py", "ts_ops.py", "market_rules.py"}
+        expected = {"__init__.py", "_jit_fill.py", "matcher.py", "ts_ops.py", "market_rules.py"}
         actual = {
             f.name
             for f in (EZ_ROOT / "core").iterdir()

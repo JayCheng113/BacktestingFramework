@@ -1,7 +1,7 @@
 # ez/core -- Core Computational Primitives
 
 ## Responsibility
-Provide the low-level building blocks (matching, time-series ops) that both factor and backtest layers depend on. Python implementations now, C++ replaceable in V2.1.
+Provide the low-level building blocks (matching, time-series ops, optional JIT kernels) that both factor and backtest layers depend on.
 
 ## Public Interfaces
 - `Matcher(ABC)` — [CORE] order matching interface: `fill_buy()`, `fill_sell()` -> `FillResult`
@@ -13,6 +13,7 @@ Provide the low-level building blocks (matching, time-series ops) that both fact
 ## Files
 | File | Role | Core/Extension |
 |------|------|---------------|
+| _jit_fill.py | Optional numba fill kernels + simulation loop fallback | CORE |
 | matcher.py | Matcher ABC + SimpleMatcher + SlippageMatcher | CORE |
 | market_rules.py | MarketRulesMatcher (V2.6) | CORE |
 | ts_ops.py | Time series primitives (pandas wrappers) | CORE |

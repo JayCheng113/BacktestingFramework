@@ -249,7 +249,7 @@ def _simulate(self, ...):
 
 ## 验收标准
 
-1. `scripts/run_pytest_safe.sh tests/ -x -q` 全量通过（不含已知的 `_jit_fill.py` 架构测试）
+1. `scripts/run_pytest_safe.sh tests/ -x -q` 全量通过
 2. 裸数字验证：在目标文件的逻辑代码中（非常量定义行、非注释行），不再出现 `1e-10`、`1e-6`、`1e-3`、`1e-8`、`1e-20`、`1e-12` 等裸字面量。验证方式：`git grep` 输出中每个匹配行都是 `_XXX = 1e-xx` 的定义形式，不是 `if x > 1e-10` 的使用形式。
 3. `ez/backtest/engine.py` 中 `_simulate()` 不超过 60 行
 4. `VectorizedBacktestEngine.run()` 和 `__init__()` 有完整 docstring
