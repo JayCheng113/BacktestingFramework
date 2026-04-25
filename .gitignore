@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .uv_cache/
+.claude/*.lock
 data/*.db
 data/*.db.wal
 data/*.db.tmp
