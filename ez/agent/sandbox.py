@@ -387,8 +387,8 @@ def get_template(kind: str = "strategy", class_name: str = "", description: str 
         factor_name = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
         return _CROSS_FACTOR_TEMPLATE.format(class_name=class_name, description=description, factor_name=factor_name)
     if kind == "ml_alpha":
-        # V2.13 Phase 4: use ML_ALPHA_TEMPLATE from ez.portfolio.ml_alpha
-        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE
+        # V2.13 Phase 4: use ML_ALPHA_TEMPLATE from ez.portfolio.ml.alpha
+        from ez.portfolio.ml.alpha import ML_ALPHA_TEMPLATE
         factor_name = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
         return ML_ALPHA_TEMPLATE.format(
             class_name=class_name,
@@ -1570,7 +1570,7 @@ import importlib.util, numpy as np, pandas as pd
 from datetime import datetime
 spec = importlib.util.spec_from_file_location('_check', {safe_path_repr})
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-from ez.portfolio.ml_alpha import MLAlpha
+from ez.portfolio.ml.alpha import MLAlpha
 classes = [v for v in vars(mod).values() if isinstance(v, type) and issubclass(v, MLAlpha) and v is not MLAlpha]
 assert classes, 'No MLAlpha subclass found'
 cls = classes[0]

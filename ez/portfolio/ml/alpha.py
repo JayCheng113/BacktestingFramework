@@ -97,7 +97,7 @@ def _build_supported_estimator_set() -> frozenset[type]:
     """Construct the estimator whitelist.
 
     Built lazily (not at module import) so that ``import
-    ez.portfolio.ml_alpha`` works even when sklearn is not installed —
+    ez.portfolio.ml.alpha`` works even when sklearn is not installed —
     only the first ``MLAlpha`` construction triggers the sklearn import.
 
     V1 core: 7 sklearn classes (always required).
@@ -1178,7 +1178,7 @@ from __future__ import annotations
 import pandas as pd
 
 from sklearn.linear_model import Ridge
-from ez.portfolio.ml_alpha import MLAlpha
+from ez.portfolio.ml.alpha import MLAlpha
 
 
 def _feature_fn(df: pd.DataFrame) -> pd.DataFrame:

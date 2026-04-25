@@ -67,7 +67,7 @@ def _build_system_prompt(editor_code: str = "") -> str:
         "使用 create_ml_alpha 工具。必须遵循以下模板结构：",
         "```python",
         "import pandas as pd",
-        "from ez.portfolio.ml_alpha import MLAlpha",
+        "from ez.portfolio.ml.alpha import MLAlpha",
         "from sklearn.linear_model import Ridge",
         "",
         "def _feature_fn(df: pd.DataFrame) -> pd.DataFrame:",

@@ -42,8 +42,9 @@ Multi-stock portfolio backtesting: universe management, cross-sectional factors,
 | risk_manager.py | RiskConfig + RiskManager: drawdown state machine + turnover limiter (V2.12) |
 | attribution.py | BrinsonAttribution + compute_attribution(): Brinson decomposition (V2.12) |
 | loader.py | Startup scanner for portfolio_strategies/ and cross_factors/ |
-| ml_alpha.py | MLAlpha(CrossSectionalFactor): walk-forward ML factor framework + V1 whitelist + n_jobs runtime enforcement + positional purge/embargo (trading days) + ML_ALPHA_TEMPLATE + UnsupportedEstimatorError (V2.13 Phase 1) |
-| ml_diagnostics.py | MLDiagnostics: overfitting detection for MLAlpha — feature importance CV, IS/OOS IC decay, turnover, verdict (V2.13 Phase 2) |
+| ml/alpha.py | MLAlpha(CrossSectionalFactor): walk-forward ML factor framework + V1 whitelist + n_jobs runtime enforcement + positional purge/embargo (trading days) + ML_ALPHA_TEMPLATE + UnsupportedEstimatorError (V2.13 Phase 1) |
+| ml/diagnostics.py | MLDiagnostics: overfitting detection for MLAlpha — feature importance CV, IS/OOS IC decay, turnover, verdict (V2.13 Phase 2) |
+| ml/__init__.py | Re-exports MLAlpha, ML_ALPHA_TEMPLATE, UnsupportedEstimatorError, MLDiagnostics, DiagnosticsResult, DiagnosticsConfig |
 | ensemble.py | StrategyEnsemble(PortfolioStrategy): multi-strategy composition — equal/manual/return_weighted/inverse_vol, hypothetical-return ledger, correlation_warnings (V2.13 Phase 3) |
 
 ## Key Design Decisions

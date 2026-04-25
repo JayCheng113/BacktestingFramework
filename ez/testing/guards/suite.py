@@ -250,7 +250,7 @@ def load_user_class(
     elif kind == "portfolio_strategy":
         from ez.portfolio.portfolio_strategy import PortfolioStrategy as _Base
     elif kind == "ml_alpha":
-        from ez.portfolio.ml_alpha import MLAlpha as _Base
+        from ez.portfolio.ml.alpha import MLAlpha as _Base
     else:
         return None, f"Unknown kind: {kind}"
 

@@ -208,7 +208,7 @@ class TestMLAlphaDiagnosticsEndpoint:
         assert resp.status_code == 422
 
     def test_happy_path_with_mock_data(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from ez.portfolio.cross_factor import CrossSectionalFactor
         from sklearn.linear_model import Ridge
 

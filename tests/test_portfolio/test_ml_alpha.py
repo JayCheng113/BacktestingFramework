@@ -31,8 +31,8 @@ pytest.importorskip("sklearn", reason="V2.13 MLAlpha tests require scikit-learn;
 
 
 def test_mlalpha_import():
-    """MLAlpha can be imported from ez.portfolio.ml_alpha."""
-    from ez.portfolio.ml_alpha import MLAlpha
+    """MLAlpha can be imported from ez.portfolio.ml.alpha."""
+    from ez.portfolio.ml.alpha import MLAlpha
     assert MLAlpha is not None
 
 
@@ -40,7 +40,7 @@ def test_mlalpha_is_cross_sectional_factor():
     """MLAlpha inherits from CrossSectionalFactor so it's compatible with
     the existing factor pipeline (TopNRotation, CrossSectionalEvaluator,
     AlphaCombiner, registry, etc.)."""
-    from ez.portfolio.ml_alpha import MLAlpha
+    from ez.portfolio.ml.alpha import MLAlpha
     from ez.portfolio.cross_factor import CrossSectionalFactor
     assert issubclass(MLAlpha, CrossSectionalFactor)
 
@@ -48,14 +48,14 @@ def test_mlalpha_is_cross_sectional_factor():
 def test_unsupported_estimator_error_importable():
     """UnsupportedEstimatorError is part of the public API so callers can
     catch it and show a friendly message."""
-    from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+    from ez.portfolio.ml.alpha import UnsupportedEstimatorError
     assert issubclass(UnsupportedEstimatorError, TypeError)
 
 
 def test_mlalpha_init_requires_four_callables():
     """MLAlpha must be constructed with model_factory, feature_fn,
     target_fn (three callables) plus sizing parameters."""
-    from ez.portfolio.ml_alpha import MLAlpha
+    from ez.portfolio.ml.alpha import MLAlpha
     from sklearn.linear_model import Ridge
 
     def feature_fn(df: pd.DataFrame) -> pd.DataFrame:
@@ -83,7 +83,7 @@ def test_mlalpha_fresh_instance_has_no_fitted_state():
     _retrain_count == 0. This is what makes strategy_factory() per-fold
     isolation work in portfolio_walk_forward — each fold's factory call
     returns a fresh instance with zero prior state."""
-    from ez.portfolio.ml_alpha import MLAlpha
+    from ez.portfolio.ml.alpha import MLAlpha
     from sklearn.linear_model import Ridge
 
     alpha = MLAlpha(
@@ -119,28 +119,28 @@ class TestMLAlphaValidation:
 
     @pytest.mark.parametrize("bad", [0, -1, -100])
     def test_train_window_must_be_positive(self, valid_kwargs, bad):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["train_window"] = bad
         with pytest.raises(ValueError, match="train_window"):
             MLAlpha(**valid_kwargs)
 
     @pytest.mark.parametrize("bad", [0, -1])
     def test_retrain_freq_must_be_positive(self, valid_kwargs, bad):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["retrain_freq"] = bad
         with pytest.raises(ValueError, match="retrain_freq"):
             MLAlpha(**valid_kwargs)
 
     @pytest.mark.parametrize("bad", [-1, -5])
     def test_purge_days_must_be_non_negative(self, valid_kwargs, bad):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["purge_days"] = bad
         with pytest.raises(ValueError, match="purge_days"):
             MLAlpha(**valid_kwargs)
 
     @pytest.mark.parametrize("bad", [-1, -3])
     def test_embargo_days_must_be_non_negative(self, valid_kwargs, bad):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["embargo_days"] = bad
         with pytest.raises(ValueError, match="embargo_days"):
             MLAlpha(**valid_kwargs)
@@ -149,14 +149,14 @@ class TestMLAlphaValidation:
         """purge_days=0 is allowed (no purge window). User must then
         ensure their target_fn doesn't look forward, otherwise there's
         no protection against label leakage."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["purge_days"] = 0
         alpha = MLAlpha(**valid_kwargs)
         assert alpha.warmup_period == 60  # train_window + 0 + 0
 
     def test_embargo_days_zero_default(self, valid_kwargs):
         """embargo_days defaults to 0 when not provided."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         del valid_kwargs["embargo_days"]
         alpha = MLAlpha(**valid_kwargs)
         assert alpha._embargo_days == 0
@@ -165,7 +165,7 @@ class TestMLAlphaValidation:
         """V2.13 round 6 reviewer I1: feature_warmup_days must be
         included in warmup_period so TopNRotation.lookback_days
         propagates the full requirement to the engine."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["train_window"] = 400
         valid_kwargs["purge_days"] = 5
         valid_kwargs["embargo_days"] = 2
@@ -176,7 +176,7 @@ class TestMLAlphaValidation:
 
     def test_feature_warmup_days_zero_default(self, valid_kwargs):
         """feature_warmup_days defaults to 0 (backward compatible)."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         alpha = MLAlpha(**valid_kwargs)
         assert alpha._feature_warmup_days == 0
         # warmup = train_window(60) + purge(5) + embargo(0) + feature(0) = 65
@@ -184,7 +184,7 @@ class TestMLAlphaValidation:
 
     @pytest.mark.parametrize("bad", [-1, -10])
     def test_feature_warmup_days_must_be_non_negative(self, valid_kwargs, bad):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["feature_warmup_days"] = bad
         with pytest.raises(ValueError, match="feature_warmup_days"):
             MLAlpha(**valid_kwargs)
@@ -193,7 +193,7 @@ class TestMLAlphaValidation:
     def test_model_factory_must_be_callable(self, valid_kwargs, bad):
         """model_factory must be a callable. Non-callable raises TypeError
         at construction — NOT later at compute() time."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["model_factory"] = bad
         with pytest.raises(TypeError, match="model_factory"):
             MLAlpha(**valid_kwargs)
@@ -202,7 +202,7 @@ class TestMLAlphaValidation:
     def test_feature_fn_must_be_callable(self, valid_kwargs, bad):
         """feature_fn must be a callable. Fails at construction, not at
         compute()."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["feature_fn"] = bad
         with pytest.raises(TypeError, match="feature_fn"):
             MLAlpha(**valid_kwargs)
@@ -210,7 +210,7 @@ class TestMLAlphaValidation:
     @pytest.mark.parametrize("bad", [None, "str", 42, [1]])
     def test_target_fn_must_be_callable(self, valid_kwargs, bad):
         """target_fn must be a callable."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         valid_kwargs["target_fn"] = bad
         with pytest.raises(TypeError, match="target_fn"):
             MLAlpha(**valid_kwargs)
@@ -220,7 +220,7 @@ class TestMLAlphaValidation:
         not the _assert_supported_estimator probe (which would try to
         call None() and raise a less helpful TypeError about NoneType
         not being callable without mentioning 'model_factory')."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         with pytest.raises(TypeError, match="model_factory"):
             MLAlpha(
                 name="t",
@@ -253,31 +253,31 @@ class TestMLAlphaEstimatorWhitelist:
         )
 
     def test_ridge_is_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         alpha = MLAlpha(model_factory=lambda: Ridge(alpha=1.0), **base_kwargs)
         assert alpha is not None
 
     def test_lasso_is_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Lasso
         alpha = MLAlpha(model_factory=lambda: Lasso(alpha=0.1), **base_kwargs)
         assert alpha is not None
 
     def test_linear_regression_is_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import LinearRegression
         alpha = MLAlpha(model_factory=lambda: LinearRegression(), **base_kwargs)
         assert alpha is not None
 
     def test_elastic_net_is_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import ElasticNet
         alpha = MLAlpha(model_factory=lambda: ElasticNet(alpha=0.1), **base_kwargs)
         assert alpha is not None
 
     def test_decision_tree_regressor_is_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.tree import DecisionTreeRegressor
         alpha = MLAlpha(
             model_factory=lambda: DecisionTreeRegressor(max_depth=3, random_state=0),
@@ -286,7 +286,7 @@ class TestMLAlphaEstimatorWhitelist:
         assert alpha is not None
 
     def test_gradient_boosting_regressor_is_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.ensemble import GradientBoostingRegressor
         alpha = MLAlpha(
             model_factory=lambda: GradientBoostingRegressor(n_estimators=5, random_state=0),
@@ -295,7 +295,7 @@ class TestMLAlphaEstimatorWhitelist:
         assert alpha is not None
 
     def test_random_forest_n_jobs_1_accepted(self, base_kwargs):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.ensemble import RandomForestRegressor
         alpha = MLAlpha(
             model_factory=lambda: RandomForestRegressor(n_jobs=1, n_estimators=5, random_state=0),
@@ -305,7 +305,7 @@ class TestMLAlphaEstimatorWhitelist:
 
     def test_random_forest_n_jobs_minus_one_rejected(self, base_kwargs):
         """n_jobs=-1 must raise at construction, BEFORE any fit() runs."""
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.ensemble import RandomForestRegressor
         with pytest.raises(UnsupportedEstimatorError, match="n_jobs"):
             MLAlpha(
@@ -315,7 +315,7 @@ class TestMLAlphaEstimatorWhitelist:
 
     def test_random_forest_n_jobs_2_rejected(self, base_kwargs):
         """n_jobs=2 (or any value != 1/None) must raise."""
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.ensemble import RandomForestRegressor
         with pytest.raises(UnsupportedEstimatorError, match="n_jobs"):
             MLAlpha(
@@ -327,7 +327,7 @@ class TestMLAlphaEstimatorWhitelist:
         """n_jobs=None (sklearn default for some estimators) is treated
         as 'not set' and allowed through. sklearn's own joblib layer will
         run in single-process mode when n_jobs is None."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.ensemble import RandomForestRegressor
         alpha = MLAlpha(
             model_factory=lambda: RandomForestRegressor(n_jobs=None, n_estimators=5, random_state=0),
@@ -339,7 +339,7 @@ class TestMLAlphaEstimatorWhitelist:
         """sklearn has many estimators. MLAlpha V1 whitelists only a
         small verified subset. SVR is NOT on V1's list — verify rejection
         with a user-visible message mentioning the whitelist."""
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.svm import SVR
         with pytest.raises(UnsupportedEstimatorError, match="whitelist"):
             MLAlpha(model_factory=lambda: SVR(), **base_kwargs)
@@ -347,7 +347,7 @@ class TestMLAlphaEstimatorWhitelist:
     def test_arbitrary_python_object_rejected(self, base_kwargs):
         """A plain Python object with a .fit method is not an sklearn
         estimator and is rejected."""
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
 
         class FakeEstimator:
             def fit(self, X, y): return self
@@ -360,7 +360,7 @@ class TestMLAlphaEstimatorWhitelist:
         """Even a Ridge subclass is rejected — type identity, not isinstance.
         This blocks users from monkey-patching fit() via inheritance as a
         sandbox bypass."""
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.linear_model import Ridge
 
         class MyRidge(Ridge):
@@ -380,7 +380,7 @@ class TestMLAlphaEstimatorWhitelist:
         __init__ must detect this at construction time by calling
         model_factory() twice and comparing instance identity.
         """
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.linear_model import Ridge
 
         # Buggy factory: caches a single instance and returns it repeatedly
@@ -408,7 +408,7 @@ class TestMLAlphaEstimatorWhitelist:
         Fix: validate probe2 too. The mismatch should fail at construction
         time, not during the first compute.
         """
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.linear_model import Ridge
         from sklearn.svm import SVR
 
@@ -435,7 +435,7 @@ class TestMLAlphaEstimatorWhitelist:
     def test_factory_returning_fresh_instance_accepted(self):
         """Regression: the singleton detector must NOT reject a legitimate
         factory that returns a new instance on every call."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         # Standard factory pattern
@@ -452,7 +452,7 @@ class TestMLAlphaEstimatorWhitelist:
         """The error message must tell the user which classes ARE allowed,
         so they can pick a substitute. Otherwise the user has to read the
         source to find the whitelist."""
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.svm import SVR
         try:
             MLAlpha(model_factory=lambda: SVR(), **base_kwargs)
@@ -486,7 +486,7 @@ class TestMLAlphaLazyRetrain:
     subsequent calls within retrain_freq."""
 
     def test_compute_triggers_retrain_on_first_call(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200)
@@ -515,7 +515,7 @@ class TestMLAlphaLazyRetrain:
         assert alpha._last_retrain_date == dt.date()
 
     def test_compute_skips_retrain_within_freq(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200)
@@ -544,7 +544,7 @@ class TestMLAlphaLazyRetrain:
     def test_retrain_at_exact_boundary(self):
         """V2.13.2 G3.4: elapsed == retrain_freq must trigger retrain
         (>= not >). Tests the exact boundary that previous test missed."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200)
@@ -573,7 +573,7 @@ class TestBuildTrainingPanel:
     """Training panel must exclude samples within purge+embargo window."""
 
     def _make_alpha(self, purge=5, embargo=0, train_window=60):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         return MLAlpha(
             name="t",
@@ -646,7 +646,7 @@ class TestMLAlphaPredict:
     """compute() returns a Series indexed by symbol with model predictions."""
 
     def test_compute_returns_series_with_symbols_as_index(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=4)
@@ -672,7 +672,7 @@ class TestMLAlphaPredict:
     def test_compute_predictions_vary_across_symbols(self):
         """Sanity: with stocks that have different drift, predictions
         should NOT all be equal (otherwise the model learned nothing)."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=5)
@@ -728,7 +728,7 @@ class TestMLAlphaAntiLookahead:
         that leaked would produce predictions dominated by the outlier's
         massive feature/target values.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         n_days = 400
@@ -795,7 +795,7 @@ class TestMLAlphaAntiLookahead:
         multiple purge values. V2.13 C1 fix: purge is POSITIONAL (trading
         days), not calendar days, so the assertion is on strict `<` and
         on the number of rows trimmed, not on a calendar-day offset."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300)
@@ -849,7 +849,7 @@ class TestMLAlphaAntiLookahead:
         This test would fail with the old calendar-day purge and passes
         with the V2.13 C1 fix (positional purge).
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         n_days = 400
@@ -907,7 +907,7 @@ class TestMLAlphaAntiLookahead:
         purge_days=k, the panel's last kept row's label exactly equals
         close[pred_idx-1]/close[pred_idx-1-k], which uses only historical
         data (no label reaches >= prediction_date)."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         n_days = 400
@@ -972,7 +972,7 @@ class TestMLAlphaDeterminism:
     def test_ridge_is_deterministic(self):
         """Ridge has no random component — two identical instances trained
         on the same data must produce identical predictions."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=4)
@@ -998,7 +998,7 @@ class TestMLAlphaDeterminism:
     def test_random_forest_deterministic_with_fixed_random_state(self):
         """RandomForest has random tree sampling, but with random_state=0
         and n_jobs=1 it must be fully deterministic."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.ensemble import RandomForestRegressor
 
         data, dates = _make_universe_df(n_days=200, n_stocks=4)
@@ -1027,7 +1027,7 @@ class TestMLAlphaDeterminism:
         """Calling compute() twice at the same date on the same instance
         must return byte-identical results. This ensures idempotency
         within a rebalance."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=4)
@@ -1054,7 +1054,7 @@ class TestMLAlphaCache:
     def test_single_retrain_within_freq_window(self):
         """5 compute() calls spanning 10 days with retrain_freq=20 should
         result in exactly 1 retrain."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=4)
@@ -1078,7 +1078,7 @@ class TestMLAlphaCache:
     def test_fresh_instance_resets_cache(self):
         """Two independently-constructed instances must have independent
         state — no cross-instance caching."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         def make():
@@ -1118,7 +1118,7 @@ class TestMLAlphaFeatureErrorHandling:
         """A buggy feature_fn that raises must not crash compute. When
         ALL symbols fail, compute returns empty Series and no model
         trains."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = self._make_data()
@@ -1140,7 +1140,7 @@ class TestMLAlphaFeatureErrorHandling:
         assert alpha._current_model is None
 
     def test_feature_fn_returning_none_skips_symbol(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = self._make_data()
@@ -1155,7 +1155,7 @@ class TestMLAlphaFeatureErrorHandling:
         assert len(scores) == 0
 
     def test_target_fn_raising_skips_symbol(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = self._make_data()
@@ -1183,7 +1183,7 @@ class TestMLAlphaFeatureErrorHandling:
         majority of the universe is healthy. The framework must degrade
         gracefully — not collapse to zero predictions.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1211,7 +1211,7 @@ class TestMLAlphaFeatureErrorHandling:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -1263,7 +1263,7 @@ class TestMLAlphaFeatureErrorHandling:
         particular symbol ID (not call ordinality) and assert the
         remaining good symbols produce predictions.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = self._make_data()
@@ -1336,7 +1336,7 @@ class TestMLAlphaFitExceptionHandling:
         must be filtered before sklearn fit, otherwise sklearn raises
         ValueError("Input X contains infinity") and crashes the backtest.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         rng = np.random.default_rng(42)
@@ -1385,7 +1385,7 @@ class TestMLAlphaFitExceptionHandling:
         TypeError wrapping the original. This is intentional: at init
         time, the user gets immediate feedback. At retrain time (below),
         the same exception is wrapped and logged without crashing."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
 
         def broken_factory():
             raise RuntimeError("config is wrong")
@@ -1410,7 +1410,7 @@ class TestMLAlphaFitExceptionHandling:
         to fail starting on the FOURTH call so that probes succeed and
         the first retrain also succeeds.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1471,7 +1471,7 @@ class TestMLAlphaFitExceptionHandling:
         Decimal objects, or even a numpy object array from a ragged
         construction. The framework must log-and-skip, not crash.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1506,7 +1506,7 @@ class TestMLAlphaFitExceptionHandling:
 
     def test_non_numeric_target_dtype_does_not_crash(self):
         """Mirror of the feature test, but target_fn returns non-numeric."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1548,7 +1548,7 @@ class TestMLAlphaFitExceptionHandling:
         Fix: active dtype.kind whitelist before np.asarray catches this
         before training.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1591,7 +1591,7 @@ class TestMLAlphaFitExceptionHandling:
 
     def test_datetime64_target_do_not_silently_coerce(self):
         """Symmetric check: target_fn returning a datetime64 Series."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1617,7 +1617,7 @@ class TestMLAlphaFitExceptionHandling:
     def test_timedelta64_features_do_not_silently_coerce(self):
         """Variant: timedelta64 also has numeric-looking kind 'm', must
         also be rejected."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1642,7 +1642,7 @@ class TestMLAlphaFitExceptionHandling:
     def test_numeric_dtypes_still_accepted_after_whitelist(self):
         """Regression: the C1 whitelist must NOT reject legitimate numeric
         dtypes. Verify int32/int64/float32/float64/bool all pass through."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1674,7 +1674,7 @@ class TestMLAlphaFitExceptionHandling:
     def test_non_numeric_dtype_logs_warning(self):
         """Non-numeric dtype must emit a one-shot warning with dtype info
         so the user can track down which column is bad."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1697,7 +1697,7 @@ class TestMLAlphaFitExceptionHandling:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -1720,7 +1720,7 @@ class TestMLAlphaFitExceptionHandling:
         """If model.fit() raises on a retrain call, the prior model must
         be kept (not reset to None). A logged warning documents the
         failure."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1806,7 +1806,7 @@ class TestMLAlphaContractEdgeCases:
 
     def test_empty_universe_data_returns_empty_series(self):
         """compute({}) on empty universe must not crash."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         alpha = MLAlpha(
@@ -1823,7 +1823,7 @@ class TestMLAlphaContractEdgeCases:
 
     def test_non_datetime_index_skips_symbol(self):
         """DataFrames with non-DatetimeIndex must be silently skipped."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         # Integer-indexed DataFrame — valid pandas but not a valid
@@ -1848,7 +1848,7 @@ class TestMLAlphaContractEdgeCases:
         """V2.13 I3: a user who writes ``feature_fn = lambda df: series``
         (returning a Series instead of a DataFrame) must get a warning
         in the log, not a silent empty-Series result."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1866,7 +1866,7 @@ class TestMLAlphaContractEdgeCases:
         with_warnings = []
         handler = logging.Handler()
         handler.emit = lambda r: with_warnings.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         old_level = logger.level
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
@@ -1884,7 +1884,7 @@ class TestMLAlphaContractEdgeCases:
     def test_target_fn_returning_all_nan_produces_no_training(self):
         """target_fn that produces all-NaN (e.g., too short a series
         for shift(-k)) must leave the panel empty without crashing."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1906,7 +1906,7 @@ class TestMLAlphaContractEdgeCases:
         """V2.13 H2 regression: feature_fn exceptions must be logged (not
         silently swallowed) so users can diagnose column name typos /
         shape bugs / division errors. Log must be one-shot to avoid spam."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1927,7 +1927,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         old_level = logger.level
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
@@ -1951,7 +1951,7 @@ class TestMLAlphaContractEdgeCases:
         )
 
     def test_target_fn_exception_logs_once_and_skips(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -1974,7 +1974,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2000,7 +2000,7 @@ class TestMLAlphaContractEdgeCases:
         which passes the schema check and reaches model.predict, where
         sklearn raises UFuncTypeError.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300, n_stocks=4)
@@ -2042,7 +2042,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2081,7 +2081,7 @@ class TestMLAlphaContractEdgeCases:
         This is distinct from test_empty_panel_warning_on_training_failure
         which exercises the _empty_panel_warned flag (training-stage
         path)."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300, n_stocks=4)
@@ -2117,7 +2117,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2155,7 +2155,7 @@ class TestMLAlphaContractEdgeCases:
         test asserts a specific type warning with the bad type name and
         the symbol, so the user can trace back to feature_fn.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300, n_stocks=4)
@@ -2191,7 +2191,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2221,7 +2221,7 @@ class TestMLAlphaContractEdgeCases:
         feature_fn calls raise), _retrain must emit a diagnostic warning
         so the user knows the panel is empty — not just 'model didn't
         produce a signal'."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -2238,7 +2238,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2264,7 +2264,7 @@ class TestMLAlphaContractEdgeCases:
         Fix: validate the output index at each stage, emit one-shot
         warning + skip symbol if non-DatetimeIndex.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -2296,7 +2296,7 @@ class TestMLAlphaContractEdgeCases:
         """A feature_fn that returns a DatetimeIndex in shuffled order
         would make iloc[-train_window:] pick the wrong 'latest' rows.
         MLAlpha must sort or reject to prevent silent mis-training."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -2320,7 +2320,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2344,7 +2344,7 @@ class TestMLAlphaContractEdgeCases:
 
         Fix: save training column order, verify + reorder at predict.
         """
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300, n_stocks=4)
@@ -2385,7 +2385,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2408,7 +2408,7 @@ class TestMLAlphaContractEdgeCases:
     def test_feature_column_set_mismatch_skips_with_warning(self):
         """If the predict-stage feature_fn returns a completely different
         column set, we cannot reorder — skip with a clear warning."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=300, n_stocks=4)
@@ -2443,7 +2443,7 @@ class TestMLAlphaContractEdgeCases:
         captured = []
         handler = logging.Handler()
         handler.emit = lambda r: captured.append(r.getMessage())
-        logger = logging.getLogger("ez.portfolio.ml_alpha")
+        logger = logging.getLogger("ez.portfolio.ml.alpha")
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
@@ -2465,7 +2465,7 @@ class TestMLAlphaContractEdgeCases:
 
     def test_non_datetime_target_index_does_not_crash(self):
         """Symmetric for target_fn returning non-DatetimeIndex."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
 
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
@@ -2508,7 +2508,7 @@ class TestMLAlphaContractEdgeCases:
             Call 2: __init__ probe2 → Ridge (whitelist passes, singleton check: different id → OK)
             Call 3: _retrain → SVR (whitelist re-check raises UnsupportedEstimatorError)
         """
-        from ez.portfolio.ml_alpha import MLAlpha, UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import MLAlpha, UnsupportedEstimatorError
         from sklearn.linear_model import Ridge
         from sklearn.svm import SVR
 
@@ -2544,7 +2544,7 @@ class TestMLAlphaDiagnosticsInterface:
     interface so MLDiagnostics doesn't need to touch private attrs."""
 
     def test_diagnostics_snapshot_before_any_compute(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         alpha = MLAlpha(
             name="t",
@@ -2561,7 +2561,7 @@ class TestMLAlphaDiagnosticsInterface:
         assert snap["feature_importance"] == {}
 
     def test_diagnostics_snapshot_after_retrain(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
         alpha = MLAlpha(
@@ -2589,7 +2589,7 @@ class TestMLAlphaDiagnosticsInterface:
         """All values must be plain Python types — no numpy, no pandas,
         no sklearn objects."""
         import json
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
         alpha = MLAlpha(
@@ -2608,7 +2608,7 @@ class TestMLAlphaDiagnosticsInterface:
         assert len(json_str) > 10
 
     def test_config_dict_contains_all_constructor_params(self):
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         factory = lambda: Ridge(alpha=1.0)
         feat_fn = lambda df: pd.DataFrame({"f": df["adj_close"]})
@@ -2636,7 +2636,7 @@ class TestMLAlphaDiagnosticsInterface:
         """config_dict must contain everything needed to construct a
         fresh MLAlpha with identical configuration — this is how
         MLDiagnostics creates its diagnostic copy."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.linear_model import Ridge
         original = MLAlpha(
             name="orig",
@@ -2654,7 +2654,7 @@ class TestMLAlphaDiagnosticsInterface:
 
     def test_snapshot_with_random_forest_feature_importances(self):
         """RF uses feature_importances_ instead of coef_."""
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
         from sklearn.ensemble import RandomForestRegressor
         data, dates = _make_universe_df(n_days=200, n_stocks=3)
         alpha = MLAlpha(
@@ -2686,7 +2686,7 @@ class TestMLAlphaPackageExports:
         from ez.portfolio import MLAlpha
         assert MLAlpha is not None
         # Confirm it's the same class as the direct import
-        from ez.portfolio.ml_alpha import MLAlpha as DirectMLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha as DirectMLAlpha
         assert MLAlpha is DirectMLAlpha
 
     def test_unsupported_estimator_error_accessible(self):
@@ -2705,7 +2705,7 @@ class TestMLAlphaTemplate:
     subclass when executed."""
 
     def test_template_renders_with_format_substitution(self):
-        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE
+        from ez.portfolio.ml.alpha import ML_ALPHA_TEMPLATE
         rendered = ML_ALPHA_TEMPLATE.format(
             class_name="MyTestRidge",
             name="my_test_ridge",
@@ -2716,7 +2716,7 @@ class TestMLAlphaTemplate:
         assert "Test Ridge alpha." in rendered
 
     def test_rendered_template_is_valid_python(self):
-        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE
+        from ez.portfolio.ml.alpha import ML_ALPHA_TEMPLATE
         rendered = ML_ALPHA_TEMPLATE.format(
             class_name="FooRidge",
             name="foo_ridge",
@@ -2730,7 +2730,7 @@ class TestMLAlphaTemplate:
         """Execute the rendered template in a sandbox namespace and
         verify the resulting class can be instantiated + inherits
         MLAlpha."""
-        from ez.portfolio.ml_alpha import ML_ALPHA_TEMPLATE, MLAlpha
+        from ez.portfolio.ml.alpha import ML_ALPHA_TEMPLATE, MLAlpha
         rendered = ML_ALPHA_TEMPLATE.format(
             class_name="BarRidge",
             name="bar_ridge",

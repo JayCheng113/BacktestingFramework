@@ -48,7 +48,7 @@ def _make_universe(n_days: int = 400, n_stocks: int = 5, seed: int = 42):
 
 def _make_alpha(train_window=60, retrain_freq=20, purge_days=5, **kwargs):
     """Build a standard Ridge MLAlpha for testing."""
-    from ez.portfolio.ml_alpha import MLAlpha
+    from ez.portfolio.ml.alpha import MLAlpha
     from sklearn.linear_model import Ridge
     return MLAlpha(
         name=kwargs.pop("name", "test_diag"),
@@ -68,7 +68,7 @@ def _make_alpha(train_window=60, retrain_freq=20, purge_days=5, **kwargs):
 # ─── Task 2.1: Skeleton tests ────────────────────────────────────────
 
 def test_diagnostics_config_defaults():
-    from ez.portfolio.ml_diagnostics import DiagnosticsConfig
+    from ez.portfolio.ml.diagnostics import DiagnosticsConfig
     cfg = DiagnosticsConfig()
     assert cfg.severe_overfit_threshold == 0.5
     assert cfg.mild_overfit_threshold == 0.2
@@ -77,7 +77,7 @@ def test_diagnostics_config_defaults():
 
 
 def test_diagnostics_result_to_dict_json_serializable():
-    from ez.portfolio.ml_diagnostics import DiagnosticsResult
+    from ez.portfolio.ml.diagnostics import DiagnosticsResult
     result = DiagnosticsResult()
     d = result.to_dict()
     json_str = json.dumps(d)
@@ -86,19 +86,19 @@ def test_diagnostics_result_to_dict_json_serializable():
 
 
 def test_ml_diagnostics_import():
-    from ez.portfolio.ml_diagnostics import MLDiagnostics
+    from ez.portfolio.ml.diagnostics import MLDiagnostics
     assert MLDiagnostics is not None
 
 
 def test_ml_diagnostics_init():
-    from ez.portfolio.ml_diagnostics import MLDiagnostics
+    from ez.portfolio.ml.diagnostics import MLDiagnostics
     alpha = _make_alpha()
     diag = MLDiagnostics(alpha)
     assert diag._source_alpha is alpha
 
 
 def test_ml_diagnostics_run_returns_result():
-    from ez.portfolio.ml_diagnostics import MLDiagnostics, DiagnosticsResult
+    from ez.portfolio.ml.diagnostics import MLDiagnostics, DiagnosticsResult
     data, cal, dates = _make_universe()
     alpha = _make_alpha()
     diag = MLDiagnostics(alpha)
@@ -111,7 +111,7 @@ def test_ml_diagnostics_run_returns_result():
 
 class TestDiagnosticsWalkthrough:
     def test_retrain_cadence_matches_expected(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=60, retrain_freq=20, purge_days=5)
         diag = MLDiagnostics(alpha)
@@ -128,7 +128,7 @@ class TestDiagnosticsWalkthrough:
 
     def test_run_result_has_all_metric_fields(self):
         """After a real run, all metric fields should be populated."""
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=60, retrain_freq=20, purge_days=5)
         diag = MLDiagnostics(alpha)
@@ -150,7 +150,7 @@ class TestDiagnosticsWalkthrough:
         json.dumps(result.to_dict())
 
     def test_diagnostic_alpha_does_not_modify_original(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         snap_before = alpha.diagnostics_snapshot()
@@ -169,7 +169,7 @@ class TestDiagnosticsWalkthrough:
 
 class TestFeatureImportanceStability:
     def test_ridge_coef_captured_across_retrains(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=60, retrain_freq=20, purge_days=5)
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -181,7 +181,7 @@ class TestFeatureImportanceStability:
         assert result.feature_importance_cv["ret1"] < 5.0
 
     def test_random_forest_importance_captured(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         from sklearn.ensemble import RandomForestRegressor
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(
@@ -196,7 +196,7 @@ class TestFeatureImportanceStability:
             assert all(v >= 0 for v in values), f"RF importance for {feat} has negative value"
 
     def test_cv_computed_per_feature(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -210,7 +210,7 @@ class TestFeatureImportanceStability:
 
 class TestISOOSICDecay:
     def test_ic_series_has_one_entry_per_retrain(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=60, retrain_freq=20, purge_days=5)
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -222,7 +222,7 @@ class TestISOOSICDecay:
             assert "oos_ic" in entry
 
     def test_train_ic_is_finite(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=60, retrain_freq=20, purge_days=5)
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -231,7 +231,7 @@ class TestISOOSICDecay:
         assert len(finite_train) >= 1, "No finite IS IC values computed"
 
     def test_overfitting_score_bounded(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -242,7 +242,7 @@ class TestISOOSICDecay:
     def test_simple_ridge_not_severely_overfit(self):
         """A simple Ridge with regularization on synthetic data with
         a real (if weak) signal should not be severely overfitting."""
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=80, retrain_freq=20, purge_days=5)
         result = MLDiagnostics(alpha).run(data, cal, dates[120].date(), dates[-1].date())
@@ -257,7 +257,7 @@ class TestISOOSICDecay:
 
 class TestTurnoverAnalysis:
     def test_turnover_series_populated(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -269,7 +269,7 @@ class TestTurnoverAnalysis:
             assert 0.0 <= entry["retention_rate"] <= 1.0
 
     def test_avg_turnover_bounded(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -281,7 +281,7 @@ class TestTurnoverAnalysis:
 
 class TestVerdictAndWarnings:
     def test_verdict_is_valid_string(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -295,7 +295,7 @@ class TestVerdictAndWarnings:
         """Codex review #2: when IC data is empty (too short date range,
         no retrains completed), verdict must be 'insufficient_data',
         not a misleading 'healthy' from 0.0 defaults."""
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha(train_window=300, retrain_freq=20, purge_days=5)
         # Start very late — barely any room for even one retrain + OOS window
@@ -308,7 +308,7 @@ class TestVerdictAndWarnings:
             assert result.verdict == "insufficient_data" or result.verdict == "unknown"
 
     def test_warnings_is_list_of_strings(self):
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())
@@ -319,7 +319,7 @@ class TestVerdictAndWarnings:
 
     def test_custom_config_changes_verdict(self):
         """Tighter thresholds should produce a more critical verdict."""
-        from ez.portfolio.ml_diagnostics import MLDiagnostics, DiagnosticsConfig
+        from ez.portfolio.ml.diagnostics import MLDiagnostics, DiagnosticsConfig
 
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
@@ -344,7 +344,7 @@ class TestVerdictAndWarnings:
 
     def test_full_pipeline_to_dict_all_fields_present(self):
         """End-to-end: run → to_dict → verify all expected keys."""
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         data, cal, dates = _make_universe(n_days=400)
         alpha = _make_alpha()
         result = MLDiagnostics(alpha).run(data, cal, dates[100].date(), dates[-1].date())

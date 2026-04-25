@@ -33,7 +33,7 @@ import pandas as pd
 from scipy import stats
 
 from ez.portfolio.calendar import TradingCalendar
-from ez.portfolio.ml_alpha import MLAlpha
+from ez.portfolio.ml.alpha import MLAlpha
 
 _logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class MLDiagnostics:
 
     Usage::
 
-        from ez.portfolio.ml_diagnostics import MLDiagnostics
+        from ez.portfolio.ml.diagnostics import MLDiagnostics
         diag = MLDiagnostics(alpha)
         result = diag.run(universe_data, calendar, start, end)
         print(result.verdict)   # "healthy" / "mild_overfit" / ...

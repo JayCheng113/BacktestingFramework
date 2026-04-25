@@ -225,7 +225,7 @@ def list_portfolio_strategies():
 
         # V2.13.2 G2b: ML Alpha category — user-registered MLAlpha subclasses
         try:
-            from ez.portfolio.ml_alpha import MLAlpha
+            from ez.portfolio.ml.alpha import MLAlpha
             ml_alpha_factors = []
             for f in factor_list:
                 if f in categorized_keys or f == "alpha_combiner":
@@ -1070,7 +1070,7 @@ def ml_alpha_diagnostics(req: MLDiagnosticsRequest):
     """
     # Lazy imports — sklearn is optional, avoid circular deps
     try:
-        from ez.portfolio.ml_alpha import MLAlpha
+        from ez.portfolio.ml.alpha import MLAlpha
     except ImportError as e:
         # Narrow the message: only claim "sklearn required" if the error
         # actually mentions sklearn. Otherwise surface the real error.
@@ -1081,7 +1081,7 @@ def ml_alpha_diagnostics(req: MLDiagnosticsRequest):
         else:
             detail = f"Failed to import MLAlpha: {type(e).__name__}: {e}"
         raise HTTPException(status_code=422, detail=detail)
-    from ez.portfolio.ml_diagnostics import MLDiagnostics, DiagnosticsConfig
+    from ez.portfolio.ml.diagnostics import MLDiagnostics, DiagnosticsConfig
 
     # 1. Resolve class
     try:

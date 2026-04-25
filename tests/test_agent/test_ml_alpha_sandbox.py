@@ -41,7 +41,7 @@ def test_get_template_ml_alpha_produces_valid_python():
 
     # Must contain the class definition
     assert "class TestRidgeAlpha(MLAlpha)" in code
-    assert "from ez.portfolio.ml_alpha import MLAlpha" in code
+    assert "from ez.portfolio.ml.alpha import MLAlpha" in code
     assert "from sklearn.linear_model import Ridge" in code
 
 
@@ -74,7 +74,7 @@ def test_ml_alpha_template_can_be_instantiated():
     """The rendered template must produce a class that can be
     instantiated (triggers whitelist + n_jobs runtime check)."""
     from ez.agent.sandbox import get_template
-    from ez.portfolio.ml_alpha import MLAlpha
+    from ez.portfolio.ml.alpha import MLAlpha
     from ez.portfolio.cross_factor import CrossSectionalFactor
 
     code = get_template(kind="ml_alpha", class_name="SandboxTestAlpha", description="sandbox test")

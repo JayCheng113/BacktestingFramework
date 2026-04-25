@@ -34,7 +34,7 @@ import pytest
 # Skip the entire module if scikit-learn is not installed.
 pytest.importorskip("sklearn", reason="V2.13 MLAlpha × sklearn integration tests require scikit-learn; install with `pip install -e '.[ml]'`")
 
-from ez.portfolio.ml_alpha import MLAlpha
+from ez.portfolio.ml.alpha import MLAlpha
 
 
 def _make_data(n_days: int = 300, n_stocks: int = 5, seed: int = 42):
@@ -1005,7 +1005,7 @@ class TestMLAlphaXGBoost:
 
     def test_xgb_gpu_tree_method_rejected(self):
         from xgboost import XGBRegressor
-        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import UnsupportedEstimatorError
 
         with pytest.raises(UnsupportedEstimatorError, match="[Gg][Pp][Uu]"):
             MLAlpha(
@@ -1020,7 +1020,7 @@ class TestMLAlphaXGBoost:
 
     def test_xgb_device_cuda_rejected(self):
         from xgboost import XGBRegressor
-        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import UnsupportedEstimatorError
 
         with pytest.raises(UnsupportedEstimatorError, match="device.*cuda"):
             MLAlpha(
@@ -1046,7 +1046,7 @@ class TestMLAlphaLightGBMGPU:
 
     def test_lgbm_device_type_gpu_rejected(self):
         from lightgbm import LGBMRegressor
-        from ez.portfolio.ml_alpha import UnsupportedEstimatorError
+        from ez.portfolio.ml.alpha import UnsupportedEstimatorError
 
         with pytest.raises(UnsupportedEstimatorError, match="device_type.*gpu"):
             MLAlpha(
