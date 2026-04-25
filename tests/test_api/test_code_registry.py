@@ -62,7 +62,7 @@ class TestRefreshEndpoint:
         data = resp.json()
         assert data["strategies"] >= 3
         assert data["factors"] >= 9
-        assert data["portfolio_strategies"] >= 5
+        assert data["portfolio_strategies"] >= 3
         assert data["cross_factors"] >= 3
 
 

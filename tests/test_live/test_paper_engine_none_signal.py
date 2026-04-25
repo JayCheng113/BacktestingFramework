@@ -3,9 +3,9 @@
 Real-world bug exposed by first production deployment (A+Bond 50/50):
 PaperTradingEngine.execute_day crashed with
     AttributeError: 'NoneType' object has no attribute 'items'
-when the wrapped strategy (ARotateBondBlend -> EtfRotateCombo) returned
-None on a non-rebalance day. ez/portfolio/engine.py has handled this
-since V2.17 — paper_engine was the parity gap.
+when the wrapped strategy returned None on a non-rebalance day.
+ez/portfolio/engine.py has handled this since V2.17 — paper_engine
+was the parity gap.
 
 Contract: strategy.generate_weights() returning None means "skip
 rebalancing today, hold prior positions, still record equity/dates".

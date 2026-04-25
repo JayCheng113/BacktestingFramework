@@ -230,103 +230,6 @@ class TestEtfMacdRotation:
         assert schema["top_n"]["default"] == 2
 
 
-class TestEtfSectorSwitch:
-    """EtfSectorSwitch basic behavior."""
-
-    def test_generates_weights(self):
-        from ez.portfolio.builtin_strategies import EtfSectorSwitch
-        symbols = [f"ETF{i}" for i in range(5)]
-        data, dates = _make_data(symbols, n=350, seed=88)
-        cal = TradingCalendar.from_dates([d.date() for d in dates])
-
-        result = run_portfolio_backtest(
-            strategy=EtfSectorSwitch(top_n=1),
-            universe=Universe(symbols), universe_data=data, calendar=cal,
-            start=dates[50].date(), end=dates[-1].date(),
-            freq="weekly", initial_cash=1_000_000, lot_size=100,
-        )
-        assert len(result.equity_curve) > 100
-
-    def test_stateful_voting(self):
-        """State should accumulate across calls (cW, W, penaltyW)."""
-        from ez.portfolio.builtin_strategies import EtfSectorSwitch
-        strat = EtfSectorSwitch(top_n=1)
-        dates = pd.date_range("2023-01-02", periods=100, freq="B")
-        data = {}
-        for i in range(3):
-            prices = 10 * np.cumprod(1 + np.random.default_rng(i + 10).normal(0.001, 0.01, 100))
-            data[f"S{i}"] = pd.DataFrame({
-                "open": prices, "high": prices, "low": prices,
-                "close": prices, "adj_close": prices,
-                "volume": np.full(100, 100000),
-            }, index=dates)
-
-        # Call twice — state should accumulate
-        w1 = strat.generate_weights(data, datetime(2023, 4, 1), {}, {})
-        w2 = strat.generate_weights(data, datetime(2023, 5, 1), {}, {})
-        assert "cW" in strat.state
-        assert "W" in strat.state
-
-    def test_top_n_validation(self):
-        from ez.portfolio.builtin_strategies import EtfSectorSwitch
-        with pytest.raises(ValueError, match="top_n must be >= 1"):
-            EtfSectorSwitch(top_n=0)
-
-
-class TestEtfStockEnhance:
-    """EtfStockEnhance basic behavior."""
-
-    def test_generates_weights(self):
-        from ez.portfolio.builtin_strategies import EtfStockEnhance
-        symbols = [f"ETF{i}" for i in range(3)] + [f"STK{i}" for i in range(3)]
-        data, dates = _make_data(symbols, n=350, seed=99)
-        cal = TradingCalendar.from_dates([d.date() for d in dates])
-
-        result = run_portfolio_backtest(
-            strategy=EtfStockEnhance(top_n=1, stock_ratio=0.3),
-            universe=Universe(symbols), universe_data=data, calendar=cal,
-            start=dates[50].date(), end=dates[-1].date(),
-            freq="weekly", initial_cash=1_000_000, lot_size=100,
-        )
-        assert len(result.equity_curve) > 100
-
-    def test_stock_ratio_zero_equals_inner(self):
-        """stock_ratio=0 should give same weights as pure EtfSectorSwitch."""
-        from ez.portfolio.builtin_strategies import EtfStockEnhance, EtfSectorSwitch
-        strat_enhance = EtfStockEnhance(top_n=1, stock_ratio=0.0)
-        strat_inner = EtfSectorSwitch(top_n=1)
-        dates = pd.date_range("2023-01-02", periods=100, freq="B")
-        data = {}
-        for i in range(3):
-            prices = 10 * np.cumprod(1 + np.random.default_rng(i + 20).normal(0.001, 0.01, 100))
-            data[f"S{i}"] = pd.DataFrame({
-                "open": prices, "high": prices, "low": prices,
-                "close": prices, "adj_close": prices,
-                "volume": np.full(100, 100000),
-            }, index=dates)
-        dt = datetime(2023, 4, 1)
-        w_enhance = strat_enhance.generate_weights(data, dt, {}, {})
-        w_inner = strat_inner.generate_weights(data, dt, {}, {})
-        # With stock_ratio=0, EtfStockEnhance should return exactly the same
-        # symbols and weights as EtfSectorSwitch
-        assert set(w_enhance.keys()) == set(w_inner.keys()), \
-            f"Symbol mismatch: enhance={set(w_enhance.keys())}, inner={set(w_inner.keys())}"
-        for sym in w_enhance:
-            assert abs(w_enhance[sym] - w_inner[sym]) < 1e-10, \
-                f"Weight mismatch for {sym}: enhance={w_enhance[sym]}, inner={w_inner[sym]}"
-
-    def test_top_n_validation(self):
-        from ez.portfolio.builtin_strategies import EtfStockEnhance
-        with pytest.raises(ValueError, match="top_n must be >= 1"):
-            EtfStockEnhance(top_n=0)
-
-    def test_parameters_schema(self):
-        from ez.portfolio.builtin_strategies import EtfStockEnhance
-        schema = EtfStockEnhance.get_parameters_schema()
-        assert "top_n" in schema
-        assert "stock_ratio" in schema
-
-
 # ─── Pre-index consistency: engine results deterministic ───
 
 class TestPreIndexConsistency:
@@ -379,19 +282,19 @@ class TestPreIndexConsistency:
 # ─── Registry: builtin strategies always registered ───
 
 class TestBuiltinRegistration:
-    """All 5 builtin strategies must be in registry."""
+    """All 3 builtin strategies must be in registry."""
 
     def test_all_builtins_registered(self):
         registry = PortfolioStrategy.get_registry()
         expected = ["TopNRotation", "MultiFactorRotation",
-                    "EtfMacdRotation", "EtfSectorSwitch", "EtfStockEnhance"]
+                    "EtfMacdRotation"]
         for name in expected:
             assert name in registry, f"{name} not in registry"
 
     def test_descriptions_non_empty(self):
         registry = PortfolioStrategy.get_registry()
         builtins = ["TopNRotation", "MultiFactorRotation",
-                    "EtfMacdRotation", "EtfSectorSwitch", "EtfStockEnhance"]
+                    "EtfMacdRotation"]
         for name in builtins:
             cls = registry[name]
             if hasattr(cls, "get_description"):
