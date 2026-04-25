@@ -18,6 +18,11 @@ from scipy import stats
 
 from ez.types import FactorAnalysis
 
+_IC_DECAY_PERIODS = [1, 5, 10, 20]  # IC 衰减预测期（天）
+_IC_ROLLING_WINDOW = 30              # 滚动 IC 的窗口上限
+_IC_ROLLING_DIVISOR = 3              # 滚动窗口 = min(_IC_ROLLING_WINDOW, len // _IC_ROLLING_DIVISOR)
+_ZERO_THRESHOLD = 1e-10              # ICIR 分母零值保护
+
 
 def _nan_safe(x: float) -> float:
     """Return x if finite, else 0.0. Guards against NaN/inf from degenerate statistical inputs."""
@@ -37,7 +42,7 @@ class FactorEvaluator:
         periods: list[int] | None = None,
     ) -> FactorAnalysis:
         if periods is None:
-            periods = [1, 5, 10, 20]
+            periods = _IC_DECAY_PERIODS
 
         factor_values = factor_values.dropna()
         forward_returns = forward_returns.reindex(factor_values.index).dropna()
@@ -45,7 +50,7 @@ class FactorEvaluator:
         fv = factor_values.loc[common_idx]
         fr = forward_returns.loc[common_idx]
 
-        window = min(30, len(fv) // 3)
+        window = min(_IC_ROLLING_WINDOW, len(fv) // _IC_ROLLING_DIVISOR)
         if window < 2:
             # Not enough data for meaningful rolling correlation
             return FactorAnalysis(
@@ -62,8 +67,8 @@ class FactorEvaluator:
         rank_ic_mean = _nan_safe(rank_ic_series.mean())
         ic_std = _nan_safe(ic_series.std())
         rank_ic_std = _nan_safe(rank_ic_series.std())
-        icir = ic_mean / ic_std if ic_std > 1e-10 else 0.0
-        rank_icir = rank_ic_mean / rank_ic_std if rank_ic_std > 1e-10 else 0.0
+        icir = ic_mean / ic_std if ic_std > _ZERO_THRESHOLD else 0.0
+        rank_icir = rank_ic_mean / rank_ic_std if rank_ic_std > _ZERO_THRESHOLD else 0.0
 
         ic_decay = {}
         for p in periods:
