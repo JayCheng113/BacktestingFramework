@@ -16,6 +16,12 @@ GuardTier = Literal["block", "warn"]
 
 
 class GuardSeverity(str, Enum):
+    """Guard 执行结果的严重级别。
+
+    `PASS` 表示检查通过，`WARN` 会在 UI 中提示但不阻止保存，`BLOCK`
+    会阻止用户代码进入生产注册表。该枚举只承载状态，不执行检查逻辑。
+    """
+
     PASS = "pass"
     WARN = "warn"
     BLOCK = "block"
@@ -48,10 +54,20 @@ class GuardResult:
 
     @property
     def passed(self) -> bool:
+        """返回该 guard 是否通过。
+
+        Returns:
+            当严重级别为 `PASS` 时返回 True；警告和阻断都返回 False。
+        """
         return self.severity == GuardSeverity.PASS
 
     @property
     def blocked(self) -> bool:
+        """返回该 guard 是否阻断保存。
+
+        Returns:
+            当严重级别为 `BLOCK` 时返回 True，用于 sandbox 决定是否回滚。
+        """
         return self.severity == GuardSeverity.BLOCK
 
 
@@ -73,4 +89,12 @@ class Guard(ABC):
         raise NotImplementedError
 
     def applies(self, kind: GuardKind) -> bool:
+        """判断当前 guard 是否适用于指定代码类型。
+
+        Args:
+            kind: 用户保存的代码类别，例如 strategy、factor 或 ml_alpha。
+
+        Returns:
+            如果 `kind` 出现在 `applies_to` 白名单中则返回 True。
+        """
         return kind in self.applies_to

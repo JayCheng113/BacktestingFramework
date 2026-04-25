@@ -17,22 +17,48 @@ from .base import Guard, GuardContext, GuardResult, GuardSeverity, GuardKind
 
 @dataclass(frozen=True)
 class SuiteResult:
+    """一次 GuardSuite 执行的汇总结果。
+
+    保存流程使用该对象同时判断是否阻断、展示警告列表，并把每个 guard
+    的耗时和细节序列化到 API 响应中。它不持有外部资源。
+    """
+
     results: tuple[GuardResult, ...]
     total_runtime_ms: float
 
     @property
     def blocked(self) -> bool:
+        """返回本次保存是否应被阻断。
+
+        Returns:
+            只要任一 guard 返回 `BLOCK` 就为 True。
+        """
         return any(r.blocked for r in self.results)
 
     @property
     def warnings(self) -> list[GuardResult]:
+        """返回所有警告级别结果。
+
+        Returns:
+            严重级别为 `WARN` 的 guard 结果列表，顺序与执行顺序一致。
+        """
         return [r for r in self.results if r.severity == GuardSeverity.WARN]
 
     @property
     def blocks(self) -> list[GuardResult]:
+        """返回所有阻断级别结果。
+
+        Returns:
+            严重级别为 `BLOCK` 的 guard 结果列表，供 UI 展示失败原因。
+        """
         return [r for r in self.results if r.severity == GuardSeverity.BLOCK]
 
     def to_payload(self) -> dict:
+        """转换为 REST API 可直接返回的字典。
+
+        Returns:
+            包含阻断状态、警告/阻断数量、总耗时和每个 guard 详情的 payload。
+        """
         return {
             "blocked": self.blocked,
             "n_warnings": len(self.warnings),
@@ -74,10 +100,33 @@ def default_guards() -> list[Guard]:
 
 
 class GuardSuite:
+    """按固定顺序运行 guard 集合的编排器。
+
+    通常由 sandbox 保存路径创建，默认使用 `default_guards()`。测试可以传入
+    自定义 guard 列表来隔离单个规则；运行时会捕获 guard 自身异常并转换成
+    阻断结果，避免 guard bug 让用户代码静默通过。
+    """
+
     def __init__(self, guards: Iterable[Guard] | None = None):
+        """初始化 guard 集合。
+
+        Args:
+            guards: 可选的 guard 迭代器；为空时加载生产默认规则。
+        """
         self.guards = list(guards) if guards is not None else default_guards()
 
     def run(self, context: GuardContext) -> SuiteResult:
+        """执行适用于当前代码类型的所有 guard。
+
+        Args:
+            context: sandbox 构造的代码上下文，包含文件路径、代码类型和用户类。
+
+        Returns:
+            汇总后的 `SuiteResult`，包含每个 guard 的结果与总耗时。
+
+        Side Effects:
+            guard 可能会实例化用户类或读取测试面板数据；本方法自身不写文件。
+        """
         t0 = time.perf_counter()
         results: list[GuardResult] = []
         for guard in self.guards:

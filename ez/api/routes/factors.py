@@ -1,4 +1,9 @@
-"""Factor endpoints."""
+"""单股因子评估 REST 路由。
+
+本模块负责列出内置/动态注册因子，并对指定股票的因子序列执行 IC、
+RankIC、衰减和换手评估。依赖数据链路读取行情，依赖 `FactorEvaluator`
+完成统计计算。
+"""
 from __future__ import annotations
 
 from datetime import date
@@ -31,6 +36,12 @@ def _get_factor_map() -> dict:
 
 
 class FactorEvalRequest(BaseModel):
+    """单股因子评估请求体。
+
+    字段描述目标标的、市场、因子名称、构造参数、评估日期窗口和需要评估的
+    forward return 周期；`column` 用于选择 MACD/BOLL 等多列因子的子列。
+    """
+
     symbol: str
     market: str = "cn_stock"
     factor_name: str
@@ -43,6 +54,11 @@ class FactorEvalRequest(BaseModel):
 
 @router.get("")
 def list_factors():
+    """列出所有可通过 API 评估的因子。
+
+    Returns:
+        因子注册名与类名列表，包含内置技术因子和运行时注册的用户因子。
+    """
     return [
         {"name": name, "class": cls.__name__}
         for name, cls in _get_factor_map().items()
@@ -51,6 +67,20 @@ def list_factors():
 
 @router.post("/evaluate")
 def evaluate_factor(req: FactorEvalRequest):
+    """评估单个股票上的因子预测能力。
+
+    Args:
+        req: 因子评估请求体，包含因子名称、参数、股票和时间窗口。
+
+    Returns:
+        主评估列的 IC/RankIC/ICIR/衰减/换手结果；多列因子会附带 per_column。
+
+    Raises:
+        HTTPException: 因子不存在、参数错误、无行情或数据不足时返回 4xx。
+
+    Side Effects:
+        读取行情数据源；不会写入因子注册表或持久化结果。
+    """
     factory = _get_factor_map().get(req.factor_name.lower())
     if not factory:
         raise HTTPException(status_code=404, detail=f"Factor '{req.factor_name}' not found")

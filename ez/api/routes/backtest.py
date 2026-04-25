@@ -1,4 +1,9 @@
-"""Backtest endpoints."""
+"""单股回测 REST 路由。
+
+本模块把前端/Agent 的回测请求转换为数据拉取、策略实例化、撮合器构建和
+walk-forward 验证调用。依赖 `ez.api.deps` 提供的数据链，以及
+`ez.backtest` / `ez.strategy` 的公开接口。
+"""
 from __future__ import annotations
 
 from datetime import date
@@ -24,6 +29,12 @@ from ez.core.matcher import SellSideTaxMatcher as _SellSideTaxMatcher
 
 
 class BacktestRequest(BaseModel):
+    """单股向量化回测请求体。
+
+    字段覆盖标的、市场、周期、策略参数、日期窗口和交易成本。A 股请求在
+    未显式传入时会自动补齐印花税、最小交易单位和涨跌停规则。
+    """
+
     symbol: str = Field(min_length=1)
     market: str = "cn_stock"
     period: str = "daily"
@@ -72,6 +83,12 @@ class BacktestRequest(BaseModel):
 
 
 class WalkForwardRequest(BacktestRequest):
+    """单股 walk-forward 验证请求体。
+
+    继承基础回测参数，并增加折数和训练区间比例；路由层直接传给
+    `WalkForwardValidator`，不会修改策略公开 API。
+    """
+
     n_splits: int = Field(default=5, ge=2, le=50)
     train_ratio: float = Field(default=0.7, gt=0.0, lt=1.0)
 
@@ -98,6 +115,17 @@ def _get_strategy(name: str, params: dict) -> Strategy:
 
 
 def _fetch_data(req: BacktestRequest) -> pd.DataFrame:
+    """按请求窗口获取回测所需 K 线数据。
+
+    Args:
+        req: 已通过 Pydantic 校验的回测请求。
+
+    Returns:
+        以日期为索引的行情 DataFrame；字段由 `fetch_kline_df` 保证。
+
+    Side Effects:
+        可能触发数据源链路读取远端或缓存数据。
+    """
     from ez.api.deps import fetch_kline_df
     return fetch_kline_df(req.symbol, req.market, req.period, req.start_date, req.end_date)
 
@@ -154,6 +182,17 @@ def _build_matcher(req: BacktestRequest) -> Matcher:
 
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
+    """运行单股回测并返回前端所需的序列化结果。
+
+    Args:
+        req: 回测请求体，包含策略名称、参数、行情窗口和交易规则。
+
+    Returns:
+        指标、净值曲线、交易列表和显著性检验结果组成的 JSON 兼容字典。
+
+    Side Effects:
+        读取行情数据源；不写入实验库或组合回测历史。
+    """
     strategy = _get_strategy(req.strategy_name, req.strategy_params)
     df = _fetch_data(req)
     config = load_config()
@@ -184,6 +223,17 @@ def run_backtest(req: BacktestRequest):
 
 @router.post("/walk-forward")
 def run_walk_forward(req: WalkForwardRequest):
+    """运行单股 walk-forward 验证。
+
+    Args:
+        req: 继承基础回测参数的 walk-forward 请求体。
+
+    Returns:
+        样本外指标、过拟合评分、折数和样本外净值曲线。
+
+    Raises:
+        HTTPException: 当验证窗口无法切分或数据不足时返回 400。
+    """
     strategy = _get_strategy(req.strategy_name, req.strategy_params)
     df = _fetch_data(req)
     config = load_config()
@@ -208,6 +258,11 @@ def run_walk_forward(req: WalkForwardRequest):
 
 @router.get("/strategies")
 def list_strategies():
+    """列出已注册的单股策略。
+
+    Returns:
+        每个策略的显示名、注册 key、参数 schema 和描述，供前端下拉框使用。
+    """
     return [
         {
             "name": cls.__name__,
