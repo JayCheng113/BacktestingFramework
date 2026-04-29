@@ -39,15 +39,15 @@ function toStr(d: Date): string {
 // Popular stocks per market — shown as fallback and on market switch
 const POPULAR_BY_MARKET: Record<string, SymbolInfo[]> = {
   cn_stock: [
+    { symbol: '510300.SH', name: '沪深300ETF', industry: 'ETF' },
+    { symbol: '510050.SH', name: '上证50ETF', industry: 'ETF' },
+    { symbol: '159915.SZ', name: '创业板ETF', industry: 'ETF' },
     { symbol: '000001.SZ', name: '平安银行', industry: '银行' },
     { symbol: '600519.SH', name: '贵州茅台', industry: '白酒' },
     { symbol: '601318.SH', name: '中国平安', industry: '保险' },
     { symbol: '000333.SZ', name: '美的集团', industry: '家电' },
     { symbol: '600036.SH', name: '招商银行', industry: '银行' },
     { symbol: '300750.SZ', name: '宁德时代', industry: '电池' },
-    { symbol: '510300.SH', name: '沪深300ETF', industry: 'ETF' },
-    { symbol: '510050.SH', name: '上证50ETF', industry: 'ETF' },
-    { symbol: '159915.SZ', name: '创业板ETF', industry: 'ETF' },
     { symbol: '512100.SH', name: '中证1000ETF', industry: 'ETF' },
     { symbol: '159919.SZ', name: '沪深300ETF', industry: 'ETF' },
     { symbol: '513050.SH', name: '中概互联ETF', industry: 'ETF' },
@@ -86,8 +86,8 @@ const inputStyle = {
 
 export default function SearchBar({ onSearch }: Props) {
   const [query, setQuery] = useState('')
-  const [selectedSymbol, setSelectedSymbol] = useState('000001.SZ')
-  const [selectedName, setSelectedName] = useState('平安银行')
+  const [selectedSymbol, setSelectedSymbol] = useState('510300.SH')
+  const [selectedName, setSelectedName] = useState('沪深300ETF')
   const [market, setMarket] = useState('cn_stock')
   const [period, setPeriod] = useState('daily')
   const [startDate, setStartDate] = useState<Date>(oneYearAgoDate)

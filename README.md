@@ -1,11 +1,13 @@
 # OpenTrading
 
-开源量化交易研究平台 — 从策略研究到模拟实盘，全流程 UI 驱动。
+开源量化交易研究平台。下载项目、启动服务，然后在浏览器里完成行情查看、策略回测、因子研究、组合回测和模拟盘管理。
 
 ![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Tests](https://img.shields.io/badge/Tests-3000%2B-brightgreen)
+
+![OpenTrading dashboard](docs/images/opentrading-dashboard.png)
 
 ---
 
@@ -24,27 +26,42 @@
 
 ## 快速开始
 
-### Docker（推荐）
+### 本地启动
 
 ```bash
 git clone https://github.com/JayCheng113/OpenTrading.git
 cd OpenTrading
-docker compose up
+
+# 安装后端依赖
+pip install -e ".[all]"
+
+# 安装前端依赖
+cd web && npm install && cd ..
+
+# 启动后端和前端
+scripts/start.sh
 ```
 
-浏览器访问 `http://localhost:8000`
+浏览器访问 `http://localhost:3000`。
 
-### 本地安装
+> 没有数据源 Token 也可以先试用内置 ETF 样例数据，例如搜索 `510300.SH`。如需完整 A 股行情和基本面数据，再配置 `TUSHARE_TOKEN`。
+
+### 单服务模式
 
 ```bash
-git clone https://github.com/JayCheng113/OpenTrading.git
-cd OpenTrading
-pip install -e ".[all]"
 cd web && npm install && npm run build && cd ..
 uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 ```
 
-> **首次使用**：需要配置数据源（Tushare Token 等），详见 [docs/guide/installation.md](docs/guide/installation.md)
+浏览器访问 `http://localhost:8000`。
+
+### Docker（可选）
+
+```bash
+docker compose up --build
+```
+
+Docker 配置用于容器化部署和快速试跑；本地开发建议优先使用上面的本地启动方式。
 
 ---
 
@@ -72,85 +89,29 @@ uvicorn ez.api.app:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 技术架构
-
-```
-ez/types.py -> ez/data/ -> ez/factor/ -> ez/strategy/ -> ez/backtest/ -> ez/api/ -> web/
-                            ^  ts_ops                     ^  matcher
-                            └──────────── ez/core/ ───────┘
-
-ez/llm/      仅依赖配置层
-ez/agent/    消费 backtest / core / llm 接口
-ez/live/     基于 portfolio + 部署基础设施
-ez/research/ 可复用研究工作流层
-```
-
-| 模块 | 职责 |
-|------|------|
-| `ez/core/` | 计算原语：匹配器、时间序列操作、市场规则 |
-| `ez/data/` | 数据摄取、验证、缓存、Parquet/DuckDB 存储、提供者链 |
-| `ez/factor/` | 因子计算与评估，内置技术/基本面因子 |
-| `ez/strategy/` | 单股策略框架与自动注册 |
-| `ez/backtest/` | 单股引擎、指标计算、Walk-forward、显著性检验 |
-| `ez/portfolio/` | 组合引擎、截面因子、优化器、风险管理、归因、MLAlpha |
-| `ez/research/` | 可复用研究管线与步骤 |
-| `ez/llm/` | LLM 提供商抽象层 |
-| `ez/agent/` | 编程/研究智能体、沙箱、工具、安全守卫 |
-| `ez/live/` | 模拟实盘部署生命周期、调度器、监控 |
-| `ez/api/` | FastAPI 路由层 |
-| `web/` | React 19 + ECharts 前端仪表盘 |
-
-完整文档索引见 [docs/README.md](docs/README.md)，详细架构说明见 [docs/architecture/](docs/architecture/)。
-
----
-
-## 项目结构
-
-```
-OpenTrading/
-├── ez/                    # 后端核心包
-│   ├── core/              # 计算原语
-│   ├── data/              # 数据层
-│   ├── factor/            # 因子层
-│   ├── strategy/          # 策略层
-│   ├── backtest/          # 回测引擎
-│   ├── portfolio/         # 组合管理
-│   ├── research/          # 研究管线
-│   ├── llm/               # LLM 集成
-│   ├── agent/             # AI 智能体
-│   ├── live/              # 模拟实盘
-│   └── api/               # API 路由
-├── web/                   # React 前端
-├── strategies/            # 用户策略目录
-├── factors/               # 用户因子目录
-├── ml_alphas/             # MLAlpha 定义目录
-├── docs/                  # 文档
-├── tests/                 # 测试套件
-├── scripts/               # 工具脚本
-└── docker-compose.yml
-```
-
----
-
 ## 环境变量
 
 | 变量名 | 必填 | 说明 |
 |--------|------|------|
-| `TUSHARE_TOKEN` | 是 | Tushare 数据接口 Token，用于获取 A 股行情与财务数据 |
+| `TUSHARE_TOKEN` | 否 | Tushare 数据接口 Token，用于获取完整 A 股行情与财务数据 |
 | `DEEPSEEK_API_KEY` | 否 | DeepSeek LLM API Key，用于 AI 助手与自主研究功能 |
 | `FMP_API_KEY` | 否 | Financial Modeling Prep API Key，用于部分基本面数据 |
 
 ---
 
-## 开发指南
+## 文档与贡献
 
-贡献代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，了解代码规范、测试要求与提交流程。
+- [快速上手](docs/guide/quick-start.md)：完成第一次策略回测
+- [安装指南](docs/guide/installation.md)：依赖安装、环境变量和数据缓存
+- [功能总览](docs/guide/features.md)：了解各个页面能做什么
+- [贡献指南](CONTRIBUTING.md)：本地开发、测试和 PR 流程
+- [更新日志](CHANGELOG.md)：查看版本变化
 
 ---
 
-## 更新日志
+## 免责声明
 
-完整版本历史见 [CHANGELOG.md](CHANGELOG.md)
+OpenTrading 仅用于量化研究、教学和工具开发，不构成任何投资建议。回测结果不代表未来收益，实盘交易请自行评估风险。
 
 ---
 

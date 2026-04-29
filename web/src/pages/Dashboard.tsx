@@ -19,7 +19,7 @@ export default function Dashboard() {
   const [trades, setTrades] = useState<TradeRecord[]>([])
 
   useEffect(() => {
-    handleSearch('000001.SZ', 'cn_stock', startDate, endDate, 'daily')
+    handleSearch('510300.SH', 'cn_stock', startDate, endDate, 'daily')
   }, [])  // run once on mount
 
   const handleSearch = async (symbol: string, market: string, start: string, end: string, period: string = 'daily') => {
